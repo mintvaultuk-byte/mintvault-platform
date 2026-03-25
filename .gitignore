@@ -1,10 +1,45 @@
-# For projects using Nanoc (http://nanoc.ws/)
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
 
-# Default location for output (needs to match output_dir's value found in nanoc.yaml)
-output/
+# Secrets / environment
+.env
+.env.*
+*.pem
+*.key
 
-# Temporary file directory
-tmp/nanoc/
+# Replit internals
+.replit
+.upm
+.local
+replit.nix
+.cache/
+.config/
 
-# Crash Log
-crash.log
+# Attached assets / uploads (binary, large files — docs copied to /docs instead)
+attached_assets/
+uploads/
+
+# Unrelated scripts (not part of MintVault)
+ebay_sniper.py
+telegram_test.py
+__pycache__/
+*.pyc
+sniper.log
+sniper_stats.json
+seen_ids.json
+seen_items.txt
+seen.json
+seen_rss_ids.json
+sold_cache.json
+sold_cache_simple.json
+data/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
