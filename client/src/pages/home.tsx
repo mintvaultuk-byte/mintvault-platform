@@ -4,6 +4,7 @@ import {
   Zap, Shield, Menu, Plus, Home, CreditCard, CheckCircle,
   Share2, Camera, BarChart2, Contact
 } from "lucide-react";
+import SeoHead from "@/components/seo-head";
 
 /* ── Inline SVG icons for card-type strip ───────────────────── */
 function PokemonIcon() {
@@ -19,6 +20,11 @@ function PokemonIcon() {
 export default function HomePage() {
   return (
     <div className="bg-[#131313] text-[#e5e2e1] font-sans overflow-x-hidden min-h-screen">
+      <SeoHead
+        title="MintVault - Professional Card Grading | UK Trading Card Grading Service"
+        description="Professional UK trading card grading. Secure handling, precision slabs, fully insured return shipping. Fast turnaround. Trusted results."
+        canonical="https://mintvaultuk.com/"
+      />
 
       {/* ── Top Nav ───────────────────────────────────────────────── */}
       <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 py-4 bg-[#131313]/80 backdrop-blur-lg border-b border-[#f2ca50]/5">
