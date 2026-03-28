@@ -1,9 +1,21 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
+import { useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
+
+function ScrollToTop() {
+  const [pathname] = useLocation();
+  useEffect(() => {
+    // Skip anchor links — let them scroll naturally
+    if (!window.location.hash) {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+    }
+  }, [pathname]);
+  return null;
+}
 import HomePage from "@/pages/home";
 import PricingPage from "@/pages/pricing";
 import CertLookupPage from "@/pages/cert-lookup";
@@ -32,7 +44,9 @@ import ClaimPage from "@/pages/claim";
 
 function Router() {
   return (
-    <Switch>
+    <>
+      <ScrollToTop />
+      <Switch>
       <Route path="/admin">
         <AdminPage />
       </Route>
@@ -67,6 +81,7 @@ function Router() {
         </Layout>
       </Route>
     </Switch>
+    </>
   );
 }
 
