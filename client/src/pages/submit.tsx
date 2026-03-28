@@ -8,6 +8,7 @@ import { pricingTiers, submissionTypes, calculateOrderTotals, getInsuranceTier, 
 import type { PricingTier } from "@shared/schema";
 import { ArrowLeft, ArrowRight, Check, Shield, CreditCard, AlertTriangle, Info, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { Link } from "wouter";
+import SeoHead from "@/components/seo-head";
 
 interface CardItem {
   game: string;
@@ -101,17 +102,17 @@ function StepIndicator({ step }: { step: number }) {
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${
               i + 1 < step
-                ? "bg-[#D4AF37] text-black border-[#D4AF37]"
+                ? "bg-[#f2ca50] text-black border-[#f2ca50]"
                 : i + 1 === step
-                ? "border-[#D4AF37] text-[#D4AF37]"
-                : "border-[#D4AF37]/20 text-[#D4AF37]/30"
+                ? "border-[#f2ca50] text-[#f2ca50]"
+                : "border-[#f2ca50]/20 text-[#f2ca50]/30"
             }`}
             data-testid={`step-indicator-${i + 1}`}
           >
             {i + 1 < step ? <Check size={14} /> : i + 1}
           </div>
           {i < stepLabels.length - 1 && (
-            <div className={`w-6 h-px mx-0.5 ${i + 1 < step ? "bg-[#D4AF37]" : "bg-[#D4AF37]/20"}`} />
+            <div className={`w-6 h-px mx-0.5 ${i + 1 < step ? "bg-[#f2ca50]" : "bg-[#f2ca50]/20"}`} />
           )}
         </div>
       ))}
@@ -138,10 +139,10 @@ function Step1Tier({ state, setState, tiers }: { state: WizardState; setState: (
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-step1-title">
+      <h2 className="text-2xl font-black text-[#f2ca50] tracking-tighter mb-2 text-center" data-testid="text-step1-title">
         Choose Service Level
       </h2>
-      <p className="text-gray-400 text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
+      <p className="text-[#e5e2e1]/50 text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
 
       <div className="space-y-3">
         {tiers.map((tier) => {
@@ -151,17 +152,17 @@ function Step1Tier({ state, setState, tiers }: { state: WizardState; setState: (
             <button
               key={tier.id}
               onClick={() => setState({ ...state, tier: tier.id })}
-              className={`w-full border rounded-lg p-4 text-left transition-all ${
+              className={`w-full border rounded-2xl p-4 text-left transition-all ${
                 isSelected
-                  ? "border-[#D4AF37] bg-[#D4AF37]/10"
-                  : "border-[#D4AF37]/20 hover:border-[#D4AF37]/50"
+                  ? "border-[#f2ca50] bg-[#f2ca50]/10"
+                  : "border-[#f2ca50]/20 hover:border-[#f2ca50]/50"
               }`}
               data-testid={`button-tier-${tier.id}`}
             >
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider">{tier.name}</h3>
-                  <p className="text-gray-400 text-sm mt-1">{tier.turnaround}</p>
+                  <h3 className="text-[#f2ca50] font-bold text-lg tracking-wider">{tier.name}</h3>
+                  <p className="text-[#e5e2e1]/50 text-sm mt-1">{tier.turnaround}</p>
                   {isSelected && estimatedReturn && (
                     <p className="text-emerald-400/80 text-xs mt-1.5 flex items-center gap-1" data-testid={`text-estimated-return-${tier.id}`}>
                       <Check size={11} />
@@ -183,68 +184,68 @@ const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "ACE", "TAG", "SGC", "Other"];
 
 function CrossoverFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#f2ca50]/30 rounded-2xl p-4 bg-[#f2ca50]/5">
       <div>
-        <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Crossover Details</h3>
-        <p className="text-gray-500 text-xs mb-3">Tell us about the existing slab you're crossing over.</p>
+        <h3 className="text-[#f2ca50] font-semibold text-sm tracking-wider mb-1">Crossover Details</h3>
+        <p className="text-[#e5e2e1]/40 text-xs mb-3">Tell us about the existing slab you're crossing over.</p>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+        <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1">
           Original Grading Company <span className="text-red-400">*</span>
         </label>
         <select
           value={state.crossoverCompany}
           onChange={(e) => setState({ ...state, crossoverCompany: e.target.value, crossoverCompanyOther: "" })}
-          className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+          className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#f2ca50] transition-colors"
           data-testid="select-crossover-company"
         >
-          <option value="" className="bg-black">Select company...</option>
+          <option value="" className="bg-[#131313]">Select company...</option>
           {GRADING_COMPANIES.map((c) => (
-            <option key={c} value={c} className="bg-black">{c}</option>
+            <option key={c} value={c} className="bg-[#131313]">{c}</option>
           ))}
         </select>
       </div>
 
       {state.crossoverCompany === "Other" && (
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Enter Grading Company</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1">Enter Grading Company</label>
           <input
             type="text"
             value={state.crossoverCompanyOther}
             onChange={(e) => setState({ ...state, crossoverCompanyOther: e.target.value })}
             placeholder="e.g. Beckett"
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-crossover-company-other"
           />
         </div>
       )}
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Original Grade</label>
+        <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1">Original Grade</label>
         <input
           type="text"
           value={state.crossoverOriginalGrade}
           onChange={(e) => setState({ ...state, crossoverOriginalGrade: e.target.value })}
           placeholder="e.g. 9.5 or NM-MT"
-          className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+          className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
           data-testid="input-crossover-grade"
         />
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Certificate Number</label>
+        <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1">Certificate Number</label>
         <input
           type="text"
           value={state.crossoverCertNumber}
           onChange={(e) => setState({ ...state, crossoverCertNumber: e.target.value })}
           placeholder="e.g. 12345678"
-          className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+          className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
           data-testid="input-crossover-cert"
         />
       </div>
 
-      <p className="text-gray-500 text-xs leading-relaxed border-t border-[#D4AF37]/20 pt-3">
+      <p className="text-[#e5e2e1]/40 text-xs leading-relaxed border-t border-[#f2ca50]/20 pt-3">
         Crossover is subject to review. MintVault reserves the right to return cards that do not meet crossover standards.
       </p>
     </div>
@@ -256,10 +257,10 @@ const REHOLDER_REASONS = ["Damaged slab", "Cosmetic upgrade", "Label error / cor
 
 function ReholderFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-amber-500/30 rounded-lg p-4 bg-amber-500/5">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-amber-500/30 rounded-2xl p-4 bg-amber-500/5">
       <div>
         <h3 className="text-amber-400 font-semibold text-sm tracking-wider mb-1">Reholder Details</h3>
-        <p className="text-gray-500 text-xs mb-3">Tell us about the existing slab you need reheld.</p>
+        <p className="text-[#e5e2e1]/40 text-xs mb-3">Tell us about the existing slab you need reheld.</p>
       </div>
 
       <div>
@@ -272,9 +273,9 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           className="w-full bg-transparent border border-amber-500/40 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-400 transition-colors"
           data-testid="select-reholder-company"
         >
-          <option value="" className="bg-black">Select company...</option>
+          <option value="" className="bg-[#131313]">Select company...</option>
           {SLAB_COMPANIES.map((c) => (
-            <option key={c} value={c} className="bg-black">{c}</option>
+            <option key={c} value={c} className="bg-[#131313]">{c}</option>
           ))}
         </select>
       </div>
@@ -289,9 +290,9 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           className="w-full bg-transparent border border-amber-500/40 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-400 transition-colors"
           data-testid="select-reholder-reason"
         >
-          <option value="" className="bg-black">Select reason...</option>
+          <option value="" className="bg-[#131313]">Select reason...</option>
           {REHOLDER_REASONS.map((r) => (
-            <option key={r} value={r} className="bg-black">{r}</option>
+            <option key={r} value={r} className="bg-[#131313]">{r}</option>
           ))}
         </select>
       </div>
@@ -308,7 +309,7 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
         />
       </div>
 
-      <p className="text-gray-500 text-xs leading-relaxed border-t border-amber-500/20 pt-3">
+      <p className="text-[#e5e2e1]/40 text-xs leading-relaxed border-t border-amber-500/20 pt-3">
         Reholdering applies to MintVault slabs only. Cards from other grading companies are subject to review. The original grade is retained unless a new grading service is also requested.
       </p>
     </div>
@@ -319,10 +320,10 @@ const AUTH_REASONS = ["Counterfeit suspicion", "Pre-sale verification", "Insuran
 
 function AuthenticationFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-blue-500/30 rounded-lg p-4 bg-blue-500/5">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-blue-500/30 rounded-2xl p-4 bg-blue-500/5">
       <div>
         <h3 className="text-blue-400 font-semibold text-sm tracking-wider mb-1">Authentication Details</h3>
-        <p className="text-gray-500 text-xs mb-3">Help us understand why you're requesting authentication.</p>
+        <p className="text-[#e5e2e1]/40 text-xs mb-3">Help us understand why you're requesting authentication.</p>
       </div>
 
       <div>
@@ -335,9 +336,9 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
           className="w-full bg-transparent border border-blue-500/40 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-400 transition-colors"
           data-testid="select-auth-reason"
         >
-          <option value="" className="bg-black">Select reason...</option>
+          <option value="" className="bg-[#131313]">Select reason...</option>
           {AUTH_REASONS.map((r) => (
-            <option key={r} value={r} className="bg-black">{r}</option>
+            <option key={r} value={r} className="bg-[#131313]">{r}</option>
           ))}
         </select>
       </div>
@@ -354,7 +355,7 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
         />
       </div>
 
-      <p className="text-gray-500 text-xs leading-relaxed border-t border-blue-500/20 pt-3">
+      <p className="text-[#e5e2e1]/40 text-xs leading-relaxed border-t border-blue-500/20 pt-3">
         Authentication results in a certificate confirming the card is genuine. No condition grade is assigned. Cards found to be counterfeit will not be returned without prior arrangement.
       </p>
     </div>
@@ -402,10 +403,10 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-step2-title">
+      <h2 className="text-2xl font-black text-[#f2ca50] tracking-tighter mb-2 text-center" data-testid="text-step2-title">
         How Many Cards?
       </h2>
-      <p className="text-gray-400 text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
+      <p className="text-[#e5e2e1]/50 text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
 
       {state.type === "crossover" && <CrossoverFields state={state} setState={setState} />}
       {state.type === "reholder" && <ReholderFields state={state} setState={setState} />}
@@ -413,7 +414,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
       <div className="max-w-sm mx-auto space-y-6">
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#f2ca50]/70 text-sm uppercase tracking-wider block mb-2">
             Number of Cards
           </label>
           <input
@@ -423,16 +424,16 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             value={state.quantity}
             onChange={(e) => handleQuantityChange(Math.max(0, parseInt(e.target.value) || 0))}
             placeholder="0"
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-3 text-white text-lg text-center focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-3 text-white text-lg text-center focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-quantity"
           />
         </div>
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#f2ca50]/70 text-sm uppercase tracking-wider block mb-2">
             Total Declared Value (£)
           </label>
           <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 text-lg">£</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#f2ca50]/60 text-lg">£</span>
             <input
               type="number"
               min="0"
@@ -440,23 +441,23 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
               value={state.declaredValue || ""}
               onChange={(e) => setState({ ...state, declaredValue: Math.max(0, parseFloat(e.target.value) || 0) })}
               placeholder="0"
-              className="w-full bg-transparent border border-[#D4AF37]/40 rounded pl-8 pr-4 py-3 text-white text-lg text-center focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#f2ca50]/40 rounded pl-8 pr-4 py-3 text-white text-lg text-center focus:outline-none focus:border-[#f2ca50] transition-colors"
               data-testid="input-declared-value"
             />
           </div>
-          <p className="text-gray-500 text-xs mt-1.5">Combined estimated value of all cards in this submission</p>
+          <p className="text-[#e5e2e1]/40 text-xs mt-1.5">Combined estimated value of all cards in this submission</p>
           {state.declaredValue > 0 && (
             <div className="mt-2 space-y-1.5">
               <div className="flex items-center gap-2 text-sm">
-                <Shield size={14} className="text-[#D4AF37]" />
-                <span className="text-[#D4AF37]/80">
+                <Shield size={14} className="text-[#f2ca50]" />
+                <span className="text-[#f2ca50]/80">
                   Insured shipping: {insurance.label} — £{(insurance.shippingPence / 100).toFixed(2)}
                 </span>
               </div>
               {surchargeInfo.surchargePence > 0 && (
                 <div className="flex items-center gap-2 text-sm" data-testid="text-insurance-surcharge">
-                  <Shield size={14} className="text-[#D4AF37]" />
-                  <span className="text-[#D4AF37]/80">
+                  <Shield size={14} className="text-[#f2ca50]" />
+                  <span className="text-[#f2ca50]/80">
                     Insurance protection: {surchargeInfo.label} (£{(declaredPerCard).toLocaleString()}/card avg)
                   </span>
                 </div>
@@ -465,7 +466,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
           )}
         </div>
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#f2ca50]/70 text-sm uppercase tracking-wider block mb-2">
             Submission Name (optional)
           </label>
           <input
@@ -473,7 +474,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             value={state.submissionName}
             onChange={(e) => setState({ ...state, submissionName: e.target.value })}
             placeholder="e.g. My Charizard Collection"
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-3 text-white placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-3 text-white placeholder:text-[#f2ca50]/30 focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-submission-name"
           />
         </div>
@@ -483,19 +484,19 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
         <button
           type="button"
           onClick={toggleCardDetails}
-          className="w-full flex items-center justify-between border border-[#D4AF37]/30 rounded-lg px-4 py-3 text-left transition-all hover:border-[#D4AF37]/50"
+          className="w-full flex items-center justify-between border border-[#f2ca50]/30 rounded-2xl px-4 py-3 text-left transition-all hover:border-[#f2ca50]/50"
           data-testid="button-toggle-card-details"
         >
           <div className="flex items-center gap-2">
-            <Plus size={16} className="text-[#D4AF37]" />
-            <span className="text-[#D4AF37] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
+            <Plus size={16} className="text-[#f2ca50]" />
+            <span className="text-[#f2ca50] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
           </div>
-          {showCardDetails ? <ChevronUp size={16} className="text-[#D4AF37]/60" /> : <ChevronDown size={16} className="text-[#D4AF37]/60" />}
+          {showCardDetails ? <ChevronUp size={16} className="text-[#f2ca50]/60" /> : <ChevronDown size={16} className="text-[#f2ca50]/60" />}
         </button>
 
         {showCardDetails && (
           <div className="mt-4 space-y-4">
-            <p className="text-gray-500 text-xs">Pre-fill card details to speed up processing. All fields are optional.</p>
+            <p className="text-[#e5e2e1]/40 text-xs">Pre-fill card details to speed up processing. All fields are optional.</p>
 
             {hasMismatch && (
               <div className="flex items-center gap-2 border border-yellow-500/30 rounded p-3 bg-yellow-500/5" data-testid="text-declared-value-mismatch">
@@ -509,76 +510,76 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             {state.cardItems.map((item, index) => (
               <div
                 key={index}
-                className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-3"
+                className="border border-[#f2ca50]/20 rounded-2xl p-4 space-y-3"
                 data-testid={`card-item-${index}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[#D4AF37] font-semibold text-sm tracking-wider">Card {index + 1}</span>
+                  <span className="text-[#f2ca50] font-semibold text-sm tracking-wider">Card {index + 1}</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Game</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Game</label>
                     <select
                       value={item.game}
                       onChange={(e) => updateCardItem(index, "game", e.target.value)}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#f2ca50] transition-colors"
                       data-testid={`select-game-${index}`}
                     >
-                      <option value="" className="bg-black">Select game...</option>
+                      <option value="" className="bg-[#131313]">Select game...</option>
                       {cardGames.map((g) => (
-                        <option key={g} value={g} className="bg-black">{g}</option>
+                        <option key={g} value={g} className="bg-[#131313]">{g}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Card Name</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Card Name</label>
                     <input
                       type="text"
                       value={item.cardName}
                       onChange={(e) => updateCardItem(index, "cardName", e.target.value)}
                       placeholder="e.g. Charizard"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
                       data-testid={`input-card-name-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Set Name</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Set Name</label>
                     <input
                       type="text"
                       value={item.setName}
                       onChange={(e) => updateCardItem(index, "setName", e.target.value)}
                       placeholder="e.g. Base Set"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
                       data-testid={`input-set-name-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Card Number</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Card Number</label>
                     <input
                       type="text"
                       value={item.cardNumber}
                       onChange={(e) => updateCardItem(index, "cardNumber", e.target.value)}
                       placeholder="e.g. 4/102"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
                       data-testid={`input-card-number-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Year</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Year</label>
                     <input
                       type="text"
                       value={item.year}
                       onChange={(e) => updateCardItem(index, "year", e.target.value)}
                       placeholder="e.g. 1999"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                      className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
                       data-testid={`input-year-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Declared Value (£)</label>
+                    <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Declared Value (£)</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40 text-sm">£</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#f2ca50]/40 text-sm">£</span>
                       <input
                         type="number"
                         min="0"
@@ -586,7 +587,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                         value={item.declaredValue || ""}
                         onChange={(e) => updateCardItem(index, "declaredValue", Math.max(0, parseFloat(e.target.value) || 0))}
                         placeholder="0"
-                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded pl-7 pr-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                        className="w-full bg-transparent border border-[#f2ca50]/30 rounded pl-7 pr-3 py-2 text-white text-sm focus:outline-none focus:border-[#f2ca50] transition-colors"
                         data-testid={`input-card-value-${index}`}
                       />
                     </div>
@@ -594,13 +595,13 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                 </div>
 
                 <div>
-                  <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Notes</label>
+                  <label className="text-[#f2ca50]/50 text-xs uppercase tracking-wider block mb-1">Notes</label>
                   <input
                     type="text"
                     value={item.notes}
                     onChange={(e) => updateCardItem(index, "notes", e.target.value)}
                     placeholder="Any special notes for this card..."
-                    className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+                    className="w-full bg-transparent border border-[#f2ca50]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
                     data-testid={`input-card-notes-${index}`}
                   />
                 </div>
@@ -619,14 +620,14 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-step3-title">
+      <h2 className="text-2xl font-black text-[#f2ca50] tracking-tighter mb-2 text-center" data-testid="text-step3-title">
         Order Summary
       </h2>
-      <p className="text-gray-400 text-center mb-8 text-sm">Review your submission before proceeding</p>
+      <p className="text-[#e5e2e1]/50 text-center mb-8 text-sm">Review your submission before proceeding</p>
 
-      <div className="max-w-md mx-auto border border-[#D4AF37]/30 rounded-lg overflow-hidden">
-        <div className="bg-[#D4AF37]/5 p-4 border-b border-[#D4AF37]/20">
-          <h3 className="text-[#D4AF37] font-semibold tracking-wider text-sm uppercase">Submission Details</h3>
+      <div className="max-w-md mx-auto border border-[#f2ca50]/30 rounded-2xl overflow-hidden">
+        <div className="bg-[#f2ca50]/5 p-4 border-b border-[#f2ca50]/20">
+          <h3 className="text-[#f2ca50] font-semibold tracking-wider text-sm uppercase">Submission Details</h3>
         </div>
         <div className="p-5 space-y-3">
           <SummaryRow label="Submission Type" value={typeName} testId="text-summary-type" />
@@ -642,8 +643,8 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
           )}
 
           {state.type === "crossover" && state.crossoverCompany && (
-            <div className="border-t border-[#D4AF37]/15 pt-3 mt-1">
-              <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Crossover Details</p>
+            <div className="border-t border-[#f2ca50]/15 pt-3 mt-1">
+              <p className="text-[#f2ca50]/60 text-xs uppercase tracking-wider mb-2">Crossover Details</p>
               <SummaryRow
                 label="Original Company"
                 value={state.crossoverCompany === "Other" ? state.crossoverCompanyOther : state.crossoverCompany}
@@ -655,7 +656,7 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
               {state.crossoverCertNumber && (
                 <SummaryRow label="Certificate No." value={state.crossoverCertNumber} testId="text-summary-crossover-cert" />
               )}
-              <p className="text-gray-500 text-xs mt-2">Subject to review before crossover is accepted.</p>
+              <p className="text-[#e5e2e1]/40 text-xs mt-2">Subject to review before crossover is accepted.</p>
             </div>
           )}
 
@@ -679,11 +680,11 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
               {state.authConcerns && (
                 <SummaryRow label="Concerns" value={state.authConcerns} testId="text-summary-auth-concerns" />
               )}
-              <p className="text-gray-500 text-xs mt-2">Authentication certificate only — no condition grade assigned.</p>
+              <p className="text-[#e5e2e1]/40 text-xs mt-2">Authentication certificate only — no condition grade assigned.</p>
             </div>
           )}
 
-          <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
+          <div className="border-t border-[#f2ca50]/20 pt-3 mt-3 space-y-2">
             <SummaryRow label="Service Fees" value={`£${(totals.subtotal / 100).toFixed(2)}`} testId="text-summary-subtotal" />
             {totals.discountPercent > 0 && (
               <div className="flex justify-between items-center">
@@ -695,7 +696,7 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
             )}
             <div className="flex justify-between items-start">
               <div className="flex-1">
-                <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-shipping-label">
+                <span className="text-[#f2ca50]/60 text-sm" data-testid="text-summary-shipping-label">
                   Fully Insured Return Shipping ({totals.shippingLabel})
                 </span>
               </div>
@@ -706,7 +707,7 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
             {totals.totalInsuranceFee > 0 && (
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-insurance-label">
+                  <span className="text-[#f2ca50]/60 text-sm" data-testid="text-summary-insurance-label">
                     Insurance Protection ({totals.insuranceSurchargeLabel})
                   </span>
                 </div>
@@ -717,26 +718,26 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
             )}
 
             <div className="pl-1 space-y-1 mt-1">
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#f2ca50]/50">
+                <Check size={12} className="text-[#f2ca50]/60 flex-shrink-0" />
                 <span>Fully insured return shipping</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#f2ca50]/50">
+                <Check size={12} className="text-[#f2ca50]/60 flex-shrink-0" />
                 <span>Signature required on delivery</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#f2ca50]/50">
+                <Check size={12} className="text-[#f2ca50]/60 flex-shrink-0" />
                 <span>Real-time status tracking</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#f2ca50]/50">
+                <Check size={12} className="text-[#f2ca50]/60 flex-shrink-0" />
                 <span>Secure intake scanning on arrival</span>
               </div>
             </div>
 
-            <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]/20">
-              <span className="text-[#D4AF37] font-bold uppercase tracking-wider">Total</span>
+            <div className="flex justify-between items-center pt-2 border-t border-[#f2ca50]/20">
+              <span className="text-[#f2ca50] font-bold uppercase tracking-wider">Total</span>
               <span className="text-white font-bold text-xl" data-testid="text-summary-total">
                 £{(totals.total / 100).toFixed(2)}
               </span>
@@ -751,14 +752,14 @@ function Step3Review({ state, tier }: { state: WizardState; tier: PricingTier | 
 function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-step4-title">
+      <h2 className="text-2xl font-black text-[#f2ca50] tracking-tighter mb-2 text-center" data-testid="text-step4-title">
         Return Shipping & Details
       </h2>
-      <p className="text-gray-400 text-center mb-6 text-sm">Where should we return your cards?</p>
+      <p className="text-[#e5e2e1]/50 text-center mb-6 text-sm">Where should we return your cards?</p>
 
-      <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5" data-testid="text-shipping-notice">
-        <Info size={14} className="text-[#D4AF37] flex-shrink-0 mt-0.5" />
-        <span className="text-gray-300 text-xs leading-relaxed">
+      <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#f2ca50]/20 rounded p-3 bg-[#f2ca50]/5" data-testid="text-shipping-notice">
+        <Info size={14} className="text-[#f2ca50] flex-shrink-0 mt-0.5" />
+        <span className="text-[#e5e2e1]/70 text-xs leading-relaxed">
           Important: You are responsible for insured shipping to MintVault. Please use tracked and insured delivery appropriate to your declared item value.
         </span>
       </div>
@@ -766,114 +767,114 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
       <div className="max-w-md mx-auto space-y-5">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">First Name *</label>
+            <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">First Name *</label>
             <input
               type="text"
               value={state.firstName}
               onChange={(e) => setState({ ...state, firstName: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
               data-testid="input-first-name"
             />
           </div>
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Last Name *</label>
+            <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Last Name *</label>
             <input
               type="text"
               value={state.lastName}
               onChange={(e) => setState({ ...state, lastName: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
               data-testid="input-last-name"
             />
           </div>
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Email *</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Email *</label>
           <input
             type="email"
             value={state.email}
             onChange={(e) => setState({ ...state, email: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-email"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Phone (recommended)</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Phone (recommended)</label>
           <input
             type="tel"
             value={state.phone}
             onChange={(e) => setState({ ...state, phone: e.target.value })}
             placeholder="e.g. 07700 900000"
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white placeholder:text-[#f2ca50]/20 focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-phone"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 1 *</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 1 *</label>
           <input
             type="text"
             value={state.addressLine1}
             onChange={(e) => setState({ ...state, addressLine1: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-address-1"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 2</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 2</label>
           <input
             type="text"
             value={state.addressLine2}
             onChange={(e) => setState({ ...state, addressLine2: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-address-2"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">City *</label>
+            <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">City *</label>
             <input
               type="text"
               value={state.city}
               onChange={(e) => setState({ ...state, city: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
               data-testid="input-city"
             />
           </div>
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">County</label>
+            <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">County</label>
             <input
               type="text"
               value={state.county}
               onChange={(e) => setState({ ...state, county: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
               data-testid="input-county"
             />
           </div>
         </div>
 
         <div className="max-w-[200px]">
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Postcode *</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Postcode *</label>
           <input
             type="text"
             value={state.postcode}
             onChange={(e) => setState({ ...state, postcode: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2.5 text-white focus:outline-none focus:border-[#f2ca50] transition-colors"
             data-testid="input-postcode"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Notes (optional)</label>
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-1.5">Notes (optional)</label>
           <textarea
             value={state.notes}
             onChange={(e) => setState({ ...state, notes: e.target.value })}
             placeholder="Special instructions, handling notes, or anything else we should know..."
             rows={3}
-            className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-3 text-white placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
+            className="w-full bg-transparent border border-[#f2ca50]/40 rounded px-4 py-3 text-white placeholder:text-[#f2ca50]/30 focus:outline-none focus:border-[#f2ca50] transition-colors resize-none"
             data-testid="input-notes"
           />
         </div>
@@ -885,7 +886,7 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
 function SummaryRow({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
     <div className="flex justify-between items-center">
-      <span className="text-[#D4AF37]/60 text-sm">{label}</span>
+      <span className="text-[#f2ca50]/60 text-sm">{label}</span>
       <span className="text-white font-medium text-sm" data-testid={testId}>{value}</span>
     </div>
   );
@@ -993,60 +994,60 @@ function Step5Payment({ state, tier, onSuccess }: {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-step5-title">
+      <h2 className="text-2xl font-black text-[#f2ca50] tracking-tighter mb-2 text-center" data-testid="text-step5-title">
         Secure Payment
       </h2>
-      <p className="text-gray-400 text-center mb-8 text-sm">Complete your order</p>
+      <p className="text-[#e5e2e1]/50 text-center mb-8 text-sm">Complete your order</p>
 
       <form onSubmit={handleSubmit} className="max-w-md mx-auto space-y-5">
-        <div className="border border-[#D4AF37]/20 rounded-lg p-4 bg-[#D4AF37]/5 space-y-1">
+        <div className="border border-[#f2ca50]/20 rounded-2xl p-4 bg-[#f2ca50]/5 space-y-1">
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Shipping to</span>
+            <span className="text-[#f2ca50]/60">Shipping to</span>
             <span className="text-white">{state.firstName} {state.lastName}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Address</span>
+            <span className="text-[#f2ca50]/60">Address</span>
             <span className="text-white text-right">{state.addressLine1}, {state.city}, {state.postcode}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Email</span>
+            <span className="text-[#f2ca50]/60">Email</span>
             <span className="text-white">{state.email}</span>
           </div>
         </div>
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+        <div className="flex items-start gap-2 border border-[#f2ca50]/20 rounded p-3 bg-[#f2ca50]/5">
           <input
             type="checkbox"
             id="confirm-address"
             required
-            className="mt-1 accent-[#D4AF37]"
+            className="mt-1 accent-[#f2ca50]"
             data-testid="checkbox-confirm-address"
           />
-          <label htmlFor="confirm-address" className="text-gray-300 text-xs leading-relaxed cursor-pointer">
+          <label htmlFor="confirm-address" className="text-[#e5e2e1]/70 text-xs leading-relaxed cursor-pointer">
             I confirm the return address above is correct. MintVault will return cards to this address.
           </label>
         </div>
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+        <div className="flex items-start gap-2 border border-[#f2ca50]/20 rounded p-3 bg-[#f2ca50]/5">
           <input
             type="checkbox"
             id="liability-accept"
             checked={liabilityAccepted}
             onChange={(e) => setLiabilityAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
+            className="mt-1 accent-[#f2ca50]"
             data-testid="checkbox-liability"
           />
-          <label htmlFor="liability-accept" className="text-gray-300 text-xs leading-relaxed cursor-pointer">
+          <label htmlFor="liability-accept" className="text-[#e5e2e1]/70 text-xs leading-relaxed cursor-pointer">
             I confirm I have read and agree to the{" "}
             <Link href="/terms-and-conditions">
-              <span className="text-[#D4AF37] underline">Liability & Shipping Policy</span>
+              <span className="text-[#f2ca50] underline">Liability & Shipping Policy</span>
             </Link>. I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
           </label>
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
-          <div className="border border-[#D4AF37]/40 rounded px-4 py-3" data-testid="card-element-wrapper">
+          <label className="text-[#f2ca50]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
+          <div className="border border-[#f2ca50]/40 rounded px-4 py-3" data-testid="card-element-wrapper">
             <CardElement
               options={{
                 style: {
@@ -1066,25 +1067,26 @@ function Step5Payment({ state, tier, onSuccess }: {
           <p className="text-red-400 text-sm" data-testid="text-payment-error">{error}</p>
         )}
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+        <div className="flex items-start gap-2 border border-[#f2ca50]/20 rounded p-3 bg-[#f2ca50]/5">
           <input
             type="checkbox"
             id="terms-accept"
             checked={termsAccepted}
             onChange={(e) => setTermsAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
+            className="mt-1 accent-[#f2ca50]"
             data-testid="checkbox-terms"
           />
-          <label htmlFor="terms-accept" className="text-gray-300 text-xs leading-relaxed cursor-pointer">
+          <label htmlFor="terms-accept" className="text-[#e5e2e1]/70 text-xs leading-relaxed cursor-pointer">
             I confirm I have read and agree to the MintVault UK Ltd{" "}
-            <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
+            <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#f2ca50] underline">Terms & Conditions</a>
           </label>
         </div>
 
         <button
           type="submit"
           disabled={isPending || !stripe || !liabilityAccepted || !termsAccepted}
-          className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3.5 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3.5 rounded-xl font-black tracking-widest text-sm text-[#3c2f00] active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center justify-center gap-2"
+          style={{ background: "linear-gradient(135deg,#f2ca50 0%,#d4af37 100%)" }}
           data-testid="button-pay"
         >
           <CreditCard size={18} />
@@ -1124,26 +1126,31 @@ const SERVICE_TYPE_OPTIONS = [
 
 function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
   return (
-    <div className="px-4 py-8 max-w-2xl mx-auto">
+    <div className="px-4 py-8 max-w-2xl mx-auto min-h-screen bg-[#131313]">
+      <SeoHead
+        title="Submit Cards | MintVault UK"
+        description="Submit your trading cards for professional grading. Choose your service tier, enter card details, and pay securely online."
+        canonical="https://mintvaultuk.com/submit"
+      />
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm">
-          Choose a Service
+        <h1 className="text-2xl font-black text-[#e5e2e1] tracking-tighter mb-2">
+          CHOOSE A <span className="text-[#f2ca50]">SERVICE</span>
         </h1>
-        <p className="text-gray-400 text-sm">Select the type of submission you'd like to make</p>
+        <p className="text-[#e5e2e1]/50 text-sm">Select the type of submission you'd like to make</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {SERVICE_TYPE_OPTIONS.map((opt) => (
           <button
             key={opt.id}
             onClick={() => onSelect(opt.id)}
-            className="border border-[#D4AF37]/30 hover:border-[#D4AF37] bg-transparent hover:bg-[#D4AF37]/5 rounded-lg p-5 text-left transition-all group"
+            className="border border-[#f2ca50]/20 hover:border-[#f2ca50]/60 bg-[#1c1b1b] hover:bg-[#f2ca50]/5 rounded-2xl p-5 text-left transition-all group"
             data-testid={`button-type-${opt.id}`}
           >
-            <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider mb-1 group-hover:glow-gold-sm">
+            <h3 className="text-[#f2ca50] font-bold text-lg tracking-wider mb-1 group-hover:glow-gold-sm">
               {opt.name}
             </h3>
-            <p className="text-gray-300 text-sm font-medium mb-2">{opt.desc}</p>
-            <p className="text-gray-500 text-xs leading-relaxed">{opt.detail}</p>
+            <p className="text-[#e5e2e1]/70 text-sm font-medium mb-2">{opt.desc}</p>
+            <p className="text-[#e5e2e1]/40 text-xs leading-relaxed">{opt.detail}</p>
           </button>
         ))}
       </div>
@@ -1278,9 +1285,9 @@ function SubmitWizardInner() {
   }
 
   return (
-    <div className="px-4 py-8 max-w-2xl mx-auto">
+    <div className="px-4 py-8 max-w-2xl mx-auto min-h-screen bg-[#131313]">
       <div className="text-center mb-2">
-        <span className="text-[#D4AF37]/60 text-xs uppercase tracking-widest" data-testid="text-service-badge">
+        <span className="text-[#f2ca50]/60 text-xs uppercase tracking-widest" data-testid="text-service-badge">
           {typeName} Submission
         </span>
       </div>
@@ -1297,7 +1304,7 @@ function SubmitWizardInner() {
         {step > 1 && step < 5 && (
           <button
             onClick={() => setStep(step - 1)}
-            className="flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+            className="flex items-center gap-1.5 text-[#f2ca50]/60 hover:text-[#f2ca50] transition-colors"
             data-testid="button-back"
           >
             <ArrowLeft size={16} /> Back
@@ -1306,7 +1313,7 @@ function SubmitWizardInner() {
         {step === 5 && (
           <button
             onClick={() => setStep(4)}
-            className="flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+            className="flex items-center gap-1.5 text-[#f2ca50]/60 hover:text-[#f2ca50] transition-colors"
             data-testid="button-back"
           >
             <ArrowLeft size={16} /> Back
@@ -1317,7 +1324,8 @@ function SubmitWizardInner() {
           <button
             onClick={() => canNext() && setStep(step + 1)}
             disabled={!canNext()}
-            className="ml-auto flex items-center gap-1.5 border border-[#D4AF37] bg-black text-[#D4AF37] px-5 py-2 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#D4AF37]/10 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="ml-auto flex items-center gap-1.5 px-6 py-2.5 rounded-xl font-black tracking-widest text-sm text-[#3c2f00] active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
+            style={{ background: "linear-gradient(135deg,#f2ca50 0%,#d4af37 100%)" }}
             data-testid="button-next"
           >
             Next <ArrowRight size={16} />
@@ -1328,7 +1336,8 @@ function SubmitWizardInner() {
           <button
             onClick={() => canNext() && setStep(5)}
             disabled={!canNext()}
-            className="ml-auto flex items-center gap-1.5 border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-6 py-2.5 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="ml-auto flex items-center gap-1.5 px-6 py-2.5 rounded-xl font-black tracking-widest text-sm text-[#3c2f00] active:scale-95 transition-transform disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100"
+            style={{ background: "linear-gradient(135deg,#f2ca50 0%,#d4af37 100%)" }}
             data-testid="button-proceed-payment"
           >
             Proceed to Payment <ArrowRight size={16} />
@@ -1348,8 +1357,8 @@ export default function SubmitPage() {
     return (
       <div className="px-4 py-12 text-center">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-[#D4AF37]/10 rounded w-48 mx-auto" />
-          <div className="h-4 bg-[#D4AF37]/10 rounded w-32 mx-auto" />
+          <div className="h-8 bg-[#f2ca50]/10 rounded w-48 mx-auto" />
+          <div className="h-4 bg-[#f2ca50]/10 rounded w-32 mx-auto" />
         </div>
       </div>
     );
