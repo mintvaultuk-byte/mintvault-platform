@@ -9,9 +9,11 @@ import Layout from "@/components/layout";
 function ScrollToTop() {
   const [pathname] = useLocation();
   useEffect(() => {
-    // Skip anchor links — let them scroll naturally
+    // Skip anchor links — let the browser scroll to the target naturally
     if (!window.location.hash) {
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
     }
   }, [pathname]);
   return null;

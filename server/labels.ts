@@ -436,9 +436,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textMaxW = panelX - textLeft - 6;     // 495
 
   // Vertical content zone (inner area above bottom strip)
-  const contentT = I_TOP;                     // 19
-  const contentB = stripY;                    // 179
-  const contentH = contentB - contentT;       // 160
+  const contentT = I_TOP;
+  const contentB = stripY;
 
   // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
   const artworkUrl = (cert as any).frontImageUrl;
@@ -610,7 +609,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MV_HDR_PAD   = 8;                            // top padding — vertically centres text in header zone
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // 19 + 8 = 27  (text top)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // 27 + 44 = 71 (text bottom)
-  const MV_BELOW_GAP = 5;                            // gap below MINTVAULT header → tighter top section
+  const MV_BELOW_GAP = 10;                           // gap below MINTVAULT header before card text
   try { (ctx as any).letterSpacing = "2px"; } catch {}
   ctx.font         = `bold ${MV_HDR_SZ}px Arial, Helvetica, sans-serif`;
   ctx.textAlign    = "center";
@@ -679,29 +678,31 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   }
 
   // ── 4. LEFT PANEL TEXT ────────────────────────────────────────────────────
-  // Card text centred in zone below MINTVAULT header.
-  // Cert ID is drawn separately in the strip at the bottom.
-  const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;       // 71 + 6 = 77
-  const textZoneH = contentB - textZoneT;             // 179 - 77 = 102
+  // Card text vertically centred in zone below MINTVAULT header.
+  const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
+  const textZoneH = contentB - textZoneT;
 
-  // ── Font size constants (hierarchy: 43 / 29 / 25) ────────────────────────
-  const SZ_NM  = 43;   // Line 1: Card Name  — hero, bold
-  const SZ_YS  = 29;   // Line 2: Year + Set
-  const SZ_VAR = 29;   // Line 3: Variant — same weight as set line
-  const LG     = 2;    // inner line gap (−8% for tighter compact block)
-  const DIM    = "rgba(255,255,255,0.85)";
+  // ── Base font sizes ───────────────────────────────────────────────────────
+  const SZ_NM  = 38;   // Line 1: Card Name — hero, bold
+  const SZ_YS  = 26;   // Line 2: Year + Set
+  const SZ_VAR = 26;   // Line 3: Variant
+  const LG     = 2;    // intra-block line gap
 
-  // Line 1 — Card Name (hero, scales 36→26px before wrapping)
+  // Inter-block gaps
+  const G_NM_YS  = 9;   // Card Name → Year+Set
+  const G_YS_VAR = 9;   // Year+Set → Variant
+
+  // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   ctx.font = `bold ${SZ_NM}px Arial, Helvetica, sans-serif`;
   let nameSz = SZ_NM;
   if (cardNameText && ctx.measureText(cardNameText).width > textMaxW) {
-    nameSz = fitFontSize(ctx, cardNameText, textMaxW, SZ_NM, 28, "bold");
+    nameSz = fitFontSize(ctx, cardNameText, textMaxW, SZ_NM, 24, "bold");
   }
   ctx.font = `bold ${nameSz}px Arial, Helvetica, sans-serif`;
   const nmLines = cardNameText ? wrapText(ctx, cardNameText, textMaxW, 2) : [];
 
-  // Line 2 — Year + Set Name (no language tag)
+  // Line 2 — Year + Set Name
   const yearSetText = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
     .filter(Boolean).join("  ");
   ctx.font = `bold ${SZ_YS}px Arial, Helvetica, sans-serif`;
@@ -712,22 +713,31 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
   const varLines = variantText ? wrapText(ctx, variantText.toUpperCase(), textMaxW, 1) : [];
 
-  // ── VERTICAL CENTERING CALC ───────────────────────────────────────────────
+  // ── VERTICAL CENTERING ────────────────────────────────────────────────────
   function lh(sz: number, n: number): number { return n > 0 ? n * sz + (n - 1) * LG : 0; }
 
-  const G_NM_YS  = 3;   // Card Name → Year+Set gap
-  const G_YS_VAR = 3;   // Year+Set → Variant gap
+  let nmSzR = nameSz, ysSzR = SZ_YS, varSzR = SZ_VAR;
 
-  const stackH =
-      lh(nameSz, nmLines.length)
+  const computeStack = () =>
+      lh(nmSzR, nmLines.length)
     + (nmLines.length > 0 && ysLines.length > 0 ? G_NM_YS  : 0)
-    + lh(SZ_YS,  ysLines.length)
+    + lh(ysSzR,  ysLines.length)
     + (ysLines.length > 0 && varLines.length > 0 ? G_YS_VAR : 0)
-    + lh(SZ_VAR, varLines.length);
+    + lh(varSzR, varLines.length);
 
-  // Centre the text stack with a slight upward bias — tighter header gap, more breathing room below
-  const TOP_BIAS = 3;
-  let curY = textZoneT + Math.max(0, Math.round((textZoneH - stackH) / 2) - TOP_BIAS);
+  let stackH = computeStack();
+
+  // Overflow guard: if stack exceeds zone, scale all sizes down proportionally
+  const maxStack = textZoneH * 0.94;
+  if (stackH > maxStack) {
+    const s = maxStack / stackH;
+    nmSzR  = Math.max(16, Math.round(nmSzR  * s));
+    ysSzR  = Math.max(14, Math.round(ysSzR  * s));
+    varSzR = Math.max(14, Math.round(varSzR * s));
+    stackH = computeStack();
+  }
+
+  let curY = textZoneT + Math.max(0, Math.round((textZoneH - stackH) / 2));
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   ctx.textAlign    = "left";
@@ -744,14 +754,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     curY -= LG;
   };
 
-  renderBlock(nmLines, nameSz, "bold",   WHITE);
+  renderBlock(nmLines, nmSzR, "bold", WHITE);
   if (nmLines.length && ysLines.length) curY += G_NM_YS;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(ysLines, SZ_YS,  "bold",   WHITE);
+  renderBlock(ysLines, ysSzR, "bold", WHITE);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
   if (ysLines.length && varLines.length) curY += G_YS_VAR;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(varLines, SZ_VAR, "bold", WHITE);
+  renderBlock(varLines, varSzR, "bold", WHITE);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
 
   ctx.textAlign    = "left";
@@ -842,26 +852,24 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
-  //   LEFT   — Logo        : 240×240px, centred vertically — ~29% of label width
+  //   LEFT   — Logo        : fits within inner content area (~24% of label width)
   //   CENTRE — NFC + txt   : NFC_ICON_CX = midpoint of (logo-right … qr-left)
   //   RIGHT  — QR code     : unchanged (150px, flush top-right)
   //
-  // Logo uses source-over blend (logo PNG has transparent background —
-  // screen blend was incorrectly hiding most of the graphic).
-  const LOGO_DRAW    = 240;                        // px — 29% of PX_W=827 ✓ (user target: 25–30%)
+  // Logo must fit within PX_H=236 canvas. Using I_H-10=196px keeps it inside
+  // the inner content area (I_TOP=15 to I_BOTTOM=221) with 5px margin each side.
+  const LOGO_DRAW    = I_H - 10;                  // 196px — fits within inner area
   const LOGO_LX      = I_LEFT + 4;                // 19px — tight to left gold border
   const NFC_ICON_CX  = Math.round((LOGO_LX + LOGO_DRAW + gfLeft) / 2); // midpoint of (logo-right … gold-frame-left)
 
-  // ── LEFT: MintVault logo — primary visual anchor (transparent PNG, source-over) ──
+  // ── LEFT: MintVault logo — primary visual anchor ──────────────────────────
   if (logo) {
     const aspect = logo.width / logo.height;
-    let drawH = LOGO_DRAW;
-    let drawW = Math.round(drawH * aspect);
+    const drawH = LOGO_DRAW;
+    const drawW = Math.round(drawH * aspect);
     const lx = LOGO_LX;
-    const ly = Math.round((PX_H - drawH) / 2);    // vertically centred in full canvas
+    const ly = I_TOP + Math.round((I_H - drawH) / 2); // vertically centred within inner area
 
-    // source-over: logo PNG has a transparent background — renders cleanly against
-    // the dark label. No screen blend needed (and screen was incorrectly fading the graphic).
     ctx.drawImage(logo, lx, ly, drawW, drawH);
 
     // Redraw gold border on top to ensure logo never bleeds into the frame.
