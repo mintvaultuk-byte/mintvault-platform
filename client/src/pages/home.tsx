@@ -42,7 +42,7 @@ export default function HomePage() {
       <main className="pt-24 pb-32">
 
         {/* ── Hero ──────────────────────────────────────────────────── */}
-        <section className="relative min-h-[751px] flex flex-col items-center justify-center px-6 overflow-hidden">
+        <section className="relative min-h-[580px] flex flex-col items-center justify-center px-6 overflow-hidden">
           {/* Background light leaks */}
           <div className="absolute top-0 -left-1/4 w-[500px] h-[500px] bg-[#f2ca50]/10 blur-[120px] rounded-full pointer-events-none" />
           <div className="absolute bottom-0 -right-1/4 w-[500px] h-[500px] bg-[#d4af37]/10 blur-[120px] rounded-full pointer-events-none" />
@@ -98,26 +98,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Floating slab mockup */}
-          <div className="mt-20 relative w-full max-w-sm mx-auto md:absolute md:top-1/2 md:-right-16 md:-translate-y-1/2 md:opacity-40 md:max-w-xs">
-            <div
-              className="border border-[#f2ca50]/20 rounded-2xl p-4 shadow-2xl rotate-6 hover:rotate-0 transition-transform duration-700"
-              style={{ background: "rgba(32,31,31,0.6)", backdropFilter: "blur(20px)" }}
-            >
-              <img
-                alt="Graded Trading Card"
-                className="rounded-lg mb-4 w-full aspect-[3/4] object-cover grayscale brightness-75 hover:grayscale-0 transition-all duration-500"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuCLOZ-3wLCQy2OhYceuz5DaGXKoprIvb4MORSpkKCLVrxTSOl1fwkmm8-_ZpYShJwbYWIB-yd-T4HnXzl3QYkw8w7IzIEyiB-klAXK-HtI8zSuAWtQ65wCt4rMjz947RG9eyoxOJIBq4zg-uh8ZViZIUuY9ANp5DJjD3j8ecX4uHJY5EWO8Aaft6BJABGyqZ--OVNb8oeIsSzxIxvVxYB-u1iu3NN4-eh4Y-F8OegWcU9FppXrf6N1JgwUsLvbxgROuM8V2gUYAnc8"
-              />
-              <div className="flex justify-between items-end border-t border-[#f2ca50]/20 pt-4">
-                <div>
-                  <p className="text-[10px] text-[#f2ca50]/60 uppercase tracking-widest font-mono">Charizard VMAX</p>
-                  <p className="text-lg font-bold uppercase tracking-tighter">MintVault Pristine</p>
-                </div>
-                <div className="bg-[#d4af37] p-3 rounded-lg text-[#554300] text-2xl font-black font-mono">10</div>
-              </div>
-            </div>
-          </div>
         </section>
 
         {/* ── How It Works ──────────────────────────────────────────── */}
