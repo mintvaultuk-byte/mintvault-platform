@@ -184,7 +184,7 @@ export default function CertLookupPage() {
           {!showStaff ? (
             <button
               onClick={() => setShowStaff(true)}
-              className="text-gray-700 hover:text-gray-500 text-xs transition-colors inline-flex items-center gap-1.5"
+              className="text-[#e5e2e1]/20 hover:text-[#e5e2e1]/40 text-xs transition-colors inline-flex items-center gap-1.5"
               data-testid="button-staff-access"
             >
               <Lock size={10} />
@@ -214,13 +214,13 @@ export default function CertLookupPage() {
                   onChange={(e) => { setStaffPassword(e.target.value); setStaffError(""); }}
                   placeholder="Staff password"
                   autoFocus
-                  className="flex-1 bg-transparent border border-gray-800 rounded px-3 py-2 text-white text-sm placeholder:text-gray-700 focus:outline-none focus:border-[#f2ca50]/40 transition-colors"
+                  className="flex-1 bg-transparent border border-[#f2ca50]/15 rounded-lg px-3 py-2 text-[#e5e2e1] text-sm placeholder:text-[#e5e2e1]/20 focus:outline-none focus:border-[#f2ca50]/40 transition-colors"
                   data-testid="input-staff-password"
                 />
                 <button
                   type="submit"
                   disabled={staffLoading}
-                  className="border border-gray-800 hover:border-[#f2ca50]/30 text-gray-600 hover:text-[#f2ca50] px-4 py-2 rounded text-sm transition-colors disabled:opacity-50"
+                  className="border border-[#f2ca50]/20 hover:border-[#f2ca50]/50 text-[#e5e2e1]/40 hover:text-[#f2ca50] px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
                   data-testid="button-staff-login"
                 >
                   {staffLoading ? "..." : "Go"}

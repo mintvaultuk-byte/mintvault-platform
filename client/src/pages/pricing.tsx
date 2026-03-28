@@ -107,7 +107,7 @@ function PremiumSlabFallback() {
     <div
       className="absolute inset-0 flex flex-col items-center justify-center w-full h-full"
       style={{
-        background: "linear-gradient(160deg, #1A1400 0%, #0D0D00 45%, #000000 100%)",
+        background: "linear-gradient(160deg, #1c1b1b 0%, #131313 100%)",
       }}
     >
       <div className="flex flex-col items-center gap-3 px-6 text-center">
@@ -190,7 +190,7 @@ function ReholderImage() {
       aspect="4/3"
       overlay={
         <>
-          <span className="absolute top-3 left-3 bg-black/75 text-white text-xs font-semibold px-2 py-1 rounded">Standard Slab</span>
+          <span className="absolute top-3 left-3 bg-[#131313]/90 text-[#e5e2e1] text-xs font-semibold px-2 py-1 rounded-md">Standard Slab</span>
           <span className="absolute top-3 right-3 bg-[#f2ca50] text-black text-xs font-semibold px-2 py-1 rounded">MintVault Upgrade</span>
         </>
       }
@@ -259,7 +259,7 @@ function FeaturedCertsSection() {
 
   return (
     <section className="px-4 max-w-3xl mx-auto mb-12" data-testid="section-featured-certs">
-      <h2 className="text-2xl font-bold text-[#f2ca50] tracking-wide mb-2 text-center">View Real MintVault Certificates</h2>
+      <h2 className="text-2xl font-black text-[#e5e2e1] tracking-tighter mb-2 text-center">VIEW REAL <span className="text-[#f2ca50]">CERTIFICATES</span></h2>
       <p className="text-[#e5e2e1]/50 text-sm text-center mb-5">Real graded cards. Live certificates. Tap any card to verify.</p>
       <div className="relative">
         {certs.length > 2 && (
@@ -267,7 +267,7 @@ function FeaturedCertsSection() {
             <button
               type="button"
               onClick={() => scroll("left")}
-              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-black border border-[#f2ca50]/30 flex items-center justify-center text-[#f2ca50] hover:bg-[#f2ca50]/10 transition-all shadow-lg"
+              className="absolute -left-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-[#1c1b1b] border border-[#f2ca50]/30 flex items-center justify-center text-[#f2ca50] hover:bg-[#f2ca50]/10 transition-all shadow-lg"
               data-testid="button-certs-scroll-left"
             >
               <ChevronLeft size={16} />
@@ -275,7 +275,7 @@ function FeaturedCertsSection() {
             <button
               type="button"
               onClick={() => scroll("right")}
-              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-black border border-[#f2ca50]/30 flex items-center justify-center text-[#f2ca50] hover:bg-[#f2ca50]/10 transition-all shadow-lg"
+              className="absolute -right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-[#1c1b1b] border border-[#f2ca50]/30 flex items-center justify-center text-[#f2ca50] hover:bg-[#f2ca50]/10 transition-all shadow-lg"
               data-testid="button-certs-scroll-right"
             >
               <ChevronRight size={16} />
@@ -301,7 +301,7 @@ function FeaturedCertsSection() {
                   className="shrink-0 w-44 border border-[#f2ca50]/20 bg-[#1c1b1b] rounded-2xl overflow-hidden hover:border-[#f2ca50]/50 hover:shadow-[0_0_16px_rgba(242,202,80,0.12)] transition-all cursor-pointer"
                   data-testid={`card-featured-cert-${cert.certId}`}
                 >
-                  <div className="aspect-[3/4] bg-black/40 overflow-hidden">
+                  <div className="aspect-[3/4] bg-[#131313]/60 overflow-hidden">
                     <img
                       src={cert.frontImageUrl}
                       alt={`${cert.cardName} — MintVault Certificate ${cert.certId}`}
@@ -310,7 +310,7 @@ function FeaturedCertsSection() {
                     />
                   </div>
                   <div className="p-3">
-                    <p className="text-white text-xs font-semibold leading-tight line-clamp-2 mb-1">{cert.cardName}</p>
+                    <p className="text-[#e5e2e1] text-xs font-semibold leading-tight line-clamp-2 mb-1">{cert.cardName}</p>
                     <p className="text-[#e5e2e1]/40 text-[10px] leading-tight truncate mb-2">{cert.setName}</p>
                     <div className="flex items-center justify-between">
                       <span className={`text-lg font-bold ${gradeColour}`}>{cert.gradeType === "numeric" ? cert.gradeOverall : cert.gradeType}</span>
@@ -443,7 +443,7 @@ export default function PricingPage() {
                   <div className="text-[#f2ca50]">{step.icon}</div>
                 </div>
                 <div>
-                  <h3 className="text-white font-semibold text-sm mb-1">{step.title}</h3>
+                  <h3 className="text-[#e5e2e1] font-semibold text-sm mb-1">{step.title}</h3>
                   <p className="text-[#e5e2e1]/70 text-xs leading-relaxed">{step.desc}</p>
                 </div>
               </div>
@@ -458,13 +458,13 @@ export default function PricingPage() {
               Card grading transforms a raw trading card into a professionally authenticated, condition-verified collectible sealed in a protective slab. For Pokémon card collectors and investors across the UK, grading provides several key benefits.
             </p>
             <p>
-              <strong className="text-white">Increased value</strong> — graded cards consistently sell for more than raw cards of similar condition. A card graded Gem Mint 10 can be worth many multiples of its raw counterpart, as buyers have confidence in the card's authenticated condition.
+              <strong className="text-[#e5e2e1]">Increased value</strong> — graded cards consistently sell for more than raw cards of similar condition. A card graded Gem Mint 10 can be worth many multiples of its raw counterpart, as buyers have confidence in the card's authenticated condition.
             </p>
             <p>
-              <strong className="text-white">Protection</strong> — once sealed in a tamper-evident slab, your card is protected from handling damage, moisture, UV exposure, and accidental bending. This preserves the card's condition indefinitely.
+              <strong className="text-[#e5e2e1]">Protection</strong> — once sealed in a tamper-evident slab, your card is protected from handling damage, moisture, UV exposure, and accidental bending. This preserves the card's condition indefinitely.
             </p>
             <p>
-              <strong className="text-white">Authentication</strong> — grading confirms your card is genuine, not a counterfeit or altered reproduction. Each MintVault certificate can be <Link href="/cert" className="text-[#f2ca50] hover:underline">verified online</Link>.
+              <strong className="text-[#e5e2e1]">Authentication</strong> — grading confirms your card is genuine, not a counterfeit or altered reproduction. Each MintVault certificate can be <Link href="/cert" className="text-[#f2ca50] hover:underline">verified online</Link>.
             </p>
             <p>
               Learn more in our guide on <Link href="/guides/why-graded-cards-sell-for-more" className="text-[#f2ca50] hover:underline">why graded cards sell for more</Link>.
@@ -485,7 +485,7 @@ export default function PricingPage() {
               <div key={i} className="flex gap-3 border border-[#f2ca50]/20 bg-[#1c1b1b] rounded-2xl p-4" data-testid={`card-why-${i}`}>
                 <div className="text-[#f2ca50] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <h3 className="text-[#e5e2e1] font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#e5e2e1]/70 text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
@@ -515,15 +515,15 @@ export default function PricingPage() {
       </article>
 
       <section className="px-4 max-w-3xl mx-auto mb-8">
-        <h2 className="text-2xl font-bold text-[#f2ca50] tracking-widest mb-2 text-center glow-gold">
-          CARD {serviceLabel} PRICES
+        <h2 className="text-2xl font-black text-[#e5e2e1] tracking-tighter mb-2 text-center">
+          CARD <span className="text-[#f2ca50]">{serviceLabel}</span> PRICES
         </h2>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 mb-5">
           <p className="text-[#e5e2e1]/70 text-sm text-center" data-testid="text-trust-line">
             Trusted by collectors across the UK
           </p>
           <span className="hidden sm:block text-[#f2ca50]/30">·</span>
-          <p className="text-amber-400 text-sm font-medium text-center" data-testid="text-urgency-line">
+          <p className="text-[#f2ca50]/80 text-sm font-medium text-center" data-testid="text-urgency-line">
             ⚡ Limited slots available this month
           </p>
         </div>
@@ -540,7 +540,7 @@ export default function PricingPage() {
               className={`flex flex-col items-center text-center p-3 rounded border transition-all ${
                 activeService === st.id
                   ? "bg-[#f2ca50]/20 text-[#f2ca50] border-[#f2ca50]/40"
-                  : "bg-[#1c1b1b] text-gray-200 border-[#555] hover:text-white hover:border-[#f2ca50]/40 hover:bg-[#222] hover:shadow-[0_0_10px_rgba(242,202,80,0.08)]"
+                  : "bg-[#1c1b1b] text-[#e5e2e1]/70 border-[#f2ca50]/15 hover:text-[#e5e2e1] hover:border-[#f2ca50]/40 hover:bg-[#f2ca50]/5"
               }`}
               data-testid={`button-pricing-${st.id}`}
             >
@@ -563,7 +563,7 @@ export default function PricingPage() {
             <p className="text-center text-[#e5e2e1]/70 text-xs mt-2 italic">Upgrade your slab for a stronger, cleaner, premium finish.</p>
             <div className="flex items-center justify-center gap-4 mt-2 mb-3">
               <span className="text-[#f2ca50] font-semibold text-sm" data-testid="text-reholder-price-anchor">From £7.99 per card</span>
-              <span className="text-amber-400 text-xs font-medium" data-testid="text-reholder-urgency">⚡ Limited intake — slots fill daily</span>
+              <span className="text-[#f2ca50]/80 text-xs font-medium" data-testid="text-reholder-urgency">⚡ Limited intake — slots fill daily</span>
             </div>
           </div>
         )}
@@ -584,11 +584,11 @@ export default function PricingPage() {
           const isPopular = badge?.popular ?? false;
 
           const tierAvailability: Record<string, { text: string; colour: string }> = {
-            basic:    { text: "Good Availability",     colour: "text-emerald-400" },
-            standard: { text: "Good Availability",     colour: "text-emerald-400" },
-            priority: { text: "Good Availability",     colour: "text-emerald-400" },
-            express:  { text: "Limited Availability",  colour: "text-amber-400"   },
-            premium:  { text: "Limited Availability",  colour: "text-amber-400"   },
+            basic:    { text: "Good Availability",     colour: "text-[#f2ca50]/70" },
+            standard: { text: "Good Availability",     colour: "text-[#f2ca50]/70" },
+            priority: { text: "Good Availability",     colour: "text-[#f2ca50]/70" },
+            express:  { text: "Limited Availability",  colour: "text-[#f2ca50]"    },
+            premium:  { text: "Limited Availability",  colour: "text-[#f2ca50]"    },
           };
           const availability = useBadges ? (tierAvailability[tier.id] ?? null) : null;
 
@@ -606,7 +606,7 @@ export default function PricingPage() {
               <div className="mb-4">
                 <div className="flex items-center justify-between gap-3">
                   <h3
-                    className="text-2xl md:text-3xl font-bold text-[#f2ca50] tracking-widest glow-gold shrink-0"
+                    className="text-2xl md:text-3xl font-black text-[#f2ca50] tracking-tighter shrink-0"
                     data-testid={`text-tier-name-${tier.id}`}
                   >
                     {tier.name}
@@ -637,13 +637,13 @@ export default function PricingPage() {
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between items-center border-b border-[#f2ca50]/10 pb-3">
                   <span className="text-[#f2ca50]/70 text-sm uppercase tracking-wider">Price</span>
-                  <span className="text-white font-bold text-xl" data-testid={`text-price-${tier.id}`}>
+                  <span className="text-[#e5e2e1] font-bold text-xl" data-testid={`text-price-${tier.id}`}>
                     {tier.price}
                   </span>
                 </div>
                 <div className="flex justify-between items-center border-b border-[#f2ca50]/10 pb-3">
                   <span className="text-[#f2ca50]/70 text-sm uppercase tracking-wider">Turnaround</span>
-                  <span className="text-white font-semibold" data-testid={`text-turnaround-${tier.id}`}>
+                  <span className="text-[#e5e2e1] font-semibold" data-testid={`text-turnaround-${tier.id}`}>
                     {tier.turnaround}
                   </span>
                 </div>
@@ -673,7 +673,7 @@ export default function PricingPage() {
                 </button>
               </Link>
               {isPopular && (
-                <p className="text-amber-400/80 text-[11px] text-center mt-2 flex items-center justify-center gap-1" data-testid="text-urgency-cta">
+                <p className="text-[#f2ca50]/70 text-[11px] text-center mt-2 flex items-center justify-center gap-1" data-testid="text-urgency-cta">
                   <Zap size={10} className="shrink-0" /> Turnaround times filling quickly
                 </p>
               )}
@@ -691,14 +691,14 @@ export default function PricingPage() {
               <Percent size={20} className="text-[#f2ca50]" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-[#f2ca50] tracking-widest glow-gold" data-testid="text-bulk-title">
+              <h3 className="text-2xl font-black text-[#f2ca50] tracking-tighter" data-testid="text-bulk-title">
                 BULK DISCOUNTS
               </h3>
               <p className="text-[#e5e2e1]/70 text-sm">Save more when you submit more cards</p>
             </div>
           </div>
 
-          <div className="space-y-0 border border-[#f2ca50]/20 rounded-lg overflow-hidden mb-6">
+          <div className="space-y-0 border border-[#f2ca50]/20 rounded-2xl overflow-hidden mb-6">
             <div className="flex justify-between items-center px-5 py-2.5 border-b border-[#f2ca50]/20 bg-[#f2ca50]/10" data-testid="bulk-header">
               <span className="text-[#f2ca50] text-xs font-bold tracking-widest uppercase">Quantity</span>
               <span className="text-[#f2ca50] text-xs font-bold tracking-widest uppercase">Bulk Deal</span>
@@ -711,7 +711,7 @@ export default function PricingPage() {
                 } ${dt.percent > 0 ? "bg-[#f2ca50]/5" : ""}`}
                 data-testid={`bulk-tier-${i}`}
               >
-                <span className="text-white text-sm font-medium" data-testid={`text-bulk-range-${i}`}>
+                <span className="text-[#e5e2e1] text-sm font-medium" data-testid={`text-bulk-range-${i}`}>
                   {dt.label}
                 </span>
                 <span

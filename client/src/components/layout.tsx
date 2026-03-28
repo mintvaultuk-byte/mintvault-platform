@@ -232,11 +232,11 @@ function Footer() {
               type="email"
               placeholder="Enter your email"
               data-testid="input-email"
-              className="flex-1 bg-transparent border border-[#f2ca50]/40 rounded px-4 py-2 text-white text-sm placeholder:text-[#f2ca50]/40 focus:outline-none focus:border-[#f2ca50] transition-colors"
+              className="flex-1 bg-transparent border border-[#f2ca50]/30 rounded-lg px-4 py-2 text-[#e5e2e1] text-sm placeholder:text-[#f2ca50]/40 focus:outline-none focus:border-[#f2ca50]/60 transition-colors"
             />
             <button
               data-testid="button-subscribe"
-              className="border border-[#f2ca50] bg-black text-[#f2ca50] px-4 py-2 rounded font-medium text-sm tracking-wide transition-all btn-gold-glow hover:bg-[#f2ca50]/10"
+              className="border border-[#f2ca50]/50 bg-[#f2ca50]/[0.06] text-[#f2ca50] px-4 py-2 rounded-lg font-semibold text-sm tracking-wide transition-all hover:bg-[#f2ca50]/15"
             >
               Subscribe
             </button>
