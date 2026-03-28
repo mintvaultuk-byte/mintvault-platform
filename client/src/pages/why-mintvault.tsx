@@ -1,4 +1,5 @@
 import { Shield, Award, BarChart3, Target, Users } from "lucide-react";
+import SeoHead from "@/components/seo-head";
 
 const sections = [
   {
@@ -64,6 +65,11 @@ const sections = [
 export default function WhyMintVaultPage() {
   return (
     <div className="px-4 py-12 max-w-3xl mx-auto">
+      <SeoHead
+        title="Why MintVault | UK Trading Card Grading"
+        description="Discover why MintVault is the UK's most trusted card grading service. Independent grading, NFC-enabled slabs, QR authentication, and insured return shipping."
+        canonical="https://mintvaultuk.com/why-mintvault"
+      />
       <h1
         className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-widest text-center mb-4 glow-gold"
         data-testid="text-why-title"

@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { pricingTiers, bulkDiscountTiers, submissionTypes } from "@shared/schema";
 import type { PricingTier } from "@shared/schema";
-import logoPath from "@assets/file_000000002550720aada646b736a25622_1772023165771.png";
+const logoPath = "/mintvault-logo.png";
 import { Percent, Shield, Clock, Award, Package, CheckCircle, ArrowRight, BookOpen, Lock, Truck, MapPin, Eye, Star, ChevronLeft, ChevronRight, Zap, FileCheck } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import FaqSection, { faqSchema } from "@/components/faq-section";
@@ -371,9 +371,9 @@ export default function PricingPage() {
   return (
     <div>
       <SeoHead
-        title="Pokemon Card Grading UK | Professional TCG Grading | MintVault UK"
-        description="Professional Pokémon and trading card grading service in the UK. Fast turnaround, secure certification and premium slabs. Submit your cards to MintVault today."
-        canonical={`${SITE}/`}
+        title="Pricing | MintVault UK"
+        description="Transparent card grading pricing for UK collectors. Standard, Express and Bulk tiers available. Fully insured return shipping included. No hidden fees."
+        canonical={`${SITE}/pricing`}
         ogImage={`${SITE}/images/collector-lifestyle.webp`}
         schema={homeSchema}
       />
