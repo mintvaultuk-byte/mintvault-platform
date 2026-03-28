@@ -23,13 +23,12 @@ function getClientIp(req: Request): string {
 function timingSafeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf8");
   const bufB = Buffer.from(b, "utf8");
-  if (bufA.length !== bufB.length) {
-    const padded = Buffer.alloc(bufA.length);
-    bufB.copy(padded);
-    crypto.timingSafeEqual(bufA, padded);
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
+  const maxLen = Math.max(bufA.length, bufB.length);
+  const paddedA = Buffer.alloc(maxLen);
+  const paddedB = Buffer.alloc(maxLen);
+  bufA.copy(paddedA);
+  bufB.copy(paddedB);
+  return crypto.timingSafeEqual(paddedA, paddedB);
 }
 
 export function isLoginRateLimited(req: Request): boolean {

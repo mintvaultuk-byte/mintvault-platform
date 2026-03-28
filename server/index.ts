@@ -6,8 +6,6 @@ import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./stripeClient";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
@@ -110,43 +108,12 @@ app.use("/api/admin/session", loginRateLimit);
 app.use("/api/admin/pin", loginRateLimit);
 app.use("/api/admin", adminIpAllowlist);
 
-async function initStripe() {
-  const databaseUrl = getDatabaseUrl();
-  if (!databaseUrl) {
-    console.warn("MINTVAULT_DATABASE_URL not set, skipping Stripe initialization");
-    return;
-  }
-
-  try {
-    log("Initializing Stripe schema...", "stripe");
-    await runMigrations({ databaseUrl, schema: "stripe" });
-    log("Stripe schema ready", "stripe");
-
-    const stripeSync = await getStripeSync();
-
-    try {
-      const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-      if (domain) {
-        const webhookUrl = `https://${domain}/api/stripe/webhook`;
-        const result = await stripeSync.findOrCreateManagedWebhook(webhookUrl);
-        log(`Webhook configured: ${result?.webhook?.url || webhookUrl}`, "stripe");
-      } else {
-        log("REPLIT_DOMAINS not set, skipping webhook registration", "stripe");
-      }
-    } catch (webhookErr: any) {
-      log(`Webhook setup warning: ${webhookErr.message}`, "stripe");
-    }
-
-    stripeSync
-      .syncBackfill()
-      .then(() => log("Stripe data synced", "stripe"))
-      .catch((err: any) => console.error("Error syncing Stripe data:", err));
-  } catch (error) {
-    console.error("Failed to initialize Stripe:", error);
-  }
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn("[stripe] STRIPE_SECRET_KEY not set — payments disabled");
 }
-
-initStripe().catch(err => console.error("Stripe init failed:", err));
+if (!process.env.STRIPE_PUBLISHABLE_KEY) {
+  console.warn("[stripe] STRIPE_PUBLISHABLE_KEY not set — payments disabled");
+}
 
 app.post(
   "/api/stripe/webhook",
@@ -287,8 +254,7 @@ log(`SESSION_SECRET env var: ${process.env.SESSION_SECRET ? "SET" : "NOT SET (us
   httpServer.listen(
     {
       port,
-      host: "0.0.0.0",
-      reusePort: true,
+      host: process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1",
     },
     () => {
       log(`serving on port ${port}`);

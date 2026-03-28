@@ -140,7 +140,7 @@
   }
 
   h1, h2, h3 {
-    text-shadow: 0 0 10px rgba(255,215,0,0.35), 0 0 22px rgba(255,195,0,0.2);
+    text-shadow: 0 0 1px rgba(212,175,55,0.35), 0 1px 3px rgba(0,0,0,0.6);
   }
 
   a:hover {
@@ -221,11 +221,11 @@
   }
 
   .glow-gold {
-    text-shadow: 0 0 6px rgba(255,215,0,0.8), 0 0 16px rgba(255,195,0,0.5), 0 0 32px rgba(255,184,0,0.25);
+    text-shadow: 0 0 8px rgba(212,175,55,0.45), 0 0 20px rgba(212,175,55,0.15);
   }
 
   .glow-gold-sm {
-    text-shadow: 0 0 5px rgba(255,215,0,0.7), 0 0 12px rgba(255,195,0,0.35);
+    text-shadow: 0 0 6px rgba(212,175,55,0.35), 0 0 14px rgba(212,175,55,0.1);
   }
 
   .btn-gold-glow:hover {
@@ -322,47 +322,76 @@
     margin: 12mm 16mm;
   }
 
-  /* Collapse page so hidden content produces no blank pages */
   html, body {
     height: auto !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     background: #ffffff !important;
   }
 
-  /* Hide every element on the page */
+  /*
+   * Use visibility:hidden instead of display:none.
+   *
+   * display:none on a parent makes ALL descendants invisible with no
+   * override possible — #cert-print-view { display:block } cannot escape
+   * a display:none ancestor, which is why the page was blank.
+   *
+   * visibility:hidden preserves boxes in the render tree and ALLOWS a
+   * descendant to override with visibility:visible and actually appear.
+   */
   body * {
-    display: none !important;
+    visibility: hidden !important;
   }
 
-  /* Restore only the certificate print view and all its children */
-  #cert-print-view,
-  #cert-print-view * {
-    display: block !important;
-  }
-
-  /* Restore correct display types for structural elements */
-  #cert-print-view table  { display: table        !important; }
-  #cert-print-view thead  { display: table-header-group !important; }
-  #cert-print-view tbody  { display: table-row-group    !important; }
-  #cert-print-view tr     { display: table-row          !important; }
-  #cert-print-view td,
-  #cert-print-view th     { display: table-cell         !important; }
-  #cert-print-view img    { display: inline-block        !important; }
-
-  /* Horizontal flex rows inside the print view */
-  #cert-print-view .pv-row {
-    display: flex !important;
-  }
-
+  /*
+   * Pull cert-print-view out of normal flow with position:fixed so the
+   * space occupied by all hidden elements does not push it down the page.
+   * position:fixed !important overrides the inline position:relative.
+   * visibility:visible overrides the ancestor visibility:hidden.
+   */
   #cert-print-view {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
+    visibility: visible !important;
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    overflow: visible !important;
     background: #ffffff !important;
     page-break-after: avoid;
     page-break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* Make all cert-print-view descendants visible */
+  #cert-print-view * {
+    visibility: visible !important;
+    display: block !important;
+  }
+
+  /* Restore correct display types for structural elements */
+  #cert-print-view table  { display: table              !important; }
+  #cert-print-view thead  { display: table-header-group !important; }
+  #cert-print-view tbody  { display: table-row-group    !important; }
+  #cert-print-view tr     { display: table-row          !important; }
+  #cert-print-view td,
+  #cert-print-view th     { display: table-cell         !important; }
+  #cert-print-view img    { display: inline-block       !important; }
+
+  /* Horizontal flex rows inside the print view */
+  #cert-print-view .pv-row {
+    display: flex !important;
+  }
+}
+
+
+/* ── Homepage scroll animation ─────────────────────────────── */
+@keyframes scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }

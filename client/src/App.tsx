@@ -4,13 +4,13 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
+import HomePage from "@/pages/home";
 import PricingPage from "@/pages/pricing";
 import CertLookupPage from "@/pages/cert-lookup";
 import CertDetailPage from "@/pages/cert-detail";
 import WhyMintVaultPage from "@/pages/why-mintvault";
 import LabelsPage from "@/pages/labels";
 import ReportsPage from "@/pages/reports";
-import PopulationPage from "@/pages/population";
 import TcgPage from "@/pages/tcg";
 import SubmitPage from "@/pages/submit";
 import SubmitSuccessPage from "@/pages/submit-success";
@@ -37,16 +37,16 @@ function Router() {
         <AdminPage />
       </Route>
       <Route path="/nfc/:certId" component={NfcRedirectPage} />
+      <Route path="/" component={HomePage} />
       <Route>
         <Layout>
           <Switch>
-            <Route path="/" component={PricingPage} />
+            <Route path="/pricing" component={PricingPage} />
             <Route path="/cert" component={CertLookupPage} />
             <Route path="/cert/:id" component={CertDetailPage} />
             <Route path="/why-mintvault" component={WhyMintVaultPage} />
             <Route path="/labels" component={LabelsPage} />
             <Route path="/reports" component={ReportsPage} />
-            <Route path="/population" component={PopulationPage} />
             <Route path="/tcg" component={TcgPage} />
             <Route path="/submit" component={SubmitPage} />
             <Route path="/submit/success" component={SubmitSuccessPage} />
