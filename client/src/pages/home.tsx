@@ -1,8 +1,9 @@
-import { Link } from "wouter";
+import { useState } from "react";
+import { Link, useLocation } from "wouter";
 import {
   Star, Truck, Database, ClipboardList, Package, Search, Wifi,
-  Zap, Shield, Menu, Plus, Home, CreditCard, CheckCircle,
-  Share2, Camera, BarChart2, Contact
+  Zap, Shield, Menu, X, Plus, Home, CreditCard, CheckCircle,
+  Share2, Camera, BarChart2, Contact, Award, BookOpen, FileCheck
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 
@@ -18,6 +19,20 @@ function PokemonIcon() {
 }
 
 export default function HomePage() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [, navigate] = useLocation();
+
+  const closeMenu = () => setMenuOpen(false);
+
+  const navLinks = [
+    { href: "/", label: "Home", icon: <Home size={18} /> },
+    { href: "/pricing", label: "Pricing", icon: <CreditCard size={18} /> },
+    { href: "/cert", label: "Certificate Lookup", icon: <FileCheck size={18} /> },
+    { href: "/why-mintvault", label: "Why MintVault", icon: <Award size={18} /> },
+    { href: "/submit", label: "Submit Cards", icon: <Plus size={18} /> },
+    { href: "/guides", label: "Guides & Articles", icon: <BookOpen size={18} /> },
+  ];
+
   return (
     <div className="bg-[#131313] text-[#e5e2e1] font-sans overflow-x-hidden min-h-screen">
       <SeoHead
@@ -27,25 +42,60 @@ export default function HomePage() {
       />
 
       {/* ── Top Nav ───────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 py-4 bg-[#131313]/80 backdrop-blur-lg border-b border-[#f2ca50]/5">
-        <div className="flex items-center gap-4">
-          <Menu size={22} className="text-[#f2ca50]" />
-          <span className="text-xl font-bold tracking-tighter text-[#f2ca50] uppercase">MintVault</span>
-        </div>
-        <div className="hidden md:flex gap-8 items-center">
-          <Link href="/" className="text-[#f2ca50] font-bold uppercase text-sm tracking-tight">Home</Link>
-          <Link href="/cert" className="text-[#e5e2e1] hover:text-[#d4af37] transition-colors duration-300 uppercase text-sm tracking-tight">Verify</Link>
-          <Link href="/why-mintvault" className="text-[#e5e2e1] hover:text-[#d4af37] transition-colors duration-300 uppercase text-sm tracking-tight">Dashboard</Link>
-          <Link href="/pricing" className="text-[#e5e2e1] hover:text-[#d4af37] transition-colors duration-300 uppercase text-sm tracking-tight">Pricing</Link>
-        </div>
-        <Link href="/submit">
-          <button className="bg-[#f2ca50] text-[#3c2f00] px-6 py-2 rounded-lg font-bold uppercase text-xs tracking-widest active:scale-95 transition-transform">
-            Submit
+      <header className="fixed top-0 left-0 w-full z-50 bg-[#131313]/95 backdrop-blur-lg border-b border-[#f2ca50]/10">
+        <div className="flex justify-between items-center px-5 py-3.5">
+          <button
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="text-[#f2ca50] p-1 -ml-1 active:scale-90 transition-transform"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            data-testid="button-home-menu"
+          >
+            {menuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
-        </Link>
+
+          <Link href="/" onClick={closeMenu}>
+            <span className="text-xl font-black tracking-tighter text-[#f2ca50] uppercase">MintVault</span>
+          </Link>
+
+          <Link href="/submit" onClick={closeMenu}>
+            <button className="bg-[#f2ca50] text-[#3c2f00] px-5 py-2 rounded-lg font-black uppercase text-xs tracking-widest active:scale-95 transition-transform">
+              Submit
+            </button>
+          </Link>
+        </div>
+
+        {/* Mobile nav dropdown */}
+        {menuOpen && (
+          <nav className="border-t border-[#f2ca50]/10 px-5 py-4" data-testid="nav-home-menu">
+            <ul className="space-y-1">
+              {navLinks.map(({ href, label, icon }) => (
+                <li key={href}>
+                  <Link
+                    href={href}
+                    onClick={closeMenu}
+                    className="flex items-center gap-3 text-[#f2ca50] text-base font-semibold py-3 px-3 rounded-xl hover:bg-[#f2ca50]/10 active:bg-[#f2ca50]/15 transition-colors"
+                    data-testid={`link-home-menu-${label.toLowerCase().replace(/\s/g, "-")}`}
+                  >
+                    <span className="text-[#f2ca50]/70">{icon}</span>
+                    {label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+
+        {/* Backdrop — tapping outside closes the menu */}
+        {menuOpen && (
+          <div
+            className="fixed inset-0 z-[-1]"
+            onClick={closeMenu}
+            aria-hidden="true"
+          />
+        )}
       </header>
 
-      <main className="pt-24 pb-32">
+      <main className="pt-20 pb-32">
 
         {/* ── Hero ──────────────────────────────────────────────────── */}
         <section className="relative min-h-[580px] flex flex-col items-center justify-center px-6 overflow-hidden">
@@ -300,7 +350,7 @@ export default function HomePage() {
         </Link>
         <Link href="/why-mintvault" className="flex flex-col items-center justify-center text-[#e5e2e1]/60">
           <Database size={22} />
-          <span className="text-[10px] uppercase tracking-widest mt-1">Dashboard</span>
+          <span className="text-[10px] uppercase tracking-widest mt-1">Why Us</span>
         </Link>
         <Link href="/pricing" className="flex flex-col items-center justify-center text-[#e5e2e1]/60">
           <CreditCard size={22} />

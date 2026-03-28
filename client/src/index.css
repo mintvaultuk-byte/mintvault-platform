@@ -322,36 +322,42 @@
     margin: 12mm 16mm;
   }
 
+  /*
+   * Force the document to a single A4 page.
+   *
+   * Previously: height:auto + overflow:visible let the full screen page
+   * (which spans 2-3 screen pages) render completely. #cert-print-view was
+   * position:fixed, which attaches to each printed page — so it appeared on
+   * all 3 pages.
+   *
+   * Fix: constrain html/body to exactly one A4 page height and hide overflow,
+   * so the browser only generates a single page. The cert-print-view is then
+   * position:absolute, stays within that one page, and prints once.
+   */
   html, body {
-    height: auto !important;
-    overflow: visible !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    overflow: hidden !important;
     background: #ffffff !important;
   }
 
   /*
    * Use visibility:hidden instead of display:none.
-   *
-   * display:none on a parent makes ALL descendants invisible with no
-   * override possible — #cert-print-view { display:block } cannot escape
-   * a display:none ancestor, which is why the page was blank.
-   *
-   * visibility:hidden preserves boxes in the render tree and ALLOWS a
-   * descendant to override with visibility:visible and actually appear.
+   * display:none on a parent prevents any descendant override.
+   * visibility:hidden preserves the render tree so a child can override.
    */
   body * {
     visibility: hidden !important;
   }
 
   /*
-   * Pull cert-print-view out of normal flow with position:fixed so the
-   * space occupied by all hidden elements does not push it down the page.
-   * position:fixed !important overrides the inline position:relative.
-   * visibility:visible overrides the ancestor visibility:hidden.
+   * Cert-print-view: position:absolute (not fixed) within the
+   * now-single-page document. visibility:visible makes it appear.
    */
   #cert-print-view {
     visibility: visible !important;
     display: block !important;
-    position: fixed !important;
+    position: absolute !important;
     top: 0 !important;
     left: 0 !important;
     right: 0 !important;
@@ -360,6 +366,8 @@
     background: #ffffff !important;
     page-break-after: avoid;
     page-break-inside: avoid;
+    break-after: avoid;
+    break-inside: avoid;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
