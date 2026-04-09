@@ -61,7 +61,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
+    <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="w-14 h-14 rounded-full border-2 border-[#D4AF37]/40 flex items-center justify-center mx-auto mb-4">
@@ -74,7 +74,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
           <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest glow-gold-sm" data-testid="text-admin-title">
             STAFF ACCESS
           </h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="text-[#999999] text-sm mt-1">
             {step === "password" ? "MintVault Administration" : "Enter your security PIN"}
           </p>
         </div>
@@ -91,7 +91,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
                   required
                   autoComplete="current-password"
                   autoFocus
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-white focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="input-admin-password"
                 />
                 <button
@@ -137,7 +137,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
                   pattern="[0-9]*"
                   autoFocus
                   placeholder="Enter PIN"
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-white text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="input-admin-pin"
                 />
                 <button
@@ -169,7 +169,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
             <button
               type="button"
               onClick={() => { setStep("password"); setPin(""); setError(""); }}
-              className="w-full text-gray-500 text-xs hover:text-[#D4AF37] transition-colors"
+              className="w-full text-[#999999] text-xs hover:text-[#D4AF37] transition-colors"
               data-testid="button-back-to-password"
             >
               Back to password

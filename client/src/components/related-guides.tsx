@@ -20,8 +20,8 @@ export default function RelatedGuides({ guides, title = "Related Guides" }: { gu
         {guides.map((guide) => (
           <Link key={guide.slug} href={`/guides/${guide.slug}`}>
             <div className="border border-[#D4AF37]/20 rounded-lg p-4 hover:border-[#D4AF37]/40 hover:bg-[#D4AF37]/5 transition-all cursor-pointer h-full" data-testid={`card-guide-${guide.slug}`}>
-              <h3 className="text-white text-sm font-semibold mb-2 leading-snug">{guide.title}</h3>
-              <p className="text-gray-400 text-xs leading-relaxed mb-3 line-clamp-3">{guide.excerpt}</p>
+              <h3 className="text-[#1A1A1A] text-sm font-semibold mb-2 leading-snug">{guide.title}</h3>
+              <p className="text-[#666666] text-xs leading-relaxed mb-3 line-clamp-3">{guide.excerpt}</p>
               <span className="text-[#D4AF37] text-xs font-medium flex items-center gap-1">
                 Read More <ArrowRight size={12} />
               </span>

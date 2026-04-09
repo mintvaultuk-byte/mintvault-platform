@@ -211,7 +211,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
   const isBusy = op !== "idle" || saveMutation.isPending || lockMutation.isPending || clearMutation.isPending;
 
   return (
-    <div className="rounded-lg border border-yellow-900/40 bg-black/40 p-4 space-y-4" data-testid="nfc-section">
+    <div className="rounded-lg border border-yellow-900/40 bg-[#FAFAF8] p-4 space-y-4" data-testid="nfc-section">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -252,7 +252,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
 
       {/* Operation status */}
       {op !== "idle" && (
-        <div className="flex items-center gap-2 rounded-md border border-yellow-600/40 bg-yellow-900/20 p-3 text-sm text-yellow-200">
+        <div className="flex items-center gap-2 rounded-md border border-yellow-600/40 bg-[#FFF9E6] p-3 text-sm text-yellow-200">
           <Loader2 className="h-4 w-4 animate-spin text-yellow-400" />
           {op === "reading" && "Waiting for tag… hold tag to device."}
           {op === "writing" && "Writing URL to tag… hold tag to device."}
@@ -275,7 +275,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
             <KeyRound className="h-3 w-3" />
             Manual UID Entry
           </div>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-[#999999]">
             Use this if you are programming tags with a USB NFC writer or an external encoder.
             Paste the tag UID exactly as printed or reported by your writer.
           </p>
@@ -284,14 +284,14 @@ export default function NfcSection({ cert, onUpdated }: Props) {
               placeholder="Tag UID  e.g. 04:1A:2B:3C:4D:5E:6F"
               value={manualUid}
               onChange={(e) => setManualUid(e.target.value.trim())}
-              className="h-7 text-xs bg-black border-gray-700 text-gray-100 font-mono flex-1"
+              className="h-7 text-xs bg-white border-[#E8E4DC] text-[#1A1A1A] font-mono flex-1"
               data-testid="input-manual-uid"
             />
             <Input
               placeholder="Chip type (optional)"
               value={manualChipType}
               onChange={(e) => setManualChipType(e.target.value.trim())}
-              className="h-7 text-xs bg-black border-gray-700 text-gray-100 w-36"
+              className="h-7 text-xs bg-white border-[#E8E4DC] text-[#1A1A1A] w-36"
               data-testid="input-manual-chip-type"
             />
           </div>
@@ -304,7 +304,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
               chipType: manualChipType || undefined,
               url: nfcUrl,
             })}
-            className="h-7 text-xs border-yellow-700/50 text-yellow-300 hover:bg-yellow-900/30"
+            className="h-7 text-xs border-yellow-700/50 text-yellow-300 hover:bg-[#FFF9E6]"
             data-testid="btn-manual-save"
           >
             {saveMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <KeyRound className="h-3 w-3 mr-1" />}
@@ -321,7 +321,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           onClick={handleRead}
           disabled={isBusy || !supported}
           data-testid="btn-nfc-read"
-          className="border-yellow-700/50 text-yellow-300 hover:bg-yellow-900/30"
+          className="border-yellow-700/50 text-yellow-300 hover:bg-[#FFF9E6]"
         >
           <Wifi className="h-3 w-3 mr-1" />
           Read Tag
@@ -331,9 +331,9 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           size="sm"
           variant="outline"
           onClick={handleWrite}
-          disabled={isBusy || !supported || cert.nfcLocked}
+          disabled={isBusy || !supported || !!cert.nfcLocked}
           data-testid="btn-nfc-write"
-          className="border-yellow-700/50 text-yellow-300 hover:bg-yellow-900/30"
+          className="border-yellow-700/50 text-yellow-300 hover:bg-[#FFF9E6]"
         >
           {saveMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <CheckCircle2 className="h-3 w-3 mr-1" />}
           Write Tag
@@ -343,7 +343,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           size="sm"
           variant="outline"
           onClick={() => setShowLockConfirm(true)}
-          disabled={isBusy || !cert.nfcUid || cert.nfcLocked}
+          disabled={isBusy || !cert.nfcUid || !!cert.nfcLocked}
           data-testid="btn-nfc-lock"
           className="border-orange-700/50 text-orange-300 hover:bg-orange-900/30"
         >
@@ -378,16 +378,16 @@ export default function NfcSection({ cert, onUpdated }: Props) {
 
       {/* Lock confirm dialog */}
       <AlertDialog open={showLockConfirm} onOpenChange={setShowLockConfirm}>
-        <AlertDialogContent className="bg-black border-yellow-900/50">
+        <AlertDialogContent className="bg-white border-[#E8E4DC]">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-yellow-400">Lock this NFC tag?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300">
+            <AlertDialogDescription className="text-[#666666]">
               Locking makes the tag <strong>permanently read-only</strong> — it can never be reprogrammed.
               Hold the tag to the device after confirming.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-gray-700">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-[#E8E4DC]">Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-orange-700 hover:bg-orange-600 text-white"
               onClick={() => { setShowLockConfirm(false); handleLock(); }}
@@ -401,16 +401,16 @@ export default function NfcSection({ cert, onUpdated }: Props) {
 
       {/* Clear confirm dialog */}
       <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
-        <AlertDialogContent className="bg-black border-yellow-900/50">
+        <AlertDialogContent className="bg-white border-[#E8E4DC]">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-yellow-400">Clear NFC record?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300">
+            <AlertDialogDescription className="text-[#666666]">
               This removes all NFC data from this certificate. The physical tag will still work
               but will no longer be linked in the system.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-gray-700">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-[#E8E4DC]">Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-700 hover:bg-red-600 text-white"
               onClick={() => { setShowClearConfirm(false); clearMutation.mutate(); }}
@@ -424,14 +424,14 @@ export default function NfcSection({ cert, onUpdated }: Props) {
 
       {/* Overwrite confirm dialog — shown when cert already has a different UID */}
       <AlertDialog open={!!overwritePending} onOpenChange={(open) => { if (!open) setOverwritePending(null); }}>
-        <AlertDialogContent className="bg-black border-orange-900/50">
+        <AlertDialogContent className="bg-white border-[#E8E4DC]">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-orange-400">Replace existing NFC tag?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-300 space-y-2">
+            <AlertDialogDescription className="text-[#666666] space-y-2">
               <span className="block">
                 This certificate already has an NFC tag linked to it.
               </span>
-              <span className="block font-mono text-xs text-gray-500">
+              <span className="block font-mono text-xs text-[#999999]">
                 Existing UID: {cert.nfcUid}
               </span>
               <span className="block font-mono text-xs text-yellow-400">
@@ -444,7 +444,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-gray-700" onClick={() => setOverwritePending(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-[#E8E4DC]" onClick={() => setOverwritePending(null)}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-orange-700 hover:bg-orange-600 text-white"
               onClick={() => {
@@ -465,8 +465,8 @@ export default function NfcSection({ cert, onUpdated }: Props) {
 function InfoRow({ label, value, mono, testId }: { label: string; value: string; mono?: boolean; testId?: string }) {
   return (
     <>
-      <span className="text-gray-500">{label}</span>
-      <span className={`text-gray-200 truncate ${mono ? "font-mono text-[11px]" : ""}`} data-testid={testId}>
+      <span className="text-[#999999]">{label}</span>
+      <span className={`text-[#1A1A1A] truncate ${mono ? "font-mono text-[11px]" : ""}`} data-testid={testId}>
         {value}
       </span>
     </>

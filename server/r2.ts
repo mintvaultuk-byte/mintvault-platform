@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let s3Client: S3Client | null = null;
@@ -58,4 +58,45 @@ export function r2KeyForImage(certId: string, side: "front" | "back", ext: strin
 
 export function r2KeyForLabel(certId: string, side: "front" | "back" | "both", format: "png" | "pdf"): string {
   return `labels/${certId}/${side}.${format}`;
+}
+
+// Safety-net cleanup: delete any pre-grade-checker objects older than maxAgeMs.
+// In normal operation this prefix should always be empty because the estimate endpoint
+// never writes to R2. This job exists purely as a failsafe in case something changes.
+export async function cleanupStalePreGradeImages(maxAgeMs = 60 * 60 * 1000): Promise<number> {
+  let client: S3Client;
+  let bucket: string;
+  try {
+    client = getClient();
+    bucket = getBucket();
+  } catch {
+    // R2 not configured in this environment — skip silently
+    return 0;
+  }
+
+  const prefix = "pre-grade-checker/";
+  const cutoff = Date.now() - maxAgeMs;
+  let deleted = 0;
+  let continuationToken: string | undefined;
+
+  do {
+    const list = await client.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+
+    for (const obj of list.Contents ?? []) {
+      if (!obj.Key) continue;
+      const lastModified = obj.LastModified?.getTime() ?? 0;
+      if (lastModified < cutoff) {
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: obj.Key }));
+        deleted++;
+      }
+    }
+
+    continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return deleted;
 }

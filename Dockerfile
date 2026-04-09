@@ -1,7 +1,7 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM node:20-slim AS builder
 
-# System libs required to compile the canvas native module
+# System libs required to compile canvas and sharp native modules
 RUN apt-get update && apt-get install -y \
     build-essential \
     libcairo2-dev \
@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libgif-dev \
     librsvg2-dev \
+    libvips-dev \
     pkg-config \
     python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -23,7 +24,7 @@ RUN npm run build
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM node:20-slim AS production
 
-# Runtime libs for canvas (label/PDF generation)
+# Runtime libs for canvas (label/PDF generation) and sharp (image processing)
 RUN apt-get update && apt-get install -y \
     libcairo2 \
     libpango-1.0-0 \
@@ -31,6 +32,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg62-turbo \
     libgif7 \
     librsvg2-2 \
+    libvips \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -15,7 +15,7 @@ const mockReport = {
   ],
   graderNotes: "Exceptional card with near-flawless presentation. Minor edge softening at top-left under 10x magnification. No print lines, no whitening, perfect gloss retention.",
   gradedDate: "15 January 2026",
-  tier: "ELITE",
+  tier: "EXPRESS",
 };
 
 export default function ReportsPage() {
@@ -45,9 +45,9 @@ export default function ReportsPage() {
           {[
             "Overall grade from 1 to 10 (including half grades)",
             "Individual subgrades for Centering, Corners, Edges, and Surface",
-            "Detailed grader notes (Premier tier and above)",
-            "High-resolution front & back imaging (Ultra tier and above)",
-            "Population report inclusion (Elite tier)",
+            "Detailed grader notes",
+            "High-resolution front & back imaging",
+            "Population report inclusion",
           ].map((item, i) => (
             <li key={i} className="flex items-start gap-2">
               <CheckCircle size={16} className="text-[#D4AF37] mt-0.5 shrink-0" />

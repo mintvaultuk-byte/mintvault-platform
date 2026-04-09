@@ -11,8 +11,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield,
+  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield, ClipboardList,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 type BrowserCert = CertificateRecord & { isPrinted: boolean; reprintCount: number };
 
@@ -96,13 +97,13 @@ function EditModal({
     placeholder?: string
   ) => (
     <div className="space-y-1">
-      <Label htmlFor={id} className="text-xs text-gray-400">{label}</Label>
+      <Label htmlFor={id} className="text-xs text-[#666666]">{label}</Label>
       <Input
         id={id}
         value={form[id]}
         onChange={(e) => setForm((f) => ({ ...f, [id]: e.target.value }))}
         placeholder={placeholder || label}
-        className="bg-black border-gray-700 text-gray-100 text-sm h-8"
+        className="bg-white border-[#E8E4DC] text-[#1A1A1A] text-sm h-8"
         data-testid={`input-override-${id}`}
       />
     </div>
@@ -110,14 +111,14 @@ function EditModal({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-gray-950 border-gray-800 text-gray-100 max-w-md">
+      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md">
         <DialogHeader>
           <DialogTitle className="text-yellow-400 flex items-center gap-2">
             <Pencil className="h-4 w-4" /> Edit Label Display Data
           </DialogTitle>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-[#999999] mt-1">
             <span className="font-mono text-yellow-500/80">{cert.certId}</span> · Grade{" "}
-            <span className="text-white">{gradeDisplay(cert)}</span> — locked, not editable
+            <span className="text-[#1A1A1A]">{gradeDisplay(cert)}</span> — locked, not editable
           </p>
         </DialogHeader>
 
@@ -151,7 +152,7 @@ function EditModal({
             size="sm"
             variant="outline"
             onClick={onClose}
-            className="border-gray-700 text-gray-400 text-xs"
+            className="border-[#E8E4DC] text-[#666666] text-xs"
           >
             Cancel
           </Button>
@@ -170,13 +171,128 @@ function EditModal({
   );
 }
 
+// ── Grading Report Modal ─────────────────────────────────────────────────────
+function GradingReportModal({
+  cert,
+  onClose,
+}: {
+  cert: BrowserCert;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const [form, setForm] = useState({
+    centering: "",
+    corners:   "",
+    edges:     "",
+    surface:   "",
+    overall:   "",
+  });
+
+  const { data: existing, isLoading } = useQuery<{ gradingReport?: Record<string, string> } | null>({
+    queryKey: ["/api/admin/printing/browser/cert", cert.certId],
+    queryFn: async () => {
+      const res = await fetch(`/api/cert/${cert.certId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    const r = (existing as any)?.gradingReport;
+    if (r) {
+      setForm({
+        centering: r.centering ?? "",
+        corners:   r.corners   ?? "",
+        edges:     r.edges     ?? "",
+        surface:   r.surface   ?? "",
+        overall:   r.overall   ?? "",
+      });
+    }
+  }, [existing]);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: typeof form) =>
+      apiRequest("PATCH", `/api/admin/certificates/${cert.certId}/grading-report`, data),
+    onSuccess: () => {
+      toast({ title: "Grading report saved" });
+      qc.invalidateQueries({ queryKey: ["/api/admin/printing/browser/cert", cert.certId] });
+      onClose();
+    },
+    onError: () => toast({ title: "Save failed", variant: "destructive" }),
+  });
+
+  const field = (id: keyof typeof form, label: string, placeholder: string) => (
+    <div className="space-y-1">
+      <Label htmlFor={`gr-${id}`} className="text-xs text-[#666666]">{label}</Label>
+      <Textarea
+        id={`gr-${id}`}
+        value={form[id]}
+        onChange={(e) => setForm((f) => ({ ...f, [id]: e.target.value }))}
+        placeholder={placeholder}
+        rows={2}
+        className="bg-white border-[#E8E4DC] text-[#1A1A1A] text-sm resize-none"
+      />
+    </div>
+  );
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-yellow-400 flex items-center gap-2">
+            <ClipboardList className="h-4 w-4" /> Grading Report
+          </DialogTitle>
+          <p className="text-xs text-[#999999] mt-1">
+            <span className="font-mono text-yellow-500/80">{cert.certId}</span> — commentary shown on the public cert page. All fields optional.
+          </p>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-[#999999]" />
+          </div>
+        ) : (
+          <div className="space-y-3 py-1">
+            {field("centering", "Centering", "e.g. Front centering measured at approximately 55/45 left-right, 50/50 top-bottom")}
+            {field("corners",   "Corners",   "e.g. All four corners sharp under 10x magnification. No whitening detected")}
+            {field("edges",     "Edges",     "e.g. Clean edges with no visible whitening or chipping")}
+            {field("surface",   "Surface",   "e.g. No scratches, print lines, or surface damage detected")}
+            {field("overall",   "Overall",   "e.g. Exceptional example — clean presentation across all four categories")}
+          </div>
+        )}
+
+        <DialogFooter className="gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onClose}
+            className="border-[#E8E4DC] text-[#666666] text-xs"
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => saveMutation.mutate(form)}
+            disabled={saveMutation.isPending || isLoading}
+            className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold text-xs"
+          >
+            {saveMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save Report"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Label Preview Modal ───────────────────────────────────────────────────────
 function PreviewModal({ cert, onClose }: { cert: BrowserCert; onClose: () => void }) {
   const frontUrl = `/api/admin/certificates/label/${cert.certId}/front.png`;
   const backUrl  = `/api/admin/certificates/label/${cert.certId}/back.png`;
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-gray-950 border-gray-800 text-gray-100 max-w-xl">
+      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-xl">
         <DialogHeader>
           <DialogTitle className="text-yellow-400 text-sm">
             Label Preview — <span className="font-mono">{cert.certId}</span>
@@ -184,26 +300,26 @@ function PreviewModal({ cert, onClose }: { cert: BrowserCert; onClose: () => voi
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <p className="text-[11px] text-gray-500 mb-1 uppercase tracking-wider">Front</p>
+            <p className="text-[11px] text-[#999999] mb-1 uppercase tracking-wider">Front</p>
             <img
               src={frontUrl}
               alt="Front label"
-              className="w-full rounded border border-gray-800"
+              className="w-full rounded border border-[#E8E4DC]"
               data-testid={`preview-front-${cert.certId}`}
             />
           </div>
           <div>
-            <p className="text-[11px] text-gray-500 mb-1 uppercase tracking-wider">Back</p>
+            <p className="text-[11px] text-[#999999] mb-1 uppercase tracking-wider">Back</p>
             <img
               src={backUrl}
               alt="Back label"
-              className="w-full rounded border border-gray-800"
+              className="w-full rounded border border-[#E8E4DC]"
               data-testid={`preview-back-${cert.certId}`}
             />
           </div>
         </div>
         <DialogFooter>
-          <Button size="sm" variant="outline" onClick={onClose} className="border-gray-700 text-gray-400 text-xs">
+          <Button size="sm" variant="outline" onClick={onClose} className="border-[#E8E4DC] text-[#666666] text-xs">
             Close
           </Button>
         </DialogFooter>
@@ -218,17 +334,19 @@ function BrowserRow({
   onPreview,
   onReprint,
   onEdit,
+  onReport,
   reprintPending,
 }: {
   cert: BrowserCert;
   onPreview: () => void;
   onReprint: () => void;
   onEdit: () => void;
+  onReport: () => void;
   reprintPending: boolean;
 }) {
   return (
     <div
-      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-gray-800 hover:border-gray-700 transition-colors text-sm"
+      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-[#E8E4DC] hover:border-[#D4AF37]/30 transition-colors text-sm"
       data-testid={`browser-row-${cert.certId}`}
     >
       {/* Printed status */}
@@ -257,12 +375,12 @@ function BrowserRow({
               <Shield className="h-2.5 w-2.5" /> claimed
             </Badge>
           ) : (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 border-gray-700 text-gray-600" data-testid={`badge-ownership-browser-${cert.certId}`}>
+            <Badge variant="outline" className="text-[10px] px-1 py-0 border-[#E8E4DC] text-[#999999]" data-testid={`badge-ownership-browser-${cert.certId}`}>
               unclaimed
             </Badge>
           )}
         </div>
-        <p className="text-xs text-gray-400 truncate" data-testid={`cardname-browser-${cert.certId}`}>
+        <p className="text-xs text-[#666666] truncate" data-testid={`cardname-browser-${cert.certId}`}>
           {cert.cardName ?? "—"}
           {cert.setName ? <span className="text-gray-600"> · {cert.setName}</span> : null}
         </p>
@@ -272,7 +390,7 @@ function BrowserRow({
       {/* Actions */}
       <button
         onClick={onPreview}
-        className="text-gray-500 hover:text-yellow-400 transition-colors p-1 rounded"
+        className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
         title="Preview label"
         data-testid={`btn-preview-${cert.certId}`}
       >
@@ -281,7 +399,7 @@ function BrowserRow({
       <button
         onClick={onReprint}
         disabled={reprintPending}
-        className="text-gray-500 hover:text-blue-400 transition-colors p-1 rounded disabled:opacity-40"
+        className="text-[#999999] hover:text-blue-400 transition-colors p-1 rounded disabled:opacity-40"
         title="Reprint label"
         data-testid={`btn-reprint-${cert.certId}`}
       >
@@ -291,11 +409,19 @@ function BrowserRow({
       </button>
       <button
         onClick={onEdit}
-        className="text-gray-500 hover:text-yellow-400 transition-colors p-1 rounded"
+        className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
         title="Edit label display data"
         data-testid={`btn-edit-${cert.certId}`}
       >
         <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        onClick={onReport}
+        className="text-[#999999] hover:text-green-400 transition-colors p-1 rounded"
+        title="Edit grading report"
+        data-testid={`btn-report-${cert.certId}`}
+      >
+        <ClipboardList className="h-4 w-4" />
       </button>
     </div>
   );
@@ -308,6 +434,7 @@ export default function AdminCertBrowser() {
   const [search, setSearch] = useState("");
   const [previewCert, setPreviewCert] = useState<BrowserCert | null>(null);
   const [editCert, setEditCert] = useState<BrowserCert | null>(null);
+  const [reportCert, setReportCert] = useState<BrowserCert | null>(null);
   const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   const { data: certs = [], isLoading, refetch } = useQuery<BrowserCert[]>({
@@ -353,30 +480,30 @@ export default function AdminCertBrowser() {
       {/* Header row */}
       <div className="flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#999999]" />
           <Input
             placeholder="Search cert ID, card name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 bg-black border-gray-700 text-gray-100 text-sm h-8"
+            className="pl-8 bg-white border-[#E8E4DC] text-[#1A1A1A] text-sm h-8"
             data-testid="input-browser-search"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#666666]"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-[10px] text-gray-500 border-gray-700">
+          <Badge variant="outline" className="text-[10px] text-[#999999] border-[#E8E4DC]">
             {filtered.length} of {certs.length}
           </Badge>
           <button
             onClick={() => refetch()}
-            className="text-gray-500 hover:text-yellow-400 transition-colors p-1 rounded"
+            className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
             data-testid="btn-browser-refresh"
           >
             <RefreshCw className="h-4 w-4" />
@@ -401,7 +528,7 @@ export default function AdminCertBrowser() {
           <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-lg border border-gray-800 p-8 text-center text-gray-600 text-sm">
+        <div className="rounded-lg border border-[#E8E4DC] p-8 text-center text-[#999999] text-sm">
           {search ? "No certificates match your search." : "No certificates found."}
         </div>
       ) : (
@@ -413,6 +540,7 @@ export default function AdminCertBrowser() {
               onPreview={() => setPreviewCert(cert)}
               onReprint={() => handleReprint(cert)}
               onEdit={() => setEditCert(cert)}
+              onReport={() => setReportCert(cert)}
               reprintPending={reprintingId === cert.certId}
             />
           ))}
@@ -425,6 +553,9 @@ export default function AdminCertBrowser() {
       )}
       {editCert && (
         <EditModal cert={editCert} onClose={() => setEditCert(null)} />
+      )}
+      {reportCert && (
+        <GradingReportModal cert={reportCert} onClose={() => setReportCert(null)} />
       )}
     </div>
   );

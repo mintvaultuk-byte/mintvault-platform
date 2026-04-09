@@ -32,7 +32,7 @@ export default function SubmitSuccessPage() {
           Submission Not Found
         </h2>
         <Link href="/submit">
-          <button className="border border-[#D4AF37] bg-black text-[#D4AF37] px-6 py-2.5 rounded font-medium transition-all btn-gold-glow hover:bg-[#D4AF37]/10" data-testid="button-new-submission">
+          <button className="border border-[#D4AF37] bg-white text-[#D4AF37] px-6 py-2.5 rounded font-medium transition-all hover:bg-[#D4AF37]/10" data-testid="button-new-submission">
             Start New Submission
           </button>
         </Link>
@@ -56,7 +56,7 @@ export default function SubmitSuccessPage() {
         <h1 className="text-2xl md:text-3xl font-bold text-[#D4AF37] tracking-wide glow-gold-sm mb-2" data-testid="text-success-title">
           Submission Received!
         </h1>
-        <p className="text-gray-400" data-testid="text-success-subtitle">
+        <p className="text-[#666666]" data-testid="text-success-subtitle">
           Thank you for your order. Your submission has been confirmed.
         </p>
       </div>
@@ -78,22 +78,41 @@ export default function SubmitSuccessPage() {
         </div>
       </div>
 
-      <div className="border border-emerald-500/30 rounded-lg p-5 mb-6 bg-emerald-500/5">
+      <div className="border border-emerald-300 rounded-lg p-5 mb-6 bg-emerald-50">
         <div className="flex items-center gap-2 mb-3">
-          <Download size={18} className="text-emerald-400" />
-          <h3 className="text-emerald-400 font-semibold tracking-wider text-sm uppercase">
+          <Download size={18} className="text-emerald-600" />
+          <h3 className="text-emerald-600 font-semibold tracking-wider text-sm uppercase">
             Packing Slip
           </h3>
         </div>
-        <p className="text-gray-300 text-sm mb-4">
+        <p className="text-[#444444] text-sm mb-4">
           Download your packing slip and include it inside your package. This is essential for us to process your submission quickly.
         </p>
         <a
           href={`/api/submissions/${subId}/packing-slip?token=${psToken}`}
-          className="inline-flex items-center gap-2 border border-emerald-500 bg-emerald-500/10 text-emerald-400 px-5 py-2.5 rounded font-medium tracking-wide text-sm transition-all hover:bg-emerald-500/20"
+          className="inline-flex items-center gap-2 border border-emerald-500 bg-emerald-50 text-emerald-600 px-5 py-2.5 rounded font-medium tracking-wide text-sm transition-all hover:bg-emerald-100"
           data-testid="button-download-slip"
         >
           <Download size={16} /> Download Packing Slip (PDF)
+        </a>
+      </div>
+
+      <div className="border border-[#D4AF37]/30 rounded-lg p-5 mb-6 bg-[#D4AF37]/5">
+        <div className="flex items-center gap-2 mb-3">
+          <Download size={18} className="text-[#D4AF37]" />
+          <h3 className="text-[#D4AF37] font-semibold tracking-wider text-sm uppercase">
+            Shipping Label
+          </h3>
+        </div>
+        <p className="text-[#444444] text-sm mb-4">
+          Download your pre-addressed shipping label. Print it, attach it to the outside of your package, and send it to us.
+        </p>
+        <a
+          href={`/api/submissions/${subId}/shipping-label?token=${psToken}`}
+          className="inline-flex items-center gap-2 border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-5 py-2.5 rounded font-medium tracking-wide text-sm transition-all hover:bg-[#D4AF37]/20"
+          data-testid="button-download-shipping-label"
+        >
+          <Download size={16} /> Download Shipping Label (PDF)
         </a>
       </div>
 
@@ -104,18 +123,18 @@ export default function SubmitSuccessPage() {
             Shipping Instructions
           </h3>
         </div>
-        <div className="text-gray-300 text-sm space-y-3">
+        <div className="text-[#444444] text-sm space-y-3">
           <div className="space-y-1.5">
-            <p className="text-white font-medium text-xs uppercase tracking-wider">Before you ship:</p>
-            <ol className="list-decimal list-inside text-gray-400 text-xs space-y-1">
+            <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider">Before you ship:</p>
+            <ol className="list-decimal list-inside text-[#666666] text-xs space-y-1">
               <li>Print the packing slip above and include it inside the box</li>
               <li>Write your Submission ID (<span className="text-[#D4AF37] font-mono font-bold">{subId}</span>) on the outside of the box</li>
               <li>Pack your cards securely with adequate protection</li>
               <li>Use tracked, insured shipping for your protection</li>
             </ol>
           </div>
-          <p className="text-white font-medium text-xs uppercase tracking-wider mt-3">Send to:</p>
-          <div className="border border-[#D4AF37]/10 rounded p-3 bg-[#D4AF37]/5 font-mono text-xs leading-relaxed" data-testid="text-shipping-address">
+          <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider mt-3">Send to:</p>
+          <div className="border border-[#E8E4DC] rounded p-3 bg-[#FAFAF8] font-mono text-xs leading-relaxed" data-testid="text-shipping-address">
             MintVault Grading<br />
             2 Temple Gardens<br />
             Strood<br />
@@ -128,7 +147,7 @@ export default function SubmitSuccessPage() {
 
       <div className="flex flex-col sm:flex-row gap-3">
         <Link href="/submit" className="flex-1">
-          <button className="w-full border border-[#D4AF37] bg-black text-[#D4AF37] py-2.5 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#D4AF37]/10" data-testid="button-another-submission">
+          <button className="w-full border border-[#D4AF37] bg-white text-[#D4AF37] py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#D4AF37]/10" data-testid="button-another-submission">
             Submit Another Order
           </button>
         </Link>
@@ -146,7 +165,7 @@ function ConfirmRow({ label, value, testId, highlight }: { label: string; value:
   return (
     <div className="flex justify-between items-center border-b border-[#D4AF37]/10 pb-2 last:border-0">
       <span className="text-[#D4AF37]/60 text-sm">{label}</span>
-      <span className={`font-medium text-sm ${highlight ? "text-[#D4AF37] font-mono font-bold" : "text-white"}`} data-testid={testId}>
+      <span className={`font-medium text-sm ${highlight ? "text-[#D4AF37] font-mono font-bold" : "text-[#1A1A1A]"}`} data-testid={testId}>
         {value}
       </span>
     </div>

@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import rateLimit from "express-rate-limit";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage } from "./storage";
@@ -15,7 +16,27 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, r2KeyForImage, r2KeyForLabel 
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendClaimVerification } from "./email";
+import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { generateCertificateDocument } from "./certificate-document";
+import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, type ImageKeys } from "./ai-grading-service";
+import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
+import {
+  hashPassword, verifyPassword, validatePassword,
+  createEmailVerificationToken, createPasswordResetToken, createAccountMagicLinkToken,
+  findUserByEmail, findUserById,
+  countRecentFailedAttempts, logLoginAttempt, writeAuthAudit,
+  migrateAccountSchema,
+} from "./account-auth";
+import {
+  sendWelcomeVerificationEmail, sendAccountMagicLinkEmail,
+  sendPasswordResetEmail, sendPasswordChangedEmail,
+  sendEmailChangedNotification, sendAccountDeletedEmail,
+} from "./email";
+import { requireAuth } from "./middleware/auth";
+import { registerShowroomRoutes } from "./showroom";
+import { registerVaultClubRoutes } from "./vault-club";
+import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -166,13 +187,221 @@ async function certToPublic(c: any): Promise<PublicCertificate> {
     backImageUrl: backUrl,
     gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
     notes: c.notes || null,
+    nfcEnabled: c.nfcEnabled ?? null,
+    nfcScanCount: c.nfcScanCount != null ? Number(c.nfcScanCount) : null,
+    ownershipStatus: c.ownershipStatus || "unclaimed",
+    ownershipRef: c.ownershipStatus === "claimed" && c.certId
+      ? `MV-REG-${String(c.certId).replace(/^MV-?0*/, "").padStart(10, "0")}`
+      : null,
+    gradingReport: c.gradingReport && Object.keys(c.gradingReport).length > 0 ? c.gradingReport : null,
   };
+}
+
+async function seedGoldTiers() {
+  const tiers = [
+    { serviceType: "grading",        tierId: "gold",           name: "GOLD",             pricePerCard: 8500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",  maxValueGbp: 2500, sortOrder: 4 },
+    { serviceType: "grading",        tierId: "gold-elite",     name: "GOLD ELITE",       pricePerCard: 12500, turnaroundDays: 3,  turnaroundLabel: "2-3 working days", maxValueGbp: 5000, sortOrder: 5 },
+    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",         pricePerCard: 800,   turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",        pricePerCard: 1500,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",   pricePerCard: 1000,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
+  ];
+  for (const t of tiers) {
+    try {
+      await db.execute(sql`
+        INSERT INTO service_tiers (service_type, tier_id, name, price_per_card, turnaround_days, turnaround_label, max_value_gbp, is_active, sort_order)
+        VALUES (${t.serviceType}, ${t.tierId}, ${t.name}, ${t.pricePerCard}, ${t.turnaroundDays}, ${t.turnaroundLabel}, ${t.maxValueGbp}, true, ${t.sortOrder})
+        ON CONFLICT DO NOTHING
+      `);
+    } catch {}
+  }
+}
+
+async function addRevealWrapColumn() {
+  try {
+    await db.execute(sql`
+      ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reveal_wrap BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+  } catch {}
+}
+
+async function seedEstimateCreditsTable() {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS estimate_credits (
+        id SERIAL PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        credits_remaining INTEGER NOT NULL DEFAULT 0,
+        credits_purchased INTEGER NOT NULL DEFAULT 0,
+        credits_used INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+  } catch {}
+}
+
+const ESTIMATE_PACKAGES: Record<string, { credits: number; pricePence: number; label: string }> = {
+  "5":   { credits: 5,   pricePence: 200,  label: "5 estimates" },
+  "15":  { credits: 15,  pricePence: 400,  label: "15 estimates" },
+  "100": { credits: 100, pricePence: 1000, label: "100 estimates" },
+};
+
+async function createAiGradeCorrectionsTable() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS ai_grade_corrections (
+      id                SERIAL PRIMARY KEY,
+      cert_id           TEXT,
+      ai_estimated_grade INTEGER,
+      ai_centering      TEXT,
+      ai_corners        TEXT,
+      ai_edges          TEXT,
+      ai_surface        TEXT,
+      actual_grade      INTEGER,
+      actual_centering  INTEGER,
+      actual_corners    INTEGER,
+      actual_edges      INTEGER,
+      actual_surface    INTEGER,
+      graded_by         TEXT,
+      correction_notes  TEXT,
+      created_at        TIMESTAMP DEFAULT NOW()
+    )
+  `);
+}
+
+// Admin email gets unlimited free access to all tools
+const ADMIN_FREE_EMAIL = "neilsophieoliver@gmail.com";
+
+async function seedAdminCredits() {
+  await db.execute(sql`
+    INSERT INTO estimate_credits (email, credits_remaining, credits_purchased, credits_used)
+    VALUES (${ADMIN_FREE_EMAIL}, 999999, 999999, 0)
+    ON CONFLICT (email) DO UPDATE
+      SET credits_remaining = GREATEST(estimate_credits.credits_remaining, 999999)
+  `);
+}
+
+// ── Capacity gating helpers ───────────────────────────────────────────────────
+
+// In-memory cache: tier slug → { active, max, full, forceOpen, ts }
+type CapacityEntry = { active: number; max: number; full: boolean; forceOpen: boolean; ts: number };
+const _capacityCache: Record<string, CapacityEntry> = {};
+const CAPACITY_CACHE_MS = 30_000;
+
+const ACTIVE_STATUSES = ["received", "in_grading", "ready_to_return", "ready_to_ship"];
+
+async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
+  const now = Date.now();
+  const cached = _capacityCache[tierSlug];
+  if (cached && now - cached.ts < CAPACITY_CACHE_MS) return cached;
+
+  // Get max + force_open from tier_capacity table
+  const capRows = await db.execute(sql`
+    SELECT max_active, force_open FROM tier_capacity WHERE tier_slug = ${tierSlug} LIMIT 1
+  `);
+  if (capRows.rows.length === 0) {
+    // No row = unlimited
+    const entry: CapacityEntry = { active: 0, max: 99999, full: false, forceOpen: false, ts: now };
+    _capacityCache[tierSlug] = entry;
+    return entry;
+  }
+  const cap = capRows.rows[0] as any;
+  const maxActive: number = cap.max_active ?? 99999;
+  const forceOpen: boolean = cap.force_open ?? false;
+
+  // Count active submissions for this tier
+  const countRows = await db.execute(sql`
+    SELECT COUNT(*) AS cnt FROM submissions
+    WHERE service_tier = ${tierSlug}
+      AND status = ANY(${ACTIVE_STATUSES}::text[])
+  `);
+  const active = parseInt((countRows.rows[0] as any)?.cnt ?? "0", 10);
+  const full = !forceOpen && active >= maxActive;
+
+  const entry: CapacityEntry = { active, max: maxActive, full, forceOpen, ts: now };
+  _capacityCache[tierSlug] = entry;
+  return entry;
+}
+
+function invalidateCapacityCache(tierSlug?: string) {
+  if (tierSlug) {
+    delete _capacityCache[tierSlug];
+  } else {
+    Object.keys(_capacityCache).forEach(k => delete _capacityCache[k]);
+  }
+}
+
+async function seedTierCapacityTable() {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS tier_capacity (
+        id          SERIAL PRIMARY KEY,
+        tier_slug   TEXT UNIQUE NOT NULL,
+        max_active  INTEGER NOT NULL,
+        force_open  BOOLEAN NOT NULL DEFAULT false,
+        updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    // Seed default capacities — ON CONFLICT DO NOTHING so admin overrides are preserved
+    for (const [slug, max] of [["standard", 500], ["priority", 150], ["express", 40]] as [string, number][]) {
+      await db.execute(sql`
+        INSERT INTO tier_capacity (tier_slug, max_active) VALUES (${slug}, ${max}) ON CONFLICT DO NOTHING
+      `);
+    }
+  } catch {}
+}
+
+async function createEbayPriceCacheTable() {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ebay_price_cache (
+        id                  SERIAL PRIMARY KEY,
+        card_key            TEXT NOT NULL UNIQUE,
+        card_name           TEXT NOT NULL,
+        card_number         TEXT,
+        set_name            TEXT,
+        average_price_pence INTEGER,
+        listing_count       INTEGER NOT NULL DEFAULT 0,
+        listings_json       JSONB NOT NULL DEFAULT '[]',
+        last_updated_at     TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_ebay_cache_updated ON ebay_price_cache(last_updated_at)
+    `);
+  } catch {}
 }
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Seed gold grading tiers, estimate_credits table, admin credits, and run column migrations on startup
+  seedGoldTiers().catch(() => {});
+  seedEstimateCreditsTable().catch(() => {});
+  seedAdminCredits().catch(() => {});
+  addRevealWrapColumn().catch(() => {});
+  createAiGradeCorrectionsTable().catch(() => {});
+  createEbayPriceCacheTable().catch(() => {});
+  seedTierCapacityTable().catch(() => {});
+  migrateAccountSchema().catch((e: any) => console.error("[account-auth] migration error:", e.message));
+
+  // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
+  // These fire for direct URL access (e.g. scanning an old QR code with a legacy URL format)
+  app.get("/cert/:certId/report", (req, res, next) => {
+    const raw = req.params.certId;
+    if (/^MV-/i.test(raw)) {
+      return res.redirect(301, `/vault/${normalizeCertId(raw)}`);
+    }
+    next();
+  });
+  app.get("/cert/report/:certId", (req, res) => {
+    res.redirect(301, `/vault/${normalizeCertId(req.params.certId)}`);
+  });
+  // Redirect old /dig/:certId URLs to /vault/:certId (for any slabs printed before the rename)
+  app.get("/dig/:certId", (req, res) => {
+    res.redirect(301, `/vault/${normalizeCertId(req.params.certId)}`);
+  });
+
   app.get("/api/version", (_req, res) => {
     res.json({
       build: BUILD_STAMP,
@@ -246,6 +475,52 @@ export async function registerRoutes(
       return res.status(404).json({ error: "Certificate not found" });
     }
     return res.json(await certToPublic(dbCert));
+  });
+
+  // ── PUBLIC VERIFICATION API (v1) ──────────────────────────────────────────
+  const verifyRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests. Limit: 100 per minute per IP." },
+  });
+
+  app.get("/api/v1/verify/:certId", verifyRateLimit, async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    try {
+      const dbCert = await findCertByIdFlex(String(req.params.certId));
+      if (!dbCert) {
+        return res.status(404).json({ verified: false, error: "Certificate not found" });
+      }
+
+      const gradeType = dbCert.gradeType || "numeric";
+      const isNonNum = isNonNumericGrade(gradeType);
+      const gradeNumeric = isNonNum ? null : parseFloat(dbCert.gradeOverall || "0");
+
+      return res.json({
+        verified: true,
+        certId: normalizeCertId(dbCert.certId),
+        status: dbCert.status || "active",
+        cardGame: dbCert.cardGame || null,
+        cardName: dbCert.cardName || null,
+        cardSet: dbCert.setName || null,
+        cardYear: dbCert.year || null,
+        cardNumber: dbCert.cardNumber || null,
+        language: dbCert.language || null,
+        grade: gradeLabelFull(gradeType, dbCert.gradeOverall || "0"),
+        gradeNumeric,
+        gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
+        ownershipStatus: dbCert.ownershipStatus || "unclaimed",
+        verifyUrl: `https://mintvaultuk.com/cert/${normalizeCertId(dbCert.certId)}`,
+      });
+    } catch (err: any) {
+      console.error("[verify] error:", err.message);
+      return res.status(500).json({ verified: false, error: "Internal error" });
+    }
   });
 
   app.get("/api/featured-certificates", async (_req, res) => {
@@ -371,7 +646,7 @@ export async function registerRoutes(
         email, firstName, lastName, shippingAddress, phone, cardItems,
         crossoverCompany, crossoverOriginalGrade, crossoverCertNumber,
         reholderCompany, reholderReason, reholderCondition,
-        authReason, authConcerns,
+        authReason, authConcerns, revealWrap,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
@@ -404,6 +679,14 @@ export async function registerRoutes(
 
       if (!tierData.pricePerCard || tierData.pricePerCard <= 0) {
         return res.status(400).json({ error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.` });
+      }
+
+      // Capacity gating — only applied to grading submissions (reholder/crossover/auth have no tier capacity)
+      if (serviceType === "grading") {
+        const capacity = await getTierCapacity(tier).catch(() => null);
+        if (capacity && capacity.full) {
+          return res.status(409).json({ error: "tier_full", tier, message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.` });
+        }
       }
 
       if (!quantity || quantity < 1) {
@@ -455,7 +738,39 @@ export async function registerRoutes(
       }
 
       const totals = calculateOrderTotals(tierData.pricePerCard, quantity, totalDeclaredValue);
-      const total = totals.total;
+
+      // Vault Club grading discount — applies to grading service only, never stacks with bulk.
+      // We take whichever discount is bigger: Vault Club % vs bulk %. Shipping is never discounted.
+      let vaultClubDiscountPercent = 0;
+      let vaultClubTierApplied: string | null = null;
+      if (serviceType === "grading" && req.session?.userId) {
+        try {
+          const vcRows = await db.execute(sql`
+            SELECT vault_club_tier, vault_club_status
+            FROM users WHERE id = ${(req.session as any).userId} AND deleted_at IS NULL LIMIT 1
+          `);
+          const vcUser = vcRows.rows[0] as any;
+          if (vcUser && isActiveStatus(vcUser.vault_club_status) && vcUser.vault_club_tier in VAULT_CLUB_TIERS) {
+            vaultClubDiscountPercent = VAULT_CLUB_TIERS[vcUser.vault_club_tier as VaultClubTier].grading_discount_percent;
+            vaultClubTierApplied = vcUser.vault_club_tier;
+          }
+        } catch { /* non-critical — never block checkout */ }
+      }
+
+      // Apply max(vault_club_discount, bulk_discount) to grading fees only
+      let effectiveDiscountPercent = totals.discountPercent;
+      let effectiveDiscountAmount = totals.discountAmount;
+      let discountType: string | null = null;
+      if (vaultClubDiscountPercent > totals.discountPercent) {
+        const subtotal = tierData.pricePerCard * quantity;
+        effectiveDiscountAmount = Math.round(subtotal * vaultClubDiscountPercent / 100);
+        effectiveDiscountPercent = vaultClubDiscountPercent;
+        discountType = `vault_club_${vaultClubTierApplied}`;
+      } else if (totals.discountPercent > 0) {
+        discountType = "bulk";
+      }
+      const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
+      const total = discountedSubtotal + totals.shipping + totals.totalInsuranceFee;
 
       const declaredValuePerCard = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
@@ -478,7 +793,7 @@ export async function registerRoutes(
         amountTotal: total,
         totalDeclaredValue: totalDeclaredValue,
         currency: "gbp",
-        status: "DRAFT",
+        status: "draft",
         email: email?.toLowerCase(),
         firstName,
         lastName,
@@ -487,7 +802,7 @@ export async function registerRoutes(
         turnaroundDays,
         shippingCost: totals.shipping,
         shippingInsuranceTier: totals.shippingLabel,
-        gradingCost: totals.discountedSubtotal,
+        gradingCost: discountedSubtotal,
         pricePerCardAtPurchase: tierData.pricePerCard,
         insuranceFee: totals.totalInsuranceFee,
         insuranceSurchargePerCard: totals.insuranceSurchargePerCard,
@@ -507,6 +822,7 @@ export async function registerRoutes(
         reholderCondition: reholderCondition || null,
         authReason: authReason || null,
         authConcerns: authConcerns || null,
+        revealWrap: revealWrap === true,
       });
 
       const stripe = await getUncachableStripeClient();
@@ -520,8 +836,9 @@ export async function registerRoutes(
           serviceType,
           tier,
           quantity: String(quantity),
-          discountPercent: String(totals.discountPercent),
-          discountAmount: String(totals.discountAmount),
+          discountPercent: String(effectiveDiscountPercent),
+          discountAmount: String(effectiveDiscountAmount),
+          discountType: discountType || "none",
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
           shippingInsurance: totals.shippingLabel,
@@ -584,6 +901,11 @@ export async function registerRoutes(
         clientSecret: paymentIntent.client_secret,
         submissionId: submission.submissionId,
         total,
+        discount: effectiveDiscountPercent > 0 ? {
+          type: discountType,
+          percent: effectiveDiscountPercent,
+          amount_pence: effectiveDiscountAmount,
+        } : null,
       });
     } catch (error: any) {
       console.error("Error creating payment intent:", error.message);
@@ -604,9 +926,13 @@ export async function registerRoutes(
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
       if (paymentIntent.status === "succeeded") {
-        await storage.updateSubmission(submission.id, {
-          status: "new",
-        });
+        if (submission.paymentStatus === "paid") {
+          // Already processed (e.g. webhook fired first) — return success without re-processing
+          const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
+          return res.json({ success: true, submissionId: submission.submissionId, status: submission.status, packingSlipToken });
+        }
+        await storage.markSubmissionAsPaid(Number(submission.id));
+        storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
 
         if (submission.email) {
           let user = await storage.getUserByEmail(submission.email);
@@ -622,6 +948,8 @@ export async function registerRoutes(
           });
         }
 
+        const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
+
         sendSubmissionConfirmation({
           email: submission.email || "",
           firstName: submission.firstName || "Customer",
@@ -633,14 +961,13 @@ export async function registerRoutes(
           crossoverCompany: submission.crossover_company || undefined,
           crossoverOriginalGrade: submission.crossover_original_grade || undefined,
           crossoverCertNumber: submission.crossover_cert_number || undefined,
+          labelToken: packingSlipToken,
         }).catch(() => {});
-
-        const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
 
         return res.json({
           success: true,
           submissionId: submission.submissionId,
-          status: "new",
+          status: "paid",
           packingSlipToken,
         });
       }
@@ -926,7 +1253,7 @@ export async function registerRoutes(
 
   app.put("/api/admin/service-tiers/:id", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       if (isNaN(id)) return res.status(400).json({ error: "Invalid tier ID" });
 
       const { pricePerCard, turnaroundDays, maxValueGbp, isActive, features } = req.body;
@@ -961,6 +1288,1039 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to update service tier" });
     }
   });
+
+  // ── AI-ASSISTED GRADING (Build 3 placeholder — superseded by Build 5) ───────
+
+  // Rate limit — 1 AI call per 5 seconds per IP
+  const aiRateLimit = rateLimit({
+    windowMs: 5 * 1000,
+    max: 1,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => false,
+    message: { error: "Please wait 5 seconds between AI analysis requests." },
+  });
+
+  // OLD endpoint stub — kept to avoid 404 on any lingering clients; real impl in Build 5 below
+  app.post("/api/admin/certificates/:id/analyze-v1-legacy", requireAdmin, aiRateLimit, async (req, res) => {
+    try {
+      const _unused = ""; // placeholder
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
+
+      if (!cert.frontImagePath && !cert.backImagePath) {
+        return res.status(400).json({ error: "Certificate must have at least one image uploaded before AI analysis" });
+      }
+
+      // Fetch images from R2 and convert to base64
+      async function getImageBase64(key: string | null | undefined): Promise<{ data: string; mediaType: string } | null> {
+        if (!key) return null;
+        try {
+          const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+          const { S3Client } = await import("@aws-sdk/client-s3");
+          const s3 = new S3Client({
+            region: "auto",
+            endpoint: process.env.R2_ENDPOINT,
+            credentials: {
+              accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+            },
+          });
+          const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
+          const chunks: Buffer[] = [];
+          for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));
+          const buf = Buffer.concat(chunks);
+          const ext = key.split(".").pop()?.toLowerCase() || "jpg";
+          const mediaType = ext === "png" ? "image/png" : "image/jpeg";
+          return { data: buf.toString("base64"), mediaType };
+        } catch {
+          return null;
+        }
+      }
+
+      const [frontImg, backImg] = await Promise.all([
+        getImageBase64(cert.frontImagePath),
+        getImageBase64(cert.backImagePath),
+      ]);
+
+      if (!frontImg && !backImg) {
+        return res.status(400).json({ error: "Could not load card images from storage" });
+      }
+
+      const contentParts: any[] = [];
+      if (frontImg) {
+        contentParts.push({ type: "image", source: { type: "base64", media_type: frontImg.mediaType, data: frontImg.data } });
+      }
+      if (backImg) {
+        contentParts.push({ type: "image", source: { type: "base64", media_type: backImg.mediaType, data: backImg.data } });
+      }
+      contentParts.push({ type: "text", text: "Legacy endpoint disabled." });
+
+      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-opus-4-6",
+          max_tokens: 4096,
+          messages: [{ role: "user", content: contentParts }],
+        }),
+      });
+
+      if (!anthropicRes.ok) {
+        const errBody = await anthropicRes.text();
+        console.error("Anthropic API error:", errBody);
+        return res.status(502).json({ error: "AI analysis failed. Try again in a moment." });
+      }
+
+      const anthropicData = await anthropicRes.json();
+      const rawText = anthropicData.content?.[0]?.text || "";
+
+      let analysis: any;
+      try {
+        // Strip any accidental markdown fences
+        const cleaned = rawText.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
+        analysis = JSON.parse(cleaned);
+      } catch {
+        console.error("AI response parse failed:", rawText.slice(0, 500));
+        return res.status(502).json({ error: "AI returned invalid JSON. Please retry." });
+      }
+
+      // Normalise AI defects into the DIG format (x/y instead of position_x_percent/position_y_percent)
+      const aiDefectsNorm = (analysis.defects ?? []).map((d: any, i: number) => ({
+        id: i + 1,
+        type: d.type,
+        severity: d.severity === "minor" ? "low" : d.severity === "major" ? "high" : "medium",
+        x: d.position_x_percent ?? d.x ?? 50,
+        y: d.position_y_percent ?? d.y ?? 50,
+        description: d.description,
+      }));
+
+      // Persist to DB
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis        = ${JSON.stringify(analysis)}::jsonb,
+          ai_draft_grade     = ${analysis.overall_grade ?? null},
+          centering_front_lr = ${analysis.centering?.front_left_right ?? null},
+          centering_front_tb = ${analysis.centering?.front_top_bottom ?? null},
+          centering_back_lr  = ${analysis.centering?.back_left_right  ?? null},
+          centering_back_tb  = ${analysis.centering?.back_top_bottom  ?? null},
+          defects            = ${JSON.stringify(analysis.defects ?? [])}::jsonb,
+          ai_defects         = ${JSON.stringify(aiDefectsNorm)}::jsonb,
+          updated_at         = NOW()
+        WHERE id = ${id}
+      `);
+
+      res.json({ analysis });
+    } catch (error: any) {
+      console.error("AI analyze error:", error.message, error.stack);
+      res.status(500).json({ error: `Analysis failed: ${error.message}` });
+    }
+  });
+
+  app.put("/api/admin/certificates/:id/approve-grade", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { centering, corners, edges, surface, overall, gradeType } = req.body;
+
+      const finalGradeType = gradeType || "numeric";
+      const isNonNum = isNonNumericGrade(finalGradeType);
+      const finalOverall = isNonNum ? null : parseFloat(overall);
+      const computedLabel = (!isNonNum && finalOverall === 10) ? "black" : "Standard";
+
+      // Promote ai_defects → verified_defects on grade approval (if not already set)
+      await db.execute(sql`
+        UPDATE certificates SET
+          grade_type        = ${finalGradeType},
+          grade             = ${isNonNum ? null : finalOverall},
+          centering_score   = ${isNonNum ? null : (parseFloat(centering) || null)},
+          corners_score     = ${isNonNum ? null : (parseFloat(corners) || null)},
+          edges_score       = ${isNonNum ? null : (parseFloat(edges) || null)},
+          surface_score     = ${isNonNum ? null : (parseFloat(surface) || null)},
+          label_type        = ${computedLabel},
+          grade_approved_by = ${"Cornelius Oliver"},
+          grade_approved_at = NOW(),
+          status            = 'active',
+          verified_defects  = CASE
+            WHEN verified_defects IS NULL OR verified_defects = '[]'::jsonb
+            THEN COALESCE(ai_defects, '[]'::jsonb)
+            ELSE verified_defects
+          END,
+          updated_at        = NOW()
+        WHERE id = ${id}
+      `);
+
+      await storage.writeAuditLog("certificate", cert.certId, "approve_grade", req.session.adminEmail || "admin", {
+        centering, corners, edges, surface, overall, gradeType, labelType: computedLabel,
+      });
+
+      const updated = await storage.getCertificate(id);
+      res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
+    } catch (error: any) {
+      console.error("Approve grade error:", error.message);
+      res.status(500).json({ error: `Failed to approve grade: ${error.message}` });
+    }
+  });
+
+  // ── Public DGR endpoint ────────────────────────────────────────────────────
+  app.get("/api/cert/:id/report", async (req, res) => {
+    try {
+      const dbCert = await findCertByIdFlex(req.params.id);
+      if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
+      if (dbCert.status !== "active") return res.status(404).json({ error: "Certificate not found" });
+
+      const c = dbCert as any;
+      const gradeType = c.gradeType || "numeric";
+      const isNonNum = isNonNumericGrade(gradeType);
+      const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
+      const labelType = c.labelType || "Standard";
+      const isBlack = !isNonNum && gradeNum === 10 && labelType === "black";
+
+      // Signed image URLs — grading variants
+      async function signedOrNull(key: string | null | undefined): Promise<string | null> {
+        if (!key) return null;
+        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+      }
+
+      const [frontUrl, backUrl, fGrey, fHC, fEdge, fInv, bGrey, bHC, bEdge, bInv, angledUrl, closeupUrl] = await Promise.all([
+        signedOrNull(c.gradingFrontCropped   || c.gradingFrontOriginal   || c.frontImagePath),
+        signedOrNull(c.gradingBackCropped    || c.gradingBackOriginal    || c.backImagePath),
+        signedOrNull(c.gradingFrontGreyscale),
+        signedOrNull(c.gradingFrontHighcontrast),
+        signedOrNull(c.gradingFrontEdgeenhanced),
+        signedOrNull(c.gradingFrontInverted),
+        signedOrNull(c.gradingBackGreyscale),
+        signedOrNull(c.gradingBackHighcontrast),
+        signedOrNull(c.gradingBackEdgeenhanced),
+        signedOrNull(c.gradingBackInverted),
+        signedOrNull(c.gradingAngledCropped  || c.gradingAngledOriginal),
+        signedOrNull(c.gradingCloseupCropped || c.gradingCloseupOriginal),
+      ]);
+
+      // Population data
+      let population = { totalGraded: 0, sameGradeCount: 0, higherGradeCount: 0, percentile: 0 };
+      try {
+        const popRows = await db.execute(sql`
+          SELECT grade FROM certificates
+          WHERE card_name = ${c.cardName} AND set_name = ${c.setName} AND card_game = ${c.cardGame}
+            AND status = 'active' AND grade IS NOT NULL
+        `);
+        const grades: number[] = (popRows.rows || []).map((r: any) => parseFloat(r.grade)).filter((g: number) => !isNaN(g));
+        const totalGraded = grades.length;
+        const sameGradeCount = grades.filter(g => g === gradeNum).length;
+        const higherGradeCount = grades.filter(g => g > gradeNum).length;
+        const percentile = totalGraded > 0 ? Math.round(((totalGraded - higherGradeCount) / totalGraded) * 100) : 0;
+        population = { totalGraded, sameGradeCount, higherGradeCount, percentile };
+      } catch { /* non-critical */ }
+
+      const defects = (c.defects || []).map((d: any) => ({
+        id: d.id,
+        type: d.type,
+        severity: d.severity,
+        description: d.description,
+        location: d.location,
+        imageSide: d.image_side || d.imageSide || "front",
+        xPercent: d.x_percent ?? d.xPercent ?? 50,
+        yPercent: d.y_percent ?? d.yPercent ?? 50,
+      }));
+
+      const ai = c.aiAnalysis || {};
+
+      const report = {
+        certificate: {
+          certId: normalizeCertId(c.certId),
+          cardName: c.cardName || "",
+          cardGame: c.cardGame || "",
+          cardSet: c.setName || "",
+          cardYear: c.year || "",
+          cardNumber: c.cardNumber || "",
+          language: c.language || "English",
+          rarity: rarityDisplayLabel(c.rarity, c.rarityOther) || c.rarity || null,
+          variant: variantDisplayLabel(c.variant, c.variantOther) || null,
+          gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
+          gradedBy: c.gradeApprovedBy || "MintVault UK",
+          status: c.status || "active",
+        },
+        grade: {
+          overall: isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : gradeNum,
+          label: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
+          labelType,
+          isBlackLabel: isBlack,
+          explanation: c.gradeExplanation || ai.grade_explanation || null,
+          approvedBy: c.gradeApprovedBy || null,
+          approvedAt: c.gradeApprovedAt || null,
+        },
+        subgrades: {
+          centering: c.centeringScore   != null ? parseFloat(c.centeringScore)   : null,
+          corners:   c.cornersScore     != null ? parseFloat(c.cornersScore)     : null,
+          edges:     c.edgesScore       != null ? parseFloat(c.edgesScore)       : null,
+          surface:   c.surfaceScore     != null ? parseFloat(c.surfaceScore)     : null,
+        },
+        centering: {
+          frontLR: c.centeringFrontLr || null,
+          frontTB: c.centeringFrontTb || null,
+          backLR:  c.centeringBackLr  || null,
+          backTB:  c.centeringBackTb  || null,
+        },
+        corners: c.cornerValues || null,
+        edges:   c.edgeValues   || null,
+        surface: c.surfaceValues ? { front: (c.surfaceValues as any).front, back: (c.surfaceValues as any).back } : null,
+        defects,
+        authentication: {
+          status: c.authStatus || "genuine",
+          notes:  c.authNotes  || ai.authentication_notes || null,
+        },
+        images: {
+          front: frontUrl,
+          back:  backUrl,
+          frontGreyscale:    fGrey,
+          frontHighcontrast: fHC,
+          frontEdge:         fEdge,
+          frontInverted:     fInv,
+          backGreyscale:     bGrey,
+          backHighcontrast:  bHC,
+          backEdge:          bEdge,
+          backInverted:      bInv,
+          angled:  angledUrl,
+          closeup: closeupUrl,
+        },
+        population,
+        ownership: {
+          status: c.ownershipStatus || "unclaimed",
+          nfcEnabled: c.nfcEnabled ?? false,
+        },
+        marketValue: { estimatedLow: null, estimatedHigh: null, currency: "GBP" },
+      };
+
+      res.json(report);
+    } catch (error: any) {
+      console.error("[report] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Public DGR PDF endpoint ────────────────────────────────────────────────
+  app.get("/api/cert/:id/report/pdf", async (req, res) => {
+    try {
+      const dbCert = await findCertByIdFlex(req.params.id);
+      if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
+      if (dbCert.status !== "active") return res.status(404).json({ error: "Certificate not found" });
+
+      const certId = normalizeCertId(dbCert.certId);
+      const c = dbCert as any;
+      const gradeType = c.gradeType || "numeric";
+      const isNonNum = isNonNumericGrade(gradeType);
+      const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
+      const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
+      const gLabel = isNonNum
+        ? (gradeType === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL")
+        : gradeLabel(gradeNum);
+
+      const PDFDocument = (await import("pdfkit")).default;
+      const doc = new PDFDocument({ size: "A4", margin: 50, autoFirstPage: true });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="MintVault-DGR-${certId}.pdf"`);
+      doc.pipe(res);
+
+      const GOLD = "#D4AF37";
+      const DARK = isBlack ? "#FFFFFF" : "#1A1A1A";
+      const BG   = isBlack ? "#0A0A0A" : "#FFFFFF";
+
+      if (isBlack) {
+        doc.rect(0, 0, doc.page.width, doc.page.height).fill(BG);
+      }
+
+      // Header
+      doc.fontSize(8).fillColor(GOLD).text("MINTVAULT UK", { align: "center" });
+      doc.moveDown(0.3);
+      doc.fontSize(14).fillColor(GOLD).text("DIGITAL GRADING REPORT", { align: "center" });
+      doc.moveDown(0.2);
+      doc.fontSize(10).fillColor(DARK).text(`Certificate ${certId}`, { align: "center" });
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(GOLD).lineWidth(1).stroke();
+      doc.moveDown(0.8);
+
+      // Card identity
+      doc.fontSize(18).fillColor(DARK).text(c.cardName || "—", { align: "left" });
+      doc.fontSize(10).fillColor(isBlack ? "#AAAAAA" : "#666666")
+        .text(`${c.setName || ""}${c.year ? ` · ${c.year}` : ""}${c.cardNumber ? ` · #${c.cardNumber}` : ""}`)
+        .text(`${c.cardGame || ""} · ${c.language || "English"}`);
+      if (c.rarity) doc.text(`Rarity: ${rarityDisplayLabel(c.rarity, c.rarityOther) || c.rarity}`);
+      doc.moveDown(0.3);
+      const gradedDateFmt = c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }) : "—";
+      doc.fontSize(9).fillColor(isBlack ? "#888888" : "#888888")
+        .text(`Graded: ${gradedDateFmt}  ·  By: ${c.gradeApprovedBy || "MintVault UK"}`);
+      doc.moveDown(0.8);
+
+      // Grade hero
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(GOLD).lineWidth(0.5).stroke();
+      doc.moveDown(0.5);
+      if (isBlack) doc.fontSize(9).fillColor(GOLD).text("★ BLACK LABEL ★", { align: "center" });
+      doc.fontSize(48).fillColor(GOLD).text(isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : String(gradeNum), { align: "center" });
+      doc.fontSize(14).fillColor(DARK).text(gLabel, { align: "center" });
+      doc.moveDown(0.5);
+
+      if (c.gradeExplanation) {
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(GOLD).lineWidth(0.5).stroke();
+        doc.moveDown(0.5);
+        doc.fontSize(9).fillColor(isBlack ? "#AAAAAA" : "#444444").text(`"${c.gradeExplanation}"`, { align: "left" });
+        doc.moveDown(0.5);
+      }
+
+      // Images — fetch from R2 and embed
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const backKey  = c.gradingBackCropped  || c.gradingBackOriginal  || c.backImagePath;
+
+      async function fetchBuffer(key: string | null | undefined): Promise<Buffer | null> {
+        if (!key) return null;
+        try {
+          const { GetObjectCommand, S3Client } = await import("@aws-sdk/client-s3");
+          const s3 = new S3Client({ region: "auto", endpoint: process.env.R2_ENDPOINT!, credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID!, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY! } });
+          const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
+          const chunks: Buffer[] = [];
+          for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));
+          return Buffer.concat(chunks);
+        } catch { return null; }
+      }
+
+      const [frontBuf, backBuf] = await Promise.all([fetchBuffer(frontKey), fetchBuffer(backKey)]);
+
+      if (frontBuf || backBuf) {
+        doc.moveDown(0.5);
+        const imgW = 210, imgH = 294;
+        const pageW = doc.page.width - 100;
+        const startX = 50;
+
+        if (frontBuf && backBuf) {
+          try { doc.image(frontBuf, startX, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
+          try { doc.image(backBuf, startX + imgW + 20, doc.y - (doc.y > 50 ? 0 : 0), { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
+          doc.y += imgH + 10;
+        } else if (frontBuf) {
+          try { doc.image(frontBuf, startX + (pageW - imgW) / 2, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
+          doc.y += imgH + 10;
+        }
+        doc.moveDown(0.5);
+      }
+
+      // Page 2 — subgrades
+      doc.addPage();
+      if (isBlack) doc.rect(0, 0, doc.page.width, doc.page.height).fill(BG);
+
+      doc.fontSize(10).fillColor(GOLD).text("SUBGRADE BREAKDOWN", { align: "center" });
+      doc.moveDown(0.5);
+
+      const subs = [
+        { label: "Centering", val: c.centeringScore },
+        { label: "Corners",   val: c.cornersScore },
+        { label: "Edges",     val: c.edgesScore },
+        { label: "Surface",   val: c.surfaceScore },
+      ];
+      const boxW = 110, boxH = 55, gap = 10;
+      const totalW = subs.length * boxW + (subs.length - 1) * gap;
+      let bx = (doc.page.width - totalW) / 2;
+      const by = doc.y;
+      for (const s of subs) {
+        const val = s.val != null ? parseFloat(s.val) : null;
+        const bColor = val === null ? "#555555" : val >= 9.5 ? "#D4AF37" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
+        doc.rect(bx, by, boxW, boxH).fillColor(bColor).fill();
+        doc.fontSize(7).fillColor("#FFFFFF").text(s.label.toUpperCase(), bx, by + 6, { width: boxW, align: "center" });
+        doc.fontSize(22).fillColor("#FFFFFF").text(val !== null ? String(val) : "—", bx, by + 16, { width: boxW, align: "center" });
+        bx += boxW + gap;
+      }
+      doc.y = by + boxH + 15;
+      doc.moveDown(0.5);
+
+      // Centering ratios
+      if (c.centeringFrontLr || c.centeringFrontTb) {
+        doc.fontSize(9).fillColor(GOLD).text("Centering Measurements");
+        doc.fontSize(8).fillColor(isBlack ? "#AAAAAA" : "#444444")
+          .text(`Front L/R: ${c.centeringFrontLr || "—"}   Front T/B: ${c.centeringFrontTb || "—"}   Back L/R: ${c.centeringBackLr || "—"}   Back T/B: ${c.centeringBackTb || "—"}`);
+        doc.moveDown(0.5);
+      }
+
+      // Defects
+      const defects = c.defects || [];
+      doc.moveDown(0.3);
+      doc.fontSize(9).fillColor(GOLD).text("IDENTIFIED DEFECTS");
+      doc.moveDown(0.3);
+      if (defects.length === 0) {
+        doc.fontSize(8).fillColor(isBlack ? "#22C55E" : "#16A34A").text("No defects identified — this card is in exceptional condition.");
+      } else {
+        for (const d of defects) {
+          doc.fontSize(8).fillColor(DARK).text(`${d.type} · ${d.severity?.toUpperCase()} · ${d.location || ""}`);
+          if (d.description) doc.fontSize(7).fillColor(isBlack ? "#AAAAAA" : "#666666").text(`  ${d.description}`);
+        }
+      }
+      doc.moveDown(0.5);
+
+      // Authentication
+      doc.fontSize(9).fillColor(GOLD).text("AUTHENTICATION");
+      const authStatus = c.authStatus || "genuine";
+      doc.fontSize(8).fillColor(isBlack ? "#AAAAAA" : "#444444")
+        .text(authStatus === "genuine"
+          ? "This card has been authenticated as genuine by MintVault UK."
+          : authStatus === "authentic_altered"
+            ? "This card has been identified as AUTHENTIC ALTERED."
+            : "This card has been identified as NOT ORIGINAL.");
+      if (c.authNotes) doc.fontSize(7).fillColor(isBlack ? "#888888" : "#666666").text(c.authNotes);
+      doc.moveDown(0.5);
+
+      // Footer
+      doc.moveTo(50, doc.page.height - 70).lineTo(545, doc.page.height - 70).strokeColor(GOLD).lineWidth(0.5).stroke();
+      doc.fontSize(7).fillColor(isBlack ? "#666666" : "#999999")
+        .text(`Graded by MintVault UK · Rochester, Kent · mintvaultuk.com`, 50, doc.page.height - 60, { align: "center" })
+        .text(`Verify at mintvaultuk.com/cert/${certId}/report`, 50, doc.page.height - 50, { align: "center" })
+        .text(`© 2026 MintVault UK — This report is permanent and cannot be altered.`, 50, doc.page.height - 40, { align: "center" });
+
+      doc.end();
+    } catch (error: any) {
+      console.error("[report/pdf] error:", error.message, error.stack);
+      if (!res.headersSent) res.status(500).json({ error: `PDF generation failed: ${error.message}` });
+    }
+  });
+
+  // ── Vault Report endpoint ──────────────────────────────────────────────────
+  app.get("/api/vault/:certId", async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    try {
+      const dbCert = await findCertByIdFlex(req.params.certId);
+      if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
+      if (dbCert.status !== "active") return res.status(404).json({ error: "Certificate not found" });
+
+      const c = dbCert as any;
+      const certId = normalizeCertId(c.certId);
+      const gradeType = c.gradeType || "numeric";
+      const isNonNum = isNonNumericGrade(gradeType);
+      const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
+      const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
+
+      async function signedOrNull(key: string | null | undefined): Promise<string | null> {
+        if (!key) return null;
+        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+      }
+
+      const [frontUrl, backUrl] = await Promise.all([
+        signedOrNull(c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath),
+        signedOrNull(c.gradingBackCropped  || c.gradingBackOriginal  || c.backImagePath),
+      ]);
+
+      // Population — grade distribution for this card
+      let population = {
+        thisGrade: 0,
+        totalGraded: 0,
+        distribution: {} as Record<string, number>,
+      };
+      try {
+        const popRows = await db.execute(sql`
+          SELECT ROUND(grade::numeric, 0)::int AS g, COUNT(*) AS cnt
+          FROM certificates
+          WHERE card_name = ${c.cardName} AND set_name = ${c.setName} AND card_game = ${c.cardGame}
+            AND status = 'active' AND grade IS NOT NULL AND grade_type = 'numeric'
+          GROUP BY 1
+        `);
+        const dist: Record<string, number> = {};
+        let total = 0;
+        let sameGrade = 0;
+        for (const row of popRows.rows as any[]) {
+          const g = String(row.g);
+          const cnt = parseInt(row.cnt, 10);
+          dist[g] = cnt;
+          total += cnt;
+          if (row.g === gradeNum) sameGrade = cnt;
+        }
+        population = { thisGrade: sameGrade, totalGraded: total, distribution: dist };
+      } catch { /* non-critical */ }
+
+      // Owner's Vault Club tier (for members-only visual treatment on the frontend)
+      let ownerVaultClubTier: string | null = null;
+      if (c.currentOwnerUserId) {
+        try {
+          const ownerRows = await db.execute(sql`
+            SELECT vault_club_tier, vault_club_status
+            FROM users WHERE id = ${c.currentOwnerUserId} AND deleted_at IS NULL LIMIT 1
+          `);
+          const owner = ownerRows.rows[0] as any;
+          if (owner && isActiveStatus(owner.vault_club_status)) {
+            ownerVaultClubTier = owner.vault_club_tier || null;
+          }
+        } catch { /* non-critical */ }
+      }
+
+      // Ownership history
+      let ownership: Array<{ owner: string; date: string; method: string; verified: boolean }> = [];
+      try {
+        const hist = await storage.getOwnershipHistory(certId);
+        ownership = hist.map((h: any) => ({
+          owner: h.ownerName || h.toEmail || "Anonymous Owner",
+          date: h.createdAt ? new Date(h.createdAt).toISOString().split("T")[0] : "",
+          method: h.eventType === "initial_claim" ? "Original Owner" : "Email Verified Transfer",
+          verified: true,
+        }));
+      } catch { /* non-critical */ }
+
+      // Verified defects — prefer verifiedDefects column, fallback to defects column
+      const rawDefects = (c.verifiedDefects?.length ? c.verifiedDefects : c.defects) || [];
+      const defects = rawDefects.map((d: any, i: number) => ({
+        id: i + 1,
+        type: d.type,
+        severity: d.severity,
+        x: d.x ?? d.position?.x_percent ?? 50,
+        y: d.y ?? d.position?.y_percent ?? 50,
+        description: d.description,
+      }));
+
+      // Centering
+      const centeringLR = c.centeringFrontLr || null;
+      const centeringTB = c.centeringFrontTb || null;
+
+      function centeringMeetsPsa(lr: string | null, tb: string | null): boolean {
+        if (!lr || !tb) return false;
+        const [l, r] = lr.split("/").map(Number);
+        const [t, b] = tb.split("/").map(Number);
+        if (isNaN(l) || isNaN(r) || isNaN(t) || isNaN(b)) return false;
+        const side = Math.max(l, r) / Math.min(l, r);
+        const topb = Math.max(t, b) / Math.min(t, b);
+        return side <= 1.5556 && topb <= 1.5556; // 55/45 ratio
+      }
+
+      function centeringMeetsBlack(lr: string | null, tb: string | null): boolean {
+        if (!lr || !tb) return false;
+        const [l, r] = lr.split("/").map(Number);
+        const [t, b] = tb.split("/").map(Number);
+        if (isNaN(l) || isNaN(r) || isNaN(t) || isNaN(b)) return false;
+        const side = Math.max(l, r) / Math.min(l, r);
+        const topb = Math.max(t, b) / Math.min(t, b);
+        return side <= 1.1 && topb <= 1.1; // ~52/48
+      }
+
+      res.json({
+        certId,
+        card: {
+          name: c.cardName || "",
+          set: c.setName || "",
+          year: c.year || "",
+          number: c.cardNumber || "",
+          variant: variantDisplayLabel(c.variant, c.variantOther) || null,
+          language: c.language || "English",
+          rarity: rarityDisplayLabel(c.rarity, c.rarityOther) || null,
+          manufacturer: c.cardGame || "",
+          collection: collectionDisplayLabel(c.collectionCode, c.collectionOther, c.collection) || null,
+        },
+        grades: {
+          overall: isNonNum ? gradeType : gradeNum,
+          centering: c.gradeCentering ? parseFloat(c.gradeCentering) : null,
+          corners:   c.gradeCorners   ? parseFloat(c.gradeCorners)   : null,
+          edges:     c.gradeEdges     ? parseFloat(c.gradeEdges)     : null,
+          surface:   c.gradeSurface   ? parseFloat(c.gradeSurface)   : null,
+          isBlackLabel: isBlack,
+          isNonNumeric: isNonNum,
+          gradeLabel: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
+        },
+        centering: {
+          leftRight: centeringLR,
+          topBottom: centeringTB,
+          meetsPsaGemMt10: centeringMeetsPsa(centeringLR, centeringTB),
+          meetsBlackLabel: centeringMeetsBlack(centeringLR, centeringTB),
+        },
+        defects,
+        images: { front: frontUrl, back: backUrl },
+        ownership,
+        population,
+        authentication: {
+          nfcActive: c.nfcEnabled ?? false,
+          nfcUid: c.nfcUid || null,
+          qrVerified: true,
+          certId,
+          slabSerial: c.slabSerial || null,
+          tamperSealIntact: true,
+        },
+        gradedAt: c.createdAt || null,
+        gradedBy: c.gradeApprovedBy || "MintVault UK",
+        status: c.status || "active",
+        stolenStatus: c.stolenStatus || null,
+        stolenReportedAt: c.stolenReportedAt || null,
+        ownerVaultClubTier: ownerVaultClubTier,
+      });
+    } catch (error: any) {
+      console.error("[dig] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Stolen card registry ─────────────────────────────────────────────────
+  // Startup: ensure stolen_reports table and stolen columns exist
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS stolen_reports (
+        id            SERIAL PRIMARY KEY,
+        cert_id       TEXT NOT NULL,
+        reporter_name  TEXT NOT NULL,
+        reporter_email TEXT NOT NULL,
+        description   TEXT,
+        verify_token  TEXT NOT NULL UNIQUE,
+        verified_at   TIMESTAMP,
+        cleared_at    TIMESTAMP,
+        cleared_by    TEXT,
+        created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      ALTER TABLE certificates
+        ADD COLUMN IF NOT EXISTS stolen_status TEXT,
+        ADD COLUMN IF NOT EXISTS stolen_reported_at TIMESTAMP
+    `);
+  } catch (e: any) {
+    console.error("[stolen] startup migration error:", e.message);
+  }
+
+  // POST /api/stolen/report — any visitor can file a report; sends verification email
+  app.post("/api/stolen/report", async (req, res) => {
+    try {
+      const { certId, reporterName, reporterEmail, description } = req.body;
+      if (!certId || !reporterName || !reporterEmail) {
+        return res.status(400).json({ error: "certId, reporterName, and reporterEmail are required" });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(reporterEmail)) {
+        return res.status(400).json({ error: "Invalid reporter email" });
+      }
+      const normalCertId = normalizeCertId(String(certId));
+      const cert = await findCertByIdFlex(normalCertId);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const token = crypto.randomBytes(32).toString("hex");
+      await db.execute(sql`
+        INSERT INTO stolen_reports (cert_id, reporter_name, reporter_email, description, verify_token)
+        VALUES (${normalCertId}, ${String(reporterName).slice(0, 200)}, ${String(reporterEmail).toLowerCase()}, ${description ? String(description).slice(0, 1000) : null}, ${token})
+      `);
+
+      // Send verification email
+      const verifyUrl = `${req.protocol}://${req.get("host")}/api/stolen/verify/${token}`;
+      try {
+        await sendStolenVerificationEmail(String(reporterEmail), String(reporterName), normalCertId, cert.cardName || "Unknown card", verifyUrl);
+      } catch (emailErr: any) {
+        console.error("[stolen] email send error:", emailErr.message);
+      }
+
+      return res.json({ ok: true, message: "Verification email sent. Please check your inbox to confirm the report." });
+    } catch (err: any) {
+      console.error("[stolen] POST report error:", err.message);
+      return res.status(500).json({ error: "Failed to submit report" });
+    }
+  });
+
+  // GET /api/stolen/verify/:token — link clicked in email; marks report verified, flags cert
+  app.get("/api/stolen/verify/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      const rows = await db.execute(sql`
+        SELECT * FROM stolen_reports WHERE verify_token = ${token} LIMIT 1
+      `);
+      if (rows.rows.length === 0) {
+        return res.status(404).send("Verification link not found or already used.");
+      }
+      const report = rows.rows[0] as any;
+      if (report.verified_at) {
+        return res.redirect("/stolen-card-protection?verified=already");
+      }
+      await db.execute(sql`
+        UPDATE stolen_reports SET verified_at = NOW() WHERE verify_token = ${token}
+      `);
+      await db.execute(sql`
+        UPDATE certificates SET stolen_status = 'reported_stolen', stolen_reported_at = NOW()
+        WHERE certificate_number = ${report.cert_id}
+      `);
+      return res.redirect(`/stolen-card-protection?verified=true&cert=${report.cert_id}`);
+    } catch (err: any) {
+      console.error("[stolen] GET verify error:", err.message);
+      return res.status(500).send("Verification failed. Please try again.");
+    }
+  });
+
+  // GET /api/stolen/status/:certId — public; returns whether a cert is flagged
+  app.get("/api/stolen/status/:certId", async (req, res) => {
+    try {
+      const normalCertId = normalizeCertId(req.params.certId);
+      const rows = await db.execute(sql`
+        SELECT stolen_status, stolen_reported_at FROM certificates
+        WHERE certificate_number = ${normalCertId} LIMIT 1
+      `);
+      if (rows.rows.length === 0) return res.status(404).json({ error: "Not found" });
+      const row = rows.rows[0] as any;
+      return res.json({
+        stolen: row.stolen_status === "reported_stolen",
+        reportedAt: row.stolen_reported_at || null,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed" });
+    }
+  });
+
+  // GET /api/admin/stolen — admin only; list active stolen reports
+  app.get("/api/admin/stolen", requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, cert_id, reporter_name, reporter_email, description, verified_at, cleared_at, created_at
+        FROM stolen_reports
+        WHERE cleared_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 50
+      `);
+      return res.json(rows.rows);
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed" });
+    }
+  });
+
+  // POST /api/admin/stolen/:certId/clear — admin only; clears the stolen flag
+  app.post("/api/admin/stolen/:certId/clear", requireAdmin, async (req, res) => {
+    try {
+      const normalCertId = normalizeCertId(String(req.params.certId));
+      await db.execute(sql`
+        UPDATE certificates SET stolen_status = NULL, stolen_reported_at = NULL
+        WHERE certificate_number = ${normalCertId}
+      `);
+      await db.execute(sql`
+        UPDATE stolen_reports SET cleared_at = NOW(), cleared_by = 'admin'
+        WHERE cert_id = ${normalCertId} AND cleared_at IS NULL
+      `);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[stolen] admin clear error:", err.message);
+      return res.status(500).json({ error: "Failed to clear stolen flag" });
+    }
+  });
+
+  // ── Capacity endpoint ─────────────────────────────────────────────────────
+  // Returns current active vs max counts for each grading tier.
+  // Cached in-memory for 30 s to avoid hammering the DB on every page load.
+  app.get("/api/capacity", async (_req, res) => {
+    try {
+      const [standard, priority, express_] = await Promise.all([
+        getTierCapacity("standard"),
+        getTierCapacity("priority"),
+        getTierCapacity("express"),
+      ]);
+      return res.json({
+        standard: { active: standard.active, max: standard.max, full: standard.full, forceOpen: standard.forceOpen },
+        priority: { active: priority.active, max: priority.max, full: priority.full, forceOpen: priority.forceOpen },
+        express:  { active: express_.active,  max: express_.max,  full: express_.full,  forceOpen: express_.forceOpen },
+      });
+    } catch (err: any) {
+      console.error("[capacity] GET /api/capacity error:", err.message);
+      return res.status(500).json({ error: "Failed to load capacity data" });
+    }
+  });
+
+  // ── Admin: update tier capacity ───────────────────────────────────────────
+  app.put("/api/admin/capacity/:tierSlug", requireAdmin, async (req, res) => {
+    try {
+      const tierSlug = String(req.params.tierSlug);
+      const { maxActive, forceOpen } = req.body;
+
+      if (!["standard", "priority", "express"].includes(tierSlug)) {
+        return res.status(400).json({ error: "Invalid tier slug" });
+      }
+      if (maxActive !== undefined && (typeof maxActive !== "number" || maxActive < 0)) {
+        return res.status(400).json({ error: "maxActive must be a non-negative number" });
+      }
+
+      const fields: string[] = [];
+      if (maxActive !== undefined) fields.push(`max_active = ${parseInt(maxActive, 10)}`);
+      if (forceOpen !== undefined) fields.push(`force_open = ${Boolean(forceOpen)}`);
+      if (fields.length === 0) return res.status(400).json({ error: "Nothing to update" });
+
+      await db.execute(sql`
+        UPDATE tier_capacity
+        SET ${sql.raw(fields.join(", "))}, updated_at = NOW()
+        WHERE tier_slug = ${tierSlug}
+      `);
+      invalidateCapacityCache(tierSlug);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[capacity] PUT error:", err.message);
+      return res.status(500).json({ error: "Failed to update capacity" });
+    }
+  });
+
+  // ── eBay price data for Vault report ─────────────────────────────────────
+  // Returns current eBay UK fixed-price listings for the card on this cert.
+  // Results are cached for 24h in ebay_price_cache to minimise API calls.
+  app.get("/api/vault/:certId/ebay-prices", async (req, res) => {
+    const empty = { averagePence: 0, gradeAverages: {}, listings: [], cachedAt: new Date().toISOString() };
+    try {
+      const dbCert = await findCertByIdFlex(req.params.certId);
+      if (!dbCert) return res.json(empty);
+
+      const c = dbCert as any;
+      const cardName: string = c.cardName || "";
+      const cardNumber: string | null = c.cardNumber || null;
+      const setName: string | null = c.setName || null;
+
+      if (!cardName) return res.json(empty);
+
+      const cardKey = buildCardKey(cardName, cardNumber, setName);
+      const result = await getCachedOrFreshEbayPrices(cardKey, cardName, cardNumber, setName);
+
+      return res.json({
+        averagePence: result.averagePence,
+        gradeAverages: result.gradeAverages,
+        listings: result.listings,
+        cachedAt: result.cachedAt.toISOString(),
+      });
+    } catch (err: any) {
+      console.error("[ebay-prices] error:", err.message);
+      return res.json(empty);
+    }
+  });
+
+  // Startup migration — AI grading columns + Build 1 image columns + new tables
+  (async () => {
+    try {
+      // AI grading columns (original set)
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_analysis JSONB DEFAULT '{}'`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_draft_grade DECIMAL(3,1)`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_front_lr TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_front_tb TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_back_lr TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_back_tb TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS defects JSONB DEFAULT '[]'`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_approved_by TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_approved_at TIMESTAMP`);
+
+      // Build 1 — grading image paths (original + auto-cropped + 4 variants per angle)
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_original TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_cropped TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_greyscale TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_highcontrast TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_edgeenhanced TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_inverted TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_original TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_cropped TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_greyscale TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_highcontrast TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_edgeenhanced TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_inverted TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_angled_original TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_angled_cropped TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_closeup_original TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_closeup_cropped TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS image_quality_checks JSONB DEFAULT '{}'`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_card_id TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_card_source TEXT`);
+
+      // Build 2 — detailed grading columns
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS corner_values JSONB`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS edge_values JSONB`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS surface_values JSONB`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS auth_status TEXT DEFAULT 'genuine'`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS auth_notes TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_explanation TEXT`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS private_notes TEXT`);
+
+      // Build 1 — grading_sessions table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS grading_sessions (
+          id            SERIAL PRIMARY KEY,
+          cert_id       TEXT NOT NULL,
+          started_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+          completed_at  TIMESTAMP,
+          grader        TEXT,
+          model_version TEXT,
+          ai_response   JSONB,
+          final_grade   DECIMAL(3,1),
+          notes         TEXT
+        )
+      `);
+
+      // Build 1 — ai_accuracy_log table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS ai_accuracy_log (
+          id              SERIAL PRIMARY KEY,
+          cert_id         TEXT NOT NULL,
+          ai_grade        DECIMAL(3,1),
+          human_grade     DECIMAL(3,1),
+          grade_delta     DECIMAL(3,1),
+          ai_centering    DECIMAL(3,1),
+          human_centering DECIMAL(3,1),
+          ai_corners      DECIMAL(3,1),
+          human_corners   DECIMAL(3,1),
+          ai_edges        DECIMAL(3,1),
+          human_edges     DECIMAL(3,1),
+          ai_surface      DECIMAL(3,1),
+          human_surface   DECIMAL(3,1),
+          logged_at       TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+      // Build 6 — grading timeline + market value columns
+      await db.execute(sql`
+        ALTER TABLE certificates
+          ADD COLUMN IF NOT EXISTS grading_status      TEXT NOT NULL DEFAULT 'submitted',
+          ADD COLUMN IF NOT EXISTS status_updated_at   TIMESTAMP,
+          ADD COLUMN IF NOT EXISTS cert_tracking_number TEXT,
+          ADD COLUMN IF NOT EXISTS estimated_value_low  DECIMAL(10,2),
+          ADD COLUMN IF NOT EXISTS estimated_value_high DECIMAL(10,2),
+          ADD COLUMN IF NOT EXISTS market_value_updated_at TIMESTAMP
+      `);
+
+      // Build 6 — extend grading_sessions with AI accuracy columns
+      await db.execute(sql`
+        ALTER TABLE grading_sessions
+          ADD COLUMN IF NOT EXISTS card_game               TEXT,
+          ADD COLUMN IF NOT EXISTS card_name               TEXT,
+          ADD COLUMN IF NOT EXISTS card_set                TEXT,
+          ADD COLUMN IF NOT EXISTS grading_duration_seconds INTEGER,
+          ADD COLUMN IF NOT EXISTS ai_draft_centering      DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS ai_draft_corners        DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS ai_draft_edges          DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS ai_draft_surface        DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS ai_draft_overall        DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_centering         DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_corners           DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_edges             DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_surface           DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_overall           DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS human_defects           JSONB,
+          ADD COLUMN IF NOT EXISTS ai_defects              JSONB,
+          ADD COLUMN IF NOT EXISTS centering_diff          DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS corners_diff            DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS edges_diff              DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS surface_diff            DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS overall_diff            DECIMAL(3,1),
+          ADD COLUMN IF NOT EXISTS correction_notes        TEXT,
+          ADD COLUMN IF NOT EXISTS is_holo                 BOOLEAN,
+          ADD COLUMN IF NOT EXISTS is_black_label          BOOLEAN
+      `);
+
+      // DIG Report — ai_defects and verified_defects columns
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_defects JSONB DEFAULT '[]'`);
+      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS verified_defects JSONB DEFAULT '[]'`);
+
+      // DIG Report — migrate old cert IDs from MV-0000000042 format to MV42 format
+      await db.execute(sql`
+        UPDATE certificates
+        SET certificate_number = 'MV' || LTRIM(SPLIT_PART(certificate_number, '-', 2), '0')
+        WHERE certificate_number ~ '^MV-[0-9]+$'
+          AND certificate_number NOT LIKE 'MV%-%-%'
+      `);
+
+      // eBay cache — purge stale ungraded results so next load fetches graded-only data
+      await db.execute(sql`DELETE FROM ebay_price_cache WHERE last_updated_at < NOW() - INTERVAL '1 second'`);
+
+    } catch (err) {
+      console.error("[migration] startup migration error:", err);
+    }
+  })();
 
   app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
     try {
@@ -1053,7 +2413,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/submissions/:id", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
@@ -1068,7 +2428,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/submissions/:id/status", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
@@ -1118,6 +2478,12 @@ export async function registerRoutes(
           trackingNumber: returnTracking || submission.returnTracking || undefined,
           carrier: returnCarrier || submission.returnCarrier || undefined,
         }).catch(() => {});
+      } else if (newStatus === "delivered" && emailData.email) {
+        sendSubmissionDelivered({
+          email: emailData.email,
+          firstName: emailData.firstName,
+          submissionId: emailData.submissionId,
+        }).catch(() => {});
       }
 
       res.json({ success: true, submission: updated });
@@ -1129,12 +2495,12 @@ export async function registerRoutes(
 
   app.patch("/api/admin/submissions/:id/items/:itemId", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const itemId = parseInt(req.params.itemId, 10);
+      const itemId = parseInt(String(req.params.itemId), 10);
       if (isNaN(itemId)) {
         return res.status(400).json({ error: "Invalid item ID" });
       }
@@ -1178,7 +2544,7 @@ export async function registerRoutes(
 
   app.patch("/api/admin/submissions/:id/notes", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
@@ -1198,7 +2564,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/submissions/:id/return-label", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
@@ -1232,7 +2598,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/submissions/:id/packing-slip", requireAdmin, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.id);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
@@ -1345,6 +2711,49 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Public packing slip error:", error.message);
       res.status(500).json({ error: "Failed to generate packing slip" });
+    }
+  });
+
+  app.get("/api/submissions/:submissionId/shipping-label", async (req, res) => {
+    try {
+      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+
+      const token = req.query.token as string;
+      if (!token) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+      const secret = getSignedUrlSecret();
+      const expected = crypto.createHmac("sha256", secret).update(req.params.submissionId).digest("hex").slice(0, 16);
+      if (token !== expected) {
+        return res.status(403).json({ error: "Invalid token" });
+      }
+
+      if (submission.status === "draft") {
+        return res.status(400).json({ error: "Submission is still in draft" });
+      }
+
+      const { generateShippingLabelPDF } = await import("./shipping-label");
+      const pdf = await generateShippingLabelPDF({
+        submissionId: submission.submissionId,
+        customerFirstName: submission.customerFirstName || submission.customer_first_name || "",
+        customerLastName: submission.customerLastName || submission.customer_last_name || "",
+        returnAddressLine1: submission.returnAddressLine1 || submission.return_address_line1 || "",
+        returnAddressLine2: submission.returnAddressLine2 || submission.return_address_line2 || undefined,
+        returnCity: submission.returnCity || submission.return_city || "",
+        returnCounty: submission.returnCounty || submission.return_county || undefined,
+        returnPostcode: submission.returnPostcode || submission.return_postcode || "",
+        cardCount: submission.cardCount || submission.card_count || 0,
+      });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-shipping-label.pdf"`);
+      res.send(pdf);
+    } catch (error: any) {
+      console.error("Shipping label error:", error.message);
+      res.status(500).json({ error: "Failed to generate shipping label" });
     }
   });
 
@@ -1526,8 +2935,11 @@ export async function registerRoutes(
           }
         }
 
+        const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
+        const computedLabelType = certGrade === 10 ? "black" : "Standard";
+
         const data = {
-          labelType: "Standard",
+          labelType: computedLabelType,
           gradeType,
           submissionItemId: validatedItemId,
           cardGame: req.body.cardGame,
@@ -1612,7 +3024,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const id = parseInt(req.params.id, 10);
+        const id = parseInt(String(req.params.id), 10);
         const existing = await storage.getCertificate(id);
         if (!existing) {
           return res.status(404).json({ error: "Certificate not found" });
@@ -1632,8 +3044,11 @@ export async function registerRoutes(
           }
         }
 
+        const updateGrade = !isNonNumUpdate ? parseFloat(req.body.gradeOverall || "0") : 0;
+        const computedLabelTypeUpdate = updateGrade === 10 ? "black" : "Standard";
+
         const data: any = {
-          labelType: "Standard",
+          labelType: computedLabelTypeUpdate,
           gradeType: gradeTypeUpdate,
           cardGame: req.body.cardGame,
           setName: req.body.setName,
@@ -1708,7 +3123,7 @@ export async function registerRoutes(
   );
 
   app.delete("/api/admin/certificates/:id", requireAdmin, async (req, res) => {
-    await storage.writeAuditLog("certificate", req.params.id, "delete_attempt_blocked", req.session.adminEmail || "admin", {
+    await storage.writeAuditLog("certificate", String(req.params.id), "delete_attempt_blocked", req.session.adminEmail || "admin", {
       message: "Hard delete is disabled. Use void instead.",
     });
     res.status(405).json({ error: "DELETE is disabled. Certificates cannot be deleted — use Void instead." });
@@ -1716,7 +3131,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/certificates/:id/void", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const { confirmation, reason } = req.body;
 
       if (confirmation !== "VOID") {
@@ -1754,7 +3169,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/certificates/:id/label/:side", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const side = req.params.side as "front" | "back" | "both";
       const format = (req.query.format as string) || "pdf";
       const preview = req.query.preview === "1";
@@ -1810,7 +3225,7 @@ export async function registerRoutes(
 
   app.get("/api/admin/printing/sheets/:sheetRef", requireAdmin, async (req, res) => {
     try {
-      const detail = await storage.getSheetDetail(req.params.sheetRef);
+      const detail = await storage.getSheetDetail(String(req.params.sheetRef));
       res.json(detail);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1883,8 +3298,8 @@ export async function registerRoutes(
   // Pattern: /api/admin/certificates/label/:certId/front.png   (or back.png / front.pdf etc.)
   app.get("/api/admin/certificates/label/:certId/:filename", requireAdmin, async (req, res) => {
     try {
-      const certId = req.params.certId;
-      const filename = req.params.filename; // e.g. "front.png", "back.pdf"
+      const certId = String(req.params.certId);
+      const filename = String(req.params.filename); // e.g. "front.png", "back.pdf"
       const [side, fmt] = filename.split(".");
       if (!["front", "back", "both"].includes(side) || !["png", "pdf"].includes(fmt)) {
         return res.status(400).json({ error: "Invalid format. Use front.png / back.pdf / both.pdf" });
@@ -1924,7 +3339,7 @@ export async function registerRoutes(
   // ── LABEL OVERRIDES ────────────────────────────────────────────────────────
   app.get("/api/admin/printing/override/:certId", requireAdmin, async (req, res) => {
     try {
-      const override = await storage.getLabelOverride(req.params.certId);
+      const override = await storage.getLabelOverride(String(req.params.certId));
       res.json(override ?? null);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1934,7 +3349,7 @@ export async function registerRoutes(
   app.post("/api/admin/printing/override/:certId", requireAdmin, async (req, res) => {
     try {
       const { cardNameOverride, setOverride, variantOverride, languageOverride, yearOverride } = req.body;
-      const override = await storage.upsertLabelOverride(req.params.certId, {
+      const override = await storage.upsertLabelOverride(String(req.params.certId), {
         cardNameOverride: cardNameOverride ?? null,
         setOverride: setOverride ?? null,
         variantOverride: variantOverride ?? null,
@@ -1949,7 +3364,7 @@ export async function registerRoutes(
 
   app.delete("/api/admin/printing/override/:certId", requireAdmin, async (req, res) => {
     try {
-      await storage.clearLabelOverride(req.params.certId);
+      await storage.clearLabelOverride(String(req.params.certId));
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1960,7 +3375,7 @@ export async function registerRoutes(
   // Generates a 70×20mm PDF, logs the reprint. Does NOT affect the printed flag.
   app.post("/api/admin/printing/reprint/:certId", requireAdmin, async (req, res) => {
     try {
-      const certId = req.params.certId;
+      const certId = String(req.params.certId);
       const side   = (req.query.side as "front" | "back" | "both") || "both";
 
       const rawCert = await storage.getCertificateByCertId(certId);
@@ -1983,7 +3398,7 @@ export async function registerRoutes(
   // ── NFC ADMIN ROUTES ─────────────────────────────────────────────────────
   app.post("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const { uid, chipType, url, writtenBy } = req.body;
       if (!uid || !url) return res.status(400).json({ error: "uid and url are required" });
 
@@ -1997,7 +3412,7 @@ export async function registerRoutes(
       }
 
       // Guard: cert already has a different UID unless overwrite is explicitly confirmed
-      const target = await storage.getCertificateById(id);
+      const target = await storage.getCertificate(id);
       if (target?.nfcUid && target.nfcUid !== uid && !req.body.overwrite) {
         return res.status(409).json({
           error: "Certificate already has an NFC tag",
@@ -2017,7 +3432,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/certificates/:id/nfc/lock", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const cert = await storage.lockNfc(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       res.json(cert);
@@ -2029,7 +3444,7 @@ export async function registerRoutes(
 
   app.post("/api/admin/certificates/:id/nfc/verify", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       await storage.recordNfcVerified(id);
       res.json({ ok: true });
     } catch (err: any) {
@@ -2039,7 +3454,7 @@ export async function registerRoutes(
 
   app.delete("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = parseInt(String(req.params.id), 10);
       const cert = await storage.clearNfc(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       res.json(cert);
@@ -2093,11 +3508,20 @@ export async function registerRoutes(
   ];
 
   // ── PUBLIC CLAIM FLOW ──────────────────────────────────────────────────────
-  app.post("/api/claim/request", async (req, res) => {
+  // Rate limiter: max 5 attempts per IP per 15 minutes to prevent brute-forcing claim codes
+  const claimRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many claim attempts from this device. Please wait 15 minutes before trying again." },
+  });
+
+  app.post("/api/claim/request", claimRateLimit, async (req, res) => {
     try {
-      const { certId, claimCode, email } = req.body;
+      const { certId, claimCode, email, name } = req.body;
       if (!certId || !claimCode || !email) {
-        return res.status(400).json({ error: "Certificate number, claim code, and email are required." });
+        return res.status(400).json({ error: "Certificate number, claim code, and email are all required." });
       }
 
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -2105,26 +3529,35 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Please provide a valid email address." });
       }
 
-      const valid = await storage.validateClaimCode(certId.trim(), claimCode.trim());
-      if (!valid) {
-        return res.status(400).json({ error: "Invalid certificate number or claim code." });
+      const normalizedId = normalizeCertId(certId.trim());
+      const cert = await storage.getCertificateByCertId(normalizedId);
+      if (!cert) {
+        // Generic error — do not confirm or deny whether the cert exists to avoid enumeration
+        console.warn(`[claim] Failed attempt — cert not found: ${normalizedId} from IP ${req.ip}`);
+        return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
+      }
+      if (cert.ownershipStatus === "claimed") {
+        return res.status(400).json({ error: "This certificate has already been registered to an owner. To transfer ownership, please use the Transfer Ownership page." });
       }
 
-      const token = await storage.createClaimVerification(certId.trim(), email.trim());
+      // ── SECOND FACTOR: validate claim code ──────────────────────────────────
+      const codeValid = await storage.validateClaimCode(normalizedId, claimCode.trim());
+      if (!codeValid) {
+        console.warn(`[claim] Failed claim code attempt for cert ${normalizedId} from IP ${req.ip}`);
+        return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
+      }
 
-      const baseUrl = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : process.env.REPLIT_DOMAINS
-          ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-          : "https://mintvaultuk.com";
+      const token = await storage.createClaimVerification(normalizedId, email.trim(), name?.trim() || undefined);
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
       const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;
 
-      await sendClaimVerification({ email: email.trim(), certId: certId.trim(), verifyUrl });
+      await sendClaimVerification({ email: email.trim(), certId: normalizedId, verifyUrl });
 
-      return res.json({ success: true, message: "Verification email sent. Please check your inbox to complete the claim." });
+      return res.json({ success: true, message: "Verification email sent! Please check your inbox and click the link to complete your ownership registration." });
     } catch (err: any) {
       console.error("[claim] Error processing claim request:", err);
-      return res.status(500).json({ error: "An error occurred processing your claim. Please try again." });
+      return res.status(500).json({ error: "An error occurred processing your request. Please try again." });
     }
   });
 
@@ -2135,6 +3568,22 @@ export async function registerRoutes(
 
       const result = await storage.completeClaimByToken(token);
       if (result.success) {
+        // Auto-generate and email the certificate PDF
+        try {
+          const cert = await storage.getCertificateByCertId(result.certId!);
+          if (cert && cert.status !== "voided") {
+            const pdfBuffer = await generateCertificateDocument(cert, result.ownerName);
+            await sendCertificatePdf({
+              email: result.email!,
+              ownerName: result.ownerName,
+              certId: normalizeCertId(cert.certId),
+              cardName: cert.cardName,
+              pdfBuffer,
+            });
+          }
+        } catch (pdfErr: any) {
+          console.error("[claim] PDF generation/email failed (non-fatal):", pdfErr.message);
+        }
         return res.redirect(`/claim?success=true&certId=${encodeURIComponent(result.certId || "")}`);
       } else {
         return res.redirect(`/claim?error=${encodeURIComponent(result.error || "unknown")}`);
@@ -2145,13 +3594,134 @@ export async function registerRoutes(
     }
   });
 
+  // ── PUBLIC TRANSFER FLOW ───────────────────────────────────────────────────
+  // Rate limiter: max 5 attempts per IP per 15 minutes
+  const transferRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many transfer attempts from this device. Please wait 15 minutes before trying again." },
+  });
+
+  // Step 1: initiate — current owner enters cert ID + their email + new owner email
+  app.post("/api/transfer/request", transferRateLimit, async (req, res) => {
+    try {
+      const { certId, fromEmail, toEmail, newOwnerName } = req.body;
+      if (!certId || !fromEmail || !toEmail) {
+        return res.status(400).json({ error: "Certificate number, your email, and new owner email are all required." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(fromEmail) || !emailRegex.test(toEmail)) {
+        return res.status(400).json({ error: "Please provide valid email addresses for both fields." });
+      }
+
+      if (fromEmail.toLowerCase().trim() === toEmail.toLowerCase().trim()) {
+        return res.status(400).json({ error: "The current owner and new owner email addresses must be different." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const cert = await storage.getCertificateByCertId(normalizedId);
+      if (!cert) {
+        return res.status(404).json({ error: "Certificate not found. Please check your certificate number." });
+      }
+      if (cert.ownershipStatus !== "claimed") {
+        return res.status(400).json({ error: "This certificate does not have a registered owner. Please use Register Ownership first." });
+      }
+
+      // Verify the fromEmail matches the current owner
+      if (cert.currentOwnerUserId) {
+        const owner = await storage.getUser(cert.currentOwnerUserId);
+        if (!owner || (owner.email ?? "").toLowerCase() !== fromEmail.toLowerCase().trim()) {
+          return res.status(400).json({ error: "The email address you entered does not match the registered owner of this certificate." });
+        }
+      } else {
+        return res.status(400).json({ error: "This certificate does not have a verified owner on record." });
+      }
+
+      const ownerToken = await storage.createTransferVerification(normalizedId, fromEmail.trim(), toEmail.trim(), newOwnerName?.trim() || undefined);
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const confirmUrl = `${baseUrl}/api/transfer/owner-confirm?token=${ownerToken}`;
+
+      await sendTransferOwnerConfirmation({ fromEmail: fromEmail.trim(), toEmail: toEmail.trim(), certId: normalizedId, confirmUrl });
+
+      return res.json({ success: true, message: "Transfer initiated. Please check your inbox and click the confirmation link to proceed." });
+    } catch (err: any) {
+      console.error("[transfer] Error initiating transfer:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Step 2: current owner clicks their confirmation link → generates new owner token, sends to new owner
+  app.get("/api/transfer/owner-confirm", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token");
+
+      const result = await storage.confirmOwnerTransferStep(token);
+      if (!result.success || !result.newOwnerToken) {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}`);
+      }
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const newOwnerConfirmUrl = `${baseUrl}/api/transfer/new-owner-confirm?token=${result.newOwnerToken}`;
+
+      await sendTransferNewOwnerConfirmation({
+        toEmail: result.toEmail || "",
+        fromEmail: result.fromEmail || "",
+        certId: result.certId || "",
+        confirmUrl: newOwnerConfirmUrl,
+      });
+
+      return res.redirect(`/transfer?step=owner_confirmed&certId=${encodeURIComponent(result.certId || "")}`);
+    } catch (err: any) {
+      console.error("[transfer] Error confirming owner step:", err);
+      return res.redirect("/transfer?error=server_error");
+    }
+  });
+
+  // Step 3: new owner clicks their confirmation link → transfer completes
+  app.get("/api/transfer/new-owner-confirm", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token");
+
+      const result = await storage.completeTransferByNewOwnerToken(token);
+      if (result.success) {
+        // Auto-generate and email the certificate PDF to the new owner
+        try {
+          const cert = await storage.getCertificateByCertId(result.certId!);
+          if (cert && cert.status !== "voided") {
+            const pdfBuffer = await generateCertificateDocument(cert, result.ownerName);
+            await sendCertificatePdf({
+              email: result.toEmail!,
+              ownerName: result.ownerName,
+              certId: normalizeCertId(cert.certId),
+              cardName: cert.cardName,
+              pdfBuffer,
+            });
+          }
+        } catch (pdfErr: any) {
+          console.error("[transfer] PDF generation/email failed (non-fatal):", pdfErr.message);
+        }
+        return res.redirect(`/transfer?success=true&certId=${encodeURIComponent(result.certId || "")}`);
+      } else {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}`);
+      }
+    } catch (err: any) {
+      console.error("[transfer] Error completing transfer:", err);
+      return res.redirect("/transfer?error=server_error");
+    }
+  });
+
   // ── ADMIN OWNERSHIP ROUTES ────────────────────────────────────────────────
   app.get("/api/admin/certificates/:certId/ownership", requireAdmin, async (req, res) => {
     try {
-      const cert = await storage.getCertificateByCertId(req.params.certId);
+      const cert = await storage.getCertificateByCertId(String(req.params.certId));
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const history = await storage.getOwnershipHistory(req.params.certId);
+      const history = await storage.getOwnershipHistory(String(req.params.certId));
 
       let ownerEmail: string | null = null;
       if (cert.currentOwnerUserId) {
@@ -2167,6 +3737,8 @@ export async function registerRoutes(
         hasClaimCode: !!cert.claimCodeHash,
         claimCodeCreatedAt: cert.claimCodeCreatedAt,
         claimCodeUsedAt: cert.claimCodeUsedAt,
+        ownershipToken: (cert as any).ownershipToken ?? null,
+        ownershipTokenGeneratedAt: (cert as any).ownershipTokenGeneratedAt ?? null,
         history,
       });
     } catch (err: any) {
@@ -2177,13 +3749,14 @@ export async function registerRoutes(
 
   app.post("/api/admin/certificates/:certId/regenerate-claim-code", requireAdmin, async (req, res) => {
     try {
-      const cert = await storage.getCertificateByCertId(req.params.certId);
+      const certId = String(req.params.certId);
+      const cert = await storage.getCertificateByCertId(certId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const claimCode = await storage.generateClaimCode(req.params.certId);
-      await storage.writeAuditLog("certificate", req.params.certId, "CLAIM_CODE_REGENERATED", "admin", {});
+      const claimCode = await storage.generateClaimCode(certId);
+      await storage.writeAuditLog("certificate", certId, "CLAIM_CODE_REGENERATED", "admin", {});
 
-      return res.json({ certId: req.params.certId, claimCode });
+      return res.json({ certId, claimCode });
     } catch (err: any) {
       console.error("[admin] Error regenerating claim code:", err);
       return res.status(500).json({ error: "Server error" });
@@ -2195,14 +3768,34 @@ export async function registerRoutes(
       const { email, notes } = req.body;
       if (!email) return res.status(400).json({ error: "Email is required" });
 
-      const cert = await storage.getCertificateByCertId(req.params.certId);
+      const certId = String(req.params.certId);
+      const cert = await storage.getCertificateByCertId(certId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      await storage.assignOwnerManual(req.params.certId, email, "admin", notes);
+      await storage.assignOwnerManual(certId, email, "admin", notes);
       return res.json({ success: true });
     } catch (err: any) {
       console.error("[admin] Error assigning owner:", err);
       return res.status(500).json({ error: "Server error" });
+    }
+  });
+
+  // ── CERTIFICATE DOCUMENT (A4 PDF) ─────────────────────────────────────────
+  app.get("/api/admin/certificates/:certId/certificate-document", requireAdmin, async (req, res) => {
+    try {
+      const certId = String(req.params.certId);
+      const cert = await storage.getCertificateByCertId(certId);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      if (cert.status === "voided") return res.status(403).json({ error: "Cannot generate certificate for a voided certificate" });
+
+      const pdfBuffer = await generateCertificateDocument(cert, cert.ownerName);
+      const normalId = normalizeCertId(cert.certId);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="MintVault-Certificate-${normalId}.pdf"`);
+      res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error("[certificate-doc] Error generating certificate document:", err.message);
+      res.status(500).json({ error: "Failed to generate certificate document" });
     }
   });
 
@@ -2226,14 +3819,39 @@ export async function registerRoutes(
     }
   });
 
-  // ── CLAIM INSERT GENERATION ──────────────────────────────────────────────────
-  app.post("/api/admin/certificates/:certId/claim-insert", requireAdmin, async (req, res) => {
+  // ── GRADING REPORT ────────────────────────────────────────────────────────────
+  app.patch("/api/admin/certificates/:certId/grading-report", requireAdmin, async (req, res) => {
     try {
-      const cert = await storage.getCertificateByCertId(req.params.certId);
+      const certId = req.params.certId;
+      const { centering, corners, edges, surface, overall } = req.body as {
+        centering?: string; corners?: string; edges?: string; surface?: string; overall?: string;
+      };
+      const report: Record<string, string> = {};
+      if (centering?.trim()) report.centering = centering.trim().slice(0, 1000);
+      if (corners?.trim())   report.corners   = corners.trim().slice(0, 1000);
+      if (edges?.trim())     report.edges     = edges.trim().slice(0, 1000);
+      if (surface?.trim())   report.surface   = surface.trim().slice(0, 1000);
+      if (overall?.trim())   report.overall   = overall.trim().slice(0, 1000);
+
+      await db.execute(
+        sql`UPDATE certificates SET grading_report = ${JSON.stringify(report)}::jsonb WHERE certificate_number = ${certId}`
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[grading-report] save error:", err);
+      res.status(500).json({ error: "Failed to save grading report." });
+    }
+  });
+
+  // ── CLAIM INSERT GENERATION ──────────────────────────────────────────────────
+  app.get("/api/admin/certificates/:certId/claim-insert", requireAdmin, async (req, res) => {
+    try {
+      const certId = String(req.params.certId);
+      const cert = await storage.getCertificateByCertId(certId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const claimCode = await storage.generateClaimCode(req.params.certId);
-      await storage.writeAuditLog("certificate", req.params.certId, "CLAIM_INSERT_GENERATED", "admin", {});
+      const claimCode = await storage.getOrGenerateClaimCode(certId);
+      await storage.writeAuditLog("certificate", certId, "CLAIM_INSERT_GENERATED", "admin", {});
 
       const format = (req.query.format as string) || "pdf";
       const nCertId = normalizeCertId(cert.certId);
@@ -2271,7 +3889,7 @@ export async function registerRoutes(
         const cert = await storage.getCertificateByCertId(cid);
         if (!cert) continue;
 
-        const claimCode = await storage.generateClaimCode(cid);
+        const claimCode = await storage.getOrGenerateClaimCode(cid);
         inserts.push({ certId: normalizeCertId(cert.certId), claimCode });
       }
 
@@ -2295,7 +3913,7 @@ export async function registerRoutes(
   });
 
   app.get("/sitemap.xml", (_req, res) => {
-    const baseUrl = "https://mintvault.co.uk";
+    const baseUrl = "https://mintvaultuk.com";
     const now = new Date().toISOString().split("T")[0];
 
     const staticPages = [
@@ -2336,7 +3954,7 @@ export async function registerRoutes(
   });
 
   app.get("/robots.txt", (_req, res) => {
-    const baseUrl = "https://mintvault.co.uk";
+    const baseUrl = "https://mintvaultuk.com";
     const txt = [
       "User-agent: *",
       "Allow: /",
@@ -2351,6 +3969,1671 @@ export async function registerRoutes(
     res.header("Content-Type", "text/plain");
     res.send(txt);
   });
+
+  // ── CUSTOMER DASHBOARD API ─────────────────────────────────────────────────
+  const magicLinkRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many login requests. Please wait 15 minutes." },
+  });
+
+  // POST /api/customer/magic-link — send login link to email
+  app.post("/api/customer/magic-link", magicLinkRateLimit, async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || typeof email !== "string") {
+        return res.status(400).json({ error: "Email address is required." });
+      }
+      const normalEmail = email.toLowerCase().trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalEmail)) {
+        return res.status(400).json({ error: "Please enter a valid email address." });
+      }
+
+      const token = createMagicToken(normalEmail);
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const loginUrl = `${baseUrl}/api/customer/verify/${token}`;
+
+      await sendMagicLink({ email: normalEmail, loginUrl });
+      res.json({ message: "Login link sent. Check your inbox." });
+    } catch (err) {
+      console.error("[customer] magic-link error:", err);
+      res.status(500).json({ error: "Failed to send login link. Please try again." });
+    }
+  });
+
+  // GET /api/customer/verify/:token — verify magic link, set session, redirect
+  app.get("/api/customer/verify/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token);
+      const email = verifyMagicToken(token);
+      if (!email) {
+        return res.redirect("/dashboard?error=invalid_link");
+      }
+      req.session.customerEmail = email;
+      res.redirect("/dashboard?login=success");
+    } catch (err) {
+      console.error("[customer] verify error:", err);
+      res.redirect("/dashboard?error=server_error");
+    }
+  });
+
+  // GET /api/customer/me — return current customer session info
+  app.get("/api/customer/me", requireCustomer, (req, res) => {
+    res.json({ email: req.session.customerEmail });
+  });
+
+  // POST /api/customer/logout — destroy customer session
+  app.post("/api/customer/logout", (req, res) => {
+    req.session.customerEmail = undefined as unknown as string;
+    res.json({ message: "Logged out." });
+  });
+
+  // GET /api/customer/submissions — all submissions for the logged-in customer
+  app.get("/api/customer/submissions", requireCustomer, async (req, res) => {
+    try {
+      const email = req.session.customerEmail!;
+      const submissions = await storage.getSubmissionsByEmail(email);
+      const secret = getSignedUrlSecret();
+      const result = submissions.map((sub: any) => {
+        const sid = sub.submissionId || sub.submission_id || "";
+        const token = sid ? crypto.createHmac("sha256", secret).update(sid).digest("hex").slice(0, 16) : "";
+        return { ...sub, packingSlipToken: token, shippingLabelToken: token };
+      });
+      res.json(result);
+    } catch (err) {
+      console.error("[customer] submissions error:", err);
+      res.status(500).json({ error: "Failed to load submissions." });
+    }
+  });
+
+  // GET /api/submissions/me — full submission list with tracking fields (user account session)
+  app.get("/api/submissions/me", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      // Look up user email for legacy email-matched submissions
+      const userRows = await db.execute(sql`SELECT email FROM users WHERE id = ${userId} LIMIT 1`);
+      const email = userRows.rows.length > 0 ? (userRows.rows[0] as any).email as string : null;
+      let subs: any[] = [];
+      if (email) {
+        subs = await storage.getSubmissionsByEmail(email);
+      }
+      res.json(subs);
+    } catch (err) {
+      console.error("[submissions/me] error:", err);
+      res.status(500).json({ error: "Failed to load submissions." });
+    }
+  });
+
+  // POST /api/submissions/:id/customer-tracking — customer saves outbound tracking number
+  app.post("/api/submissions/:id/customer-tracking", requireCustomer, async (req, res) => {
+    try {
+      const sub = await storage.getSubmissionBySubmissionId(String(req.params.id));
+      if (!sub) return res.status(404).json({ error: "Submission not found" });
+      // Verify ownership by email
+      if (sub.email !== req.session.customerEmail && sub.customerEmail !== req.session.customerEmail) {
+        return res.status(403).json({ error: "Not your submission" });
+      }
+      const { tracking_number } = req.body;
+      if (!tracking_number || typeof tracking_number !== "string") {
+        return res.status(400).json({ error: "tracking_number required" });
+      }
+      const numId = typeof sub.id === "string" ? parseInt(sub.id, 10) : sub.id;
+      await db.execute(sql`
+        UPDATE submissions SET royal_mail_outbound_tracking = ${tracking_number.trim()}, updated_at = NOW()
+        WHERE id = ${numId}
+      `);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[customer-tracking] error:", err);
+      res.status(500).json({ error: "Failed to save tracking number" });
+    }
+  });
+
+  // POST /api/admin/submissions/:id/mark-received — admin marks received + uploads photos
+  const receiptUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024, files: 6 },
+    fileFilter: (_req, file, cb) => {
+      if (/\.(jpg|jpeg|png|webp)$/i.test(path.extname(file.originalname))) cb(null, true);
+      else cb(new Error("Images only"));
+    },
+  });
+
+  app.post(
+    "/api/admin/submissions/:id/mark-received",
+    requireAdmin,
+    receiptUpload.array("photos", 6),
+    async (req, res) => {
+      try {
+        const sub = await storage.getSubmissionBySubmissionId(String(req.params.id));
+        if (!sub) return res.status(404).json({ error: "Submission not found" });
+        const numId = typeof sub.id === "string" ? parseInt(sub.id, 10) : sub.id;
+
+        // Upload photos to R2
+        const files = (req.files as Express.Multer.File[]) ?? [];
+        const photoUrls: string[] = [];
+        for (const file of files) {
+          const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
+          await uploadToR2(key, file.buffer, file.mimetype);
+          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 365); // 1-year URL
+          photoUrls.push(url);
+        }
+        // Also accept pre-uploaded URLs from body (for admin typing in URLs)
+        const bodyUrls: string[] = Array.isArray(req.body.photo_urls) ? req.body.photo_urls : [];
+        const allUrls = [...photoUrls, ...bodyUrls];
+
+        await storage.updateSubmissionStatus(numId, "received", {
+          onReceiptPhotoUrls: JSON.stringify(allUrls),
+        });
+
+        await storage.writeAuditLog("submission", sub.submissionId, "status_received", req.session.adminEmail || "admin", { photoCount: allUrls.length });
+
+        const email = sub.email || sub.customerEmail || "";
+        if (email) {
+          sendCardsReceived({
+            email,
+            firstName: sub.firstName || sub.customerFirstName || "Customer",
+            submissionId: sub.submissionId,
+            cardCount: sub.cardCount || 0,
+            photoUrls: allUrls,
+          }).catch(() => {});
+        }
+
+        res.json({ success: true, photoUrls: allUrls });
+      } catch (err: any) {
+        console.error("[mark-received] error:", err.message);
+        res.status(500).json({ error: "Failed to mark received" });
+      }
+    }
+  );
+
+  // GET /api/customer/certificates — all certs linked to the logged-in customer
+  app.get("/api/customer/certificates", requireCustomer, async (req, res) => {
+    try {
+      const email = req.session.customerEmail!;
+      const certs = await storage.getCertificatesByEmail(email);
+      // Strip sensitive fields before sending to client
+      const safe = certs.map((c) => ({
+        id: c.id,
+        certId: c.certId,
+        cardName: c.cardName,
+        setName: c.setName,
+        year: c.year,
+        cardGame: c.cardGame,
+        language: c.language,
+        gradeOverall: c.gradeOverall,
+        gradeType: c.gradeType,
+        createdAt: c.createdAt,
+        status: c.status,
+        ownershipStatus: c.ownershipStatus,
+        ownerEmail: c.ownerEmail,
+        submissionItemId: c.submissionItemId,
+      }));
+      res.json(safe);
+    } catch (err) {
+      console.error("[customer] certificates error:", err);
+      res.status(500).json({ error: "Failed to load certificates." });
+    }
+  });
+
+  // ── Build 1: Grading image upload ─────────────────────────────────────────
+  const gradingUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 30 * 1024 * 1024 }, // 30 MB for high-res scans
+    fileFilter: (_req, file, cb) => {
+      if (/\.(jpg|jpeg|png|webp|tiff?)$/i.test(path.extname(file.originalname))) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only image files are allowed"));
+      }
+    },
+  });
+
+  app.post(
+    "/api/admin/certificates/:id/upload-images",
+    requireAdmin,
+    gradingUpload.fields([
+      { name: "front", maxCount: 1 },
+      { name: "back", maxCount: 1 },
+      { name: "angled", maxCount: 1 },
+      { name: "closeup", maxCount: 1 },
+    ]),
+    async (req, res) => {
+      try {
+        const { autoCrop, generateVariants, checkImageQuality } = await import("./image-processing");
+
+        const id = parseInt(String(req.params.id), 10);
+        const cert = await storage.getCertificate(id);
+        if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+        const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+        if (!files || Object.keys(files).length === 0) {
+          return res.status(400).json({ error: "No images provided" });
+        }
+
+        const certId = normalizeCertId(cert.certId);
+        const updates: Record<string, string> = {};
+        const qualityResults: Record<string, any> = {};
+
+        async function processAngle(angle: "front" | "back" | "angled" | "closeup", buffer: Buffer) {
+          const ext = "jpg";
+          // 1. Save original
+          const origKey = `grading/${certId}/${angle}_original.${ext}`;
+          await uploadToR2(origKey, buffer, "image/jpeg");
+          updates[`grading_${angle}_original`] = origKey;
+
+          // 2. Auto-crop
+          const { buffer: croppedBuf, cropped } = await autoCrop(buffer);
+          const cropKey = `grading/${certId}/${angle}_cropped.${ext}`;
+          await uploadToR2(cropKey, croppedBuf, "image/jpeg");
+          updates[`grading_${angle}_cropped`] = cropKey;
+
+          // 3. Quality check on cropped image
+          const quality = await checkImageQuality(croppedBuf);
+          qualityResults[angle] = { ...quality, cropped };
+
+          // 4. Also update the primary front/back image paths used for display + AI
+          if (angle === "front") {
+            updates["front_image_path"] = r2KeyForImage(certId, "front", ext);
+            await uploadToR2(r2KeyForImage(certId, "front", ext), croppedBuf, "image/jpeg");
+          } else if (angle === "back") {
+            updates["back_image_path"] = r2KeyForImage(certId, "back", ext);
+            await uploadToR2(r2KeyForImage(certId, "back", ext), croppedBuf, "image/jpeg");
+          }
+
+          // 5. Variants — fire-and-forget (don't block the response)
+          setImmediate(async () => {
+            try {
+              const { greyscale, highcontrast, edgeenhanced, inverted } = await generateVariants(croppedBuf);
+              await Promise.all([
+                uploadToR2(`grading/${certId}/${angle}_greyscale.jpg`, greyscale, "image/jpeg"),
+                uploadToR2(`grading/${certId}/${angle}_highcontrast.jpg`, highcontrast, "image/jpeg"),
+                uploadToR2(`grading/${certId}/${angle}_edgeenhanced.jpg`, edgeenhanced, "image/jpeg"),
+                uploadToR2(`grading/${certId}/${angle}_inverted.jpg`, inverted, "image/jpeg"),
+              ]);
+              // Persist variant paths for front/back
+              if (angle === "front" || angle === "back") {
+                await db.execute(sql`
+                  UPDATE certificates SET
+                    ${angle === "front" ? sql`grading_front_greyscale` : sql`grading_back_greyscale`}     = ${`grading/${certId}/${angle}_greyscale.jpg`},
+                    ${angle === "front" ? sql`grading_front_highcontrast` : sql`grading_back_highcontrast`} = ${`grading/${certId}/${angle}_highcontrast.jpg`},
+                    ${angle === "front" ? sql`grading_front_edgeenhanced` : sql`grading_back_edgeenhanced`} = ${`grading/${certId}/${angle}_edgeenhanced.jpg`},
+                    ${angle === "front" ? sql`grading_front_inverted` : sql`grading_back_inverted`}     = ${`grading/${certId}/${angle}_inverted.jpg`},
+                    updated_at = NOW()
+                  WHERE id = ${id}
+                `);
+              }
+            } catch (varErr) {
+              console.error(`[upload-images] variant generation failed for ${angle}:`, varErr);
+            }
+          });
+        }
+
+        // Process each angle sequentially to avoid memory spikes
+        for (const angle of ["front", "back", "angled", "closeup"] as const) {
+          const fileArr = files[angle];
+          if (fileArr && fileArr[0]) {
+            await processAngle(angle, fileArr[0].buffer);
+          }
+        }
+
+        // Persist image paths and quality results
+        updates["image_quality_checks"] = JSON.stringify(qualityResults);
+        const setClauses = Object.entries(updates)
+          .filter(([k]) => !k.includes("_image_path") || k === "front_image_path" || k === "back_image_path");
+
+        // Build dynamic update via raw SQL per-column
+        const colMap: Record<string, string> = {
+          grading_front_original: "grading_front_original",
+          grading_front_cropped: "grading_front_cropped",
+          grading_back_original: "grading_back_original",
+          grading_back_cropped: "grading_back_cropped",
+          grading_angled_original: "grading_angled_original",
+          grading_angled_cropped: "grading_angled_cropped",
+          grading_closeup_original: "grading_closeup_original",
+          grading_closeup_cropped: "grading_closeup_cropped",
+          image_quality_checks: "image_quality_checks",
+          front_image_path: "front_image_path",
+          back_image_path: "back_image_path",
+        };
+
+        for (const [key, val] of Object.entries(updates)) {
+          const col = colMap[key];
+          if (!col) continue;
+          if (col === "image_quality_checks") {
+            await db.execute(sql`UPDATE certificates SET image_quality_checks = ${val}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+          } else {
+            await db.execute(sql`UPDATE certificates SET front_image_path = CASE WHEN ${col} = 'front_image_path' THEN ${val} ELSE front_image_path END, back_image_path = CASE WHEN ${col} = 'back_image_path' THEN ${val} ELSE back_image_path END, updated_at = NOW() WHERE id = ${id}`);
+            // Use separate targeted updates to avoid conditional SQL complexity
+          }
+        }
+
+        // Targeted column updates
+        if (updates.grading_front_original) await db.execute(sql`UPDATE certificates SET grading_front_original = ${updates.grading_front_original}, updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_front_cropped)   await db.execute(sql`UPDATE certificates SET grading_front_cropped  = ${updates.grading_front_cropped},  updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_back_original)   await db.execute(sql`UPDATE certificates SET grading_back_original  = ${updates.grading_back_original},  updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_back_cropped)    await db.execute(sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_angled_original) await db.execute(sql`UPDATE certificates SET grading_angled_original = ${updates.grading_angled_original}, updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_angled_cropped)  await db.execute(sql`UPDATE certificates SET grading_angled_cropped  = ${updates.grading_angled_cropped},  updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_closeup_original) await db.execute(sql`UPDATE certificates SET grading_closeup_original = ${updates.grading_closeup_original}, updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_closeup_cropped) await db.execute(sql`UPDATE certificates SET grading_closeup_cropped  = ${updates.grading_closeup_cropped},  updated_at = NOW() WHERE id = ${id}`);
+        if (updates.image_quality_checks)    await db.execute(sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+        if (updates.front_image_path)        await db.execute(sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`);
+        if (updates.back_image_path)         await db.execute(sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`);
+
+        // Generate signed URLs for response
+        const responseUrls: Record<string, string | null> = {};
+        for (const [key, val] of Object.entries(updates)) {
+          if (key === "image_quality_checks") continue;
+          try { responseUrls[key] = await getR2SignedUrl(val, 3600); } catch { responseUrls[key] = null; }
+        }
+
+        res.json({ success: true, urls: responseUrls, quality: qualityResults });
+      } catch (error: any) {
+        console.error("[upload-images] error:", error.message, error.stack);
+        res.status(500).json({ error: `Upload failed: ${error.message}` });
+      }
+    }
+  );
+
+  app.get("/api/admin/certificates/:id/images", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const imageKeys: Record<string, string | null> = {
+        front_original:      c.gradingFrontOriginal   || null,
+        front_cropped:       c.gradingFrontCropped    || null,
+        front_greyscale:     c.gradingFrontGreyscale  || null,
+        front_highcontrast:  c.gradingFrontHighcontrast || null,
+        front_edgeenhanced:  c.gradingFrontEdgeenhanced || null,
+        front_inverted:      c.gradingFrontInverted   || null,
+        back_original:       c.gradingBackOriginal    || null,
+        back_cropped:        c.gradingBackCropped     || null,
+        back_greyscale:      c.gradingBackGreyscale   || null,
+        back_highcontrast:   c.gradingBackHighcontrast || null,
+        back_edgeenhanced:   c.gradingBackEdgeenhanced || null,
+        back_inverted:       c.gradingBackInverted    || null,
+        angled_original:     c.gradingAngledOriginal  || null,
+        angled_cropped:      c.gradingAngledCropped   || null,
+        closeup_original:    c.gradingCloseupOriginal || null,
+        closeup_cropped:     c.gradingCloseupCropped  || null,
+        front_display:       c.frontImagePath         || null,
+        back_display:        c.backImagePath          || null,
+      };
+
+      const urls: Record<string, string | null> = {};
+      await Promise.all(
+        Object.entries(imageKeys).map(async ([k, key]) => {
+          if (!key) { urls[k] = null; return; }
+          try { urls[k] = await getR2SignedUrl(key, 3600); } catch { urls[k] = null; }
+        })
+      );
+
+      const quality = c.imageQualityChecks || {};
+      res.json({ urls, quality });
+    } catch (error: any) {
+      res.status(500).json({ error: `Failed to get images: ${error.message}` });
+    }
+  });
+
+  // ── Build 2: Manual grading endpoints ─────────────────────────────────────
+
+  // GET grading data for a certificate
+  app.get("/api/admin/certificates/:id/grading", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      const c = cert as any;
+      res.json({
+        centeringFrontLr: c.centeringFrontLr || c.centering_front_lr || null,
+        centeringFrontTb: c.centeringFrontTb || c.centering_front_tb || null,
+        centeringBackLr:  c.centeringBackLr  || c.centering_back_lr  || null,
+        centeringBackTb:  c.centeringBackTb  || c.centering_back_tb  || null,
+        corners: c.cornerValues  || null,
+        edges:   c.edgeValues    || null,
+        surface: c.surfaceValues || null,
+        defects: c.defects       || [],
+        authStatus:       c.authStatus      || "genuine",
+        authNotes:        c.authNotes       || "",
+        gradeExplanation: c.gradeExplanation || "",
+        privateNotes:     c.privateNotes     || "",
+        gradeApprovedBy:  c.gradeApprovedBy  || null,
+        gradeApprovedAt:  c.gradeApprovedAt  || null,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PUT save draft grading data
+  app.put("/api/admin/certificates/:id/grade", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const b = req.body;
+      const overallGrade = b.overall_grade;
+      const isNonNum = overallGrade === "AA" || overallGrade === "NO";
+      const gradeNum = isNonNum ? null : parseFloat(overallGrade);
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          centering_front_lr  = ${b.centering_front_lr || null},
+          centering_front_tb  = ${b.centering_front_tb || null},
+          centering_back_lr   = ${b.centering_back_lr  || null},
+          centering_back_tb   = ${b.centering_back_tb  || null},
+          centering_score     = ${isNonNum ? null : (parseFloat(b.grade_centering) || null)},
+          corners_score       = ${isNonNum ? null : (parseFloat(b.grade_corners)   || null)},
+          edges_score         = ${isNonNum ? null : (parseFloat(b.grade_edges)     || null)},
+          surface_score       = ${isNonNum ? null : (parseFloat(b.grade_surface)   || null)},
+          grade               = ${isNonNum ? null : gradeNum},
+          grade_type          = ${isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric"},
+          corner_values       = ${b.corners ? JSON.stringify(b.corners) : null}::jsonb,
+          edge_values         = ${b.edges   ? JSON.stringify(b.edges)   : null}::jsonb,
+          surface_values      = ${b.surface ? JSON.stringify(b.surface) : null}::jsonb,
+          defects             = ${JSON.stringify(b.defects || [])}::jsonb,
+          auth_status         = ${b.auth_status || "genuine"},
+          auth_notes          = ${b.auth_notes || null},
+          grade_explanation   = ${b.grade_explanation || null},
+          private_notes       = ${b.private_notes || null},
+          updated_at          = NOW()
+        WHERE id = ${id}
+      `);
+
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("[grade] save error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // PUT approve grade — finalises, creates grading_session
+  app.put("/api/admin/certificates/:id/approve", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const b = req.body;
+      const overallGrade = b.overall_grade;
+      const isNonNum = overallGrade === "AA" || overallGrade === "NO";
+      const gradeNum = isNonNum ? null : parseFloat(overallGrade);
+      const gradeCentering = isNonNum ? null : parseFloat(b.grade_centering) || null;
+      const gradeCorners   = isNonNum ? null : parseFloat(b.grade_corners)   || null;
+      const gradeEdges     = isNonNum ? null : parseFloat(b.grade_edges)     || null;
+      const gradeSurface   = isNonNum ? null : parseFloat(b.grade_surface)   || null;
+
+      // Compute Black Label: all subgrades must be exactly 10.0
+      const allTen = !isNonNum && gradeNum === 10 &&
+        gradeCentering === 10 && gradeCorners === 10 && gradeEdges === 10 && gradeSurface === 10;
+      const labelType = allTen ? "black" : "Standard";
+      const gradeType = isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric";
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          grade               = ${gradeNum},
+          grade_type          = ${gradeType},
+          centering_score     = ${gradeCentering},
+          corners_score       = ${gradeCorners},
+          edges_score         = ${gradeEdges},
+          surface_score       = ${gradeSurface},
+          centering_front_lr  = ${b.centering_front_lr || null},
+          centering_front_tb  = ${b.centering_front_tb || null},
+          centering_back_lr   = ${b.centering_back_lr  || null},
+          centering_back_tb   = ${b.centering_back_tb  || null},
+          corner_values       = ${b.corners ? JSON.stringify(b.corners) : null}::jsonb,
+          edge_values         = ${b.edges   ? JSON.stringify(b.edges)   : null}::jsonb,
+          surface_values      = ${b.surface ? JSON.stringify(b.surface) : null}::jsonb,
+          defects             = ${JSON.stringify(b.defects || [])}::jsonb,
+          auth_status         = ${b.auth_status || "genuine"},
+          auth_notes          = ${b.auth_notes || null},
+          grade_explanation   = ${b.grade_explanation || null},
+          private_notes       = ${b.private_notes || null},
+          label_type          = ${labelType},
+          grade_approved_by   = ${"Cornelius Oliver"},
+          grade_approved_at   = NOW(),
+          status              = 'active',
+          updated_at          = NOW()
+        WHERE id = ${id}
+      `);
+
+      // Log to grading_sessions
+      try {
+        await db.execute(sql`
+          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes)
+          VALUES (
+            ${cert.certId},
+            NOW(),
+            ${"Cornelius Oliver"},
+            ${gradeNum},
+            ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
+            ${b.private_notes || null}
+          )
+        `);
+      } catch (sessionErr) {
+        console.warn("[approve] grading_sessions insert failed:", sessionErr);
+      }
+
+      await storage.writeAuditLog("certificate", cert.certId, "approve_grade_v2", req.session.adminEmail || "admin", {
+        overall: overallGrade, labelType,
+      });
+
+      // Log AI vs human comparison if an AI draft grade exists for this certificate
+      if (cert.aiDraftGrade != null && gradeNum != null) {
+        try {
+          const aiAnalysis = (cert.aiAnalysis || {}) as Record<string, any>;
+          await db.execute(sql`
+            INSERT INTO ai_grade_corrections (
+              cert_id, ai_estimated_grade,
+              ai_centering, ai_corners, ai_edges, ai_surface,
+              actual_grade, actual_centering, actual_corners, actual_edges, actual_surface,
+              graded_by
+            ) VALUES (
+              ${cert.certId},
+              ${Math.round(parseFloat(String(cert.aiDraftGrade)))},
+              ${aiAnalysis.centering?.subgrade != null ? String(aiAnalysis.centering.subgrade) : null},
+              ${aiAnalysis.corners?.subgrade   != null ? String(aiAnalysis.corners.subgrade)   : null},
+              ${aiAnalysis.edges?.subgrade     != null ? String(aiAnalysis.edges.subgrade)     : null},
+              ${aiAnalysis.surface?.subgrade   != null ? String(aiAnalysis.surface.subgrade)   : null},
+              ${gradeNum},
+              ${gradeCentering != null ? Math.round(gradeCentering) : null},
+              ${gradeCorners   != null ? Math.round(gradeCorners)   : null},
+              ${gradeEdges     != null ? Math.round(gradeEdges)     : null},
+              ${gradeSurface   != null ? Math.round(gradeSurface)   : null},
+              ${req.session.adminEmail || "admin"}
+            )
+          `);
+        } catch (logErr) {
+          console.warn("[approve] ai_grade_corrections insert failed:", logErr);
+        }
+      }
+
+      const updated = await storage.getCertificate(id);
+      res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
+    } catch (error: any) {
+      console.error("[approve] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── Build 1: Card database lookup ──────────────────────────────────────────
+  app.get("/api/admin/card-lookup", requireAdmin, async (req, res) => {
+    try {
+      const { lookupCard } = await import("./card-database");
+      const game  = typeof req.query.game  === "string" ? req.query.game.trim()  : "";
+      const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+      if (!query) return res.status(400).json({ error: "query is required" });
+      const results = await lookupCard(game, query);
+      res.json(results);
+    } catch (error: any) {
+      console.error("[card-lookup] error:", error.message);
+      res.status(500).json({ error: `Card lookup failed: ${error.message}` });
+    }
+  });
+
+  // ── Build 4: Grading queue endpoints ──────────────────────────────────────
+
+  app.get("/api/admin/grading-queue", requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT id, cert_id, card_name, set_name, card_game, created_at,
+               grade_approved_at,
+               (front_image_path IS NOT NULL OR grading_front_original IS NOT NULL) AS has_images
+        FROM certificates
+        WHERE status = 'active' AND grade_approved_at IS NULL
+        ORDER BY created_at ASC
+        LIMIT 100
+      `);
+      const queue = (rows.rows || []).map((r: any) => ({
+        id:         r.id,
+        certId:     normalizeCertId(r.cert_id),
+        cardName:   r.card_name,
+        cardSet:    r.set_name,
+        cardGame:   r.card_game,
+        createdAt:  r.created_at,
+        hasImages:  !!r.has_images,
+        grade:      null,
+      }));
+      res.json(queue);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // In-memory grading queue current cert
+  let _currentGradingCertId: string | null = null;
+
+  app.get("/api/admin/grading-queue/current", requireAdmin, async (_req, res) => {
+    if (_currentGradingCertId) return res.json({ certId: _currentGradingCertId });
+    // Default: first ungraded
+    try {
+      const rows = await db.execute(sql`
+        SELECT cert_id FROM certificates WHERE status = 'active' AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1
+      `);
+      const first = rows.rows?.[0] as any;
+      res.json({ certId: first ? normalizeCertId(first.cert_id) : null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/grading-queue/set-current", requireAdmin, (req, res) => {
+    _currentGradingCertId = req.body.certId || null;
+    res.json({ ok: true, certId: _currentGradingCertId });
+  });
+
+  // ── Build 4: Upload token (phone QR) ──────────────────────────────────────
+
+  // In-memory token store: token -> { certId, imageType, expiresAt }
+  const _uploadTokens = new Map<string, { certId: string; imageType: string; expiresAt: number }>();
+
+  app.post("/api/admin/upload-token", requireAdmin, (req, res) => {
+    const { certId, imageType } = req.body;
+    if (!certId || !imageType) return res.status(400).json({ error: "certId and imageType required" });
+    const token = crypto.randomBytes(16).toString("hex");
+    const expiresAt = Date.now() + 15 * 60 * 1000;
+    _uploadTokens.set(token, { certId: String(certId), imageType, expiresAt });
+    // Cleanup expired tokens
+    for (const [k, v] of _uploadTokens.entries()) {
+      if (Date.now() > v.expiresAt) _uploadTokens.delete(k);
+    }
+    const uploadUrl = `${process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS}` : "https://mintvault.fly.dev"}/upload/${certId}/${imageType}?token=${token}`;
+    res.json({ token, expiresAt: new Date(expiresAt).toISOString(), uploadUrl });
+  });
+
+  // ── Build 4: Public phone upload endpoint ─────────────────────────────────
+
+  const phoneUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (/\.(jpg|jpeg|png|webp|heic)$/i.test(path.extname(file.originalname)) || file.mimetype.startsWith("image/")) cb(null, true);
+      else cb(new Error("Images only"));
+    },
+  });
+
+  app.post("/api/upload/:certId/:imageType", phoneUpload.single("image"), async (req, res) => {
+    try {
+      const { autoCrop, checkImageQuality } = await import("./image-processing");
+      const token = req.query.token as string;
+      if (!token) return res.status(401).json({ error: "Token required" });
+
+      const entry = _uploadTokens.get(token);
+      if (!entry) return res.status(401).json({ error: "Invalid or expired token" });
+      if (Date.now() > entry.expiresAt) { _uploadTokens.delete(token); return res.status(401).json({ error: "Token expired" }); }
+
+      const certId = String(req.params.certId);
+      const imageType = String(req.params.imageType);
+      if (entry.imageType !== imageType) return res.status(400).json({ error: "Token imageType mismatch" });
+
+      const dbCert = await findCertByIdFlex(certId);
+      if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
+
+      if (!req.file) return res.status(400).json({ error: "No image provided" });
+
+      const { buffer: croppedBuf } = await autoCrop(req.file.buffer);
+      const key = `grading/${normalizeCertId(dbCert.certId)}/${imageType}_original.jpg`;
+      await uploadToR2(key, croppedBuf, "image/jpeg");
+
+      const colMap: Record<string, string> = {
+        angled:  "grading_angled_original",
+        closeup: "grading_closeup_original",
+      };
+      const col = colMap[imageType];
+      if (col) {
+        await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
+      }
+
+      const quality = await checkImageQuality(croppedBuf);
+      const signedUrl = await getR2SignedUrl(key, 3600);
+
+      res.json({ ok: true, imageUrl: signedUrl, quality });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Build 4: Hot folder upload ─────────────────────────────────────────────
+
+  const hotFolderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+  app.post("/api/admin/hot-folder-upload", hotFolderUpload.single("front"), async (req, res) => {
+    try {
+      // Auth: Bearer token or session
+      const authHeader = req.headers.authorization || "";
+      const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+      const validToken = process.env.MINTVAULT_ADMIN_TOKEN;
+
+      // Accept either a valid Bearer token or an active admin session
+      const isSession = (req.session as any)?.adminAuthenticated === true;
+      if (!isSession && (!validToken || bearerToken !== validToken)) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const side = (req.body.side || "front") as "front" | "back";
+
+      // Determine target cert: explicit or current queue item
+      let certId = req.body.certId || _currentGradingCertId;
+      let dbCert: any = null;
+      if (certId) {
+        dbCert = await findCertByIdFlex(String(certId));
+      }
+      if (!dbCert) {
+        // Fall back to first ungraded
+        const rows = await db.execute(sql`SELECT * FROM certificates WHERE status = 'active' AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`);
+        dbCert = rows.rows?.[0];
+      }
+      if (!dbCert) return res.status(404).json({ error: "No active certificate found for upload" });
+
+      const { autoCrop } = await import("./image-processing");
+      const file = req.file || (req.files as any)?.[side]?.[0];
+      if (!file) return res.status(400).json({ error: "No image in request" });
+
+      const normId = normalizeCertId(dbCert.cert_id || dbCert.certId || "");
+      const { buffer: croppedBuf } = await autoCrop(file.buffer);
+
+      const origKey = r2KeyForImage(normId, side as "front" | "back", "jpg");
+      await uploadToR2(origKey, croppedBuf, "image/jpeg");
+
+      const col = side === "front" ? "front_image_path" : "back_image_path";
+      await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
+      if (side === "front") {
+        await db.execute(sql`UPDATE certificates SET front_image_path = ${origKey}, grading_front_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`);
+      } else {
+        await db.execute(sql`UPDATE certificates SET back_image_path = ${origKey}, grading_back_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`);
+      }
+
+      const signedUrl = await getR2SignedUrl(origKey, 3600);
+      res.json({ ok: true, certId: normId, side, imageUrl: signedUrl });
+    } catch (err: any) {
+      console.error("[hot-folder] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Build 5: AI Grading ────────────────────────────────────────────────────
+
+  function getCertImageKeys(c: any): ImageKeys {
+    return {
+      frontOriginal:     c.gradingFrontOriginal     || null,
+      backOriginal:      c.gradingBackOriginal       || null,
+      frontGreyscale:    c.gradingFrontGreyscale     || null,
+      frontHighcontrast: c.gradingFrontHighcontrast  || null,
+      backGreyscale:     c.gradingBackGreyscale      || null,
+      backHighcontrast:  c.gradingBackHighcontrast   || null,
+      angledOriginal:    c.gradingAngledOriginal     || null,
+      closeupOriginal:   c.gradingCloseupOriginal    || null,
+    };
+  }
+
+  // POST /api/admin/certificates/:id/identify
+  app.post("/api/admin/certificates/:id/identify", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontOriginal || c.frontImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available for identification" });
+
+      const rawId = await identifyCard(frontKey);
+      const enriched = await verifyAndEnrichCardData(rawId);
+
+      // Save reference image to ai_analysis
+      await storage.updateCertificate(id, {
+        aiAnalysis: { ...(c.aiAnalysis || {}), identification: enriched } as any,
+      });
+
+      res.json({ identification: enriched });
+    } catch (err: any) {
+      console.error("[ai/identify] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/analyze
+  app.post("/api/admin/certificates/:id/analyze", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const keys = getCertImageKeys(c);
+      if (!keys.frontOriginal && !c.frontImagePath) {
+        return res.status(400).json({ error: "No images available for AI analysis" });
+      }
+      if (!keys.frontOriginal) keys.frontOriginal = c.frontImagePath;
+      if (!keys.backOriginal)  keys.backOriginal  = c.backImagePath;
+
+      const cardGame = req.body?.card_game || c.gameType || undefined;
+      const analysis = await analyzeCard(keys, cardGame);
+
+      // Persist analysis
+      await storage.updateCertificate(id, {
+        aiAnalysis: { ...(c.aiAnalysis || {}), grading: analysis } as any,
+      });
+
+      res.json({ analysis });
+    } catch (err: any) {
+      console.error("[ai/analyze] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/identify-and-analyze
+  app.post("/api/admin/certificates/:id/identify-and-analyze", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const keys = getCertImageKeys(c);
+      if (!keys.frontOriginal && !c.frontImagePath) {
+        return res.status(400).json({ error: "No images available for AI analysis" });
+      }
+      if (!keys.frontOriginal) keys.frontOriginal = c.frontImagePath;
+      if (!keys.backOriginal)  keys.backOriginal  = c.backImagePath;
+
+      const cardGame = req.body?.card_game || c.gameType || undefined;
+      const result = await identifyAndAnalyze(keys, cardGame);
+
+      // Persist both
+      await storage.updateCertificate(id, {
+        aiAnalysis: { identification: result.identification, grading: result.analysis } as any,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      console.error("[ai/identify-and-analyze] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
+
+  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+  app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No image file provided" });
+    try {
+      const result = await identifyCardFromBuffer(req.file.buffer, req.file.mimetype || "image/jpeg");
+      res.json(result);
+    } catch (err: any) {
+      console.error("[ai/identify-image] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Build 6: Public tools ──────────────────────────────────────────────────
+
+  const toolsRateLimit = rateLimit({
+    windowMs: 60 * 1000, max: 10,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many requests — please wait a minute." },
+  });
+  const estimateRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 5,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many estimate requests — you can request up to 5 estimates per hour." },
+  });
+
+  const toolsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+  // GET /api/tools/estimate/credits?email=
+  app.get("/api/tools/estimate/credits", async (req, res) => {
+    const email = (req.query.email as string || "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: "Email required" });
+    try {
+      const rows = await db.execute(sql`
+        SELECT credits_remaining, credits_purchased, credits_used
+        FROM estimate_credits WHERE email = ${email}
+      `);
+      if (rows.rows.length === 0) return res.json({ credits: 0, email });
+      const row = rows.rows[0] as any;
+      res.json({ credits: row.credits_remaining, email });
+    } catch (err: any) {
+      console.error("[estimate/credits] error:", err.message);
+      res.status(500).json({ error: "Failed to check credits" });
+    }
+  });
+
+  // POST /api/tools/estimate/checkout  { email, package: "5"|"15"|"100", return_path?: "/tools/centering" }
+  app.post("/api/tools/estimate/checkout", async (req, res) => {
+    const email = (req.body.email || "").trim().toLowerCase();
+    const pkg = req.body.package as string;
+    const returnPath = (req.body.return_path as string) || "/tools/estimate";
+    if (!email) return res.status(400).json({ error: "Email required" });
+    const pkgInfo = ESTIMATE_PACKAGES[pkg];
+    if (!pkgInfo) return res.status(400).json({ error: "Invalid package" });
+    try {
+      const stripe = await getUncachableStripeClient();
+      const origin = (req.headers.origin as string) || "https://mintvaultuk.com";
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        customer_email: email,
+        line_items: [{
+          price_data: {
+            currency: "gbp",
+            product_data: {
+              name: `MintVault Pre-Grade Estimates — ${pkgInfo.label}`,
+              description: `${pkgInfo.credits} AI pre-grading estimates for your trading cards`,
+            },
+            unit_amount: pkgInfo.pricePence,
+          },
+          quantity: 1,
+        }],
+        metadata: {
+          type: "estimate_credits",
+          email,
+          credits: String(pkgInfo.credits),
+        },
+        success_url: `${origin}${returnPath}?payment=success&email=${encodeURIComponent(email)}`,
+        cancel_url: `${origin}${returnPath}?payment=cancelled`,
+      });
+      res.json({ url: session.url });
+    } catch (err: any) {
+      console.error("[estimate/checkout] error:", err.message);
+      res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  });
+
+  // POST /api/tools/estimate  (multipart: image + optional email field)
+  // Pre-grade checker images are NOT saved — they're for one-time AI analysis only and deleted
+  // immediately after processing to keep storage costs down. Images land in multer memory storage,
+  // are resized in-memory with sharp, sent to Anthropic as base64, then garbage collected with
+  // the request. Nothing is written to R2, Neon, or disk.
+  // No rate limit for paid users (email + credits > 0); free uses get the standard limit.
+  app.post("/api/tools/estimate", toolsUpload.single("image"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
+      if (!apiKey) return res.status(503).json({ error: "AI service not configured — ANTHROPIC_API_KEY secret is missing from Fly.io. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-..." });
+
+      const email = (req.body.email || "").trim().toLowerCase();
+      const isAdminFree = email === ADMIN_FREE_EMAIL;
+
+      // Logged-in users: check ai_credits_user_balance first, then fall back to email credits
+      const sessionUserId = (req.session as any)?.userId;
+      let usedUserBalance = false;
+
+      if (!isAdminFree) {
+        if (sessionUserId) {
+          // Check user-level balance
+          const userRows = await db.execute(sql`
+            SELECT ai_credits_user_balance FROM users WHERE id = ${sessionUserId} AND deleted_at IS NULL LIMIT 1
+          `);
+          const userBalance = (userRows.rows[0] as any)?.ai_credits_user_balance ?? 0;
+          if (userBalance > 0) {
+            await db.execute(sql`
+              UPDATE users SET ai_credits_user_balance = ai_credits_user_balance - 1
+              WHERE id = ${sessionUserId} AND ai_credits_user_balance > 0
+            `);
+            usedUserBalance = true;
+          } else if (email) {
+            // Fall back to email-based credits (e.g. pre-account purchases)
+            const rows = await db.execute(sql`
+              SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
+            `);
+            if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
+              return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
+            }
+            await db.execute(sql`
+              UPDATE estimate_credits
+              SET credits_remaining = credits_remaining - 1,
+                  credits_used = credits_used + 1,
+                  updated_at = NOW()
+              WHERE email = ${email} AND credits_remaining > 0
+            `);
+          } else {
+            return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
+          }
+        } else if (email) {
+          // Anonymous with email — use email credits only
+          const rows = await db.execute(sql`
+            SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
+          `);
+          if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
+            return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
+          }
+          await db.execute(sql`
+            UPDATE estimate_credits
+            SET credits_remaining = credits_remaining - 1,
+                credits_used = credits_used + 1,
+                updated_at = NOW()
+            WHERE email = ${email} AND credits_remaining > 0
+          `);
+        }
+      }
+
+      const { PRE_GRADE_PROMPT } = await import("./grading-prompt");
+
+      // Resize large images before sending to Anthropic (phone photos can be 6-8MB)
+      const sharp = (await import("sharp")).default;
+      const resizedBuffer = await sharp(req.file.buffer)
+        .resize({ width: 1500, height: 1500, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      console.log(`[tools/estimate] image resized: ${req.file.size} bytes → ${resizedBuffer.length} bytes`);
+
+      const base64 = resizedBuffer.toString("base64");
+      const mt = "image/jpeg";
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1024,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
+            { type: "text", text: PRE_GRADE_PROMPT },
+          ]}],
+        }),
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => "");
+        console.error("[tools/estimate] Anthropic API error", response.status, errBody.slice(0, 300));
+        throw new Error(`AI API error ${response.status}: ${errBody.slice(0, 200)}`);
+      }
+      const aiData = await response.json() as { content: { text: string }[] };
+      const text = aiData.content?.[0]?.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const estimate = JSON.parse(cleaned);
+      // Return remaining credits with response
+      let creditsLeft: number | undefined;
+      if (usedUserBalance && sessionUserId) {
+        const cr = await db.execute(sql`SELECT ai_credits_user_balance FROM users WHERE id = ${sessionUserId}`);
+        creditsLeft = cr.rows.length ? (cr.rows[0] as any).ai_credits_user_balance : 0;
+      } else if (email && !isAdminFree) {
+        const cr = await db.execute(sql`SELECT credits_remaining FROM estimate_credits WHERE email = ${email}`);
+        creditsLeft = cr.rows.length ? (cr.rows[0] as any).credits_remaining : 0;
+      }
+      res.json({ ...estimate, credits_remaining: creditsLeft });
+    } catch (err: any) {
+      console.error("[tools/estimate] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Build 6: Admin Learning Dashboard ─────────────────────────────────────
+
+  app.get("/api/admin/learning/overview", requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT
+          COUNT(*)::int                                    AS total_graded,
+          COUNT(*) FILTER (WHERE DATE_TRUNC('month', completed_at) = DATE_TRUNC('month', NOW()))::int AS this_month,
+          ROUND(AVG(final_grade)::numeric, 2)             AS avg_grade,
+          ROUND(AVG(grading_duration_seconds)::numeric, 0)::int AS avg_seconds,
+          COUNT(*) FILTER (WHERE final_grade = 10)::int   AS black_label_count
+        FROM grading_sessions
+        WHERE final_grade IS NOT NULL
+      `);
+      const overview = rows.rows[0] || {};
+
+      const distRows = await db.execute(sql`
+        SELECT final_grade, COUNT(*)::int AS count
+        FROM grading_sessions
+        WHERE final_grade IS NOT NULL
+        GROUP BY final_grade
+        ORDER BY final_grade DESC
+      `);
+
+      const gameRows = await db.execute(sql`
+        SELECT card_game, COUNT(*)::int AS count
+        FROM grading_sessions
+        WHERE card_game IS NOT NULL
+        GROUP BY card_game
+        ORDER BY count DESC
+      `);
+
+      const activityRows = await db.execute(sql`
+        SELECT DATE(completed_at) AS day, COUNT(*)::int AS count
+        FROM grading_sessions
+        WHERE completed_at >= NOW() - INTERVAL '30 days'
+        GROUP BY day
+        ORDER BY day
+      `);
+
+      res.json({
+        overview,
+        grade_distribution: distRows.rows,
+        game_distribution: gameRows.rows,
+        activity_last_30_days: activityRows.rows,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/learning/accuracy", requireAdmin, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(centering_diff) <= 0.5) / NULLIF(COUNT(*) FILTER (WHERE centering_diff IS NOT NULL), 0), 1) AS centering_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(corners_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE corners_diff IS NOT NULL), 0), 1)   AS corners_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(edges_diff) <= 0.5)     / NULLIF(COUNT(*) FILTER (WHERE edges_diff IS NOT NULL), 0), 1)     AS edges_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(surface_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE surface_diff IS NOT NULL), 0), 1)   AS surface_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(overall_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE overall_diff IS NOT NULL), 0), 1)   AS overall_accuracy,
+          ROUND(AVG(centering_diff)::numeric, 2) AS avg_centering_diff,
+          ROUND(AVG(corners_diff)::numeric, 2)   AS avg_corners_diff,
+          ROUND(AVG(edges_diff)::numeric, 2)     AS avg_edges_diff,
+          ROUND(AVG(surface_diff)::numeric, 2)   AS avg_surface_diff,
+          ROUND(AVG(overall_diff)::numeric, 2)   AS avg_overall_diff
+        FROM grading_sessions
+        WHERE overall_diff IS NOT NULL
+      `);
+      res.json(rows.rows[0] || {});
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/admin/certificates/:id/status
+  app.put("/api/admin/certificates/:id/status", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const { status, tracking_number } = req.body;
+      const validStatuses = ["submitted", "received", "in_queue", "grading", "quality_check", "slab_production", "shipping", "delivered"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+      await db.execute(sql`
+        UPDATE certificates
+        SET grading_status = ${status},
+            status_updated_at = NOW(),
+            cert_tracking_number = COALESCE(${tracking_number || null}, cert_tracking_number),
+            updated_at = NOW()
+        WHERE id = ${id}
+      `);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/customer/portfolio — customer's graded cards
+  app.get("/api/customer/portfolio", requireCustomer, async (req, res) => {
+    try {
+      const email = (req.session as any).customerEmail;
+      if (!email) return res.status(401).json({ error: "Not authenticated" });
+      const rows = await db.execute(sql`
+        SELECT
+          c.id, c.cert_id, c.card_name, c.set_name, c.year, c.card_game, c.language,
+          c.grade_overall, c.grade_type, c.created_at, c.grading_status,
+          c.estimated_value_low, c.estimated_value_high,
+          o.label_type
+        FROM certificates c
+        LEFT JOIN ownership_records o ON o.certificate_id = c.id AND o.owner_email = ${email} AND o.is_current = true
+        WHERE c.grade_approved_by IS NOT NULL
+          AND (o.owner_email = ${email} OR c.owner_email = ${email})
+        ORDER BY c.created_at DESC
+      `);
+      res.json(rows.rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/public/collection/:userId — shareable collection
+  app.get("/api/public/collection/:userId", async (req, res) => {
+    try {
+      const userId = String(req.params.userId);
+      const rows = await db.execute(sql`
+        SELECT c.cert_id, c.card_name, c.set_name, c.year, c.card_game,
+               c.grade_overall, c.grade_type, c.created_at
+        FROM certificates c
+        JOIN ownership_records o ON o.certificate_id = c.id
+          AND o.owner_id = ${userId} AND o.is_current = true
+          AND o.collection_public = true
+        WHERE c.grade_approved_by IS NOT NULL
+        ORDER BY c.created_at DESC
+      `);
+      res.json({ cards: rows.rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Population report ───────────────────────────────────────────────────────
+  app.get("/api/population", async (req, res) => {
+    try {
+      const game = typeof req.query.game === "string" ? req.query.game.trim() : undefined;
+      const set  = typeof req.query.set  === "string" ? req.query.set.trim()  : undefined;
+      const card = typeof req.query.card === "string" ? req.query.card.trim() : undefined;
+      const rows = await storage.getGlobalPopulation({
+        game: game || undefined,
+        set:  set  || undefined,
+        card: card || undefined,
+      });
+      res.json(rows);
+    } catch (err) {
+      console.error("[population] error:", err);
+      res.status(500).json({ error: "Failed to load population data." });
+    }
+  });
+
+  // ── Population — filtered cert list ─────────────────────────────────────────
+  app.get("/api/population/certs", async (req, res) => {
+    try {
+      const card = typeof req.query.card === "string" ? req.query.card.trim() : "";
+      const set  = typeof req.query.set  === "string" ? req.query.set.trim()  : "";
+      if (!card && !set) return res.status(400).json({ error: "card or set required" });
+
+      const cardEsc = card.replace(/'/g, "''").replace(/%/g, "\\%");
+      const setEsc  = set.replace(/'/g, "''").replace(/%/g, "\\%");
+
+      const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
+      if (card) conditions.push(`LOWER(card_name) LIKE LOWER('%${cardEsc}%')`);
+      if (set)  conditions.push(`LOWER(set_name) LIKE LOWER('%${setEsc}%')`);
+
+      const result = await db.execute(sql.raw(`
+        SELECT cert_id, card_name, set_name, card_game, grade_overall, created_at
+        FROM certificates
+        WHERE ${conditions.join(" AND ")}
+        ORDER BY grade_overall DESC NULLS LAST, created_at DESC
+        LIMIT 500
+      `));
+
+      res.json((result.rows as any[]).map(r => ({
+        certId:      r.cert_id,
+        cardName:    r.card_name,
+        setName:     r.set_name,
+        cardGame:    r.card_game,
+        grade:       r.grade_overall,
+        gradedAt:    r.created_at,
+      })));
+    } catch (err) {
+      console.error("[population/certs] error:", err);
+      res.status(500).json({ error: "Failed to load certificates." });
+    }
+  });
+
+  // ── Account auth (/api/auth/*) ────────────────────────────────────────────
+
+  function getClientIpForAuth(req: any): string {
+    const fwd = req.headers["x-forwarded-for"];
+    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
+    return req.ip || req.socket?.remoteAddress || "unknown";
+  }
+
+  function getAppBaseUrl(req: any): string {
+    return process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+  }
+
+  // POST /api/auth/signup
+  app.post("/api/auth/signup", async (req, res) => {
+    try {
+      const { email, password, display_name } = req.body;
+      if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: "Invalid email address" });
+      const pwCheck = validatePassword(password);
+      if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
+
+      const existing = await findUserByEmail(email);
+      if (existing && !existing.deleted_at) return res.status(409).json({ error: "An account with that email already exists" });
+
+      const hash = await hashPassword(password);
+      const result = await db.execute(sql`
+        INSERT INTO users (email, password_hash, display_name, email_verified, role, created_at, updated_at)
+        VALUES (${email.toLowerCase().trim()}, ${hash}, ${display_name?.trim() || null}, false, 'customer', NOW(), NOW())
+        RETURNING id, email, display_name, email_verified
+      `);
+      const user = result.rows[0] as any;
+      const verifyToken = await createEmailVerificationToken(user.id);
+      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${verifyToken}`;
+      await sendWelcomeVerificationEmail(user.email, user.display_name, verifyUrl);
+      await writeAuthAudit("auth.signup", user.id, getClientIpForAuth(req), { email: user.email });
+
+      (req.session as any).userId = user.id;
+      (req.session as any).userEmail = user.email;
+      return res.status(201).json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: false });
+    } catch (err: any) {
+      console.error("[auth] signup error:", err.message);
+      return res.status(500).json({ error: "Signup failed. Please try again." });
+    }
+  });
+
+  // POST /api/auth/login
+  app.post("/api/auth/login", async (req, res) => {
+    const ip = getClientIpForAuth(req);
+    const ua = req.headers["user-agent"] as string | undefined;
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) return res.status(401).json({ error: "invalid_credentials" });
+
+      // IP rate limit check (express-rate-limit handles this via app.use in index.ts)
+      // Email-level rate limit: 10 failed attempts in 1 hour
+      const emailFailures = await countRecentFailedAttempts(email, 60);
+      if (emailFailures >= 10) {
+        await logLoginAttempt(email, ip, false, ua);
+        await writeAuthAudit("auth.login.blocked", "unknown", ip, { email });
+        // Generic error — do NOT reveal lockout
+        return res.status(401).json({ error: "invalid_credentials" });
+      }
+
+      const user = await findUserByEmail(email);
+      if (!user || user.deleted_at) {
+        await logLoginAttempt(email, ip, false, ua);
+        await writeAuthAudit("auth.login.failure", "unknown", ip, { email, reason: "user_not_found" });
+        return res.status(401).json({ error: "invalid_credentials" });
+      }
+      if (!user.password_hash) {
+        await logLoginAttempt(email, ip, false, ua);
+        return res.status(401).json({ error: "invalid_credentials" });
+      }
+
+      const valid = await verifyPassword(password as string, user.password_hash as string);
+      if (!valid) {
+        await logLoginAttempt(email, ip, false, ua);
+        await db.execute(sql`UPDATE users SET failed_login_count = failed_login_count + 1 WHERE id = ${user.id as string}`);
+        await writeAuthAudit("auth.login.failure", user.id as string, ip, { email });
+        return res.status(401).json({ error: "invalid_credentials" });
+      }
+
+      // Success — regenerate session to prevent fixation
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+      (req.session as any).userId = user.id;
+      (req.session as any).userEmail = user.email;
+
+      await db.execute(sql`
+        UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip}, failed_login_count = 0 WHERE id = ${user.id as string}
+      `);
+      await logLoginAttempt(email, ip, true, ua);
+      await writeAuthAudit("auth.login.success", user.id as string, ip, { email });
+      return res.json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: user.email_verified });
+    } catch (err: any) {
+      console.error("[auth] login error:", err.message);
+      return res.status(500).json({ error: "Login failed. Please try again." });
+    }
+  });
+
+  // POST /api/auth/logout
+  app.post("/api/auth/logout", async (req, res) => {
+    const userId = (req.session as any).userId as string | undefined;
+    if (userId) await writeAuthAudit("auth.logout", userId, getClientIpForAuth(req), {});
+    req.session.destroy(() => {});
+    res.clearCookie("mv.sid");
+    return res.json({ ok: true });
+  });
+
+  // POST /api/auth/magic-link
+  app.post("/api/auth/magic-link", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) return res.status(400).json({ error: "Email is required" });
+      // Generic success regardless of whether account exists (prevents enumeration)
+      const user = await findUserByEmail(email);
+      if (user && !user.deleted_at) {
+        const token = await createAccountMagicLinkToken(user.id as string);
+        const loginUrl = `${getAppBaseUrl(req)}/api/auth/magic-link/verify?token=${token}`;
+        await sendAccountMagicLinkEmail(user.email as string, loginUrl);
+        await writeAuthAudit("auth.magic_link.requested", user.id as string, getClientIpForAuth(req), { email });
+      }
+      return res.json({ ok: true, message: "If an account exists, a login link has been sent." });
+    } catch (err: any) {
+      console.error("[auth] magic-link error:", err.message);
+      return res.json({ ok: true, message: "If an account exists, a login link has been sent." });
+    }
+  });
+
+  // GET /api/auth/magic-link/verify?token=...
+  app.get("/api/auth/magic-link/verify", async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token || typeof token !== "string") return res.redirect("/login?error=expired_link");
+      const rows = await db.execute(sql`
+        SELECT * FROM account_magic_link_tokens WHERE token = ${token} LIMIT 1
+      `);
+      if (!rows.rows.length) return res.redirect("/login?error=expired_link");
+      const rec = rows.rows[0] as any;
+      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
+        return res.redirect("/login?error=expired_link");
+      }
+      await db.execute(sql`UPDATE account_magic_link_tokens SET consumed_at = NOW() WHERE token = ${token}`);
+      const user = await findUserById(rec.user_id);
+      if (!user || user.deleted_at) return res.redirect("/login?error=expired_link");
+
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+      (req.session as any).userId = user.id;
+      (req.session as any).userEmail = user.email;
+      await db.execute(sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`);
+      await writeAuthAudit("auth.magic_link.used", user.id as string, getClientIpForAuth(req), {});
+      return res.redirect("/dashboard");
+    } catch (err: any) {
+      console.error("[auth] magic-link verify error:", err.message);
+      return res.redirect("/login?error=expired_link");
+    }
+  });
+
+  // POST /api/auth/forgot-password
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (email) {
+        const user = await findUserByEmail(email);
+        if (user && !user.deleted_at && user.password_hash) {
+          const token = await createPasswordResetToken(user.id as string);
+          const resetUrl = `${getAppBaseUrl(req)}/reset-password?token=${token}`;
+          await sendPasswordResetEmail(user.email as string, resetUrl);
+          await writeAuthAudit("auth.password_reset.requested", user.id as string, getClientIpForAuth(req), { email });
+        }
+      }
+      // Always return generic success (prevents email enumeration)
+      return res.json({ ok: true, message: "If an account exists with that email, a reset link has been sent." });
+    } catch (err: any) {
+      console.error("[auth] forgot-password error:", err.message);
+      return res.json({ ok: true, message: "If an account exists with that email, a reset link has been sent." });
+    }
+  });
+
+  // POST /api/auth/reset-password
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, new_password } = req.body;
+      if (!token || !new_password) return res.status(400).json({ error: "Token and new password are required" });
+      const pwCheck = validatePassword(new_password);
+      if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
+
+      const rows = await db.execute(sql`SELECT * FROM password_reset_tokens WHERE token = ${token} LIMIT 1`);
+      if (!rows.rows.length) return res.status(400).json({ error: "Invalid or expired reset link" });
+      const rec = rows.rows[0] as any;
+      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
+        return res.status(400).json({ error: "Reset link has expired. Please request a new one." });
+      }
+      const hash = await hashPassword(new_password);
+      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${rec.user_id}`);
+      await db.execute(sql`UPDATE password_reset_tokens SET consumed_at = NOW() WHERE token = ${token}`);
+      // Destroy all sessions for this user by updating their password (sessions will fail to re-validate)
+      const user = await findUserById(rec.user_id);
+      if (user) {
+        await sendPasswordChangedEmail(user.email as string);
+        await writeAuthAudit("auth.password_reset", user.id as string, getClientIpForAuth(req), { email: user.email });
+      }
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[auth] reset-password error:", err.message);
+      return res.status(500).json({ error: "Password reset failed. Please try again." });
+    }
+  });
+
+  // GET /api/auth/verify-email?token=...
+  app.get("/api/auth/verify-email", async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token || typeof token !== "string") return res.redirect("/dashboard?verified=error");
+      const rows = await db.execute(sql`SELECT * FROM email_verification_tokens WHERE token = ${token} LIMIT 1`);
+      if (!rows.rows.length) return res.redirect("/dashboard?verified=error");
+      const rec = rows.rows[0] as any;
+      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) return res.redirect("/verify-email?error=expired");
+      await db.execute(sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${rec.user_id}`);
+      await db.execute(sql`UPDATE email_verification_tokens SET consumed_at = NOW() WHERE token = ${token}`);
+      await writeAuthAudit("auth.email.verified", rec.user_id, getClientIpForAuth(req), {});
+      return res.redirect("/dashboard?verified=true");
+    } catch (err: any) {
+      console.error("[auth] verify-email error:", err.message);
+      return res.redirect("/dashboard?verified=error");
+    }
+  });
+
+  // POST /api/auth/resend-verification
+  app.post("/api/auth/resend-verification", requireAuth, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const user = await findUserById(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.email_verified) return res.status(400).json({ error: "Email already verified" });
+      const token = await createEmailVerificationToken(userId);
+      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
+      await sendWelcomeVerificationEmail(user.email as string, user.display_name as string | null, verifyUrl);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[auth] resend-verification error:", err.message);
+      return res.status(500).json({ error: "Failed to send verification email" });
+    }
+  });
+
+  // GET /api/auth/me
+  app.get("/api/auth/me", async (req, res) => {
+    const userId = (req.session as any).userId as string | undefined;
+    if (!userId) return res.status(401).json({ error: "auth_required" });
+    try {
+      const user = await findUserById(userId);
+      if (!user || user.deleted_at) {
+        req.session.destroy(() => {});
+        return res.status(401).json({ error: "auth_required" });
+      }
+      return res.json({
+        id: user.id,
+        email: user.email,
+        display_name: user.display_name,
+        email_verified: user.email_verified,
+        created_at: user.created_at,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to get user" });
+    }
+  });
+
+  // PUT /api/auth/change-password
+  app.put("/api/auth/change-password", requireAuth, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const { current_password, new_password } = req.body;
+      if (!current_password || !new_password) return res.status(400).json({ error: "Both current and new password are required" });
+      const pwCheck = validatePassword(new_password);
+      if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
+      const user = await findUserById(userId);
+      if (!user || !user.password_hash) return res.status(400).json({ error: "No password set on this account" });
+      const valid = await verifyPassword(current_password, user.password_hash as string);
+      if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
+      const hash = await hashPassword(new_password);
+      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${userId}`);
+      await sendPasswordChangedEmail(user.email as string);
+      await writeAuthAudit("auth.password_changed", userId, getClientIpForAuth(req), { email: user.email });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[auth] change-password error:", err.message);
+      return res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
+  // PUT /api/auth/change-email
+  app.put("/api/auth/change-email", requireAuth, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const { new_email, password } = req.body;
+      if (!new_email || !password) return res.status(400).json({ error: "New email and password are required" });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(new_email)) return res.status(400).json({ error: "Invalid email address" });
+      const user = await findUserById(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.password_hash) {
+        const valid = await verifyPassword(password, user.password_hash as string);
+        if (!valid) return res.status(401).json({ error: "Password is incorrect" });
+      }
+      const existing = await findUserByEmail(new_email);
+      if (existing && existing.id !== userId) return res.status(409).json({ error: "That email is already in use" });
+      const oldEmail = user.email as string;
+      await db.execute(sql`UPDATE users SET email = ${new_email.toLowerCase().trim()}, email_verified = false, email_verified_at = NULL, updated_at = NOW() WHERE id = ${userId}`);
+      (req.session as any).userEmail = new_email.toLowerCase().trim();
+      const token = await createEmailVerificationToken(userId);
+      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
+      await sendWelcomeVerificationEmail(new_email, user.display_name as string | null, verifyUrl);
+      await sendEmailChangedNotification(oldEmail, new_email);
+      await writeAuthAudit("auth.email_changed", userId, getClientIpForAuth(req), { old_email: oldEmail, new_email });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[auth] change-email error:", err.message);
+      return res.status(500).json({ error: "Failed to change email" });
+    }
+  });
+
+  // PUT /api/auth/profile
+  app.put("/api/auth/profile", requireAuth, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const { display_name } = req.body;
+      await db.execute(sql`UPDATE users SET display_name = ${display_name?.trim() || null}, updated_at = NOW() WHERE id = ${userId}`);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // DELETE /api/auth/delete-account
+  app.delete("/api/auth/delete-account", requireAuth, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const { password, confirmation } = req.body;
+      if (confirmation !== "DELETE") return res.status(400).json({ error: 'Please type "DELETE" to confirm account deletion' });
+      const user = await findUserById(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      if (user.password_hash) {
+        if (!password) return res.status(400).json({ error: "Password is required to delete your account" });
+        const valid = await verifyPassword(password, user.password_hash as string);
+        if (!valid) return res.status(401).json({ error: "Password is incorrect" });
+      }
+      // Soft delete — anonymise PII but preserve cert ownership chain
+      await db.execute(sql`
+        UPDATE users SET
+          email = ${`deleted_${userId}@mintvault.invalid`},
+          password_hash = NULL,
+          display_name = 'Deleted User',
+          deleted_at = NOW(),
+          updated_at = NOW()
+        WHERE id = ${userId}
+      `);
+      const emailForNotif = user.email as string;
+      await writeAuthAudit("auth.account_deleted", userId, getClientIpForAuth(req), { email: emailForNotif });
+      req.session.destroy(() => {});
+      await sendAccountDeletedEmail(emailForNotif);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[auth] delete-account error:", err.message);
+      return res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
+  // ── Showroom routes ──────────────────────────────────────────────────────────
+  registerShowroomRoutes(app);
+
+  // ── Vault Club routes ────────────────────────────────────────────────────────
+  registerVaultClubRoutes(app);
 
   return httpServer;
 }

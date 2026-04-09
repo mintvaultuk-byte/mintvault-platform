@@ -67,7 +67,7 @@ export default function AdminPricing() {
     });
   };
 
-  const serviceTypes = submissionTypes.filter(t => t.id === "grading" || t.id === "reholder");
+  const serviceTypes = submissionTypes;
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -75,7 +75,7 @@ export default function AdminPricing() {
         <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-pricing-title">
           PRICING MANAGEMENT
         </h1>
-        <p className="text-gray-500 text-sm">Edit service tier pricing, turnaround, and max values per service type</p>
+        <p className="text-[#999999] text-sm">Edit service tier pricing, turnaround, and max values per service type</p>
       </div>
 
       <div className="flex gap-2 mb-6">
@@ -86,7 +86,7 @@ export default function AdminPricing() {
             className={`text-sm px-4 py-2 rounded border transition-colors tracking-wider font-medium ${
               activeService === st.id
                 ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                : "text-gray-500 border-gray-700 hover:text-gray-300"
+                : "text-[#999999] border-[#E8E4DC] hover:text-[#1A1A1A]"
             }`}
             data-testid={`button-service-${st.id}`}
           >
@@ -101,7 +101,7 @@ export default function AdminPricing() {
         </div>
       ) : tiers.length === 0 ? (
         <div className="text-center py-12 border border-[#D4AF37]/10 rounded-lg">
-          <p className="text-gray-500">No tiers found for {activeService}</p>
+          <p className="text-[#999999]">No tiers found for {activeService}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -109,7 +109,7 @@ export default function AdminPricing() {
             <div
               key={tier.id}
               className={`border rounded-lg p-4 transition-colors ${
-                !tier.is_active ? "border-gray-700 opacity-60" : "border-[#D4AF37]/20"
+                !tier.is_active ? "border-[#E8E4DC] opacity-60" : "border-[#D4AF37]/20"
               }`}
               data-testid={`pricing-tier-${tier.tier_id}`}
             >
@@ -117,19 +117,19 @@ export default function AdminPricing() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider">{tier.name}</h3>
-                    <span className="text-gray-500 text-xs font-mono">{tier.service_type} / {tier.tier_id}</span>
+                    <span className="text-[#999999] text-xs font-mono">{tier.service_type} / {tier.tier_id}</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="text-gray-400 text-xs block mb-1">
+                      <label className="text-[#666666] text-xs block mb-1">
                         <DollarSign size={10} className="inline" /> Price (pence)
                       </label>
                       <input
                         type="number"
                         value={editForm.pricePerCard}
                         onChange={(e) => setEditForm({ ...editForm, pricePerCard: e.target.value })}
-                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]"
                         data-testid="input-edit-price"
                       />
                       <p className="text-gray-600 text-xs mt-0.5">
@@ -137,26 +137,26 @@ export default function AdminPricing() {
                       </p>
                     </div>
                     <div>
-                      <label className="text-gray-400 text-xs block mb-1">
+                      <label className="text-[#666666] text-xs block mb-1">
                         <Clock size={10} className="inline" /> Turnaround (days)
                       </label>
                       <input
                         type="number"
                         value={editForm.turnaroundDays}
                         onChange={(e) => setEditForm({ ...editForm, turnaroundDays: e.target.value })}
-                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]"
                         data-testid="input-edit-turnaround"
                       />
                     </div>
                     <div>
-                      <label className="text-gray-400 text-xs block mb-1">
+                      <label className="text-[#666666] text-xs block mb-1">
                         <Shield size={10} className="inline" /> Max Value (£)
                       </label>
                       <input
                         type="number"
                         value={editForm.maxValueGbp}
                         onChange={(e) => setEditForm({ ...editForm, maxValueGbp: e.target.value })}
-                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]"
                         data-testid="input-edit-maxvalue"
                       />
                     </div>
@@ -165,7 +165,7 @@ export default function AdminPricing() {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => setEditForm({ ...editForm, isActive: !editForm.isActive })}
-                      className={`flex items-center gap-1.5 text-sm ${editForm.isActive ? "text-emerald-400" : "text-gray-500"}`}
+                      className={`flex items-center gap-1.5 text-sm ${editForm.isActive ? "text-emerald-500" : "text-[#999999]"}`}
                       data-testid="button-toggle-active"
                     >
                       {editForm.isActive ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
@@ -184,7 +184,7 @@ export default function AdminPricing() {
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
-                      className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+                      className="text-[#666666] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-[#D4AF37]/40 transition-colors"
                       data-testid="button-cancel-edit"
                     >
                       Cancel
@@ -202,14 +202,14 @@ export default function AdminPricing() {
                       <div className="flex items-center gap-2">
                         <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider">{tier.name}</h3>
                         {!tier.is_active && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">Inactive</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]">Inactive</span>
                         )}
                       </div>
-                      <p className="text-gray-400 text-sm mt-1">
+                      <p className="text-[#666666] text-sm mt-1">
                         {tier.turnaround_days} working days · Max value: £{tier.max_value_gbp.toLocaleString()}
                       </p>
                     </div>
-                    <span className="text-white font-bold text-lg">
+                    <span className="text-[#1A1A1A] font-bold text-lg">
                       £{(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)} per card
                     </span>
                   </div>
@@ -221,7 +221,7 @@ export default function AdminPricing() {
       )}
 
       <div className="mt-6 border border-[#D4AF37]/10 rounded-lg p-4">
-        <p className="text-gray-500 text-xs">
+        <p className="text-[#999999] text-xs">
           Changes take effect immediately for new submissions. Existing submissions retain their original pricing.
           Editing one service type does not affect other service types.
         </p>

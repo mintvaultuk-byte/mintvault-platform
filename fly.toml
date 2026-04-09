@@ -1,0 +1,26 @@
+app = "mintvault"
+primary_region = "lhr"  # London — closest to your UK users
+
+[build]
+
+[env]
+  PORT = "5000"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,24 +1,6 @@
-import { useState } from "react";
 import { Link } from "wouter";
-import { Menu, X, ChevronDown, ChevronUp } from "lucide-react";
-import { BUILD_STAMP } from "@/lib/constants";
-const logoPath = "/mintvault-logo.png";
-
-const whyMenuItems = [
-  { label: "Why Grade", href: "/why-mintvault#why-grade" },
-  { label: "Our Labels", href: "/why-mintvault#our-labels" },
-  { label: "Grading Scale", href: "/why-mintvault#grading-scale" },
-  { label: "Population Report", href: "/why-mintvault#population-report" },
-  { label: "Blog", href: "/why-mintvault#authority" },
-];
-
-const exploreMenuItems = [
-  { label: "Our Labels", href: "/labels", isRoute: true },
-  { label: "Grading Reports", href: "/reports", isRoute: true },
-  { label: "Certificate Lookup", href: "/cert", isRoute: true },
-  { label: "Supported TCGs", href: "/tcg", isRoute: true },
-  { label: "Guides & Articles", href: "/guides", isRoute: true },
-];
+import SiteHeader from "@/components/header";
+import MintVaultWordmark from "@/components/mintvault-wordmark";
 
 const footerServices = [
   { label: "Pokemon Card Grading UK", href: "/pokemon-card-grading-uk" },
@@ -30,167 +12,44 @@ const footerServices = [
 ];
 
 const footerGuides = [
+  { label: "Grading Scale", href: "/grading-scale" },
+  { label: "Grading Glossary", href: "/grading-glossary" },
   { label: "How to Grade Pokemon Cards", href: "/guides/how-to-grade-pokemon-cards-uk" },
   { label: "What Cards Are Worth Grading", href: "/guides/what-pokemon-cards-are-worth-grading" },
   { label: "Grading Costs Explained", href: "/guides/pokemon-card-grading-costs-explained" },
   { label: "Raw vs Graded Cards", href: "/guides/raw-vs-graded-pokemon-cards" },
-  { label: "Beginner's Collecting Guide", href: "/guides/beginners-guide-pokemon-card-collecting-uk" },
   { label: "All Guides", href: "/guides" },
 ];
 
 const footerCompany = [
-  { label: "Pricing", href: "/" },
+  { label: "How It Works", href: "/how-it-works" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Submit Cards", href: "/submit" },
   { label: "Certificate Lookup", href: "/cert" },
+  { label: "Stolen Card Protection", href: "/stolen-card-protection" },
   { label: "Track Submission", href: "/track" },
+  { label: "Ownership Portal", href: "/ownership" },
   { label: "Why MintVault", href: "/why-mintvault" },
   { label: "Terms & Conditions", href: "/terms-and-conditions" },
   { label: "Liability & Insurance", href: "/liability-and-insurance" },
+  { label: "Developer API", href: "/api-docs" },
 ];
 
-function Header() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [whyOpen, setWhyOpen] = useState(false);
-  const [exploreOpen, setExploreOpen] = useState(false);
-
-  const closeMenu = () => {
-    setMenuOpen(false);
-    setWhyOpen(false);
-    setExploreOpen(false);
-  };
-
-  return (
-    <header className="sticky top-0 z-50 bg-[#131313]/95 backdrop-blur-sm border-b border-[#f2ca50]/10">
-      <div className="flex items-center justify-between px-4 py-3 max-w-7xl mx-auto">
-        <button
-          data-testid="button-menu"
-          onClick={() => {
-            setMenuOpen(!menuOpen);
-            if (menuOpen) {
-              setWhyOpen(false);
-              setExploreOpen(false);
-            }
-          }}
-          className="text-[#f2ca50] p-1"
-          aria-label="Menu"
-        >
-          {menuOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
-
-        <Link href="/" data-testid="link-home">
-          <img
-            src={logoPath}
-            alt="MintVault UK - Professional Pokemon and Trading Card Grading"
-            className="h-11 md:h-13 w-auto"
-            data-testid="img-header-logo"
-          />
-        </Link>
-
-        <Link href="/submit">
-          <button className="bg-[#f2ca50] text-[#3c2f00] px-5 py-2 rounded-lg font-bold uppercase text-xs tracking-widest active:scale-95 transition-transform">
-            Submit
-          </button>
-        </Link>
-      </div>
-
-      {menuOpen && (
-        <nav className="border-t border-[#f2ca50]/10 bg-[#131313]/98 px-4 py-4" data-testid="nav-mobile-menu">
-          <ul className="space-y-3">
-            <li>
-              <Link href="/" onClick={closeMenu} className="text-[#f2ca50] text-lg block py-1" data-testid="link-pricing">
-                Pricing
-              </Link>
-            </li>
-
-            <li>
-              <button
-                onClick={() => setWhyOpen(!whyOpen)}
-                className="flex items-center justify-between w-full text-[#f2ca50] text-lg py-1"
-                data-testid="button-why-dropdown"
-              >
-                <span>Why MintVault</span>
-                {whyOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
-              {whyOpen && (
-                <ul className="ml-4 mt-2 space-y-2 border-l border-[#f2ca50]/20 pl-4" data-testid="nav-why-submenu">
-                  {whyMenuItems.map((item) => (
-                    <li key={item.label}>
-                      <a
-                        href={item.href}
-                        onClick={closeMenu}
-                        className="text-[#f2ca50]/70 hover:text-[#f2ca50] text-base block py-0.5 transition-colors"
-                        data-testid={`link-why-${item.label.toLowerCase().replace(/\s/g, "-")}`}
-                      >
-                        {item.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-
-            <li>
-              <button
-                onClick={() => setExploreOpen(!exploreOpen)}
-                className="flex items-center justify-between w-full text-[#f2ca50] text-lg py-1"
-                data-testid="button-explore-dropdown"
-              >
-                <span>Explore MintVault</span>
-                {exploreOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </button>
-              {exploreOpen && (
-                <ul className="ml-4 mt-2 space-y-2 border-l border-[#f2ca50]/20 pl-4" data-testid="nav-explore-submenu">
-                  {exploreMenuItems.map((item) => (
-                    <li key={item.label}>
-                      <Link
-                        href={item.href}
-                        onClick={closeMenu}
-                        className="text-[#f2ca50]/70 hover:text-[#f2ca50] text-base block py-0.5 transition-colors"
-                        data-testid={`link-explore-${item.label.toLowerCase().replace(/\s/g, "-")}`}
-                      >
-                        {item.label}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-
-            <li>
-              <Link href="/cert" onClick={closeMenu} className="text-[#f2ca50] text-lg block py-1" data-testid="link-cert-lookup">
-                Certificate Lookup
-              </Link>
-            </li>
-
-            <li>
-              <Link href="/guides" onClick={closeMenu} className="text-[#f2ca50] text-lg block py-1" data-testid="link-guides">
-                Guides
-              </Link>
-            </li>
-
-            <li>
-              <Link href="/submit" onClick={closeMenu} className="text-[#f2ca50] text-lg block py-1 font-semibold" data-testid="link-submit">
-                Submit Cards
-              </Link>
-            </li>
-          </ul>
-        </nav>
-      )}
-    </header>
-  );
-}
+const footerTools = [
+  { label: "Pre-Grade Estimate", href: "/tools/estimate" },
+];
 
 function Footer() {
   return (
-    <footer className="border-t border-[#f2ca50]/20 bg-[#1c1b1b] mt-16">
+    <footer className="relative z-[3] border-t border-[#E8E4DC] bg-[#FAFAF8] mt-16">
       <div className="max-w-4xl mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 mb-10">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-8 mb-10">
           <div>
-            <h4 className="text-[#f2ca50] text-xs font-bold uppercase tracking-widest mb-4">Services</h4>
+            <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Services</h4>
             <ul className="space-y-2">
               {footerServices.map((link) => (
                 <li key={link.href}>
-                  <Link href={link.href} className="text-[#f2ca50]/50 hover:text-[#f2ca50] text-xs transition-colors" data-testid={`link-footer-${link.href.slice(1)}`}>
+                  <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors" data-testid={`link-footer-${link.href.slice(1)}`}>
                     {link.label}
                   </Link>
                 </li>
@@ -198,11 +57,11 @@ function Footer() {
             </ul>
           </div>
           <div>
-            <h4 className="text-[#f2ca50] text-xs font-bold uppercase tracking-widest mb-4">Guides</h4>
+            <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Guides</h4>
             <ul className="space-y-2">
               {footerGuides.map((link) => (
                 <li key={link.href}>
-                  <Link href={link.href} className="text-[#f2ca50]/50 hover:text-[#f2ca50] text-xs transition-colors">
+                  <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
                     {link.label}
                   </Link>
                 </li>
@@ -210,46 +69,75 @@ function Footer() {
             </ul>
           </div>
           <div>
-            <h4 className="text-[#f2ca50] text-xs font-bold uppercase tracking-widest mb-4">Company</h4>
+            <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Company</h4>
             <ul className="space-y-2">
               {footerCompany.map((link) => (
                 <li key={link.href}>
-                  <Link href={link.href} className="text-[#f2ca50]/50 hover:text-[#f2ca50] text-xs transition-colors">
+                  <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
                     {link.label}
                   </Link>
                 </li>
               ))}
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Free Tools</h4>
+            <ul className="space-y-2">
+              {footerTools.map((link) => (
+                <li key={link.href}>
+                  <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Community</h4>
+            <ul className="space-y-2">
+              <li>
+                <span className="text-[#999999] text-xs cursor-default">Discord <span className="italic">(Coming Soon)</span></span>
+              </li>
+              <li>
+                <a href="https://www.instagram.com/mint_vault/" target="_blank" rel="noopener noreferrer" className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
+                  Instagram
+                </a>
+              </li>
+              <li>
+                <a href="https://www.facebook.com/mintvaultuk" target="_blank" rel="noopener noreferrer" className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
+                  Facebook Group
+                </a>
+              </li>
             </ul>
           </div>
         </div>
 
-        <div className="text-center border-t border-[#f2ca50]/10 pt-8">
-          <h3 className="text-[#f2ca50] text-sm font-semibold mb-3 tracking-wide">
-            Join our email list
-          </h3>
-          <div className="flex gap-2 max-w-md mx-auto mb-6">
-            <input
-              type="email"
-              placeholder="Enter your email"
-              data-testid="input-email"
-              className="flex-1 bg-transparent border border-[#f2ca50]/30 rounded-lg px-4 py-2 text-[#e5e2e1] text-sm placeholder:text-[#f2ca50]/40 focus:outline-none focus:border-[#f2ca50]/60 transition-colors"
-            />
-            <button
-              data-testid="button-subscribe"
-              className="border border-[#f2ca50]/50 bg-[#f2ca50]/[0.06] text-[#f2ca50] px-4 py-2 rounded-lg font-semibold text-sm tracking-wide transition-all hover:bg-[#f2ca50]/15"
-            >
-              Subscribe
-            </button>
+        <div className="text-center border-t border-[#E8E4DC] pt-8">
+          <div className="flex justify-center mb-6">
+            <MintVaultWordmark size="sm" />
           </div>
-
-          <p className="text-[#f2ca50]/40 text-xs mb-3">
+          <div className="flex items-center justify-center gap-5 mb-4">
+            <a href="https://www.instagram.com/mint_vault/" target="_blank" rel="noopener noreferrer" aria-label="MintVault on Instagram" className="text-[#999999] hover:text-[#B8960C] transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+            </a>
+            <a href="https://www.tiktok.com/@mintvaultuk" target="_blank" rel="noopener noreferrer" aria-label="MintVault on TikTok" className="text-[#999999] hover:text-[#B8960C] transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.18 8.18 0 0 0 4.78 1.52V6.76a4.85 4.85 0 0 1-1.01-.07z"/></svg>
+            </a>
+            <a href="https://www.youtube.com/@mintvaultuk" target="_blank" rel="noopener noreferrer" aria-label="MintVault on YouTube" className="text-[#999999] hover:text-[#B8960C] transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            </a>
+            <a href="https://www.facebook.com/mintvaultuk" target="_blank" rel="noopener noreferrer" aria-label="MintVault on Facebook" className="text-[#999999] hover:text-[#B8960C] transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+            </a>
+          </div>
+          <p className="text-[#999999] text-xs mb-1">
             MintVault UK — Professional Trading Card Grading Service
           </p>
-          <p className="text-[#f2ca50]/50 text-xs mb-2" data-testid="text-copyright">
-            © 2026 MintVault. All rights reserved.
+          <p className="text-[#999999] text-xs mb-3">
+            MintVault UK · Rochester, Kent
           </p>
-          <p className="text-[#f2ca50]/30 text-xs font-mono" data-testid="text-build-stamp">
-            BUILD: {BUILD_STAMP}
+          <p className="text-[#666666] text-xs" data-testid="text-copyright">
+            © 2026 MintVault. All rights reserved.
           </p>
         </div>
       </div>
@@ -259,8 +147,8 @@ function Footer() {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#131313] flex flex-col">
-      <Header />
+    <div className="min-h-screen flex flex-col">
+      <SiteHeader />
       <main className="flex-1">{children}</main>
       <Footer />
     </div>

@@ -44,7 +44,7 @@ const serviceSchema = {
   provider: {
     "@type": "Organization",
     name: "MintVault UK",
-    url: "https://mintvault.co.uk",
+    url: "https://mintvaultuk.com",
   },
   description: "Professional TCG card grading service in the UK for collectors, investors, and resellers. All major trading card games supported.",
   areaServed: "United Kingdom",
@@ -71,31 +71,31 @@ export default function TcgGradingUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-wide mb-6" data-testid="text-h1-tcg-grading">
+        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-tcg-grading">
           TCG Grading UK
         </h1>
 
-        <p className="text-gray-300 text-base leading-relaxed mb-4">
+        <p className="text-[#444444] text-base leading-relaxed mb-4">
           The trading card game market in the UK has grown substantially in recent years. From established franchises like Pokemon, Yu-Gi-Oh!, and Magic: The Gathering to newer games like Lorcana and One Piece, collectors and players across the country are accumulating cards with real financial value. MintVault provides professional TCG grading for collectors, investors, and resellers who want to protect, authenticate, and maximise the value of their cards.
         </p>
-        <p className="text-gray-400 text-sm leading-relaxed mb-8">
+        <p className="text-[#666666] text-sm leading-relaxed mb-8">
           Our UK-based grading service covers all major trading card games with consistent, professional standards. Whether you have a single high-value pull or a bulk collection across multiple TCGs, MintVault delivers expert grading, tamper-evident slabs, verifiable certificates, and fully insured return shipping.
         </p>
 
         <section className="mb-10" data-testid="section-for-collectors">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Collectors</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Serious TCG collectors grade their most prized cards to preserve them in pristine condition and create a professional, catalogued collection. A graded card in a tamper-evident slab is protected from the environmental and handling damage that affects raw cards over time.
             </p>
             <p>
-              <strong className="text-white">Protection</strong> — once sealed in a MintVault slab, your card is shielded from fingerprints, moisture, UV exposure, bending, and other physical damage. The tamper-evident casing ensures nobody can access or alter the card without visible evidence.
+              <strong className="text-[#1A1A1A]">Protection</strong> — once sealed in a MintVault slab, your card is shielded from fingerprints, moisture, UV exposure, bending, and other physical damage. The tamper-evident casing ensures nobody can access or alter the card without visible evidence.
             </p>
             <p>
-              <strong className="text-white">Authentication</strong> — grading confirms your card is genuine. Counterfeit cards are an increasing problem in the TCG hobby, particularly for high-value vintage and modern chase cards. A graded card carries the assurance that it has been inspected and authenticated by a professional.
+              <strong className="text-[#1A1A1A]">Authentication</strong> — grading confirms your card is genuine. Counterfeit cards are an increasing problem in the TCG hobby, particularly for high-value vintage and modern chase cards. A graded card carries the assurance that it has been inspected and authenticated by a professional.
             </p>
             <p>
-              <strong className="text-white">Organisation</strong> — graded cards are uniform in size, easy to store upright, and simple to display. Many collectors find that a collection of slabbed cards looks significantly more impressive than a binder or box of raw cards.
+              <strong className="text-[#1A1A1A]">Organisation</strong> — graded cards are uniform in size, easy to store upright, and simple to display. Many collectors find that a collection of slabbed cards looks significantly more impressive than a binder or box of raw cards.
             </p>
             <p>
               Each MintVault certificate can be verified online using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>, providing a permanent digital record of each card in your collection.
@@ -105,39 +105,39 @@ export default function TcgGradingUk() {
 
         <section className="mb-10" data-testid="section-for-investors">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Investors</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Trading cards have emerged as an alternative asset class, with some rare cards appreciating significantly in value over time. For investors, professional grading serves several important functions.
             </p>
             <p>
-              <strong className="text-white">Standardised Condition Assessment</strong> — a numerical grade removes subjectivity from condition evaluation. A card graded 9.5 by a professional service means the same thing to every buyer, regardless of where in the world they are. This standardisation is essential for treating cards as investable assets.
+              <strong className="text-[#1A1A1A]">Standardised Condition Assessment</strong> — a numerical grade removes subjectivity from condition evaluation. A card graded 9.5 by a professional service means the same thing to every buyer, regardless of where in the world they are. This standardisation is essential for treating cards as investable assets.
             </p>
             <p>
-              <strong className="text-white">Value Maximisation</strong> — graded cards in high condition consistently sell for more than their raw equivalents. A Gem Mint 10 grade can multiply a card's value many times over compared to selling it as a raw card. Even mid-grade cards often sell for more than ungraded versions because the buyer has certainty about the condition.
+              <strong className="text-[#1A1A1A]">Value Maximisation</strong> — graded cards in high condition consistently sell for more than their raw equivalents. A Gem Mint 10 grade can multiply a card's value many times over compared to selling it as a raw card. Even mid-grade cards often sell for more than ungraded versions because the buyer has certainty about the condition.
             </p>
             <p>
-              <strong className="text-white">Liquidity</strong> — graded cards are easier to sell on secondary markets. Buyers are more willing to purchase cards sight-unseen when they have a professional grade to rely on, which increases the pool of potential buyers and can speed up sales.
+              <strong className="text-[#1A1A1A]">Liquidity</strong> — graded cards are easier to sell on secondary markets. Buyers are more willing to purchase cards sight-unseen when they have a professional grade to rely on, which increases the pool of potential buyers and can speed up sales.
             </p>
             <p>
-              <strong className="text-white">Condition Preservation</strong> — the slab protects the card's condition indefinitely, ensuring that the grade remains accurate for as long as the card is held. This is particularly important for long-term investment strategies.
+              <strong className="text-[#1A1A1A]">Condition Preservation</strong> — the slab protects the card's condition indefinitely, ensuring that the grade remains accurate for as long as the card is held. This is particularly important for long-term investment strategies.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-for-resellers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Resellers</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Professional traders and resellers use grading to differentiate their inventory and command premium prices. Graded cards stand out in marketplace listings and attract more buyer interest.
             </p>
             <p>
-              <strong className="text-white">Higher Selling Prices</strong> — graded cards typically sell for significantly more than raw cards. The cost of grading is usually recovered many times over through the increased selling price, especially for cards that achieve high grades.
+              <strong className="text-[#1A1A1A]">Higher Selling Prices</strong> — graded cards typically sell for significantly more than raw cards. The cost of grading is usually recovered many times over through the increased selling price, especially for cards that achieve high grades.
             </p>
             <p>
-              <strong className="text-white">Fewer Disputes</strong> — raw card sales often lead to disagreements about condition between buyer and seller. A professional grade eliminates this friction. Buyers know exactly what they are getting, which reduces returns, negative feedback, and disputes on platforms like eBay.
+              <strong className="text-[#1A1A1A]">Fewer Disputes</strong> — raw card sales often lead to disagreements about condition between buyer and seller. A professional grade eliminates this friction. Buyers know exactly what they are getting, which reduces returns, negative feedback, and disputes on platforms like eBay.
             </p>
             <p>
-              <strong className="text-white">Professional Presentation</strong> — a slabbed card with a printed label looks more professional than a raw card in a penny sleeve. This presentation helps build trust with buyers and can lead to repeat customers.
+              <strong className="text-[#1A1A1A]">Professional Presentation</strong> — a slabbed card with a printed label looks more professional than a raw card in a penny sleeve. This presentation helps build trust with buyers and can lead to repeat customers.
             </p>
             <p>
               MintVault offers bulk discounts for larger submissions, making professional grading cost-effective for resellers with volume. See our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for details on bulk discount tiers.
@@ -150,29 +150,29 @@ export default function TcgGradingUk() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Shield size={20} />, title: "Domestic Service", desc: "Your cards stay within the UK. No international shipping risks, no customs paperwork, no import duties." },
-              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "Service tiers from 2 to 60 working days. Domestic shipping means shorter total elapsed time." },
+              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "Service tiers from 5 to 20 working days. Domestic shipping means shorter total elapsed time." },
               { icon: <Award size={20} />, title: "Professional Grading", desc: "Trained UK-based graders assess centering, corners, edges, and surface quality on a 1-10 scale." },
-              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Grading from £12 per card with bulk discounts up to 10%. No hidden international shipping or customs costs." },
+              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Grading from £12 per card with bulk discounts up to 15%. No hidden international shipping or customs costs." },
               { icon: <Users size={20} />, title: "UK Customer Support", desc: "Contact our team directly in your time zone for questions about your submission." },
               { icon: <Shield size={20} />, title: "Insured Returns", desc: "All graded cards are returned via fully insured tracked delivery based on your declared card value." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-why-${i}`}>
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-gray-400 text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-gray-400 text-sm">
+          <p className="text-[#666666] text-sm">
             Compare UK grading with overseas services in our <Link href="/psa-alternative-uk" className="text-[#D4AF37] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-supported-games">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Supported Trading Card Games</h2>
-          <p className="text-gray-300 text-sm leading-relaxed mb-4">
+          <p className="text-[#444444] text-sm leading-relaxed mb-4">
             MintVault grades cards from all major trading card games. Our grading standards are applied consistently regardless of which TCG a card belongs to:
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
@@ -182,18 +182,18 @@ export default function TcgGradingUk() {
               </div>
             ))}
           </div>
-          <p className="text-gray-400 text-sm">
+          <p className="text-[#666666] text-sm">
             Visit our <Link href="/tcg" className="text-[#D4AF37] hover:underline" data-testid="link-tcg-page">TCG page</Link> for detailed information about each supported game, or <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submit your cards</Link> directly.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-getting-started">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Getting Started</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Ready to grade your TCG cards? The process is straightforward:
             </p>
-            <ol className="list-decimal list-inside space-y-2 text-gray-400 text-sm pl-2">
+            <ol className="list-decimal list-inside space-y-2 text-[#666666] text-sm pl-2">
               <li>Visit our <Link href="/submit" className="text-[#D4AF37] hover:underline">submission page</Link> and choose your service tier</li>
               <li>Enter the details for each card you want graded</li>
               <li>Pay securely online and receive your submission reference</li>

@@ -13,9 +13,9 @@ export default function TermsPage() {
       <h1 className="text-3xl font-bold text-[#D4AF37] tracking-widest mb-2 glow-gold text-center" data-testid="text-terms-title">
         TERMS & CONDITIONS
       </h1>
-      <p className="text-gray-500 text-sm text-center mb-10">Last updated: February 2026</p>
+      <p className="text-[#999999] text-sm text-center mb-10">Last updated: February 2026</p>
 
-      <div className="space-y-8 text-gray-300 text-sm leading-relaxed">
+      <div className="space-y-8 text-[#444444] text-sm leading-relaxed">
         <section>
           <h2 className="text-[#D4AF37] font-bold tracking-wider text-lg mb-3">1. Service Overview</h2>
           <p>
@@ -69,7 +69,7 @@ export default function TermsPage() {
         <section id="liability" data-testid="section-liability">
           <h2 className="text-[#D4AF37] font-bold tracking-wider text-lg mb-3">6. Liability & Shipping Policy</h2>
 
-          <h3 className="text-white font-semibold mt-4 mb-2">6.1 Inbound Shipping Responsibility</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-4 mb-2">6.1 Inbound Shipping Responsibility</h3>
           <p className="mb-2">Customers are fully responsible for items until they are:</p>
           <ul className="space-y-1 ml-4 mb-3">
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>Delivered to MintVault's registered address</span></li>
@@ -84,7 +84,7 @@ export default function TermsPage() {
           </ul>
           <p>Claims for parcels lost in transit to MintVault must be made directly with the courier.</p>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.2 Declared Value Requirement</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.2 Declared Value Requirement</h3>
           <p className="mb-2">Each submitted item must include a declared value.</p>
           <p className="mb-2">Declared value:</p>
           <ul className="space-y-1 ml-4 mb-3">
@@ -94,7 +94,7 @@ export default function TermsPage() {
           </ul>
           <p>MintVault reserves the right to suspend processing if declared value is missing or inaccurate.</p>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.3 Custody Liability</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.3 Custody Liability</h3>
           <p className="mb-2">While items are physically in MintVault UK Ltd's custody, liability is limited to the lower of:</p>
           <ul className="space-y-1 ml-4 mb-3">
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>The declared value submitted</span></li>
@@ -102,7 +102,7 @@ export default function TermsPage() {
           </ul>
           <p>Fair market value shall be determined at MintVault UK Ltd's reasonable discretion using publicly available market data.</p>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.4 Return Shipping</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.4 Return Shipping</h3>
           <p className="mb-2">Return shipments are sent using:</p>
           <ul className="space-y-1 ml-4 mb-3">
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>Fully tracked delivery</span></li>
@@ -112,7 +112,7 @@ export default function TermsPage() {
           <p className="mb-2">Once handed to the courier and tracking issued, liability transfers to the courier.</p>
           <p>Customers are responsible for pursuing any claims directly with the courier once tracking has been issued.</p>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.5 Exclusions</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.5 Exclusions</h3>
           <p className="mb-2">MintVault is not liable for:</p>
           <ul className="space-y-1 ml-4 mb-3">
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>Market fluctuations</span></li>
@@ -122,11 +122,11 @@ export default function TermsPage() {
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>Events beyond reasonable control</span></li>
           </ul>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.6 Maximum Liability</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.6 Maximum Liability</h3>
           <p className="mb-2">Total liability per submission shall not exceed the total declared value of items in that submission.</p>
           <p>MintVault shall not be liable for consequential losses, lost profits, or speculative resale value.</p>
 
-          <h3 className="text-white font-semibold mt-6 mb-2">6.7 High-Value Submissions</h3>
+          <h3 className="text-[#1A1A1A] font-semibold mt-6 mb-2">6.7 High-Value Submissions</h3>
           <p className="mb-2">MintVault reserves the right to:</p>
           <ul className="space-y-1 ml-4">
             <li className="flex items-start gap-2"><span className="text-[#D4AF37]">•</span><span>Require additional insurance</span></li>

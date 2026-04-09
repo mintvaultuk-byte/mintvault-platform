@@ -29,7 +29,7 @@ const faqs = [
   },
   {
     question: "What turnaround times does MintVault offer compared to PSA?",
-    answer: "MintVault offers five service tiers with turnaround from 2 to 60 working days. Because there is no international shipping involved, total time from sending your cards to receiving them back is significantly reduced compared to using an overseas service. PSA turnaround times have historically varied considerably depending on demand.",
+    answer: "MintVault offers three service tiers with turnaround from 5 to 20 working days. Because there is no international shipping involved, total time from sending your cards to receiving them back is significantly reduced compared to using an overseas service. PSA turnaround times have historically varied considerably depending on demand.",
   },
 ];
 
@@ -40,7 +40,7 @@ const serviceSchema = {
   provider: {
     "@type": "Organization",
     name: "MintVault UK",
-    url: "https://mintvault.co.uk",
+    url: "https://mintvaultuk.com",
   },
   description: "UK-based alternative to PSA for professional trading card grading. No international shipping, no customs fees, fast turnaround.",
   areaServed: "United Kingdom",
@@ -67,20 +67,20 @@ export default function PsaAlternativeUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-wide mb-6" data-testid="text-h1-psa-alternative">
+        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-psa-alternative">
           PSA Alternative UK: Grade Your Cards Locally
         </h1>
 
-        <p className="text-gray-300 text-base leading-relaxed mb-4">
+        <p className="text-[#444444] text-base leading-relaxed mb-4">
           UK collectors no longer need to send their cards overseas to receive a professional grading service. MintVault delivers expert card grading, tamper-evident encapsulation, and fully verifiable certificates — all without leaving the UK. No customs paperwork, no import duties, no weeks spent waiting for international shipping.
         </p>
-        <p className="text-gray-400 text-sm leading-relaxed mb-8">
+        <p className="text-[#666666] text-sm leading-relaxed mb-8">
           While PSA, BGS, and CGC are well-known names in the grading world, MintVault was built specifically for UK collectors who want a faster, more predictable, and more cost-effective grading experience. This page explains the practical advantages of grading your cards domestically.
         </p>
 
         <section className="mb-10" data-testid="section-comparison">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">UK vs US Grading: A Practical Comparison</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Grading with a US-based company from the UK introduces several layers of cost, risk, and delay that simply do not exist when you grade domestically. MintVault eliminates these friction points while delivering the same core outcome: a professionally assessed, encapsulated, and verifiable graded card.
             </p>
@@ -97,7 +97,7 @@ export default function PsaAlternativeUk() {
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Turnaround Time</h3>
             <p>
-              The total time from posting your cards to receiving them back includes the grading service's processing time plus shipping time in both directions. For US services, this can mean adding 2 to 4 weeks of transit time on top of the stated turnaround. MintVault's turnaround times range from 2 to 60 working days, and because shipping is domestic, the total elapsed time is much more predictable.
+              The total time from posting your cards to receiving them back includes the grading service's processing time plus shipping time in both directions. For US services, this can mean adding 2 to 4 weeks of transit time on top of the stated turnaround. MintVault's turnaround times range from 5 to 20 working days, and because shipping is domestic, the total elapsed time is much more predictable.
             </p>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Brand Recognition and Verification</h3>
@@ -126,8 +126,8 @@ export default function PsaAlternativeUk() {
               <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-gray-400 text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -136,17 +136,17 @@ export default function PsaAlternativeUk() {
 
         <section className="mb-10" data-testid="section-when-to-choose">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why UK Collectors Choose MintVault</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               For UK-based collectors, MintVault is the practical choice for professional card grading. Here is why:
             </p>
-            <ul className="list-disc list-inside space-y-2 text-gray-400 text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
               <li>Your cards stay in the UK — no international transit risk for irreplaceable items</li>
               <li>Zero customs paperwork, zero import charges, zero VAT surprises</li>
-              <li>Predictable turnaround: 2 to 60 working days, with no international shipping delays added</li>
+              <li>Predictable turnaround: 5 to 20 working days, with no international shipping delays added</li>
               <li>Transparent pricing from £12 per card — what you see is what you pay</li>
               <li>UK-based support team available in your time zone</li>
-              <li>Bulk discounts up to 20% make large submissions significantly more affordable than shipping overseas</li>
+              <li>Bulk discounts up to 15% make large submissions significantly more affordable than shipping overseas</li>
             </ul>
             <p className="mt-3">
               Some collectors also use PSA or BGS for specific high-value pieces intended for the international auction market. MintVault complements this approach perfectly — grade your broader collection domestically with the speed and cost savings of a UK service, and reserve international grading only where global brand recognition is essential to your selling strategy.
@@ -156,7 +156,7 @@ export default function PsaAlternativeUk() {
 
         <section className="mb-10" data-testid="section-how-it-works">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How MintVault Works</h2>
-          <div className="text-gray-300 text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               Getting your cards graded with MintVault is simple. <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">Create a submission</Link> online, choose your service tier, and post your cards to us. Our graders assess each card on a 1 to 10 scale, encapsulate them in tamper-evident slabs, and return them via fully insured shipping.
             </p>

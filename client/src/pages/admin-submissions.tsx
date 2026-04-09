@@ -5,6 +5,7 @@ import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, 
 import {
   ArrowLeft, Package, Search, Printer, CheckCircle, Truck, Clock,
   MapPin, Phone, Mail, FileText, ChevronRight, ScanLine, X, Edit2, Save, XCircle, CreditCard, Download,
+  Camera, Upload, Layers, FlaskConical, PackageCheck, Loader2,
 } from "lucide-react";
 
 interface SubmissionRow {
@@ -264,6 +265,8 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const [adminNotesInput, setAdminNotesInput] = useState<string>("");
   const [adminFlaggedInput, setAdminFlaggedInput] = useState<boolean>(false);
   const [notesSaved, setNotesSaved] = useState(false);
+  const [showMarkReceived, setShowMarkReceived] = useState(false);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
 
   const statusMutation = useMutation({
     mutationFn: async ({ status, extra }: { status: string; extra?: any }) => {
@@ -304,6 +307,39 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
       setNotesSaved(true);
       setTimeout(() => setNotesSaved(false), 2000);
+    },
+  });
+
+  const markReceivedMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      const form = new FormData();
+      files.forEach(f => form.append("photos", f));
+      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-received`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to mark received");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
+      setShowMarkReceived(false);
+      setReceiptFiles([]);
+    },
+  });
+
+  const granularStatusMutation = useMutation({
+    mutationFn: async (status: string) => {
+      await apiRequest("POST", `/api/admin/submissions/${submissionId}/status`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
     },
   });
 
@@ -402,6 +438,15 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               >
                 <Truck size={14} /> Mark Shipped
               </button>
+            ) : nextStatus === "received" ? (
+              <button
+                onClick={() => setShowMarkReceived(true)}
+                disabled={statusMutation.isPending}
+                className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 flex items-center gap-2 disabled:opacity-50"
+                data-testid="button-advance-status"
+              >
+                <Camera size={14} /> Mark Received
+              </button>
             ) : (
               <button
                 onClick={handleAdvanceStatus}
@@ -482,6 +527,134 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               Cancel
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Mark Received Modal ────────────────────────────────────────────── */}
+      {showMarkReceived && (
+        <div className="border border-[#D4AF37]/30 rounded-lg p-4 mb-6 bg-[#D4AF37]/5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Camera size={14} className="text-[#D4AF37]" />
+              <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Mark Cards Received</h3>
+            </div>
+            <button
+              onClick={() => { setShowMarkReceived(false); setReceiptFiles([]); }}
+              className="text-gray-500 hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <p className="text-gray-400 text-xs mb-3">
+            Upload receipt photos (up to 6) showing the cards as they arrived. These will be emailed to the customer.
+          </p>
+
+          {/* File picker */}
+          <label className="flex items-center gap-2 border border-dashed border-[#D4AF37]/30 rounded-lg px-4 py-3 cursor-pointer hover:border-[#D4AF37]/60 transition-colors mb-3">
+            <Upload size={14} className="text-[#D4AF37]/60" />
+            <span className="text-gray-400 text-xs">Click to add photos (JPEG/PNG, max 6)</span>
+            <input
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={e => {
+                const newFiles = Array.from(e.target.files ?? []).slice(0, 6 - receiptFiles.length);
+                setReceiptFiles(prev => [...prev, ...newFiles].slice(0, 6));
+                e.target.value = "";
+              }}
+            />
+          </label>
+
+          {/* Preview */}
+          {receiptFiles.length > 0 && (
+            <div className="flex gap-2 flex-wrap mb-3">
+              {receiptFiles.map((f, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={URL.createObjectURL(f)}
+                    alt={f.name}
+                    className="w-16 h-16 object-cover rounded border border-[#D4AF37]/20"
+                  />
+                  <button
+                    onClick={() => setReceiptFiles(prev => prev.filter((_, idx) => idx !== i))}
+                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={9} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {markReceivedMutation.isError && (
+            <p className="text-red-400 text-xs mb-3">{(markReceivedMutation.error as Error)?.message}</p>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => markReceivedMutation.mutate(receiptFiles)}
+              disabled={markReceivedMutation.isPending}
+              className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center gap-2"
+              data-testid="button-confirm-received"
+            >
+              {markReceivedMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+              {markReceivedMutation.isPending ? "Saving..." : "Confirm Received"}
+            </button>
+            <button
+              onClick={() => { setShowMarkReceived(false); setReceiptFiles([]); }}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Granular status buttons (received+) ───────────────────────────────── */}
+      {["received", "in_grading", "ready_to_return", "shipped"].includes(currentStatus) && (
+        <div className="border border-[#D4AF37]/20 rounded-lg p-4 mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Layers size={14} className="text-[#D4AF37]" />
+            <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Granular Status Updates</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => granularStatusMutation.mutate("queued")}
+              disabled={granularStatusMutation.isPending}
+              className="text-xs border border-purple-500/40 bg-purple-500/10 text-purple-400 px-3 py-1.5 rounded hover:bg-purple-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              data-testid="button-status-queued"
+            >
+              <Clock size={11} /> Move to Grading Queue
+            </button>
+            <button
+              onClick={() => granularStatusMutation.mutate("grading_started")}
+              disabled={granularStatusMutation.isPending}
+              className="text-xs border border-blue-500/40 bg-blue-500/10 text-blue-400 px-3 py-1.5 rounded hover:bg-blue-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              data-testid="button-status-grading"
+            >
+              <FlaskConical size={11} /> Mark Grading Started
+            </button>
+            <button
+              onClick={() => granularStatusMutation.mutate("encapsulating")}
+              disabled={granularStatusMutation.isPending}
+              className="text-xs border border-cyan-500/40 bg-cyan-500/10 text-cyan-400 px-3 py-1.5 rounded hover:bg-cyan-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              data-testid="button-status-encapsulating"
+            >
+              <PackageCheck size={11} /> Mark Encapsulating
+            </button>
+            <button
+              onClick={() => granularStatusMutation.mutate("delivered")}
+              disabled={granularStatusMutation.isPending}
+              className="text-xs border border-green-500/40 bg-green-500/10 text-green-400 px-3 py-1.5 rounded hover:bg-green-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              data-testid="button-status-delivered"
+            >
+              <CheckCircle size={11} /> Mark Delivered
+            </button>
+          </div>
+          {granularStatusMutation.isError && (
+            <p className="text-red-400 text-xs mt-2">{(granularStatusMutation.error as Error)?.message}</p>
+          )}
         </div>
       )}
 

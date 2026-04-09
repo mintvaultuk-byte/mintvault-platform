@@ -15,7 +15,7 @@ export default function GuideDetailPage() {
     return (
       <div className="px-4 max-w-3xl mx-auto py-16 text-center">
         <h1 className="text-2xl font-bold text-[#D4AF37] mb-4">Guide Not Found</h1>
-        <p className="text-gray-400 mb-6">The guide you are looking for does not exist.</p>
+        <p className="text-[#666666] mb-6">The guide you are looking for does not exist.</p>
         <Link href="/guides">
           <span className="text-[#D4AF37] hover:underline cursor-pointer">Browse all guides</span>
         </Link>
@@ -43,10 +43,10 @@ export default function GuideDetailPage() {
     "headline": guide.title,
     "description": guide.metaDescription,
     "author": { "@type": "Organization", "name": guide.author },
-    "publisher": { "@type": "Organization", "name": "MintVault UK", "url": "https://mintvault.co.uk" },
+    "publisher": { "@type": "Organization", "name": "MintVault UK", "url": "https://mintvaultuk.com" },
     "datePublished": guide.publishedDate,
     "dateModified": guide.updatedDate || guide.publishedDate,
-    "mainEntityOfPage": `https://mintvault.co.uk/guides/${guide.slug}`,
+    "mainEntityOfPage": `https://mintvaultuk.com/guides/${guide.slug}`,
   };
 
   const bodyWithIds = guide.body.replace(/<h2([^>]*)>(.*?)<\/h2>/gi, (_match, attrs, content) => {
@@ -60,7 +60,7 @@ export default function GuideDetailPage() {
       <SeoHead
         title={guide.metaTitle}
         description={guide.metaDescription}
-        canonical={`https://mintvault.co.uk/guides/${guide.slug}`}
+        canonical={`https://mintvaultuk.com/guides/${guide.slug}`}
         schema={[breadcrumbSchema(breadcrumbs), articleSchema]}
       />
 
@@ -77,7 +77,7 @@ export default function GuideDetailPage() {
           <h1 className="text-2xl md:text-3xl font-bold text-[#D4AF37] tracking-wide mb-4 leading-tight" data-testid="text-guide-title">
             {guide.title}
           </h1>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
+          <div className="flex items-center gap-4 text-xs text-[#999999]">
             <span className="flex items-center gap-1" data-testid="text-guide-author">
               <User size={12} /> {guide.author}
             </span>
@@ -85,7 +85,7 @@ export default function GuideDetailPage() {
               <Calendar size={12} /> {new Date(guide.publishedDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
             </span>
             {guide.updatedDate && guide.updatedDate !== guide.publishedDate && (
-              <span className="text-gray-600" data-testid="text-guide-updated">
+              <span className="text-[#666666]" data-testid="text-guide-updated">
                 Updated {new Date(guide.updatedDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
               </span>
             )}
@@ -108,14 +108,14 @@ export default function GuideDetailPage() {
         )}
 
         <div
-          className="prose prose-invert prose-gold max-w-none
+          className="prose prose-gold max-w-none
             [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-[#D4AF37] [&_h2]:mt-8 [&_h2]:mb-4 [&_h2]:tracking-wide
-            [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-6 [&_h3]:mb-3
-            [&_p]:text-gray-300 [&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-4
-            [&_ul]:space-y-2 [&_ul]:mb-4 [&_li]:text-gray-300 [&_li]:text-sm
+            [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-[#1A1A1A] [&_h3]:mt-6 [&_h3]:mb-3
+            [&_p]:text-[#444444] [&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-4
+            [&_ul]:space-y-2 [&_ul]:mb-4 [&_li]:text-[#444444] [&_li]:text-sm
             [&_a]:text-[#D4AF37] [&_a]:hover:underline
-            [&_strong]:text-white
-            [&_blockquote]:border-l-2 [&_blockquote]:border-[#D4AF37]/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-gray-400"
+            [&_strong]:text-[#1A1A1A]
+            [&_blockquote]:border-l-2 [&_blockquote]:border-[#D4AF37]/30 [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-[#666666]"
           dangerouslySetInnerHTML={{ __html: bodyWithIds }}
           data-testid="article-body"
         />

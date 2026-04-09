@@ -29,35 +29,49 @@ const MM_TO_PT = 2.83465;
 const PDF_W = 70 * MM_TO_PT;
 const PDF_H = 20 * MM_TO_PT;
 
-const BORDER = 3;
-const CUT_STROKE    = 0;   // px — no black cut outline; cut paths provided via SVG cut guide instead
-const WHITE_GAP     = 3;   // px — white margin from canvas edge to gold (covers 0→3, meeting gold outer edge)
-const BORDER_STROKE = 12;  // px — gold border stroke width
-const GOLD_CENTER   = 9;   // px — gold stroke centre from edge; outer edge = 9-6 = 3 (= WHITE_GAP)
+// ── Border geometry ────────────────────────────────────────────────────────
+// Gold frame fills from canvas edge inward FRAME_W pixels — no white gap.
+const FRAME_W = 18;   // px — gold border fill width (outer edge = canvas edge)
 
 // ── Colour palette ──────────────────────────────────────────────────────────
-const GOLD       = "#C9A227";   // outer border, separators
+const GOLD       = "#C9A227";   // separators, accents
 const GOLD_DARK  = "#A07820";
 const GOLD_LIGHT = "#D4AF37";
-const INNER_HL   = "#F3D67A";   // unused — merged into single outer border
 const BLACK      = "#000000";
 const WHITE      = "#FFFFFF";
 
-// Inner safe edge coordinates (inside gold border)
-// gold inner edge = GOLD_CENTER + BORDER_STROKE/2 = 9 + 6 = 15
-const I_LEFT   = GOLD_CENTER + BORDER_STROKE / 2;   // 15
-const I_RIGHT  = PX_W - I_LEFT;                     // 812
-const I_TOP    = I_LEFT;                             // 15
-const I_BOTTOM = PX_H - I_LEFT;                     // 221
-const I_W      = I_RIGHT - I_LEFT;                   // 797
-const I_H      = I_BOTTOM - I_TOP;                   // 198
+// Frame gradient stops (diagonal TL→BR gives dimension without looking flat)
+const FRAME_GRAD_STOPS: [number, string][] = [
+  [0,    "#F0CC50"],  // bright TL
+  [0.25, "#C9A227"],  // warm mid-gold
+  [0.50, "#9E7518"],  // deep rich center
+  [0.75, "#C9A227"],  // warm mid-gold
+  [1,    "#F0CC50"],  // bright BR
+];
 
-const LOGO_PATH     = path.join(process.cwd(), "public", "brand", "logo.png");
-// White-on-transparent version pre-generated via scripts/process-nfc-icon.js
-const NFC_ICON_PATH = path.join(process.cwd(), "public", "brand", "nfc-tap-icon-white.png");
+// Inner safe edge coordinates (inside gold frame)
+const I_LEFT   = FRAME_W;           // 18
+const I_RIGHT  = PX_W - FRAME_W;    // 809
+const I_TOP    = FRAME_W;           // 18
+const I_BOTTOM = PX_H - FRAME_W;    // 218
+const I_W      = I_RIGHT - I_LEFT;  // 791
+const I_H      = I_BOTTOM - I_TOP;  // 200
+
+const LOGO_PATH      = path.join(process.cwd(), "public", "brand", "logo.png");
+const NFC_ICON_PATH  = path.join(process.cwd(), "public", "brand", "nfc-tap-icon.png");
+const BODONI_PATH    = path.join(process.cwd(), "public", "brand", "BodoniModa-Black.ttf");
+
+// Register Bodoni Moda for canvas — runs once at module load.
+// Safe to call multiple times; canvas deduplicates by family+weight.
+try {
+  const { registerFont } = require("canvas");
+  registerFont(BODONI_PATH, { family: "Bodoni Moda", weight: "900" });
+} catch {
+  // canvas not available at import time in some build contexts — ignore
+}
 
 function getCertUrl(certId: string): string {
-  return `https://mintvaultuk.co.uk/cert/${certId}`;
+  return `https://mintvaultuk.com/vault/${certId}`;
 }
 
 async function generateQRBuffer(url: string, size: number): Promise<Buffer> {
@@ -282,12 +296,31 @@ function buildLine3(cert: CertificateRecord): string {
   const parts: string[] = [];
   const rText = buildRarityText(cert);
   if (rText) parts.push(rText);
-  if (cert.labelType && cert.labelType !== "Standard") parts.push(cert.labelType.toUpperCase());
+  if (cert.labelType && cert.labelType !== "Standard" && cert.labelType !== "black") parts.push(cert.labelType.toUpperCase());
   return parts.join(" · ") || "";
 }
 
 function buildLine4(cert: CertificateRecord): string {
   return cert.cardNumber ? `#${cert.cardNumber}` : "";
+}
+
+/**
+ * Draws the gold outer frame onto ctx. Called once during setup and again
+ * after the logo is painted on the back label to prevent bleed-over.
+ */
+function drawGoldFrame(ctx: any) {
+  ctx.shadowBlur  = 0;
+  ctx.shadowColor = "transparent";
+  const grad = ctx.createLinearGradient(0, 0, PX_W, PX_H);
+  for (const [stop, color] of FRAME_GRAD_STOPS) {
+    grad.addColorStop(stop, color);
+  }
+  ctx.fillStyle = grad;
+  // Four strips — top, bottom, left, right
+  ctx.fillRect(0,               0,               PX_W,   FRAME_W);
+  ctx.fillRect(0,               PX_H - FRAME_W,  PX_W,   FRAME_W);
+  ctx.fillRect(0,               FRAME_W,         FRAME_W, PX_H - FRAME_W * 2);
+  ctx.fillRect(PX_W - FRAME_W,  FRAME_W,         FRAME_W, PX_H - FRAME_W * 2);
 }
 
 export async function generateLabelPNG(
@@ -296,45 +329,34 @@ export async function generateLabelPNG(
 ): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
 
+  // Black Label: ONLY quad-10s (all four subgrades exactly 10) get the dark label.
+  // A standard GEM MT 10 with any subgrade below 10 renders on the white label.
+  const gradeNum = parseFloat(cert.gradeOverall || "0");
+  const isBlack = !isNonNumericGrade(cert.gradeType || "numeric")
+    && gradeNum === 10
+    && parseFloat(cert.gradeCentering || "0") === 10
+    && parseFloat(cert.gradeCorners   || "0") === 10
+    && parseFloat(cert.gradeEdges     || "0") === 10
+    && parseFloat(cert.gradeSurface   || "0") === 10;
+  const labelBg = isBlack ? BLACK : WHITE;
+  const labelFg = isBlack ? WHITE : "#1A1A1A";
+
   const canvas = createCanvas(PX_W, PX_H);
   const ctx = canvas.getContext("2d");
 
-  // ── 1. CANVAS BASE — pure #000000 interior fill ──────────────────────────
-  // The entire canvas is first filled black. The outer white gap and gold border
-  // are then drawn on top. No black detection edge — cuts are provided via the
-  // separate SVG cut guide (direct cut mode on ScanNCut CM300).
-  ctx.shadowBlur   = 0;
-  ctx.shadowColor  = "transparent";
-  ctx.fillStyle    = BLACK;
+  // ── 1. CANVAS BASE ────────────────────────────────────────────────────────
+  ctx.shadowBlur  = 0;
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle   = labelBg;
   ctx.fillRect(0, 0, PX_W, PX_H);
 
-  // ── 2. WHITE OUTER MARGIN ──────────────────────────────────────────────────
-  // Structure (outside-in): [3px white margin][gold border 12px][content]
-  // White strips cover 0→WHITE_GAP from each edge, meeting the gold outer edge at
-  // GOLD_CENTER - BORDER_STROKE/2 = 3px. No black detection element at canvas edge.
-  const CG = CUT_STROKE;           // 0 — white gap starts flush at canvas edge
-  ctx.fillStyle = WHITE;
-  ctx.fillRect(CG,           CG,           PX_W - CG * 2, WHITE_GAP); // top gap
-  ctx.fillRect(CG,           PX_H - CG - WHITE_GAP, PX_W - CG * 2, WHITE_GAP); // bottom gap
-  ctx.fillRect(CG,           CG,           WHITE_GAP,     PX_H - CG * 2); // left gap
-  ctx.fillRect(PX_W - CG - WHITE_GAP, CG, WHITE_GAP,     PX_H - CG * 2); // right gap
+  // ── 2. GOLD OUTER FRAME — fills from canvas edge to FRAME_W inward ───────
+  drawGoldFrame(ctx);
 
-  // ── 3. INNER BACKGROUND GRADIENT — constrained inside gold border ────────
-  // Gradient is drawn only within the content zone (I_LEFT … I_RIGHT ×
-  // I_TOP … I_BOTTOM) so the cut-guide and gap zones stay pure #000000.
-  const bgGrad = ctx.createLinearGradient(I_LEFT, I_TOP, I_LEFT, I_BOTTOM);
-  bgGrad.addColorStop(0, "#0A0A0A"); // near-black top
-  bgGrad.addColorStop(1, "#000000"); // pure black bottom
-  ctx.fillStyle = bgGrad;
+  // ── 3. INNER BACKGROUND — content zone inside gold frame ─────────────────
+  ctx.fillStyle = labelBg;
   ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
 
-  // ── 4. GOLD BORDER — 0.51mm inside the cut guide ────────────────────────
-  // strokeRect here is safe: GOLD_CENTER=15 is an integer → no sub-pixel AA.
-  ctx.shadowBlur   = 0;
-  ctx.shadowColor  = "transparent";
-  ctx.strokeStyle  = GOLD_LIGHT;
-  ctx.lineWidth    = BORDER_STROKE;
-  ctx.strokeRect(GOLD_CENTER, GOLD_CENTER, PX_W - GOLD_CENTER * 2, PX_H - GOLD_CENTER * 2);
 
   let logo: any = null;
   try {
@@ -342,9 +364,9 @@ export async function generateLabelPNG(
   } catch {}
 
   if (side === "front") {
-    await drawFront(ctx, cert, logo, loadImage);
+    await drawFront(ctx, cert, logo, loadImage, labelBg, labelFg);
   } else {
-    await drawBack(ctx, cert, logo, loadImage);
+    await drawBack(ctx, cert, logo, loadImage, labelBg, labelFg);
   }
 
   return canvas.toBuffer("image/png");
@@ -419,7 +441,7 @@ function drawSimpleBarcode(
  * Right 32%: gold grade panel (grade abbr + number, vertically centred)
  * Bottom strip ~38px: barcode | MintVault logo | cert number
  */
-async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage: any) {
+async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
   const gradeType = cert.gradeType || "numeric";
   const isNonNum  = isNonNumericGrade(gradeType);
   const grade     = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
@@ -440,6 +462,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const contentB = stripY;
 
   // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
+  // If artwork is available, draw it then add a white wash overlay so dark
+  // text remains legible on any card image. No dark overlays — white bg design.
   const artworkUrl = (cert as any).frontImageUrl;
   if (artworkUrl) {
     try {
@@ -452,20 +476,11 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
       const dw = artImg.width * sc, dh = artImg.height * sc;
       ctx.drawImage(artImg, I_LEFT + (I_W - dw) / 2, I_TOP + (I_H - dh) / 2, dw, dh);
       ctx.restore();
+      // Wash overlay — lightens (white label) or darkens (black label) artwork so text is legible
+      ctx.fillStyle = labelBg === WHITE ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.60)";
+      ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
     } catch {}
   }
-
-  // Dark overlay across full inner area (42% opacity)
-  ctx.fillStyle = "rgba(0,0,0,0.42)";
-  ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
-
-  // Extra gradient darkening behind left text area for readability
-  const lDark = ctx.createLinearGradient(I_LEFT, 0, panelX, 0);
-  lDark.addColorStop(0,    "rgba(0,0,0,0.38)");
-  lDark.addColorStop(0.70, "rgba(0,0,0,0.18)");
-  lDark.addColorStop(1,    "rgba(0,0,0,0.00)");
-  ctx.fillStyle = lDark;
-  ctx.fillRect(I_LEFT, I_TOP, panelX - I_LEFT, I_H);
 
   // ── 2. GRADE PANEL (right, above bottom strip) ────────────────────────────
   const panelY  = I_TOP;
@@ -566,23 +581,22 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     if (gradeType === "AA") {
       ctx.textBaseline = "middle";
       ctx.font      = `bold 28px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = WHITE;
+      ctx.fillStyle = "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2 - 20);
       ctx.font      = `bold 22px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = GOLD;
+      ctx.fillStyle = GOLD_DARK;
       ctx.fillText("ALTERED", panelCX, panelY + panelH / 2 + 14);
     } else {
       const authSize = fitFontSize(ctx, "AUTHENTIC", PANEL_W - 8, 30, 18);
       ctx.textBaseline = "middle";
       ctx.font      = `bold ${authSize}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = WHITE;
+      ctx.fillStyle = "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2);
     }
   }
 
   // ── 3. BOTTOM STRIP ───────────────────────────────────────────────────────
-  // Near-black background, full inner width
-  ctx.fillStyle = "#0C0C0C";
+  ctx.fillStyle = labelBg;
   ctx.fillRect(I_LEFT, stripY, I_W, STRIP_H);
 
   // ── GRADE PANEL cert ID — centred in the grade panel's strip zone ──────────
@@ -590,92 +604,81 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     const certStripSz  = 28;
     const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 14);
     ctx.font         = `bold ${certStripFit}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle    = WHITE;
+    ctx.fillStyle    = labelFg;
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.shadowColor   = "rgba(0, 0, 0, 0.35)";
-    ctx.shadowBlur    = 2;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 1;
-    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2));
     ctx.shadowBlur    = 0;
     ctx.shadowColor   = "transparent";
-    ctx.shadowOffsetY = 0;
+    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2));
   }
 
-  // ── 3b. MINTVAULT header — top of label, centred in left panel ─────────────
-  // Centred between I_LEFT and panelX (left panel only).
-  const MV_HDR_SZ    = 44;                           // bold dominant brand header
-  const MV_HDR_PAD   = 8;                            // top padding — vertically centres text in header zone
-  const MV_HDR_Y     = contentT + MV_HDR_PAD;        // 19 + 8 = 27  (text top)
-  const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // 27 + 44 = 71 (text bottom)
-  const MV_BELOW_GAP = 10;                           // gap below MINTVAULT header before card text
-  try { (ctx as any).letterSpacing = "2px"; } catch {}
-  ctx.font         = `bold ${MV_HDR_SZ}px Arial, Helvetica, sans-serif`;
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "top";
-  const mvCenterX = I_LEFT + Math.round((panelX - I_LEFT) / 2);
+  // ── 3b. MINTVAULT wordmark lockup — Bodoni Moda 900, gold border box ────────
+  // Perfectly centred in the left text panel (I_LEFT → panelX).
+  //
+  // node-canvas does NOT include CSS letterSpacing in measureText(), so we:
+  //   1. Measure at letterSpacing=0 to get the baseline advance width
+  //   2. Add the letter-spacing contribution manually (n-1 gaps × LS px)
+  //   3. Use textAlign="left" with an explicit x so the text lands exactly
+  //      in the centre of the correctly-sized border box.
+  const MV_HDR_SZ    = 42;                           // font size
+  const MV_HDR_PAD   = 8;                            // top padding from content area
+  const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
+  const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
+  const MV_BELOW_GAP = 10;                           // gap below lockup before card text
+  const MV_LS        = 2;                            // letter-spacing px
+  const MV_TEXT      = "MINTVAULT";
 
-  // Gradient text fill — matches grade box gradient exactly
-  const mvGrad = ctx.createLinearGradient(0, MV_HDR_Y, 0, MV_HDR_BOT);
+  const mvFont = `900 ${MV_HDR_SZ}px "Bodoni Moda", "Times New Roman", serif`;
+
+  // Step 1 — measure without letter-spacing so measureText is accurate
+  try { (ctx as any).letterSpacing = "0px"; } catch {}
+  ctx.font         = mvFont;
+  ctx.textBaseline = "middle";                               // measure in same mode as draw
+  const mvBaseW  = ctx.measureText(MV_TEXT).width;
+  // Add letter-spacing contribution: (numChars - 1) gaps × MV_LS px
+  const mvTextW  = mvBaseW + MV_LS * (MV_TEXT.length - 1);  // 9 chars → 8 gaps × 2px = +16px
+
+  // Step 2 — derive box geometry centred in left panel
+  const BOX_PX   = 12;   // horizontal padding inside box (each side)
+  const BOX_PY   = 5;    // vertical padding inside box (each side)
+  const BOX_LW   = 3;    // border line width
+  const BOX_W    = mvTextW + BOX_PX * 2;
+  const BOX_H    = MV_HDR_SZ + BOX_PY * 2;
+  const leftPanelCX = (I_LEFT + panelX) / 2;                // exact centre of left panel
+  const BOX_X    = Math.round(leftPanelCX - BOX_W / 2);
+  const BOX_Y    = MV_HDR_Y - BOX_PY;
+  const BOX_CY   = BOX_Y + BOX_H / 2;                       // vertical centre of box
+
+  // Step 3 — draw gold border box
+  ctx.strokeStyle = GOLD_LIGHT;
+  ctx.lineWidth   = BOX_LW;
+  ctx.shadowBlur  = 0;
+  ctx.shadowColor = "transparent";
+  ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
+
+  // Step 4 — draw gold gradient text.
+  //   textBaseline="middle" + y=BOX_CY → text is vertically centred inside box.
+  //   textAlign="left"      + x=BOX_X+BOX_PX → text starts at left padding,
+  //   filling the box exactly and centred in the left panel (horizontal fix preserved).
+  try { (ctx as any).letterSpacing = `${MV_LS}px`; } catch {}
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "middle";
+  const mvTextX    = BOX_X + BOX_PX;
+
+  // Gradient spans the full em height centred on BOX_CY
+  const mvGrad = ctx.createLinearGradient(0, BOX_CY - MV_HDR_SZ / 2, 0, BOX_CY + MV_HDR_SZ / 2);
   mvGrad.addColorStop(0,    "#FFF3B0");
   mvGrad.addColorStop(0.25, "#F5D06F");
   mvGrad.addColorStop(0.55, "#D4AF37");
   mvGrad.addColorStop(0.75, "#B8962E");
   mvGrad.addColorStop(1,    "#A67C00");
-  ctx.fillStyle        = mvGrad;
-  ctx.shadowColor      = "rgba(255, 215, 0, 0.25)";
-  ctx.shadowBlur       = 6;
-  ctx.shadowOffsetX    = 0;
-  ctx.shadowOffsetY    = 0;
-  ctx.fillText("MINTVAULT", mvCenterX, MV_HDR_Y);
-  ctx.shadowBlur       = 0;
-  ctx.shadowColor      = "transparent";
+  ctx.fillStyle   = mvGrad;
+  ctx.shadowColor = "rgba(255, 215, 0, 0.2)";
+  ctx.shadowBlur  = 4;
+  ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
+  ctx.shadowBlur  = 0;
+  ctx.shadowColor = "transparent";
   try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-  // ── Gradient side lines flanking MINTVAULT ────────────────────────────────
-  // Measure text width + manual letter-spacing contribution (8 gaps × 3px)
-  const mvTextW    = ctx.measureText("MINTVAULT").width + 8 * 3;
-  const mvHalf     = mvTextW / 2;
-  const LINE_GAP   = 8;    // gap between text edge and solid-gold line end
-  const LINE_PAD   = 28;   // inset from left/right panel edges — extended for print visibility
-  const lineY      = MV_HDR_Y + MV_HDR_SZ / 2;  // vertical centre of header text
-
-  // Left line — pill gradient: transparent → solid (20%) → bright centre → solid (80%) → transparent
-  const llNearX = mvCenterX - mvHalf - LINE_GAP;
-  const llFarX  = I_LEFT + LINE_PAD;
-  if (llNearX > llFarX) {
-    const llGrad = ctx.createLinearGradient(llNearX, lineY, llFarX, lineY);
-    llGrad.addColorStop(0,    "rgba(212,175,55,0)");   // inner end — fade to transparent
-    llGrad.addColorStop(0.20, "rgba(225,188,62,1)");   // solid gold starts
-    llGrad.addColorStop(0.50, "rgba(255,235,110,1)");  // bright centre
-    llGrad.addColorStop(0.80, "rgba(225,188,62,1)");   // solid gold ends
-    llGrad.addColorStop(1,    "rgba(212,175,55,0)");   // outer end — fade to transparent
-    ctx.strokeStyle = llGrad;
-    ctx.lineWidth   = 7;
-    ctx.beginPath();
-    ctx.moveTo(llNearX, lineY);
-    ctx.lineTo(llFarX, lineY);
-    ctx.stroke();
-  }
-
-  // Right line — pill gradient: transparent → solid (20%) → bright centre → solid (80%) → transparent
-  const rlNearX = mvCenterX + mvHalf + LINE_GAP;
-  const rlFarX  = panelX - LINE_PAD;
-  if (rlFarX > rlNearX) {
-    const rlGrad = ctx.createLinearGradient(rlNearX, lineY, rlFarX, lineY);
-    rlGrad.addColorStop(0,    "rgba(212,175,55,0)");   // inner end — fade to transparent
-    rlGrad.addColorStop(0.20, "rgba(225,188,62,1)");   // solid gold starts
-    rlGrad.addColorStop(0.50, "rgba(255,235,110,1)");  // bright centre
-    rlGrad.addColorStop(0.80, "rgba(225,188,62,1)");   // solid gold ends
-    rlGrad.addColorStop(1,    "rgba(212,175,55,0)");   // outer end — fade to transparent
-    ctx.strokeStyle = rlGrad;
-    ctx.lineWidth   = 7;
-    ctx.beginPath();
-    ctx.moveTo(rlNearX, lineY);
-    ctx.lineTo(rlFarX, lineY);
-    ctx.stroke();
-  }
 
   // ── 4. LEFT PANEL TEXT ────────────────────────────────────────────────────
   // Card text vertically centred in zone below MINTVAULT header.
@@ -754,14 +757,15 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     curY -= LG;
   };
 
-  renderBlock(nmLines, nmSzR, "bold", WHITE);
+  const secondaryFg = labelFg === WHITE ? "rgba(255,255,255,0.75)" : "#555555";
+  renderBlock(nmLines, nmSzR, "bold", labelFg);
   if (nmLines.length && ysLines.length) curY += G_NM_YS;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(ysLines, ysSzR, "bold", WHITE);
+  renderBlock(ysLines, ysSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
   if (ysLines.length && varLines.length) curY += G_YS_VAR;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(varLines, varSzR, "bold", WHITE);
+  renderBlock(varLines, varSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
 
   ctx.textAlign    = "left";
@@ -798,7 +802,7 @@ function drawContactlessIcon(
   ctx.restore();
 }
 
-async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any) {
+async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
   const qrSize = 150;
@@ -835,20 +839,15 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // QR image on white background
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // Cert ID — white, readable on dark background below the white box
+  // Cert ID — readable below the QR box
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
   const certBackFit = fitFontSize(ctx, cert.certId, wbW - 8, certFontH, 14);
   ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
-  ctx.fillStyle     = WHITE;
-  ctx.shadowColor   = "rgba(0, 0, 0, 0.35)";  // matches front label cert ID shadow exactly
-  ctx.shadowBlur    = 2;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 1;
-  ctx.fillText(cert.certId, qrCenterX, certMidY);
+  ctx.fillStyle     = labelFg;
   ctx.shadowBlur    = 0;
   ctx.shadowColor   = "transparent";
-  ctx.shadowOffsetY = 0;
+  ctx.fillText(cert.certId, qrCenterX, certMidY);
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
@@ -872,12 +871,8 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
 
     ctx.drawImage(logo, lx, ly, drawW, drawH);
 
-    // Redraw gold border on top to ensure logo never bleeds into the frame.
-    ctx.shadowBlur  = 0;
-    ctx.shadowColor = "transparent";
-    ctx.strokeStyle = GOLD_LIGHT;
-    ctx.lineWidth   = BORDER_STROKE;
-    ctx.strokeRect(GOLD_CENTER, GOLD_CENTER, PX_W - GOLD_CENTER * 2, PX_H - GOLD_CENTER * 2);
+    // Redraw gold frame on top so logo never bleeds into the border.
+    drawGoldFrame(ctx);
   }
 
   // ── CENTRE TOP: website URL — full gradient + glow matching front MINTVAULT ─────
@@ -928,19 +923,45 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.shadowColor      = "transparent";
   }
 
-  // ── CENTRE MIDDLE: NFC icon — 100px (secondary element; −20% from 126px) ──
-  const iconSz = 100;
+  // ── CENTRE MIDDLE: NFC hand-tap icon — tinted gold ─────────────────────────
   try {
-    const nfcImg = await loadImage(NFC_ICON_PATH);
-    ctx.drawImage(
-      nfcImg,
-      NFC_ICON_CX - Math.round(iconSz / 2),
-      Math.round(PX_H / 2) - Math.round(iconSz / 2),
-      iconSz,
-      iconSz,
-    );
+    const { createCanvas } = await import("canvas");
+    const nfcImg  = await loadImage(NFC_ICON_PATH);
+    const iconSz  = 110;                                  // rendered square size (px)
+    const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
+    const iconY   = Math.round(PX_H / 2 - iconSz / 2);
+
+    // Step 1 — draw source icon onto an offscreen canvas (same size)
+    const off = createCanvas(iconSz, iconSz);
+    const offCtx = off.getContext("2d");
+    offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
+
+    // Step 2 — overlay the gold colour using source-atop so only opaque pixels are painted
+    // The icon is black-on-white so we first make white transparent via destination-out trick:
+    // multiply blend with black achieves this on canvas 2d, but the simplest reliable
+    // approach is: use the icon as a mask by painting gold then compositing with destination-in.
+    const mask = createCanvas(iconSz, iconSz);
+    const maskCtx = mask.getContext("2d");
+    // Paint gold fill
+    maskCtx.fillStyle = GOLD;
+    maskCtx.fillRect(0, 0, iconSz, iconSz);
+    // Cut out the icon shape: pixels from nfcImg are used as the alpha mask
+    maskCtx.globalCompositeOperation = "destination-in";
+    // The source icon is black on white — invert it so the dark strokes become the mask
+    // We do this by drawing it with multiply on a black base: anything dark stays, white goes transparent
+    const inv = createCanvas(iconSz, iconSz);
+    const invCtx = inv.getContext("2d");
+    invCtx.fillStyle = BLACK;
+    invCtx.fillRect(0, 0, iconSz, iconSz);
+    invCtx.globalCompositeOperation = "destination-out";
+    invCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
+    maskCtx.drawImage(inv, 0, 0);
+
+    ctx.drawImage(mask, iconX, iconY);
   } catch {
-    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 5, WHITE);
+    // Fallback: draw programmatic signal arcs if icon fails to load
+    const iconSz = 100;
+    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_DARK);
   }
 
   ctx.textAlign    = "left";

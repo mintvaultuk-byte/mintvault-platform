@@ -7,7 +7,7 @@ import {
   LogOut, Plus, Edit, Download, Search, Eye, EyeOff,
   FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
-  Package, ScanLine, DollarSign, Save, ArrowRight, Copy, Check, Loader2,
+  Package, ScanLine, DollarSign, Save, ArrowRight, Copy, Check, Loader2, Brain,
 } from "lucide-react";
 
 type CertsFilter = {
@@ -19,6 +19,7 @@ type CertsFilter = {
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
+import AdminLearningPage from "@/pages/admin-learning";
 
 interface DbInfo {
   env: string;
@@ -36,6 +37,8 @@ interface DbInfo {
 import CertificateForm from "@/components/certificate-form";
 import NfcSection from "@/components/nfc-section";
 import OwnershipSection from "@/components/ownership-section";
+import GradingPanel from "@/components/grading/grading-panel";
+import GradingQueue from "@/components/grading/grading-queue";
 
 interface Props {
   onLogout: () => void;
@@ -52,12 +55,14 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
+  const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
+  const [approvedSignal, setApprovedSignal] = useState<{ certId: string; grade: string; ts: number } | null>(null);
 
   const { data: certs = [], isLoading } = useQuery<CertificateRecord[]>({
     queryKey: ["/api/admin/certificates"],
@@ -116,14 +121,14 @@ export default function AdminDashboard({ onLogout }: Props) {
   const filtered = searchQuery
     ? certs.filter((c) =>
         c.certId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.cardName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.setName.toLowerCase().includes(searchQuery.toLowerCase())
+        (c.cardName ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (c.setName ?? "").toLowerCase().includes(searchQuery.toLowerCase())
       )
     : certs;
 
   if (showForm) {
     return (
-      <div className="min-h-screen bg-black">
+      <div className="min-h-screen bg-white">
         <AdminHeader onLogout={handleLogout} activeTab={activeTab} onTabChange={setActiveTab} />
         <div className="max-w-3xl mx-auto px-4 py-6">
           <button
@@ -139,6 +144,13 @@ export default function AdminDashboard({ onLogout }: Props) {
           />
           {editingCert && editingCert.id && (
             <div className="mt-6 space-y-6">
+              <GradingPanel
+                certId={editingCert.id}
+                cardName={editingCert.cardName || ""}
+                cardSet={editingCert.setName || ""}
+                existingGrade={editingCert.gradeOverall}
+                onGradeApproved={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] })}
+              />
               <OwnershipSection cert={editingCert} />
               <NfcSection
                 cert={editingCert}
@@ -152,7 +164,7 @@ export default function AdminDashboard({ onLogout }: Props) {
   }
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-white">
       <AdminHeader onLogout={handleLogout} activeTab={activeTab} onTabChange={setActiveTab} />
 
       {activeTab === "dashboard" && (
@@ -176,6 +188,44 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "intake" && <AdminIntake />}
       {activeTab === "pricing" && <AdminPricing />}
       {activeTab === "printing" && <AdminPrinting />}
+      {activeTab === "learning" && <AdminLearningPage />}
+      {activeTab === "grading" && (() => {
+        const gradingCert = certs.find(c => c.id === selectedGradingCertId) ?? null;
+        return (
+          <div className="max-w-5xl mx-auto px-4 py-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
+              <GradingQueue
+                currentCertId={selectedGradingCertId}
+                onSelectCert={setSelectedGradingCertId}
+                approvedSignal={approvedSignal}
+              />
+              {gradingCert ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">{gradingCert.certId}</span>
+                    <span className="text-[#555555] text-xs">{gradingCert.cardName}</span>
+                  </div>
+                  <GradingPanel
+                    certId={gradingCert.id}
+                    certIdStr={gradingCert.certId}
+                    cardName={gradingCert.cardName || ""}
+                    cardSet={gradingCert.setName || ""}
+                    existingGrade={gradingCert.gradeOverall}
+                    onGradeApproved={(cid, grade) => {
+                      if (cid && grade) setApprovedSignal({ certId: cid, grade, ts: Date.now() });
+                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-8 text-center">
+                  <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {previewCert && (
         <LabelPreviewModal
@@ -202,8 +252,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -216,7 +266,7 @@ function AdminHeader({
     : "...";
 
   return (
-    <header className="border-b border-[#D4AF37]/20 bg-black/95 px-4 py-3">
+    <header className="border-b border-[#D4AF37]/20 bg-white/95 px-4 py-3">
       <div className="max-w-5xl mx-auto flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6">
@@ -291,6 +341,28 @@ function AdminHeader({
               >
                 <Printer size={12} /> Printing
               </button>
+              <button
+                onClick={() => onTabChange("grading")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "grading"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-grading"
+              >
+                <BarChart3 size={12} /> Grading
+              </button>
+              <button
+                onClick={() => onTabChange("learning")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "learning"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-learning"
+              >
+                <Brain size={12} /> AI Learning
+              </button>
             </nav>
           </div>
           <button
@@ -314,17 +386,229 @@ function AdminHeader({
               <Shield size={10} className="inline mr-1 -mt-px" />
               ENV: {dbInfo.env}
             </span>
-            <span className="text-gray-500 flex items-center gap-1" data-testid="badge-db">
+            <span className="text-[#999999] flex items-center gap-1" data-testid="badge-db">
               <Database size={10} />
               DB: {shortHost}/{dbInfo.db_name}
             </span>
-            <span className="text-gray-600" data-testid="text-db-counts">
+            <span className="text-[#999999]" data-testid="text-db-counts">
               CM:{dbInfo.card_master_active_count} · CS:{dbInfo.card_sets_active_count} · Certs:{dbInfo.certificates_count}
             </span>
           </div>
         )}
       </div>
     </header>
+  );
+}
+
+// ── Capacity & Queue section ──────────────────────────────────────────────────
+
+interface CapacityData {
+  standard: { active: number; max: number; full: boolean; forceOpen: boolean };
+  priority: { active: number; max: number; full: boolean; forceOpen: boolean };
+  express:  { active: number; max: number; full: boolean; forceOpen: boolean };
+}
+
+function CapacitySection() {
+  const { data, refetch } = useQuery<CapacityData>({
+    queryKey: ["/api/capacity"],
+    refetchInterval: 30_000,
+  });
+
+  const [editing, setEditing] = useState<{ slug: string; max: number; forceOpen: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const tiers = [
+    { slug: "standard", label: "Standard", color: "#D4AF37" },
+    { slug: "priority", label: "Priority",  color: "#B8960C" },
+    { slug: "express",  label: "Express",   color: "#E8C547" },
+  ] as const;
+
+  const handleSave = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const res = await apiRequest("PUT", `/api/admin/capacity/${editing.slug}`, {
+        maxActive: editing.max,
+        forceOpen: editing.forceOpen,
+      });
+      if (!res.ok) throw new Error("Failed");
+      setSaveMsg("Saved");
+      setEditing(null);
+      refetch();
+    } catch {
+      setSaveMsg("Error saving");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSaveMsg(null), 3000);
+    }
+  };
+
+  return (
+    <div className="border border-[#D4AF37]/20 rounded-lg p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase">Capacity &amp; Queue</h3>
+        {saveMsg && <span className="text-xs text-emerald-400">{saveMsg}</span>}
+      </div>
+
+      <div className="space-y-4">
+        {tiers.map(({ slug, label }) => {
+          const cap = data?.[slug as keyof CapacityData];
+          const active = cap?.active ?? 0;
+          const max = cap?.max ?? 0;
+          const full = cap?.full ?? false;
+          const forceOpen = cap?.forceOpen ?? false;
+          const pct = max > 0 ? Math.min(100, Math.round((active / max) * 100)) : 0;
+          const isEdit = editing?.slug === slug;
+
+          return (
+            <div key={slug} className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[#D4AF37] font-bold uppercase tracking-wider">{label}</span>
+                  {full && !forceOpen && (
+                    <span className="bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Full</span>
+                  )}
+                  {forceOpen && (
+                    <span className="bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Force Open</span>
+                  )}
+                </div>
+                <span className="text-[#999999]">{active} / {max} active</span>
+              </div>
+              <div className="h-2 bg-[#E8E0C8] rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-[#D4AF37]"}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+
+              {isEdit ? (
+                <div className="flex items-center gap-3 pt-1">
+                  <label className="text-xs text-[#999999]">Max:</label>
+                  <input
+                    type="number"
+                    value={editing.max}
+                    min={0}
+                    onChange={(e) => setEditing({ ...editing, max: parseInt(e.target.value) || 0 })}
+                    className="w-20 bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+                  />
+                  <label className="flex items-center gap-1.5 text-xs text-[#999999] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editing.forceOpen}
+                      onChange={(e) => setEditing({ ...editing, forceOpen: e.target.checked })}
+                      className="accent-amber-500"
+                    />
+                    Force open
+                  </label>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="text-xs border border-[#D4AF37] text-[#D4AF37] rounded px-3 py-1 hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors"
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    onClick={() => setEditing(null)}
+                    className="text-xs text-[#999999] hover:text-[#D4AF37] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setEditing({ slug, max: max, forceOpen })}
+                  className="text-[10px] text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors"
+                >
+                  Edit limits
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Stolen Reports section ────────────────────────────────────────────────────
+
+interface StolenReport {
+  id: number;
+  cert_id: string;
+  reporter_name: string;
+  reporter_email: string;
+  description: string | null;
+  verified_at: string | null;
+  created_at: string;
+}
+
+function StolenReportsSection() {
+  const { data, refetch } = useQuery<StolenReport[]>({
+    queryKey: ["/api/admin/stolen"],
+    refetchInterval: 60_000,
+  });
+  const [clearing, setClearing] = useState<number | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const reports = data || [];
+
+  const handleClear = async (certId: string, id: number) => {
+    setClearing(id);
+    try {
+      const res = await apiRequest("POST", `/api/admin/stolen/${certId}/clear`);
+      if (!res.ok) throw new Error("Failed");
+      setMsg(`Cleared flag for ${certId}`);
+      refetch();
+    } catch {
+      setMsg("Error clearing flag");
+    } finally {
+      setClearing(null);
+      setTimeout(() => setMsg(null), 4000);
+    }
+  };
+
+  if (reports.length === 0) return null;
+
+  return (
+    <div className="border border-red-200 rounded-lg p-5 mb-6 bg-red-50/30">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-red-600 font-bold tracking-widest text-xs uppercase flex items-center gap-2">
+          <AlertTriangle size={13} />
+          Stolen Reports ({reports.length} active)
+        </h3>
+        {msg && <span className="text-xs text-emerald-600">{msg}</span>}
+      </div>
+      <div className="space-y-2">
+        {reports.map((r) => (
+          <div key={r.id} className="flex items-center justify-between py-2 border-b border-red-100 last:border-0 text-sm gap-4">
+            <div className="flex-1 min-w-0">
+              <span className="text-[#D4AF37] font-mono text-xs font-bold mr-2">{r.cert_id}</span>
+              <span className="text-[#1A1A1A]">{r.reporter_name}</span>
+              <span className="text-[#999999] ml-2 text-xs">&lt;{r.reporter_email}&gt;</span>
+              {!r.verified_at && (
+                <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-bold uppercase">Unverified</span>
+              )}
+              {r.verified_at && (
+                <span className="ml-2 text-[10px] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 font-bold uppercase">Verified</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a href={`/vault/${r.cert_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors">
+                View
+              </a>
+              <button
+                onClick={() => handleClear(r.cert_id, r.id)}
+                disabled={clearing === r.id}
+                className="text-xs border border-red-300 text-red-600 rounded px-2 py-0.5 hover:bg-red-100 disabled:opacity-50 transition-colors"
+              >
+                {clearing === r.id ? "Clearing…" : "Clear Flag"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -441,7 +725,7 @@ function DashboardView({
             onChange={(e) => setCertSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCertSearch()}
             placeholder="Search Cert ID..."
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors w-48"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors w-48"
             data-testid="input-quick-search"
           />
           <button
@@ -489,7 +773,7 @@ function DashboardView({
               onGradeClick={(g) => onGoToCerts({ grade: g })}
             />
           ) : (
-            <div className="h-40 flex items-center justify-center text-gray-600 text-sm">No data</div>
+            <div className="h-40 flex items-center justify-center text-[#999999] text-sm">No data</div>
           )}
         </div>
 
@@ -529,7 +813,7 @@ function DashboardView({
               >
                 <div className="flex items-center gap-2">
                   <Tag size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37]/80 transition-colors" />
-                  <span className="text-white text-sm group-hover:text-[#D4AF37]/90 transition-colors">{label}</span>
+                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#D4AF37]/90 transition-colors">{label}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[#D4AF37] font-bold text-sm">{count}</span>
@@ -541,6 +825,9 @@ function DashboardView({
 
         </div>
       </div>
+
+      <CapacitySection />
+      <StolenReportsSection />
 
       <div className="border border-[#D4AF37]/20 rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
@@ -570,7 +857,7 @@ function DashboardView({
             })}
           </div>
         ) : (
-          <p className="text-gray-600 text-sm text-center py-8">No certificates yet</p>
+          <p className="text-[#999999] text-sm text-center py-8">No certificates yet</p>
         )}
       </div>
     </div>
@@ -623,19 +910,19 @@ function RecentCertRow({
               : <Copy size={11} />}
           </button>
         </div>
-        <span className="text-white text-sm truncate">{cert.cardName}</span>
+        <span className="text-[#1A1A1A] text-sm truncate">{cert.cardName}</span>
         <span className="text-[#D4AF37]/40 text-xs shrink-0 hidden sm:inline">{cert.setName}</span>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <span className="text-white font-bold text-sm">{gradeDisplay}</span>
+        <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
         <span className={`text-xs px-1.5 py-0.5 rounded ${
           cert.status === "active" || cert.status === "published"
             ? "bg-emerald-500/20 text-emerald-400"
             : cert.status === "voided"
             ? "bg-red-500/20 text-red-400"
-            : "bg-gray-500/20 text-gray-400"
+            : "bg-gray-500/20 text-[#666666]"
         }`}>{cert.status}</span>
-        <span className="text-gray-600 text-xs hidden sm:inline">
+        <span className="text-[#999999] text-xs hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
         </span>
         <ArrowRight size={12} className="text-[#D4AF37]/15 group-hover:text-[#D4AF37]/40 transition-colors" />
@@ -672,7 +959,7 @@ function StatTile({
       </div>
       <div className="flex-1 min-w-0">
         <p className={`font-bold text-[#D4AF37] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>{value}</p>
-        <p className="text-gray-500 text-xs uppercase tracking-wider">{label}</p>
+        <p className="text-[#999999] text-xs uppercase tracking-wider">{label}</p>
       </div>
       {clickable && (
         <ArrowRight size={13} className="text-[#D4AF37]/25 shrink-0" aria-hidden />
@@ -713,7 +1000,7 @@ function GradeChart({
                   : "bg-[#D4AF37]/15"}`}
               style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
             />
-            <span className={`text-xs transition-colors ${clickable ? "text-gray-500 group-hover:text-[#D4AF37]" : "text-gray-600"}`}>
+            <span className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#D4AF37]" : "text-[#999999]"}`}>
               {d.grade}
             </span>
           </div>
@@ -808,7 +1095,7 @@ function CertsView({
           <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-certs-title">
             CERTIFICATES
           </h1>
-          <p className="text-gray-500 text-sm">{totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}{hasActiveFilters ? " (filtered)" : ""}</p>
+          <p className="text-[#999999] text-sm">{totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}{hasActiveFilters ? " (filtered)" : ""}</p>
         </div>
         <button
           onClick={onNewCert}
@@ -827,7 +1114,7 @@ function CertsView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search cert ID, card name, set..."
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-4 py-2 pl-9 text-white text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-4 py-2 pl-9 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-search-certs"
           />
         </div>
@@ -841,7 +1128,7 @@ function CertsView({
                   ? f === "voided"
                     ? "bg-red-500/20 text-red-400 border-red-500/40"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-gray-500 border-gray-700 hover:text-gray-300"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
               }`}
               data-testid={`filter-${f}`}
             >
@@ -855,7 +1142,7 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 gradeTypeFilter === gt
                   ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-gray-500 border-gray-700 hover:text-gray-300"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
               }`}
               data-testid={`filter-gradetype-${gt}`}
             >
@@ -872,9 +1159,9 @@ function CertsView({
                   ? o === "claimed"
                     ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                     : o === "unclaimed"
-                    ? "bg-gray-700 text-gray-300 border-gray-600"
+                    ? "bg-gray-700 text-[#666666] border-gray-600"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-gray-500 border-gray-700 hover:text-gray-300"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
               }`}
               data-testid={`filter-ownership-${o}`}
             >
@@ -887,43 +1174,43 @@ function CertsView({
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <label className="text-gray-500 text-xs">Grade:</label>
+          <label className="text-[#999999] text-xs">Grade:</label>
           <select
             value={gradeFilter}
             onChange={(e) => setGradeFilter(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="select-grade-filter"
           >
-            <option value="" className="bg-black">All grades</option>
+            <option value="" className="bg-white">All grades</option>
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
-              <option key={g} value={String(g)} className="bg-black">{g}</option>
+              <option key={g} value={String(g)} className="bg-white">{g}</option>
             ))}
           </select>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-gray-500 text-xs">From:</label>
+          <label className="text-[#999999] text-xs">From:</label>
           <input
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-date-from-certs"
           />
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-gray-500 text-xs">To:</label>
+          <label className="text-[#999999] text-xs">To:</label>
           <input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-date-to-certs"
           />
         </div>
         {hasActiveFilters && (
           <button
             onClick={() => { setStatusFilter("all"); setGradeTypeFilter("all"); setGradeFilter(""); setDateFrom(""); setDateTo(""); setSearchQuery(""); setOwnershipFilter("all"); }}
-            className="text-xs text-gray-500 hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
+            className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
             data-testid="button-clear-filters-certs"
           >
             <X size={12} /> Clear filters
@@ -940,7 +1227,7 @@ function CertsView({
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 border border-[#D4AF37]/10 rounded-lg">
           <FileText className="mx-auto text-[#D4AF37]/20 mb-3" size={40} />
-          <p className="text-gray-500">
+          <p className="text-[#999999]">
             {searchQuery ? "No matching certificates" : statusFilter === "voided" ? "No voided certificates" : "No certificates yet"}
           </p>
         </div>
@@ -987,7 +1274,7 @@ function CertRow({
           {(cert as any).frontImageUrl || cert.frontImagePath ? (
             <img
               src={(cert as any).frontImageUrl || cert.frontImagePath}
-              alt={cert.cardName}
+              alt={cert.cardName ?? ""}
               className="w-10 h-14 object-cover rounded border border-[#D4AF37]/20"
             />
           ) : (
@@ -1005,7 +1292,7 @@ function CertRow({
                   ? "bg-emerald-500/20 text-emerald-400"
                   : cert.status === "voided"
                   ? "bg-red-500/20 text-red-400"
-                  : "bg-gray-500/20 text-gray-400"
+                  : "bg-gray-500/20 text-[#666666]"
               }`}>
                 {cert.status === "active" || cert.status === "published" ? <Eye size={10} className="inline mr-0.5" /> : <EyeOff size={10} className="inline mr-0.5" />}
                 {cert.status}
@@ -1015,16 +1302,16 @@ function CertRow({
                   <Shield size={9} className="inline" /> claimed
                 </span>
               ) : (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-600" data-testid={`badge-unclaimed-${cert.id}`}>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]" data-testid={`badge-unclaimed-${cert.id}`}>
                   unclaimed
                 </span>
               )}
-              <span className="text-white font-bold text-sm">{isNonNum ? label : `${grade} ${label}`}</span>
+              <span className="text-[#1A1A1A] font-bold text-sm">{isNonNum ? label : `${grade} ${label}`}</span>
             </div>
-            <p className="text-white text-sm font-medium truncate" data-testid={`text-cert-name-${cert.id}`}>
+            <p className="text-[#1A1A1A] text-sm font-medium truncate" data-testid={`text-cert-name-${cert.id}`}>
               {cert.cardName}
             </p>
-            <p className="text-gray-500 text-xs truncate">
+            <p className="text-[#999999] text-xs truncate">
               {cert.cardGame} · {cert.setName} · {cert.cardNumber}
               {cert.variant ? ` · ${cert.variant}` : ""}
               
@@ -1129,32 +1416,32 @@ function VoidConfirmationModal({
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" data-testid="modal-void">
-      <div className="bg-gray-950 border border-red-500/30 rounded-lg max-w-md w-full p-6">
+      <div className="bg-white border border-red-500/30 rounded-lg max-w-md w-full p-6">
         <div className="flex items-center gap-3 mb-4">
           <AlertTriangle className="text-red-400 shrink-0" size={24} />
           <h3 className="text-red-400 font-bold tracking-wider text-sm uppercase">Void Certificate</h3>
         </div>
-        <p className="text-gray-300 text-sm mb-2">
-          You are about to void certificate <span className="text-white font-mono font-bold">{cert.certId}</span>.
+        <p className="text-[#666666] text-sm mb-2">
+          You are about to void certificate <span className="text-[#1A1A1A] font-mono font-bold">{cert.certId}</span>.
         </p>
-        <p className="text-gray-400 text-xs mb-4">
+        <p className="text-[#666666] text-xs mb-4">
           This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public lookup page. The certificate ID will be preserved.
         </p>
 
         <div className="mb-3">
-          <label className="text-gray-400 text-xs block mb-1">Reason (optional)</label>
+          <label className="text-[#666666] text-xs block mb-1">Reason (optional)</label>
           <input
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="e.g. Issued in error, duplicate entry..."
-            className="w-full bg-transparent border border-gray-700 rounded px-3 py-2 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-red-500/50 transition-colors"
+            className="w-full bg-transparent border border-[#E8E4DC] rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-red-500/50 transition-colors"
             data-testid="input-void-reason"
           />
         </div>
 
         <div className="mb-5">
-          <label className="text-gray-400 text-xs block mb-1">
+          <label className="text-[#666666] text-xs block mb-1">
             Type <span className="text-red-400 font-bold">VOID</span> to confirm
           </label>
           <input
@@ -1162,7 +1449,7 @@ function VoidConfirmationModal({
             value={typed}
             onChange={(e) => setTyped(e.target.value.toUpperCase())}
             placeholder="VOID"
-            className="w-full bg-transparent border border-gray-700 rounded px-3 py-2 text-white text-sm placeholder:text-gray-600 focus:outline-none focus:border-red-500/50 transition-colors font-mono tracking-wider"
+            className="w-full bg-transparent border border-[#E8E4DC] rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-red-500/50 transition-colors font-mono tracking-wider"
             data-testid="input-void-confirm"
           />
         </div>
@@ -1170,7 +1457,7 @@ function VoidConfirmationModal({
         <div className="flex items-center gap-3 justify-end">
           <button
             onClick={onCancel}
-            className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+            className="text-[#666666] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
             data-testid="button-void-cancel"
           >
             Cancel
@@ -1178,7 +1465,7 @@ function VoidConfirmationModal({
           <button
             onClick={() => onConfirm(reason)}
             disabled={typed !== "VOID" || isPending}
-            className="bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded font-medium tracking-wide transition-colors flex items-center gap-2"
+            className="bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-[#999999] text-[#1A1A1A] text-sm px-4 py-2 rounded font-medium tracking-wide transition-colors flex items-center gap-2"
             data-testid="button-void-submit"
           >
             <Ban size={14} />
@@ -1205,7 +1492,7 @@ function LabelPreviewModal({
       onClick={onClose}
     >
       <div
-        className="bg-gray-950 border border-[#D4AF37]/30 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white border border-[#D4AF37]/30 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b border-[#D4AF37]/20">
@@ -1213,7 +1500,7 @@ function LabelPreviewModal({
             <h3 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-preview-title">
               LABEL PREVIEW
             </h3>
-            <p className="text-gray-500 text-xs mt-0.5">{cert.certId} · {cert.cardName}</p>
+            <p className="text-[#999999] text-xs mt-0.5">{cert.certId} · {cert.cardName}</p>
           </div>
           <button
             onClick={onClose}
@@ -1227,7 +1514,7 @@ function LabelPreviewModal({
         <div className="p-4 space-y-6">
           <div>
             <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
-            <div className="bg-gray-900 rounded-lg p-3 flex items-center justify-center">
+            <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/front?format=png&preview=1&t=${ts}`}
                 alt="Front label preview"
@@ -1240,7 +1527,7 @@ function LabelPreviewModal({
 
           <div>
             <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
-            <div className="bg-gray-900 rounded-lg p-3 flex items-center justify-center">
+            <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/back?format=png&preview=1&t=${ts}`}
                 alt="Back label preview"
@@ -1252,7 +1539,7 @@ function LabelPreviewModal({
           </div>
 
           <div className="border-t border-[#D4AF37]/10 pt-4">
-            <p className="text-gray-600 text-xs mb-3">Print specs: 827 x 236px at 300 DPI = 70mm x 20mm exact</p>
+            <p className="text-[#999999] text-xs mb-3">Print specs: 827 x 236px at 300 DPI = 70mm x 20mm exact</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}

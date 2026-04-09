@@ -1,116 +1,271 @@
-import { BarChart3, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { Search, BarChart3, Loader2 } from "lucide-react";
 
-const mockPopulationData = [
-  { grade: "10", label: "GEM MINT", count: 47, higher: 0, same: 47, lower: 1203 },
-  { grade: "9.5", label: "MINT+", count: 83, higher: 47, same: 83, lower: 1120 },
-  { grade: "9", label: "MINT", count: 215, higher: 130, same: 215, lower: 905 },
-  { grade: "8.5", label: "NM-MT+", count: 178, higher: 345, same: 178, lower: 727 },
-  { grade: "8", label: "NM-MT", count: 312, higher: 523, same: 312, lower: 415 },
-  { grade: "7.5", label: "NEAR MINT+", count: 156, higher: 835, same: 156, lower: 259 },
-  { grade: "7", label: "NEAR MINT", count: 134, higher: 991, same: 134, lower: 125 },
-  { grade: "6", label: "EX-MT", count: 75, higher: 1125, same: 75, lower: 50 },
-  { grade: "5", label: "EXCELLENT", count: 32, higher: 1200, same: 32, lower: 18 },
-  { grade: "4 & below", label: "VG & LOWER", count: 18, higher: 1232, same: 18, lower: 0 },
+interface PopRow {
+  cardGame: string | null;
+  setName: string | null;
+  cardName: string | null;
+  total: number;
+  gBL: number;
+  g10: number;
+  g9: number;
+  g8: number;
+  g7: number;
+  gLow: number;
+}
+
+const GRADE_COLS: { key: keyof PopRow; label: string; color: string }[] = [
+  { key: "gBL",  label: "BL",  color: "#D4AF37" },
+  { key: "g10",  label: "10",  color: "#B8960C" },
+  { key: "g9",   label: "9",   color: "#555555" },
+  { key: "g8",   label: "8",   color: "#777777" },
+  { key: "g7",   label: "7",   color: "#999999" },
+  { key: "gLow", label: "≤6",  color: "#AAAAAA" },
 ];
 
-const totalGraded = mockPopulationData.reduce((sum, row) => sum + row.count, 0);
-
 export default function PopulationPage() {
+  const [game, setGame] = useState("");
+  const [set,  setSet]  = useState("");
+  const [card, setCard] = useState("");
+  const [submitted, setSubmitted] = useState({ game: "", set: "", card: "" });
+
+  const { data, isLoading, isError } = useQuery<PopRow[]>({
+    queryKey: ["/api/population", submitted.game, submitted.set, submitted.card],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (submitted.game) params.set("game", submitted.game);
+      if (submitted.set)  params.set("set",  submitted.set);
+      if (submitted.card) params.set("card", submitted.card);
+      const res = await fetch(`/api/population?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+  });
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitted({ game, set, card });
+  }
+
+  function certUrl(row: PopRow) {
+    const params = new URLSearchParams();
+    if (row.cardName) params.set("card", row.cardName);
+    if (row.setName)  params.set("set",  row.setName);
+    return `/population/certs?${params.toString()}`;
+  }
+
   return (
-    <div className="px-4 py-12 max-w-3xl mx-auto">
+    <div className="px-4 py-12 max-w-4xl mx-auto">
       <h1
-        className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-widest text-center mb-4 glow-gold"
+        className="text-3xl md:text-4xl font-sans font-bold text-[#1A1A1A] tracking-tight text-center mb-4"
         data-testid="text-population-title"
       >
-        POPULATION REPORT
+        Population Report
       </h1>
-      <p className="text-gray-300 text-center mb-12 max-w-xl mx-auto" data-testid="text-population-subtitle">
-        MintVault tracks every graded card to provide full transparency on scarcity and grading
-        distribution. Our population data helps collectors and investors make informed decisions.
+      <p className="text-[#444444] text-center mb-10 max-w-xl mx-auto" data-testid="text-population-subtitle">
+        Every card graded by MintVault is recorded here. Use the filters below to see how many copies
+        of a card have been graded and at which grade levels.
       </p>
 
-      <div className="border border-[#D4AF37]/20 rounded-lg p-6 md:p-8 mb-10">
+      {/* How it works */}
+      <div className="border border-[#D4AF37]/20 rounded-lg p-6 mb-8">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] shrink-0">
-            <BarChart3 size={24} />
+          <div className="w-10 h-10 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] shrink-0">
+            <BarChart3 size={20} />
           </div>
-          <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide glow-gold-sm" data-testid="text-how-it-works">
+          <h2 className="text-lg font-sans font-bold text-[#1A1A1A] tracking-tight">
             How Population Data Works
           </h2>
         </div>
-        <p className="text-gray-300 leading-relaxed mb-4" data-testid="text-how-body">
-          Every card graded by MintVault is recorded in our population database. This tracks how many
-          copies of each card have been graded at each grade level, giving you a clear picture of
-          relative scarcity.
-        </p>
         <ul className="space-y-2">
           {[
             "Total graded count for each card across all grade levels",
-            "Higher / Same / Lower comparisons at each grade point",
-            "Full market transparency for buyers and sellers",
-            "Updated regularly as new cards are graded",
+            "Grade distribution shows scarcity at each tier — useful for pricing",
+            "BL = Black Label: all four sub-scores are 10 (quad-10)",
+            "Updated in real time as new cards are graded and certified",
+            "Click 'View certs' to see individual certificates for that card",
           ].map((item, i) => (
             <li key={i} className="flex items-start gap-2">
               <span className="text-[#D4AF37] mt-0.5">•</span>
-              <span className="text-[#D4AF37]/90 text-sm" data-testid={`text-pop-bullet-${i}`}>{item}</span>
+              <span className="text-[#666666] text-sm">{item}</span>
             </li>
           ))}
         </ul>
       </div>
 
-      <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-2 glow-gold-sm text-center" data-testid="text-example-table-heading">
-        Example Population Table
-      </h2>
-      <p className="text-gray-500 text-sm text-center mb-6" data-testid="text-example-card">
-        Charizard — Base Set (1999) #4/102 &nbsp;·&nbsp; Total Graded: {totalGraded.toLocaleString()}
-      </p>
+      {/* Search form */}
+      <form
+        onSubmit={handleSearch}
+        className="border border-[#D4AF37]/20 rounded-lg p-5 mb-8 flex flex-col sm:flex-row gap-3"
+      >
+        <input
+          type="text"
+          placeholder="Game (e.g. Pokémon)"
+          value={game}
+          onChange={e => setGame(e.target.value)}
+          className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/70"
+        />
+        <input
+          type="text"
+          placeholder="Set name"
+          value={set}
+          onChange={e => setSet(e.target.value)}
+          className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/70"
+        />
+        <input
+          type="text"
+          placeholder="Card name"
+          value={card}
+          onChange={e => setCard(e.target.value)}
+          className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/70"
+        />
+        <button
+          type="submit"
+          className="btn-gold flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded"
+        >
+          <Search size={15} />
+          Search
+        </button>
+      </form>
 
-      <div className="border border-[#D4AF37]/20 rounded-lg overflow-hidden" data-testid="table-population">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[#D4AF37]/20 bg-[#D4AF37]/5">
-                <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Grade</th>
-                <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Label</th>
-                <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Count</th>
-                <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
-                  <span className="hidden sm:inline">Higher</span>
-                  <TrendingUp size={14} className="inline sm:hidden text-[#D4AF37]/50" />
-                </th>
-                <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
-                  <span className="hidden sm:inline">Same</span>
-                  <Minus size={14} className="inline sm:hidden text-[#D4AF37]/50" />
-                </th>
-                <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
-                  <span className="hidden sm:inline">Lower</span>
-                  <TrendingDown size={14} className="inline sm:hidden text-[#D4AF37]/50" />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {mockPopulationData.map((row, i) => (
-                <tr
-                  key={i}
-                  className="border-b border-[#D4AF37]/10 last:border-0"
-                  data-testid={`row-population-${i}`}
-                >
-                  <td className="px-4 py-3 text-white font-semibold">{row.grade}</td>
-                  <td className="px-4 py-3 text-[#D4AF37]/60 hidden sm:table-cell">{row.label}</td>
-                  <td className="px-4 py-3 text-white text-right font-mono">{row.count}</td>
-                  <td className="px-4 py-3 text-gray-500 text-right font-mono">{row.higher}</td>
-                  <td className="px-4 py-3 text-[#D4AF37]/60 text-right font-mono">{row.same}</td>
-                  <td className="px-4 py-3 text-gray-500 text-right font-mono">{row.lower}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Results */}
+      {isLoading && (
+        <div className="flex items-center justify-center gap-3 py-16 text-[#D4AF37]/60">
+          <Loader2 size={22} className="animate-spin" />
+          <span className="text-sm">Loading population data…</span>
         </div>
-      </div>
+      )}
 
-      <p className="text-gray-600 text-xs text-center mt-4 italic" data-testid="text-pop-disclaimer">
-        This is sample data for demonstration purposes. Live population data will be available when
-        the full database launches.
-      </p>
+      {isError && (
+        <p className="text-center text-red-400 text-sm py-10">
+          Failed to load population data. Please try again.
+        </p>
+      )}
+
+      {!isLoading && !isError && data && data.length === 0 && (
+        <p className="text-center text-[#999999] text-sm py-10">
+          No graded cards match your filters yet. Try a broader search or check back as more cards are graded.
+        </p>
+      )}
+
+      {!isLoading && !isError && data && data.length > 0 && (
+        <div data-testid="table-population">
+
+          {/* ── Desktop table (sm+) ── */}
+          <div className="hidden sm:block border border-[#D4AF37]/20 rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#D4AF37]/20 bg-[#FFF9E6]">
+                    <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Card</th>
+                    <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
+                    <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Total</th>
+                    {GRADE_COLS.map(col => (
+                      <th key={col.key} className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="px-4 py-3"><span className="sr-only">View certs</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((row, i) => (
+                    <tr
+                      key={i}
+                      className="border-b border-[#E8E4DC] last:border-0 hover:bg-[#FFF9E6] transition-colors"
+                      data-testid={`row-population-${i}`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="text-[#1A1A1A] font-semibold text-sm">{row.cardName ?? "—"}</div>
+                        {row.cardGame && (
+                          <div className="text-[#D4AF37]/40 text-xs">{row.cardGame}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[#D4AF37]/60 text-sm hidden md:table-cell">
+                        {row.setName ?? "—"}
+                      </td>
+                      <td className="px-4 py-3 text-[#1A1A1A] font-mono font-semibold text-right">{row.total}</td>
+                      {GRADE_COLS.map(col => (
+                        <td key={col.key} className="px-4 py-3 font-mono text-right" style={{ color: col.color }}>
+                          {(row[col.key] as number) || "—"}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={certUrl(row)}
+                          className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-xs underline-offset-2 hover:underline transition-colors"
+                        >
+                          View certs
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-3 border-t border-[#E8E4DC] text-xs text-[#999999]">
+              Showing {data.length} result{data.length !== 1 ? "s" : ""}
+              {data.length === 200 ? " (limit 200 — refine your search for more specific results)" : ""}
+            </div>
+          </div>
+
+          {/* ── Mobile card layout (< sm) ── */}
+          <div className="sm:hidden space-y-3">
+            {data.map((row, i) => (
+              <div
+                key={i}
+                className="border border-[#D4AF37]/20 rounded-lg p-4 bg-white"
+                data-testid={`card-population-${i}`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <div className="text-[#1A1A1A] font-semibold text-sm">{row.cardName ?? "—"}</div>
+                    {row.setName && (
+                      <div className="text-[#888888] text-xs mt-0.5">{row.setName}</div>
+                    )}
+                    {row.cardGame && (
+                      <div className="text-[#D4AF37]/50 text-xs">{row.cardGame}</div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-[#1A1A1A] font-mono font-bold text-lg leading-none">{row.total}</div>
+                    <div className="text-[#999999] text-xs">total</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {GRADE_COLS.map(col => {
+                    const val = row[col.key] as number;
+                    if (!val) return null;
+                    return (
+                      <span
+                        key={col.key}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-mono font-semibold border"
+                        style={{ color: col.color, borderColor: `${col.color}40`, background: `${col.color}10` }}
+                      >
+                        <span className="font-bold">{col.label}</span>
+                        <span>{val}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+                <Link
+                  href={certUrl(row)}
+                  className="text-[#B8960C] text-xs font-semibold hover:underline underline-offset-2"
+                >
+                  View certificates →
+                </Link>
+              </div>
+            ))}
+            <p className="text-[#999999] text-xs text-center pt-1">
+              Showing {data.length} result{data.length !== 1 ? "s" : ""}
+              {data.length === 200 ? " (limit 200)" : ""}
+            </p>
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }

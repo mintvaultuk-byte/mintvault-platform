@@ -1,7 +1,7 @@
 import { useRoute, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, useRef } from "react";
-import { ArrowLeft, Shield, Award, Calendar, Layers, Hash, Globe, Tag, CheckCircle, XOctagon, FileText, Printer } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Shield, Award, Calendar, Layers, Hash, Globe, Tag, CheckCircle, XOctagon, FileText, Wifi, ChevronDown, ChevronUp, ClipboardList, ExternalLink } from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
 import { isNonNumericGrade } from "@shared/schema";
 import SeoHead, { SITE_URL } from "@/components/seo-head";
@@ -12,7 +12,67 @@ function gradeColor(grade: number): string {
   if (grade >= 10) return "text-emerald-400";
   if (grade >= 9) return "text-[#D4AF37]";
   if (grade >= 8) return "text-blue-400";
-  return "text-gray-400";
+  return "text-[#999999]";
+}
+
+function gameGradient(game: string | null | undefined): string {
+  const g = (game ?? "").toLowerCase();
+  if (g.includes("pokémon") || g.includes("pokemon"))
+    return "radial-gradient(ellipse at top, rgba(227,53,13,0.07) 0%, transparent 70%)";
+  if (g.includes("yu-gi-oh") || g.includes("yugioh"))
+    return "radial-gradient(ellipse at top, rgba(123,45,139,0.08) 0%, transparent 70%)";
+  if (g.includes("magic"))
+    return "radial-gradient(ellipse at top, rgba(26,111,181,0.08) 0%, transparent 70%)";
+  if (g.includes("one piece"))
+    return "radial-gradient(ellipse at top, rgba(232,65,24,0.07) 0%, transparent 70%)";
+  return "radial-gradient(ellipse at top, rgba(212,175,55,0.07) 0%, transparent 70%)";
+}
+
+function spawnConfetti(container: HTMLElement) {
+  const colors = ["#D4AF37", "#FFD700", "#FFF8DC", "#B8960C", "#FFFACD"];
+  for (let i = 0; i < 60; i++) {
+    const el = document.createElement("div");
+    const size = 6 + Math.random() * 8;
+    el.className = "confetti-particle";
+    el.style.cssText = [
+      `left:${10 + Math.random() * 80}%`,
+      `width:${size}px`,
+      `height:${size * (0.5 + Math.random())}px`,
+      `background:${colors[Math.floor(Math.random() * colors.length)]}`,
+      `border-radius:${Math.random() > 0.5 ? "50%" : "2px"}`,
+      `animation-duration:${1.5 + Math.random() * 1.5}s`,
+      `animation-delay:${Math.random() * 0.6}s`,
+    ].join(";");
+    container.appendChild(el);
+    el.addEventListener("animationend", () => el.remove());
+  }
+}
+
+function useGradeReveal(target: number | null): number | null {
+  const [displayed, setDisplayed] = useState<number | null>(null);
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    if (target == null) return;
+    setDisplayed(null);
+    setRevealed(false);
+    const timer = setTimeout(() => {
+      setRevealed(true);
+      if (target <= 1) { setDisplayed(target); return; }
+      let current = 1;
+      const step = () => {
+        setDisplayed(current);
+        if (current < target) {
+          current = Math.min(current + 1, target);
+          setTimeout(step, current >= target - 1 ? 120 : 60);
+        }
+      };
+      step();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [target]);
+
+  return revealed ? displayed : null;
 }
 
 /* ── QR code hook ─────────────────────────────────────── */
@@ -33,248 +93,46 @@ function useQrDataUrl(url: string): string | null {
   return dataUrl;
 }
 
-/* ── Print certificate view ───────────────────────────── */
-function CertPrintView({ cert }: { cert: PublicCertificate }) {
-  const certUrl = `${CERT_URL_BASE}${cert.certId}`;
-  const qrDataUrl = useQrDataUrl(certUrl);
-  const isNonNum = isNonNumericGrade(cert.gradeType);
-
-  const gradeDate = cert.gradedDate
-    ? new Date(cert.gradedDate).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })
-    : "—";
-
-  const hasSubgrades =
-    cert.gradeCentering != null ||
-    cert.gradeCorners != null ||
-    cert.gradeEdges != null ||
-    cert.gradeSurface != null;
+/* ── Grading Report expandable panel ─────────────────── */
+function GradingReportPanel({
+  report,
+}: {
+  report: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string };
+}) {
+  const [open, setOpen] = useState(false);
+  const entries = [
+    { key: "centering", label: "Centering", val: report.centering },
+    { key: "corners",   label: "Corners",   val: report.corners },
+    { key: "edges",     label: "Edges",     val: report.edges },
+    { key: "surface",   label: "Surface",   val: report.surface },
+    { key: "overall",   label: "Overall",   val: report.overall },
+  ].filter((e) => e.val?.trim());
 
   return (
-    <div
-      id="cert-print-view"
-      style={{
-        display: "none",
-        position: "relative",
-        width: "100%",
-        background: "#ffffff",
-        color: "#111111",
-        fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-        padding: "0",
-        overflow: "hidden",
-      }}
-    >
-      {/* Watermark */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%) rotate(-35deg)",
-          fontSize: "58px",
-          fontWeight: 900,
-          color: "rgba(184, 148, 31, 0.055)",
-          whiteSpace: "nowrap",
-          pointerEvents: "none",
-          userSelect: "none",
-          letterSpacing: "0.25em",
-          textTransform: "uppercase",
-          zIndex: 0,
-        }}
+    <div className="mt-5 pt-4 border-t border-[#D4AF37]/15" data-testid="section-grading-report">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-between w-full text-left group"
+        aria-expanded={open}
       >
-        MintVault Certified Copy
-      </div>
-
-      {/* Content */}
-      <div style={{ position: "relative", zIndex: 1, padding: "32px 40px" }}>
-
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: "24px", borderBottom: "2px solid #b8941f", paddingBottom: "20px" }}>
-          {/* Logo */}
-          <div style={{ marginBottom: "4px" }}>
-            <span style={{
-              fontSize: "32px",
-              fontWeight: 900,
-              letterSpacing: "0.25em",
-              color: "#b8941f",
-              textTransform: "uppercase",
-            }}>
-              MintVault
-            </span>
-            <span style={{
-              fontSize: "11px",
-              fontWeight: 700,
-              letterSpacing: "0.3em",
-              color: "#888",
-              textTransform: "uppercase",
-              display: "block",
-              marginTop: "2px",
-            }}>
-              Professional Card Grading &amp; Authentication · United Kingdom
-            </span>
-          </div>
+        <div className="flex items-center gap-2">
+          <ClipboardList size={14} className="text-[#D4AF37]/60 shrink-0" />
+          <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grading Report</p>
         </div>
-
-        {/* Cert ID + status row */}
-        <div className="pv-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "22px" }}>
-          <div>
-            <div style={{ fontSize: "10px", letterSpacing: "0.2em", color: "#888", textTransform: "uppercase", marginBottom: "3px" }}>
-              Certificate ID
+        {open
+          ? <ChevronUp size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />
+          : <ChevronDown size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3" data-testid="grading-report-body">
+          {entries.map(({ key, label, val }) => (
+            <div key={key}>
+              <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-wider mb-0.5">{label}</p>
+              <p className="text-[#444444] text-sm leading-relaxed" data-testid={`text-report-${key}`}>{val}</p>
             </div>
-            <div style={{ fontSize: "22px", fontWeight: 800, fontFamily: "monospace", letterSpacing: "0.08em", color: "#1a1a1a" }}>
-              {cert.certId}
-            </div>
-          </div>
-          <div style={{
-            padding: "6px 18px",
-            border: "2px solid",
-            borderColor: cert.status === "voided" ? "#cc2222" : "#b8941f",
-            borderRadius: "4px",
-            fontSize: "11px",
-            fontWeight: 700,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-            color: cert.status === "voided" ? "#cc2222" : "#b8941f",
-          }}>
-            {cert.status === "voided" ? "VOIDED" : "Verified"}
-          </div>
+          ))}
         </div>
-
-        {/* Main content: grade + card details + QR */}
-        <div className="pv-row" style={{ display: "flex", gap: "32px", alignItems: "flex-start", marginBottom: "28px" }}>
-
-          {/* Left: grade box */}
-          <div style={{
-            flexShrink: 0,
-            width: "140px",
-            textAlign: "center",
-          }}>
-            <div style={{
-              border: "3px solid #b8941f",
-              borderRadius: "8px",
-              padding: "16px 12px",
-              background: "linear-gradient(180deg, #fffdf5 0%, #fff8e1 100%)",
-              marginBottom: "10px",
-            }}>
-              {isNonNum ? (
-                <>
-                  <div style={{ fontSize: "26px", fontWeight: 900, color: "#b8941f", lineHeight: 1 }}>
-                    {cert.grade}
-                  </div>
-                  <div style={{ fontSize: "9px", color: "#888", letterSpacing: "0.15em", marginTop: "4px", textTransform: "uppercase" }}>
-                    Non-Numeric
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: "60px", fontWeight: 900, color: "#b8941f", lineHeight: 1 }}>
-                    {cert.gradeNumeric}
-                  </div>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#555", letterSpacing: "0.12em", marginTop: "4px", textTransform: "uppercase" }}>
-                    {cert.grade}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Subgrades */}
-            {hasSubgrades && !isNonNum && (
-              <div style={{ border: "1px solid #e8d08a", borderRadius: "6px", padding: "8px 6px", background: "#fffdf5" }}>
-                <div style={{ fontSize: "8px", letterSpacing: "0.15em", color: "#888", textTransform: "uppercase", marginBottom: "6px" }}>
-                  Subgrades
-                </div>
-                {[
-                  { label: "Centering", val: cert.gradeCentering },
-                  { label: "Corners", val: cert.gradeCorners },
-                  { label: "Edges", val: cert.gradeEdges },
-                  { label: "Surface", val: cert.gradeSurface },
-                ].map(({ label, val }) => val != null && (
-                  <div key={label} className="pv-row" style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", borderTop: "1px solid #f0e0a0" }}>
-                    <span style={{ fontSize: "9px", color: "#666" }}>{label}</span>
-                    <span style={{ fontSize: "10px", fontWeight: 700, color: "#333" }}>{val}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Centre: card details */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <tbody>
-                {[
-                  { label: "Card Name", value: cert.cardName },
-                  { label: "Set", value: `${cert.cardSet} (${cert.cardYear})` },
-                  { label: "Card Number", value: cert.cardNumber },
-                  cert.collection ? { label: "Collection", value: cert.collection } : null,
-                  cert.rarityLabel || cert.rarity ? { label: "Rarity", value: cert.rarityLabel || cert.rarity || "" } : null,
-                  cert.variant ? { label: "Variant", value: cert.variant } : null,
-                  cert.designations && cert.designations.length > 0 ? { label: "Designations", value: cert.designations.join(", ") } : null,
-                  { label: "Language", value: cert.language },
-                  cert.cardGame ? { label: "Game", value: cert.cardGame } : null,
-                  { label: "Date Graded", value: gradeDate },
-                ]
-                  .filter(Boolean)
-                  .map((row, i) => row && (
-                    <tr key={i} style={{ borderBottom: "1px solid #f0ead0" }}>
-                      <td style={{ padding: "5px 8px 5px 0", fontSize: "10px", letterSpacing: "0.1em", color: "#888", textTransform: "uppercase", whiteSpace: "nowrap", width: "110px" }}>
-                        {row.label}
-                      </td>
-                      <td style={{ padding: "5px 0", fontSize: "12px", fontWeight: 600, color: "#1a1a1a" }}>
-                        {row.value}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-
-            {/* Grader notes (if any) */}
-            {cert.notes && cert.notes.trim() && (
-              <div style={{ marginTop: "12px", padding: "10px 12px", background: "#fffdf5", border: "1px solid #e8d08a", borderRadius: "6px" }}>
-                <div style={{ fontSize: "9px", letterSpacing: "0.15em", color: "#888", textTransform: "uppercase", marginBottom: "5px" }}>
-                  Grader Notes
-                </div>
-                {cert.notes.split("\n").filter((l) => l.trim()).map((line, i) => (
-                  <div key={i} style={{ fontSize: "10px", color: "#444", lineHeight: "1.5" }}>{line.trim()}</div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Right: QR code */}
-          <div style={{ flexShrink: 0, textAlign: "center" }}>
-            {qrDataUrl ? (
-              <img
-                src={qrDataUrl}
-                alt="Verify certificate QR code"
-                style={{ width: "110px", height: "110px", display: "block", border: "1px solid #e8d08a", borderRadius: "4px" }}
-              />
-            ) : (
-              <div style={{ width: "110px", height: "110px", border: "1px dashed #ccc", borderRadius: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ fontSize: "9px", color: "#aaa" }}>QR loading…</span>
-              </div>
-            )}
-            <div style={{ fontSize: "8px", color: "#888", marginTop: "5px", wordBreak: "break-all", maxWidth: "110px" }}>
-              Scan to verify
-            </div>
-          </div>
-        </div>
-
-        {/* Divider */}
-        <div style={{ borderTop: "1px solid #e8d08a", marginBottom: "16px" }} />
-
-        {/* Footer */}
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "10px", color: "#555", letterSpacing: "0.05em", marginBottom: "4px" }}>
-            This certificate is valid only when verified at{" "}
-            <span style={{ fontWeight: 700, color: "#b8941f" }}>mintvaultuk.com</span>
-          </div>
-          <div style={{ fontSize: "9px", color: "#aaa", letterSpacing: "0.05em" }}>
-            MintVault UK Ltd · Tamper-evident precision grading · {certUrl}
-          </div>
-        </div>
-
-      </div>
+      )}
     </div>
   );
 }
@@ -291,14 +149,25 @@ export default function CertDetailPage() {
 
   const screenQrDataUrl = useQrDataUrl(certId ? `${CERT_URL_BASE}${certId}` : "");
 
+  // Grade reveal: count-up animation with 1s delay
+  const gradeNumericTarget = cert && !isNonNumericGrade(cert.gradeType) ? cert.gradeNumeric : null;
+  const displayedGrade = useGradeReveal(gradeNumericTarget);
+
+  // Confetti ref — spawned once when grade=10 is finally displayed
+  const confettiContainerRef = useRef<HTMLDivElement | null>(null);
+  const confettiFiredRef = useRef(false);
+  useEffect(() => {
+    if (displayedGrade === 10 && !confettiFiredRef.current && confettiContainerRef.current) {
+      confettiFiredRef.current = true;
+      spawnConfetti(confettiContainerRef.current);
+    }
+  }, [displayedGrade]);
+
   if (isLoading) {
     return (
-      <div className="px-4 py-12 max-w-2xl mx-auto text-center">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-[#D4AF37]/10 rounded w-64 mx-auto" />
-          <div className="h-4 bg-[#D4AF37]/10 rounded w-48 mx-auto" />
-          <div className="h-64 bg-[#D4AF37]/5 rounded mt-8" />
-        </div>
+      <div className="px-4 py-12 max-w-2xl mx-auto text-center flex flex-col items-center gap-4">
+        <div className="pokeball-spinner" aria-label="Loading…" />
+        <p className="text-[#999999] text-sm">Verifying certificate…</p>
       </div>
     );
   }
@@ -310,12 +179,12 @@ export default function CertDetailPage() {
         <h2 className="text-2xl font-bold text-[#D4AF37] mb-2 glow-gold-sm" data-testid="text-cert-not-found">
           Certificate Not Found
         </h2>
-        <p className="text-gray-400 mb-6" data-testid="text-cert-not-found-desc">
-          No certificate exists with ID: <span className="font-mono text-white">{certId}</span>
+        <p className="text-[#666666] mb-6" data-testid="text-cert-not-found-desc">
+          No certificate exists with ID: <span className="font-mono text-[#1A1A1A]">{certId}</span>
         </p>
         <Link href="/cert">
           <button
-            className="border border-[#D4AF37] bg-black text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#D4AF37]/10"
+            className="border border-[#D4AF37] bg-white text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#D4AF37]/10"
             data-testid="button-back-to-lookup"
           >
             Back to Lookup
@@ -346,12 +215,7 @@ export default function CertDetailPage() {
   };
 
   return (
-    <>
-      {/* ── Hidden print view – shown only via @media print ── */}
-      <CertPrintView cert={cert} />
-
-      {/* ── Screen view ────────────────────────────────────── */}
-      <div className="px-4 py-8 max-w-3xl mx-auto">
+    <div className="px-4 py-8 max-w-3xl mx-auto" style={{ background: gameGradient(cert.cardGame) }}>
         <SeoHead
           title={certTitle}
           description={certDesc}
@@ -361,24 +225,16 @@ export default function CertDetailPage() {
           ogImage={cert.frontImageUrl || undefined}
         />
 
-        {/* Back link + Print button row */}
-        <div className="flex items-center justify-between mb-6">
+        {/* Back link + action buttons row */}
+        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
           <Link href="/cert" className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm" data-testid="link-back-lookup">
             <ArrowLeft size={16} />
             Back to Lookup
           </Link>
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-2 border border-[#D4AF37]/40 bg-black text-[#D4AF37]/70 hover:text-[#D4AF37] hover:border-[#D4AF37] px-4 py-2 rounded text-sm font-medium tracking-wide transition-all btn-gold-glow"
-            data-testid="button-print-certificate"
-          >
-            <Printer size={15} />
-            Print Certificate
-          </button>
         </div>
 
         {cert.status === "voided" && (
-          <div className="border border-red-500/40 bg-red-950/30 rounded-lg p-4 mb-4 flex items-center gap-3" data-testid="banner-voided">
+          <div className="border border-red-300 bg-red-50 rounded-lg p-4 mb-4 flex items-center gap-3" data-testid="banner-voided">
             <XOctagon className="text-red-400 shrink-0" size={24} />
             <div>
               <p className="text-red-400 font-bold tracking-wider text-sm uppercase">VOIDED</p>
@@ -409,7 +265,7 @@ export default function CertDetailPage() {
                     <img
                       src={cert.frontImageUrl}
                       alt={`${cert.cardName} front`}
-                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-gray-900"
+                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
                       data-testid="img-card-front"
                     />
                   </div>
@@ -420,7 +276,7 @@ export default function CertDetailPage() {
                     <img
                       src={cert.backImageUrl}
                       alt={`${cert.cardName} back`}
-                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-gray-900"
+                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
                       data-testid="img-card-back"
                     />
                   </div>
@@ -429,7 +285,10 @@ export default function CertDetailPage() {
             </div>
           )}
 
-          <div className="p-6">
+          <div className="p-6 relative">
+            {/* Confetti container — absolutely positioned so particles fly over the card */}
+            <div ref={confettiContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden rounded-b-lg" aria-hidden="true" />
+
             {isNonNum ? (
               <div className="text-center mb-8">
                 <div className="flex items-center justify-center gap-2 mb-2">
@@ -443,15 +302,30 @@ export default function CertDetailPage() {
                     Status: Altered
                   </div>
                 )}
-                <p className="text-gray-500 text-xs mt-2">No Numerical Grade</p>
+                <p className="text-[#999999] text-xs mt-2">No Numerical Grade</p>
               </div>
             ) : (
               <div className="text-center mb-8">
-                <div className={`text-6xl font-bold ${gradeColor(cert.gradeNumeric)} mb-1`} data-testid="text-grade-numeric">
-                  {cert.gradeNumeric}
+                {/* Card name/set fades in immediately; grade counts up after 1s */}
+                <div className="mb-4 opacity-0 animate-[fadeIn_0.6s_ease_0.1s_forwards]"
+                  style={{ animation: "fadeIn 0.6s ease 0.1s forwards" }}>
+                  <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
+                  <p className="text-[#1A1A1A] font-semibold text-base">{cert.cardName}</p>
+                  <p className="text-[#999999] text-xs mt-0.5">{cert.cardSet} · {cert.cardYear}</p>
                 </div>
+                {displayedGrade == null ? (
+                  <div className="text-6xl font-bold text-[#D4AF37]/20 mb-1 select-none" aria-hidden="true">—</div>
+                ) : (
+                  <div
+                    key={displayedGrade}
+                    className={`text-6xl font-bold ${gradeColor(cert.gradeNumeric)} mb-1 grade-count-anim${displayedGrade === 10 ? " grade-gem-glow" : ""}`}
+                    data-testid="text-grade-numeric"
+                  >
+                    {displayedGrade}
+                  </div>
+                )}
                 <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
-                  {cert.grade}
+                  {displayedGrade != null ? cert.grade : "\u00a0"}
                 </div>
 
                 {/* Subgrades (screen) */}
@@ -465,7 +339,7 @@ export default function CertDetailPage() {
                     ].map(({ label, val }) => val != null && (
                       <div key={label} className="border border-[#D4AF37]/20 rounded p-2 text-center">
                         <div className="text-[#D4AF37] text-sm font-bold" data-testid={`text-subgrade-${label.toLowerCase()}`}>{val}</div>
-                        <div className="text-gray-500 text-[10px] mt-0.5">{label}</div>
+                        <div className="text-[#999999] text-[10px] mt-0.5">{label}</div>
                       </div>
                     ))}
                   </div>
@@ -478,7 +352,7 @@ export default function CertDetailPage() {
               <DetailRow icon={<Layers size={16} />} label="Set" value={`${cert.cardSet} (${cert.cardYear})`} testId="text-card-set" />
               {cert.collection && <DetailRow icon={<Layers size={16} />} label="Collection / Subset" value={cert.collection} testId="text-collection" />}
               <DetailRow icon={<Hash size={16} />} label="Card Number" value={cert.cardNumber} testId="text-card-number" />
-              {(cert.rarityLabel || cert.rarity) && <DetailRow icon={<Tag size={16} />} label="Rarity" value={cert.rarityLabel || cert.rarity} testId="text-rarity" />}
+              {(cert.rarityLabel || cert.rarity) && <DetailRow icon={<Tag size={16} />} label="Rarity" value={cert.rarityLabel || cert.rarity || ""} testId="text-rarity" />}
               {cert.designations && cert.designations.length > 0 && (
                 <DetailRow icon={<Tag size={16} />} label="Designations" value={cert.designations.join(", ")} testId="text-designations" />
               )}
@@ -496,11 +370,36 @@ export default function CertDetailPage() {
                 </div>
                 <div className="space-y-1.5">
                   {cert.notes.split("\n").filter((l) => l.trim()).map((line, i) => (
-                    <p key={i} className="text-gray-300 text-sm leading-relaxed" data-testid={`text-grader-note-${i}`}>
+                    <p key={i} className="text-[#444444] text-sm leading-relaxed" data-testid={`text-grader-note-${i}`}>
                       {line.trim()}
                     </p>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Grading Report — expandable, only shown when at least one field has content */}
+            {cert.gradingReport && Object.values(cert.gradingReport).some(Boolean) && (
+              <GradingReportPanel report={cert.gradingReport} />
+            )}
+
+            {/* View Full Grading Report — shown when certificate has a grade */}
+            {(cert.gradeNumeric > 0 || isNonNumericGrade(cert.gradeType)) && (
+              <div className="mt-5 pt-4 border-t border-[#D4AF37]/15">
+                <Link
+                  href={`/cert/${cert.certId}/report`}
+                  className="flex items-center justify-between w-full rounded-xl border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-4 py-3 hover:bg-[#D4AF37]/10 transition-all group"
+                  data-testid="link-view-report"
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText size={16} className="text-[#D4AF37]" />
+                    <div>
+                      <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">View Full Grading Report</p>
+                      <p className="text-[#999999] text-[10px] mt-0.5">Images, subgrades, defects & authentication</p>
+                    </div>
+                  </div>
+                  <ExternalLink size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37] transition-colors" />
+                </Link>
               </div>
             )}
 
@@ -521,25 +420,21 @@ export default function CertDetailPage() {
                 </div>
                 <p className="qr-id font-mono tracking-widest" data-testid="text-qr-cert-id">{cert.certId}</p>
               </div>
+              {cert.nfcEnabled && cert.nfcScanCount != null && (
+                <div className="flex items-center gap-1.5 text-[#D4AF37]/40 text-xs" data-testid="text-nfc-scan-count">
+                  <Wifi size={11} />
+                  <span>
+                    NFC verified {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         <PopulationSection certId={cert.certId} />
 
-        {/* Bottom print button */}
-        <div className="mt-6 flex justify-center">
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-2 border border-[#D4AF37]/30 bg-black text-[#D4AF37]/60 hover:text-[#D4AF37] hover:border-[#D4AF37]/60 px-5 py-2.5 rounded text-sm font-medium tracking-wide transition-all"
-            data-testid="button-print-certificate-bottom"
-          >
-            <Printer size={15} />
-            Print Certificate
-          </button>
-        </div>
       </div>
-    </>
   );
 }
 
@@ -606,7 +501,7 @@ function PopStat({ label, value, testId }: { label: string; value: number; testI
   return (
     <div className="text-center border border-[#D4AF37]/15 rounded-lg p-3">
       <p className="text-2xl font-bold text-[#D4AF37]" data-testid={testId}>{value}</p>
-      <p className="text-gray-500 text-xs uppercase tracking-wider mt-1">{label}</p>
+      <p className="text-[#999999] text-xs uppercase tracking-wider mt-1">{label}</p>
     </div>
   );
 }
@@ -623,7 +518,7 @@ function PopGradeChart({ data }: { data: { grade: number; count: number }[] }) {
             className="w-full bg-[#D4AF37]/30 rounded-t transition-all"
             style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
           />
-          <span className="text-gray-500 text-xs">{d.grade}</span>
+          <span className="text-[#999999] text-xs">{d.grade}</span>
         </div>
       ))}
     </div>
@@ -642,12 +537,12 @@ function DetailRow({
   testId: string;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-[#D4AF37]/10 pb-3">
+    <div className="flex items-center justify-between border-b border-[#E8E4DC] pb-3">
       <div className="flex items-center gap-2 text-[#D4AF37]/60">
         {icon}
         <span className="text-sm uppercase tracking-wider">{label}</span>
       </div>
-      <span className="text-white font-medium" data-testid={testId}>
+      <span className="text-[#1A1A1A] font-medium" data-testid={testId}>
         {value}
       </span>
     </div>

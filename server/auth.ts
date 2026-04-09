@@ -148,10 +148,16 @@ export { ADMIN_EMAIL, FAILED_LOGIN_DELAY_MS };
 
 declare module "express-session" {
   interface SessionData {
+    // Admin auth
     isAdmin: boolean;
     adminEmail: string;
     pendingAdmin: boolean;
     pendingAdminAt: number | undefined;
     pinFailures: number;
+    // Legacy customer magic link auth (dashboard)
+    customerEmail: string;
+    // Unified account auth
+    userId: string;    // UUID of the logged-in user
+    userEmail: string; // email, cached for convenience
   }
 }

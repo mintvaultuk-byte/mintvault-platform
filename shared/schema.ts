@@ -15,6 +15,55 @@ export const users = pgTable("users", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  // Account auth fields — added by migrateAccountSchema() at startup
+  passwordHash: text("password_hash"),
+  displayName: text("display_name"),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  emailVerifiedAt: timestamp("email_verified_at"),
+  lastLoginAt: timestamp("last_login_at"),
+  lastLoginIp: text("last_login_ip"),
+  failedLoginCount: integer("failed_login_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+});
+
+export type User = typeof users.$inferSelect;
+
+// ── Auth token tables ─────────────────────────────────────────────────────────
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  token: text("token").unique().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const emailVerificationTokens = pgTable("email_verification_tokens", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  token: text("token").unique().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const accountMagicLinkTokens = pgTable("account_magic_link_tokens", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  token: text("token").unique().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const loginAttempts = pgTable("login_attempts", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  ip: text("ip").notNull(),
+  success: boolean("success").notNull(),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const submissions = pgTable("submissions", {
@@ -60,6 +109,7 @@ export const submissions = pgTable("submissions", {
   termsAccepted: boolean("terms_accepted").default(false),
   termsAcceptedAt: timestamp("terms_accepted_at"),
   termsVersion: text("terms_version"),
+  revealWrap: boolean("reveal_wrap").default(false),
 });
 
 export const submissionItems = pgTable("submission_items", {
@@ -164,6 +214,35 @@ export const certificates = pgTable("certificates", {
   claimCodeHash: text("claim_code_hash"),
   claimCodeCreatedAt: timestamp("claim_code_created_at"),
   claimCodeUsedAt: timestamp("claim_code_used_at"),
+  // Stored ownership token — unique per ownership event, replaced on transfer
+  ownershipToken: text("ownership_token"),
+  ownershipTokenGeneratedAt: timestamp("ownership_token_generated_at"),
+  // Owner name and email — captured at claim/transfer time
+  ownerName: text("owner_name"),
+  ownerEmail: text("owner_email"),
+  // Grading report — per-subgrade commentary filled in by the grader
+  gradingReport: jsonb("grading_report").$type<{
+    centering?: string;
+    corners?: string;
+    edges?: string;
+    surface?: string;
+    overall?: string;
+  }>().default({}),
+  // AI-assisted grading fields
+  aiAnalysis: jsonb("ai_analysis").$type<Record<string, unknown>>().default({}),
+  aiDraftGrade: decimal("ai_draft_grade", { precision: 3, scale: 1 }),
+  centeringFrontLr: text("centering_front_lr"),
+  centeringFrontTb: text("centering_front_tb"),
+  centeringBackLr: text("centering_back_lr"),
+  centeringBackTb: text("centering_back_tb"),
+  defects: jsonb("defects").$type<Array<{type: string; location: string; position?: {x_percent: number; y_percent: number}; severity: string; description: string}>>().default([]),
+  aiDefects: jsonb("ai_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
+  verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
+  gradeApprovedBy: text("grade_approved_by"),
+  gradeApprovedAt: timestamp("grade_approved_at"),
+  // Stolen card flag — set to "stolen" when a verified report exists; null otherwise
+  stolenStatus: text("stolen_status"),            // null | "reported_stolen"
+  stolenReportedAt: timestamp("stolen_reported_at"),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -265,7 +344,6 @@ export const insertCertificateImageSchema = createInsertSchema(certificateImages
   id: true,
 });
 
-export type User = typeof users.$inferSelect;
 export type Submission = typeof submissions.$inferSelect;
 export type SubmissionItem = typeof submissionItems.$inferSelect;
 export type CertificateRecord = typeof certificates.$inferSelect;
@@ -330,6 +408,7 @@ export const claimVerifications = pgTable("claim_verifications", {
   id:          serial("id").primaryKey(),
   certId:      text("cert_id").notNull(),
   email:       text("email").notNull(),
+  ownerName:   text("owner_name"),
   tokenHash:   text("token_hash").notNull(),
   expiresAt:   timestamp("expires_at").notNull(),
   usedAt:      timestamp("used_at"),
@@ -337,6 +416,29 @@ export const claimVerifications = pgTable("claim_verifications", {
 });
 
 export type ClaimVerification = typeof claimVerifications.$inferSelect;
+
+// ── Transfer verifications — two-step email confirmation for ownership transfers
+// Step 1: current owner confirms via ownerTokenHash
+// Step 2: new owner confirms via newOwnerTokenHash → transfer completes
+export const transferVerifications = pgTable("transfer_verifications", {
+  id:                   serial("id").primaryKey(),
+  certId:               text("cert_id").notNull(),
+  fromEmail:            text("from_email").notNull(),
+  toEmail:              text("to_email").notNull(),
+  // Step 1 — current owner confirmation
+  ownerTokenHash:       text("owner_token_hash").notNull(),
+  ownerExpiresAt:       timestamp("owner_expires_at").notNull(),
+  ownerConfirmedAt:     timestamp("owner_confirmed_at"),
+  // Step 2 — new owner confirmation (generated after step 1)
+  newOwnerTokenHash:    text("new_owner_token_hash"),
+  newOwnerExpiresAt:    timestamp("new_owner_expires_at"),
+  newOwnerName:         text("new_owner_name"),
+  // Completion
+  usedAt:               timestamp("used_at"),
+  createdAt:            timestamp("created_at").notNull().defaultNow(),
+});
+
+export type TransferVerification = typeof transferVerifications.$inferSelect;
 
 export const OWNERSHIP_STATUSES = ["unclaimed", "claimed", "transfer_pending"] as const;
 export type OwnershipStatus = typeof OWNERSHIP_STATUSES[number];
@@ -381,8 +483,60 @@ export function gradeLabel(grade: number): string {
 export function gradeLabelFull(gradeType: string, gradeOverall: string): string {
   if (gradeType === "NO") return "AUTHENTIC";
   if (gradeType === "AA") return "AUTHENTIC ALTERED";
-  return gradeLabel(parseFloat(gradeOverall));
+  const g = Math.round(parseFloat(gradeOverall));
+  if (g >= 10) return "GEM MINT";
+  return gradeLabel(g);
 }
+
+// ── Tier capacity gating ────────────────────────────────────────────────────
+// Controls how many active submissions are allowed per tier before new orders
+// are blocked. Admin can override with force_open = true.
+export const tierCapacity = pgTable("tier_capacity", {
+  id:         serial("id").primaryKey(),
+  tierSlug:   text("tier_slug").notNull().unique(),
+  maxActive:  integer("max_active").notNull(),
+  forceOpen:  boolean("force_open").notNull().default(false),
+  updatedAt:  timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type TierCapacityRecord = typeof tierCapacity.$inferSelect;
+
+// ── Stolen card registry ─────────────────────────────────────────────────────
+// When a card owner reports their graded card as stolen, a report is created
+// with a verification token emailed to them. Once verified the certificate is
+// flagged `stolen` and a red banner appears on its Vault page.
+export const stolenReports = pgTable("stolen_reports", {
+  id:              serial("id").primaryKey(),
+  certId:          text("cert_id").notNull(),            // e.g. MV1
+  reporterName:    text("reporter_name").notNull(),
+  reporterEmail:   text("reporter_email").notNull(),
+  description:     text("description"),                  // optional free-text
+  verifyToken:     text("verify_token").notNull().unique(),
+  verifiedAt:      timestamp("verified_at"),
+  clearedAt:       timestamp("cleared_at"),
+  clearedBy:       text("cleared_by"),                   // admin email
+  createdAt:       timestamp("created_at").notNull().defaultNow(),
+});
+
+export type StolenReport = typeof stolenReports.$inferSelect;
+export type InsertStolenReport = typeof stolenReports.$inferInsert;
+
+// ── eBay price cache ────────────────────────────────────────────────────────
+// Caches eBay UK listing results per card (24h TTL) to avoid hitting the API
+// on every Vault page load. Populated and read by server/ebay.ts.
+export const ebayPriceCache = pgTable("ebay_price_cache", {
+  id:                 serial("id").primaryKey(),
+  cardKey:            text("card_key").notNull().unique(),
+  cardName:           text("card_name").notNull(),
+  cardNumber:         text("card_number"),
+  setName:            text("set_name"),
+  averagePricePence:  integer("average_price_pence"),
+  listingCount:       integer("listing_count").notNull().default(0),
+  listingsJson:       jsonb("listings_json").notNull().default([]),
+  lastUpdatedAt:      timestamp("last_updated_at").notNull().defaultNow(),
+});
+
+export type EbayPriceCacheRecord = typeof ebayPriceCache.$inferSelect;
 
 export const serviceTiers = pgTable("service_tiers", {
   id: serial("id").primaryKey(),
@@ -411,6 +565,7 @@ export function serviceTierToPricingTier(st: ServiceTierRecord): PricingTier {
     pricePerCard: st.pricePerCard,
     recommendedCardValue: `Up to £${st.maxValueGbp.toLocaleString()}`,
     turnaround: st.turnaroundLabel || `${st.turnaroundDays} working days`,
+    turnaroundDays: st.turnaroundDays,
     features: st.features || [],
     serviceType: st.serviceType,
   };
@@ -423,6 +578,7 @@ export interface PricingTier {
   pricePerCard: number;
   recommendedCardValue: string;
   turnaround: string;
+  turnaroundDays?: number;
   features: string[];
   serviceType?: string;
 }
@@ -452,6 +608,11 @@ export interface PublicCertificate {
   backImageUrl: string | null;
   gradedDate: string;
   notes: string | null;
+  nfcEnabled: boolean | null;
+  nfcScanCount: number | null;
+  ownershipStatus: string;
+  ownershipRef: string | null;
+  gradingReport: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string } | null;
 }
 
 export interface PopulationData {
@@ -505,11 +666,10 @@ export interface BulkDiscountTier {
 }
 
 export const bulkDiscountTiers: BulkDiscountTier[] = [
-  { minQty: 1, maxQty: 9, percent: 0, label: "1–9 cards" },
-  { minQty: 10, maxQty: 24, percent: 3, label: "10–24 cards" },
-  { minQty: 25, maxQty: 49, percent: 5, label: "25–49 cards" },
-  { minQty: 50, maxQty: 99, percent: 7, label: "50–99 cards" },
-  { minQty: 100, maxQty: null, percent: 10, label: "100+ cards" },
+  { minQty: 1,  maxQty: 9,    percent: 0,  label: "1–9 cards" },
+  { minQty: 10, maxQty: 24,   percent: 5,  label: "10–24 cards" },
+  { minQty: 25, maxQty: 49,   percent: 10, label: "25–49 cards" },
+  { minQty: 50, maxQty: null, percent: 15, label: "50+ cards" },
 ];
 
 export function getBulkDiscountPercent(quantity: number): number {
@@ -588,83 +748,89 @@ export function calculateOrderTotals(pricePerCard: number, quantity: number, tot
 
 export const pricingTiers: PricingTier[] = [
   {
-    id: "basic",
-    name: "BASIC",
-    price: "£12 per card",
-    pricePerCard: 1200,
-    recommendedCardValue: "Up to £500",
-    turnaround: "60 working days",
-    features: [
-      "Professional grading assessment",
-      "Tamper-evident precision slab",
-      "Online order tracking",
-      "Fully insured return shipping (based on declared value)",
-    ],
-  },
-  {
     id: "standard",
     name: "STANDARD",
+    price: "£12 per card",
+    pricePerCard: 1200,
+    recommendedCardValue: "Any value",
+    turnaround: "20 working days",
+    turnaroundDays: 20,
+    features: [
+      "Professional grade assessment (1–10 scale)",
+      "Subgrade breakdown (centering, corners, edges, surface)",
+      "Tamper-evident NFC-enabled precision slab",
+      "Unique online-verifiable certificate",
+      "Claim code for ownership registration",
+      "Insured Royal Mail return shipping",
+    ],
+  },
+  {
+    id: "priority",
+    name: "PRIORITY",
     price: "£15 per card",
     pricePerCard: 1500,
-    recommendedCardValue: "Up to £500",
-    turnaround: "20 working days",
-    features: [
-      "Professional grading assessment",
-      "Priority grading queue",
-      "Tamper-evident precision slab",
-      "Online order tracking",
-      "Fully insured return shipping (based on declared value)",
-    ],
-  },
-  {
-    id: "premier",
-    name: "PREMIER",
-    price: "£18 per card",
-    pricePerCard: 1800,
-    recommendedCardValue: "Up to £1,500",
+    recommendedCardValue: "Any value",
     turnaround: "10 working days",
+    turnaroundDays: 10,
     features: [
-      "Professional grading assessment",
-      "Fast-track grading queue",
-      "Detailed grader notes included",
-      "Tamper-evident precision slab",
-      "Online order tracking",
-      "Fully insured return shipping (based on declared value)",
+      "Professional grade assessment (1–10 scale)",
+      "Subgrade breakdown (centering, corners, edges, surface)",
+      "Tamper-evident NFC-enabled precision slab",
+      "Unique online-verifiable certificate",
+      "Claim code for ownership registration",
+      "Insured Royal Mail return shipping",
     ],
   },
   {
-    id: "ultra",
-    name: "ULTRA",
-    price: "£25 per card",
-    pricePerCard: 2500,
-    recommendedCardValue: "Up to £3,000",
+    id: "express",
+    name: "EXPRESS",
+    price: "£20 per card",
+    pricePerCard: 2000,
+    recommendedCardValue: "Any value",
     turnaround: "5 working days",
+    turnaroundDays: 5,
     features: [
-      "Senior grader review",
-      "Priority fast-track handling",
-      "Detailed grader notes included",
-      "High-resolution front & back imaging",
-      "Tamper-evident precision slab",
-      "Online verification & tracking",
-      "Fully insured return shipping (based on declared value)",
+      "Professional grade assessment (1–10 scale)",
+      "Subgrade breakdown (centering, corners, edges, surface)",
+      "Tamper-evident NFC-enabled precision slab",
+      "Unique online-verifiable certificate",
+      "Claim code for ownership registration",
+      "Insured Royal Mail return shipping",
     ],
   },
   {
-    id: "elite",
-    name: "ELITE",
-    price: "£50 per card",
-    pricePerCard: 5000,
-    recommendedCardValue: "Up to £7,500",
-    turnaround: "2 working days",
+    id: "gold",
+    name: "GOLD",
+    price: "£85 per card",
+    pricePerCard: 8500,
+    recommendedCardValue: "£500+",
+    turnaround: "5 working days",
+    turnaroundDays: 5,
     features: [
-      "Immediate priority grading queue",
-      "Senior grader + secondary verification review",
-      "Detailed grader notes included",
-      "High-resolution front & back imaging",
-      "Population report inclusion",
-      "Tamper-evident precision slab",
-      "Online certification verification",
-      "Fully insured return shipping (based on declared value)",
+      "Professional grade assessment (1–10 scale)",
+      "White glove card care",
+      "Priority handling throughout",
+      "Detailed grading breakdown",
+      "Up to £2,500 per card insurance",
+      "GEM MINT 10 receives exclusive Black Label",
+    ],
+  },
+  {
+    id: "gold-elite",
+    name: "GOLD ELITE",
+    price: "£125 per card",
+    pricePerCard: 12500,
+    recommendedCardValue: "£1,000+",
+    turnaround: "2-3 working days",
+    turnaroundDays: 3,
+    features: [
+      "Professional grade assessment (1–10 scale)",
+      "White glove card care",
+      "Priority handling throughout",
+      "Detailed grading breakdown",
+      "Direct communication with head grader",
+      "Up to £5,000 per card insurance",
+      "GEM MINT 10 receives exclusive Black Label",
     ],
   },
 ];

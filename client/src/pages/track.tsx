@@ -104,7 +104,7 @@ export default function TrackPage() {
         >
           TRACK YOUR SUBMISSION
         </h1>
-        <p className="text-gray-300 text-base leading-relaxed" data-testid="text-track-description">
+        <p className="text-[#666666] text-base leading-relaxed" data-testid="text-track-description">
           Enter your submission ID and email address to check the status of your grading order.
         </p>
       </div>
@@ -121,7 +121,7 @@ export default function TrackPage() {
             }}
             placeholder="Submission ID (e.g. MV-SUB-001)"
             data-testid="input-track-submission-id"
-            className="bg-transparent border-[#D4AF37]/40 pl-10 text-white placeholder:text-[#D4AF37]/30 focus:border-[#D4AF37] font-mono"
+            className="bg-transparent border-[#D4AF37]/40 pl-10 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#D4AF37] font-mono"
           />
         </div>
         <Input
@@ -133,13 +133,13 @@ export default function TrackPage() {
           }}
           placeholder="Email address used at checkout"
           data-testid="input-track-email"
-          className="bg-transparent border-[#D4AF37]/40 text-white placeholder:text-[#D4AF37]/30 focus:border-[#D4AF37]"
+          className="bg-transparent border-[#D4AF37]/40 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#D4AF37]"
         />
         <Button
           type="submit"
           disabled={loading}
           data-testid="button-track-submit"
-          className="w-full border border-[#D4AF37] bg-black text-[#D4AF37] font-semibold tracking-wide btn-gold-glow hover:bg-[#D4AF37]/10"
+          className="w-full border border-[#D4AF37] bg-white text-[#D4AF37] font-semibold tracking-wide hover:bg-[#D4AF37]/10"
           variant="outline"
         >
           {loading ? "Looking up..." : "Track Submission"}
@@ -154,7 +154,7 @@ export default function TrackPage() {
 
       {result && (
         <div className="mt-10 space-y-6">
-          <Card className="border-[#D4AF37]/20 bg-black/40">
+          <Card className="border-[#D4AF37]/20 bg-[#FAFAF8]">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
               <CardTitle className="text-[#D4AF37] text-lg font-mono" data-testid="text-track-result-id">
                 {result.submissionId}
@@ -179,7 +179,7 @@ export default function TrackPage() {
                             ? "bg-[#D4AF37] text-black"
                             : isActive
                             ? "bg-[#D4AF37]/30 text-[#D4AF37]"
-                            : "bg-gray-800 text-gray-500"
+                            : "bg-[#E8E4DC] text-[#999999]"
                         }`}
                         data-testid={`step-${step.key}`}
                       >
@@ -187,7 +187,7 @@ export default function TrackPage() {
                       </div>
                       <span
                         className={`text-xs mt-1 ${
-                          isActive ? "text-[#D4AF37]" : "text-gray-500"
+                          isActive ? "text-[#D4AF37]" : "text-[#999999]"
                         }`}
                       >
                         {step.label}
@@ -200,7 +200,7 @@ export default function TrackPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 {result.serviceType && (
                   <div>
-                    <span className="text-gray-500">Service</span>
+                    <span className="text-[#999999]">Service</span>
                     <p className="text-gray-200 capitalize" data-testid="text-track-service">
                       {result.serviceType}
                     </p>
@@ -208,7 +208,7 @@ export default function TrackPage() {
                 )}
                 {result.serviceTier && (
                   <div>
-                    <span className="text-gray-500">Tier</span>
+                    <span className="text-[#999999]">Tier</span>
                     <p className="text-gray-200 uppercase" data-testid="text-track-tier">
                       {result.serviceTier}
                     </p>
@@ -216,13 +216,13 @@ export default function TrackPage() {
                 )}
                 <div>
                   <span className="text-gray-500">Cards</span>
-                  <p className="text-gray-200" data-testid="text-track-cards">
+                  <p className="text-[#1A1A1A]" data-testid="text-track-cards">
                     {result.cardCount}
                   </p>
                 </div>
                 <div>
                   <span className="text-gray-500">Submitted</span>
-                  <p className="text-gray-200" data-testid="text-track-date">
+                  <p className="text-[#1A1A1A]" data-testid="text-track-date">
                     {new Date(result.createdAt).toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "short",
@@ -232,16 +232,16 @@ export default function TrackPage() {
                 </div>
                 {result.turnaroundDays && (
                   <div>
-                    <span className="text-gray-500">Est. Turnaround</span>
-                    <p className="text-gray-200" data-testid="text-track-turnaround">
+                    <span className="text-[#999999]">Est. Turnaround</span>
+                    <p className="text-[#1A1A1A]" data-testid="text-track-turnaround">
                       {result.turnaroundDays} working days
                     </p>
                   </div>
                 )}
                 {result.receivedAt && (
                   <div>
-                    <span className="text-gray-500">Received</span>
-                    <p className="text-gray-200" data-testid="text-track-received">
+                    <span className="text-[#999999]">Received</span>
+                    <p className="text-[#1A1A1A]" data-testid="text-track-received">
                       {new Date(result.receivedAt).toLocaleDateString("en-GB", {
                         day: "numeric",
                         month: "short",
@@ -253,13 +253,13 @@ export default function TrackPage() {
               </div>
 
               {(result.status === "shipped" || result.status === "completed") && result.returnTracking && (
-                <div className="border-t border-[#D4AF37]/10 pt-4">
+                <div className="border-t border-[#E8E4DC] pt-4">
                   <div className="flex items-center gap-2 mb-1">
                     <Truck size={16} className="text-[#D4AF37]" />
-                    <span className="text-gray-300 text-sm font-medium">Return Shipping</span>
+                    <span className="text-[#444444] text-sm font-medium">Return Shipping</span>
                   </div>
                   {result.returnCarrier && (
-                    <p className="text-gray-400 text-sm" data-testid="text-track-carrier">
+                    <p className="text-[#666666] text-sm" data-testid="text-track-carrier">
                       Carrier: {result.returnCarrier}
                     </p>
                   )}

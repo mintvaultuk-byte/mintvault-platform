@@ -38,7 +38,7 @@ export function breadcrumbSchema(items: BreadcrumbItem[]) {
         "name": item.label,
       };
       if (item.href) {
-        entry["item"] = `https://mintvault.co.uk${item.href}`;
+        entry["item"] = `https://mintvaultuk.com${item.href}`;
       }
       return entry;
     }),

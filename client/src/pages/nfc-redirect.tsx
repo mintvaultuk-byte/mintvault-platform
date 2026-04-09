@@ -33,42 +33,45 @@ export default function NfcRedirectPage() {
   }, [certId, setLocation]);
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
-      <div className="w-full max-w-sm text-center space-y-6">
-        {/* Logo / branding */}
-        <div className="flex justify-center">
-          <ShieldCheck className="h-14 w-14 text-yellow-500" />
+    <div className="min-h-screen bg-white flex items-center justify-center px-4">
+      <div className="w-full max-w-xs text-center">
+
+        {/* Brand mark */}
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5"
+          style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)" }}>
+          <ShieldCheck className="h-8 w-8 text-[#1A1400]" />
         </div>
-        <h1 className="text-xl font-bold text-yellow-400 tracking-wide">MintVault</h1>
-        <p className="text-gray-400 text-sm">Trading Card Grading</p>
+        <h1 className="text-lg font-black text-[#D4AF37] tracking-widest uppercase mb-1">MintVault</h1>
+        <p className="text-[#999999] text-xs uppercase tracking-widest mb-8 font-mono">NFC Verification</p>
 
         {status === "verifying" && (
           <div className="space-y-3">
-            <Loader2 className="h-8 w-8 animate-spin text-yellow-500 mx-auto" />
-            <p className="text-gray-300 text-sm">Verifying NFC tag…</p>
-            <p className="text-gray-600 text-xs font-mono">{certId?.toUpperCase()}</p>
+            <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
+            <p className="text-[#666666] text-sm">Verifying NFC tag…</p>
+            <p className="text-[#D4AF37]/30 text-xs font-mono">{certId?.toUpperCase()}</p>
           </div>
         )}
 
         {status === "redirecting" && (
           <div className="space-y-3">
-            <ShieldCheck className="h-8 w-8 text-emerald-400 mx-auto" />
-            <p className="text-gray-300 text-sm">Verified — opening certificate…</p>
+            <ShieldCheck className="h-7 w-7 text-emerald-400 mx-auto" />
+            <p className="text-[#666666] text-sm">Verified — opening certificate…</p>
           </div>
         )}
 
         {status === "error" && (
           <div className="space-y-4">
-            <XCircle className="h-8 w-8 text-red-400 mx-auto" />
+            <XCircle className="h-7 w-7 text-red-400 mx-auto" />
             <p className="text-red-300 text-sm">{error || "This tag could not be verified."}</p>
             <a
               href="/cert"
-              className="inline-block text-yellow-500 text-sm underline underline-offset-2"
+              className="inline-block text-[#D4AF37] text-sm border border-[#D4AF37]/30 rounded-lg px-4 py-2 hover:bg-[#D4AF37]/10 transition-colors"
             >
-              Search for a certificate manually
+              Search certificates manually
             </a>
           </div>
         )}
+
       </div>
     </div>
   );

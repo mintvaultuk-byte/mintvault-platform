@@ -5,6 +5,10 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
+import { cleanupStalePreGradeImages } from "./r2";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
+import { sendVaultClubGraceExpiredEmail } from "./email";
 import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
@@ -71,11 +75,11 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https:", "https://*.r2.cloudflarestorage.com", "https://i.ebayimg.com"],
         connectSrc: ["'self'", "https://api.stripe.com", "wss:"],
         frameSrc: ["https://js.stripe.com"],
-        fontSrc: ["'self'"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
       },
@@ -83,6 +87,7 @@ app.use(
     crossOriginEmbedderPolicy: false,
     xFrameOptions: { action: "deny" },
     referrerPolicy: { policy: "no-referrer" },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
   })
 );
 
@@ -106,6 +111,24 @@ const loginRateLimit = rateLimit({
 app.use("/api/admin/login", loginRateLimit);
 app.use("/api/admin/session", loginRateLimit);
 app.use("/api/admin/pin", loginRateLimit);
+
+const authRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: "Too many requests. Please try again in 15 minutes." },
+  keyGenerator: (req) => {
+    const fwd = req.headers["x-forwarded-for"];
+    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
+    return req.ip || req.socket.remoteAddress || "unknown";
+  },
+});
+app.use("/api/auth/login", authRateLimit);
+app.use("/api/auth/signup", authRateLimit);
+app.use("/api/auth/forgot-password", authRateLimit);
+app.use("/api/auth/magic-link", authRateLimit);
 app.use("/api/admin", adminIpAllowlist);
 
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -168,10 +191,10 @@ app.use(
     saveUninitialized: false,
     rolling: true,
     cookie: {
-      maxAge: 12 * 60 * 60 * 1000,
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "strict",
     },
   })
 );
@@ -227,8 +250,66 @@ log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`,
 log(`ADMIN_PIN env var: ${process.env.ADMIN_PIN ? "SET" : "NOT SET"}`, "auth");
 log(`SESSION_SECRET env var: ${process.env.SESSION_SECRET ? "SET" : "NOT SET (using fallback)"}`, "auth");
 
+// Daily safety-net: purge any pre-grade-checker images older than 1 hour from R2.
+// These should never exist (the estimate endpoint uses in-memory processing only),
+// but this job catches any that might have leaked through a future code change.
+async function runPreGradeCleanup() {
+  try {
+    const deleted = await cleanupStalePreGradeImages(60 * 60 * 1000);
+    if (deleted > 0) {
+      log(`[cleanup] Deleted ${deleted} stale pre-grade-checker image(s) from R2`, "cleanup");
+    }
+  } catch (err: any) {
+    log(`[cleanup] Pre-grade image cleanup error: ${err.message}`, "cleanup");
+  }
+}
+
+// Daily job: expire Vault Club grace periods
+async function runVaultClubGraceSweep() {
+  try {
+    const expired = await db.execute(sql`
+      SELECT id, email, display_name FROM users
+      WHERE vault_club_status = 'grace'
+        AND vault_club_grace_until IS NOT NULL
+        AND vault_club_grace_until < NOW()
+        AND deleted_at IS NULL
+    `);
+    for (const row of expired.rows as any[]) {
+      await db.execute(sql`
+        UPDATE users SET
+          vault_club_tier      = NULL,
+          vault_club_status    = 'canceled',
+          vault_club_grace_until = NULL,
+          showroom_active      = false,
+          updated_at           = NOW()
+        WHERE id = ${row.id}
+      `);
+      if (row.email) {
+        sendVaultClubGraceExpiredEmail({
+          email: row.email,
+          displayName: row.display_name || null,
+        }).catch(() => {});
+      }
+      log(`[vault-club] Grace expired for user ${row.id}`, "vault-club");
+    }
+    if (expired.rows.length > 0) {
+      log(`[vault-club] Grace sweep: expired ${expired.rows.length} membership(s)`, "vault-club");
+    }
+  } catch (err: any) {
+    log(`[vault-club] Grace sweep error: ${err.message}`, "vault-club");
+  }
+}
+
 (async () => {
   await registerRoutes(httpServer, app);
+
+  // Run cleanup once on startup, then every 24 hours
+  runPreGradeCleanup();
+  setInterval(runPreGradeCleanup, 24 * 60 * 60 * 1000);
+
+  // Run Vault Club grace sweep once on startup, then every 24 hours
+  runVaultClubGraceSweep();
+  setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

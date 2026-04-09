@@ -58,6 +58,12 @@ const ML_MM       = MARGIN_LEFT * PT_TO_MM; // 30.00 mm
 const MT_MM       = MARGIN_TOP  * PT_TO_MM; // 10.00 mm
 const HG_MM       = H_GAP * PT_TO_MM;    // 10.00 mm
 const VG_MM       = V_GAP * PT_TO_MM;    // ~8.56 mm
+
+// Cut guide dimensions: 0.25mm bleed inset on each side so cutter imprecision
+// cuts through the gold border rather than the white paper outside it.
+const CUT_W_MM    = 69.5;  // mm (70 - 2×0.25)
+const CUT_H_MM    = 19.5;  // mm (20 - 2×0.25)
+const CUT_INSET   = 0.25;  // mm inset per side
 // 0.5pt hairline in mm: 0.5 / 2.83464567 ≈ 0.1764 mm
 const CUT_SW_MM   = (0.5 * PT_TO_MM).toFixed(4); // SVG stroke-width in mm
 
@@ -136,7 +142,7 @@ export async function generateLabelSheet(
 /**
  * Generates an A4 SVG cut guide for use with Brother ScanNCut CM300.
  *
- * Contains ONLY red hairline rectangles (70mm × 20mm) at exact label positions.
+ * Contains ONLY red hairline rectangles (69.5mm × 19.5mm) at exact label positions.
  * No artwork, no text, no fill. Import into CM300 and use DIRECT CUT mode.
  *
  * @param nRows  Number of certificate rows (1–10). Each row = 2 rects (front + back).
@@ -147,20 +153,21 @@ export function generateCutSheetSVG(nRows: number): string {
   const rects: string[] = [];
 
   for (let row = 0; row < rows; row++) {
-    const y = MT_MM + row * (LH_MM + VG_MM);
+    const yLabel = MT_MM + row * (LH_MM + VG_MM);
+    const y = yLabel + CUT_INSET;
 
-    // Col 0 — FRONT label
+    // Col 0 — FRONT label (inset by 0.25mm on each side)
     rects.push(
-      `  <rect x="${ML_MM.toFixed(4)}" y="${y.toFixed(4)}" ` +
-      `width="${LW_MM.toFixed(4)}" height="${LH_MM.toFixed(4)}" ` +
+      `  <rect x="${(ML_MM + CUT_INSET).toFixed(4)}" y="${y.toFixed(4)}" ` +
+      `width="${CUT_W_MM.toFixed(4)}" height="${CUT_H_MM.toFixed(4)}" ` +
       `fill="none" stroke="#FF0000" stroke-width="${CUT_SW_MM}"/>`
     );
 
-    // Col 1 — BACK label
-    const x1 = ML_MM + LW_MM + HG_MM;
+    // Col 1 — BACK label (inset by 0.25mm on each side)
+    const x1 = ML_MM + LW_MM + HG_MM + CUT_INSET;
     rects.push(
       `  <rect x="${x1.toFixed(4)}" y="${y.toFixed(4)}" ` +
-      `width="${LW_MM.toFixed(4)}" height="${LH_MM.toFixed(4)}" ` +
+      `width="${CUT_W_MM.toFixed(4)}" height="${CUT_H_MM.toFixed(4)}" ` +
       `fill="none" stroke="#FF0000" stroke-width="${CUT_SW_MM}"/>`
     );
   }
@@ -168,7 +175,7 @@ export function generateCutSheetSVG(nRows: number): string {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!-- MintVault Label Cut Guide — ${rows} row(s) × 2 = ${rows * 2} cut paths -->`,
-    `<!-- Page: A4 210×297mm | Labels: 70×20mm | Import to ScanNCut CM300 → Direct Cut -->`,
+    `<!-- Page: A4 210×297mm | Cut paths: 69.5×19.5mm (0.25mm bleed inset) | Import to ScanNCut CM300 → Direct Cut -->`,
     `<svg xmlns="http://www.w3.org/2000/svg"`,
     `     width="210mm" height="297mm"`,
     `     viewBox="0 0 210 297">`,

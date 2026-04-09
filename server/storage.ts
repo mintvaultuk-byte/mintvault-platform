@@ -1,4 +1,4 @@
-import { users, submissions, submissionItems, certificates, certificateImages, cardSets, cardMaster, auditLog, serviceTiers, labelPrints, labelOverrides, reprintLog, ownershipHistory, claimVerifications, type User, type Submission, type SubmissionItem, type CertificateRecord, type InsertCertificate, type CertificateImage, type InsertCertificateImage, type CardMaster, type CardSet, type AuditLog, type ServiceTierRecord, type LabelPrint, type LabelOverride, type OwnershipHistoryRecord, type ClaimVerification, isNonNumericGrade } from "@shared/schema";
+import { users, submissions, submissionItems, certificates, certificateImages, cardSets, cardMaster, auditLog, serviceTiers, labelPrints, labelOverrides, reprintLog, ownershipHistory, claimVerifications, transferVerifications, type User, type Submission, type SubmissionItem, type CertificateRecord, type InsertCertificate, type CertificateImage, type InsertCertificateImage, type CardMaster, type CardSet, type AuditLog, type ServiceTierRecord, type LabelPrint, type LabelOverride, type OwnershipHistoryRecord, type ClaimVerification, isNonNumericGrade } from "@shared/schema";
 import { eq, sql, desc, or, ilike, like, and, isNull, isNotNull, ne, inArray } from "drizzle-orm";
 import { db } from "./db";
 import crypto from "crypto";
@@ -47,6 +47,8 @@ export interface IStorage {
   createUser(data: { email: string; firstName?: string; lastName?: string }): Promise<User>;
   createSubmission(data: any): Promise<any>;
   getSubmissionBySubmissionId(submissionId: string): Promise<any | undefined>;
+  getSubmissionByPaymentIntentId(paymentIntentId: string): Promise<any | undefined>;
+  markSubmissionAsPaid(id: number): Promise<boolean>;
   updateSubmission(id: any, data: any): Promise<any | undefined>;
   getNextSubmissionId(): Promise<string>;
   listSubmissions(filters?: SubmissionFilters): Promise<any[]>;
@@ -54,6 +56,7 @@ export interface IStorage {
   addSubmissionItems(submissionId: number, items: any[]): Promise<void>;
   updateSubmissionItem(itemId: number, data: Partial<{ game: string | null; cardName: string | null; cardSet: string | null; cardNumber: string | null; year: string | null; declaredValue: number; notes: string | null }>): Promise<SubmissionItem | undefined>;
   updateSubmissionStatus(id: number, status: string, extra?: Record<string, any>): Promise<any | undefined>;
+  setEstimatedCompletionDate(id: number): Promise<void>;
 
   createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord>;
   getCertificate(id: number): Promise<CertificateRecord | undefined>;
@@ -110,12 +113,30 @@ export interface IStorage {
 
   // ── Ownership system ────────────────────────────────────────────────────────
   generateClaimCode(certId: string): Promise<string>;
+  getOrGenerateClaimCode(certId: string): Promise<string>;
   validateClaimCode(certId: string, claimCode: string): Promise<boolean>;
-  createClaimVerification(certId: string, email: string): Promise<string>;
-  completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; error?: string }>;
+  createClaimVerification(certId: string, email: string, ownerName?: string): Promise<string>;
+  completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }>;
   getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]>;
   assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string): Promise<void>;
   batchGenerateClaimCodes(): Promise<{ certId: string; claimCode: string }[]>;
+  createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string>;
+  confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
+  completeTransferByNewOwnerToken(token: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+
+  // ── Customer dashboard queries ──────────────────────────────────────────────
+  getSubmissionsByEmail(email: string): Promise<any[]>;
+  getCertificatesByEmail(email: string): Promise<CertificateRecord[]>;
+
+  // ── Population report ───────────────────────────────────────────────────────
+  getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<{
+    cardGame: string | null;
+    setName: string | null;
+    cardName: string | null;
+    total: number;
+    gBL: number; g10: number; g9: number;
+    g8: number; g7: number; gLow: number;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -157,7 +178,7 @@ export class DatabaseStorage implements IStorage {
         terms_accepted, terms_accepted_at, terms_version,
         crossover_company, crossover_original_grade, crossover_cert_number,
         reholder_company, reholder_reason, reholder_condition,
-        auth_reason, auth_concerns
+        auth_reason, auth_concerns, reveal_wrap
       )
       VALUES (
         COALESCE(${data.userId || null}, (SELECT id FROM users LIMIT 1), gen_random_uuid()::text),
@@ -201,7 +222,8 @@ export class DatabaseStorage implements IStorage {
         ${data.reholderReason || null},
         ${data.reholderCondition || null},
         ${data.authReason || null},
-        ${data.authConcerns || null}
+        ${data.authConcerns || null},
+        ${data.revealWrap || false}
       )
       RETURNING *
     `);
@@ -271,6 +293,50 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  async markSubmissionAsPaid(id: number): Promise<boolean> {
+    // Uses the admin bypass to step around the status-transition trigger, which
+    // rejects the uppercase "DRAFT" stored at submission creation.  Transitions
+    // to "paid" — the correct next state per the trigger's own transition map.
+    const numId = id;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL mintvault.admin_bypass = 'true'`);
+      await tx.execute(sql`
+        UPDATE submissions
+        SET status = 'paid',
+            payment_status = 'paid',
+            updated_at = NOW()
+        WHERE id = ${numId}
+          AND LOWER(status) = 'draft'
+          AND payment_status != 'paid'
+      `);
+    });
+    return true;
+  }
+
+  async getSubmissionByPaymentIntentId(paymentIntentId: string): Promise<any | undefined> {
+    const result = await db.execute(sql`
+      SELECT * FROM submissions WHERE payment_intent_id = ${paymentIntentId} LIMIT 1
+    `);
+    if (result.rows.length === 0) return undefined;
+    const row = result.rows[0] as any;
+    return {
+      id: String(row.id),
+      submissionId: row.tracking_number,
+      status: row.status,
+      paymentStatus: row.payment_status,
+      stripePaymentId: row.payment_intent_id,
+      email: row.customer_email,
+      firstName: row.customer_first_name,
+      lastName: row.customer_last_name,
+      cardCount: row.card_count,
+      serviceTier: row.service_tier,
+      serviceType: row.service_type,
+      crossoverCompany: row.crossover_company,
+      crossoverOriginalGrade: row.crossover_original_grade,
+      crossoverCertNumber: row.crossover_cert_number,
+    };
+  }
+
   async updateAdminNotes(submissionId: number, notes: string | null, flagged: boolean): Promise<void> {
     await db.execute(sql`
       UPDATE submissions
@@ -290,6 +356,9 @@ export class DatabaseStorage implements IStorage {
     }
     if (data.status !== undefined) {
       setParts.push(sql`status = ${data.status.toLowerCase()}`);
+    }
+    if (data.paymentStatus !== undefined) {
+      setParts.push(sql`payment_status = ${data.paymentStatus}`);
     }
     if (data.userId !== undefined) {
       setParts.push(sql`user_id = ${data.userId}`);
@@ -432,10 +501,22 @@ export class DatabaseStorage implements IStorage {
     if (status.toLowerCase() === "received") {
       setParts.push(sql`received_at = NOW()`);
     }
+    if (status.toLowerCase() === "queued") {
+      setParts.push(sql`queued_at = NOW()`);
+    }
+    if (status.toLowerCase() === "grading_started" || status.toLowerCase() === "in_grading") {
+      if (status.toLowerCase() === "grading_started") setParts.push(sql`grading_started_at = NOW()`);
+    }
+    if (status.toLowerCase() === "encapsulating") {
+      setParts.push(sql`encapsulating_at = NOW()`);
+    }
     if (status.toLowerCase() === "shipped") {
       setParts.push(sql`shipped_at = NOW()`);
       if (extra.returnTracking) setParts.push(sql`return_tracking = ${extra.returnTracking}`);
       if (extra.returnCarrier) setParts.push(sql`return_carrier = ${extra.returnCarrier}`);
+    }
+    if (status.toLowerCase() === "delivered") {
+      setParts.push(sql`delivered_at = NOW()`);
     }
     if (status.toLowerCase() === "completed") {
       setParts.push(sql`completed_at = NOW()`);
@@ -443,6 +524,12 @@ export class DatabaseStorage implements IStorage {
     if (extra.returnPostageCost !== undefined) {
       setParts.push(sql`return_postage_cost = ${extra.returnPostageCost}`);
     }
+    if (extra.onReceiptPhotoUrls !== undefined) {
+      setParts.push(sql`on_receipt_photo_urls = ${extra.onReceiptPhotoUrls}`);
+    }
+    // Append to status_history JSON array
+    const historyEntry = JSON.stringify({ status: status.toLowerCase(), timestamp: new Date().toISOString(), note: extra.note || null });
+    setParts.push(sql`status_history = COALESCE(status_history, '[]'::jsonb) || ${historyEntry}::jsonb`);
 
     const result = await db.execute(
       sql`UPDATE submissions SET ${sql.join(setParts, sql`, `)} WHERE id = ${id} RETURNING *`
@@ -450,6 +537,26 @@ export class DatabaseStorage implements IStorage {
     if (result.rows.length === 0) return undefined;
     const row = result.rows[0] as any;
     return { id: row.id, submissionId: row.tracking_number, ...row };
+  }
+
+  async setEstimatedCompletionDate(id: number): Promise<void> {
+    // Read the service_tier from the submission, then calculate working days
+    const result = await db.execute(sql`SELECT service_tier FROM submissions WHERE id = ${id} LIMIT 1`);
+    if (result.rows.length === 0) return;
+    const tier = (result.rows[0] as any).service_tier as string | null;
+    const workingDaysMap: Record<string, number> = { standard: 20, priority: 10, express: 5 };
+    const days = workingDaysMap[tier?.toLowerCase() ?? ""] ?? 20;
+    // Calculate working days from now (Mon–Fri only)
+    const target = new Date();
+    let added = 0;
+    while (added < days) {
+      target.setDate(target.getDate() + 1);
+      const day = target.getDay();
+      if (day !== 0 && day !== 6) added++;
+    }
+    await db.execute(sql`
+      UPDATE submissions SET estimated_completion_date = ${target.toISOString()} WHERE id = ${id}
+    `);
   }
 
   async createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord> {
@@ -1097,6 +1204,7 @@ export class DatabaseStorage implements IStorage {
     await db.execute(sql`
       UPDATE certificates
       SET claim_code_hash = ${hash},
+          claim_code = ${code},
           claim_code_created_at = NOW(),
           claim_code_used_at = NULL,
           ownership_status = CASE WHEN ownership_status = 'claimed' THEN ownership_status ELSE 'unclaimed' END,
@@ -1104,6 +1212,26 @@ export class DatabaseStorage implements IStorage {
       WHERE certificate_number = ${certId}
     `);
     return code;
+  }
+
+  // Returns the existing claim code if the cert is unclaimed, otherwise generates a new one.
+  // Used by claim insert PDF downloads so repeated downloads don't invalidate the code.
+  async getOrGenerateClaimCode(certId: string): Promise<string> {
+    const result = await db.execute(sql`
+      SELECT claim_code FROM certificates
+      WHERE certificate_number = ${certId}
+        AND ownership_status = 'unclaimed'
+        AND claim_code IS NOT NULL
+        AND claim_code_used_at IS NULL
+        AND deleted_at IS NULL
+        AND status = 'active'
+      LIMIT 1
+    `);
+    if (result.rows.length > 0) {
+      const row = result.rows[0] as any;
+      if (row.claim_code) return row.claim_code as string;
+    }
+    return this.generateClaimCode(certId);
   }
 
   async validateClaimCode(certId: string, claimCode: string): Promise<boolean> {
@@ -1121,7 +1249,7 @@ export class DatabaseStorage implements IStorage {
     return result.rows.length > 0;
   }
 
-  async createClaimVerification(certId: string, email: string): Promise<string> {
+  async createClaimVerification(certId: string, email: string, ownerName?: string): Promise<string> {
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1129,6 +1257,7 @@ export class DatabaseStorage implements IStorage {
     await db.insert(claimVerifications).values({
       certId,
       email: email.toLowerCase().trim(),
+      ownerName: ownerName?.trim() || null,
       tokenHash,
       expiresAt,
     });
@@ -1136,7 +1265,7 @@ export class DatabaseStorage implements IStorage {
     return token;
   }
 
-  async completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; error?: string }> {
+  async completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }> {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
     const [verification] = await db.select()
@@ -1160,11 +1289,17 @@ export class DatabaseStorage implements IStorage {
       user = await this.createUser({ email: verification.email });
     }
 
+    const ownershipToken = await this._generateOwnershipToken();
+
     await db.execute(sql`
       UPDATE certificates
       SET current_owner_user_id = ${user.id},
           ownership_status = 'claimed',
           claim_code_used_at = NOW(),
+          ownership_token = ${ownershipToken},
+          ownership_token_generated_at = NOW(),
+          owner_name = ${verification.ownerName ?? null},
+          owner_email = ${verification.email},
           updated_at = NOW()
       WHERE certificate_number = ${verification.certId}
     `);
@@ -1182,7 +1317,7 @@ export class DatabaseStorage implements IStorage {
       .set({ usedAt: new Date() })
       .where(eq(claimVerifications.id, verification.id));
 
-    return { success: true, certId: verification.certId, email: verification.email };
+    return { success: true, certId: verification.certId, email: verification.email, ownerName: verification.ownerName ?? undefined };
   }
 
   async getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]> {
@@ -1202,11 +1337,15 @@ export class DatabaseStorage implements IStorage {
     const cert = await this.getCertificateByCertId(certId);
     const previousOwnerId = cert?.currentOwnerUserId || null;
 
+    const ownershipToken = await this._generateOwnershipToken();
+
     await db.execute(sql`
       UPDATE certificates
       SET current_owner_user_id = ${user.id},
           ownership_status = 'claimed',
           claim_code_used_at = NOW(),
+          ownership_token = ${ownershipToken},
+          ownership_token_generated_at = NOW(),
           updated_at = NOW()
       WHERE certificate_number = ${certId}
     `);
@@ -1242,6 +1381,285 @@ export class DatabaseStorage implements IStorage {
       codes.push({ certId, claimCode: code });
     }
     return codes;
+  }
+
+  async createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string> {
+    const ownerToken = crypto.randomBytes(32).toString("hex");
+    const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
+    const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await db.insert(transferVerifications).values({
+      certId,
+      fromEmail: fromEmail.toLowerCase().trim(),
+      toEmail: toEmail.toLowerCase().trim(),
+      ownerTokenHash,
+      ownerExpiresAt,
+      newOwnerName: newOwnerName?.trim() || null,
+    });
+
+    // Mark cert as transfer_pending
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'transfer_pending', updated_at = NOW()
+      WHERE certificate_number = ${certId}
+    `);
+
+    return ownerToken;
+  }
+
+  // Step 1: current owner clicks their confirmation link → generates new owner token
+  async confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }> {
+    const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(eq(transferVerifications.ownerTokenHash, ownerTokenHash));
+
+    if (!verification) return { success: false, error: "Invalid confirmation link." };
+    if (verification.ownerConfirmedAt) return { success: false, error: "You have already confirmed this transfer. The new owner has been emailed." };
+    if (new Date() > verification.ownerExpiresAt) return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+
+    // Generate token for new owner
+    const newOwnerToken = crypto.randomBytes(32).toString("hex");
+    const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
+    const newOwnerExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h for new owner
+
+    await db.update(transferVerifications)
+      .set({
+        ownerConfirmedAt: new Date(),
+        newOwnerTokenHash,
+        newOwnerExpiresAt,
+      })
+      .where(eq(transferVerifications.id, verification.id));
+
+    return { success: true, certId: verification.certId, fromEmail: verification.fromEmail, toEmail: verification.toEmail, newOwnerToken };
+  }
+
+  private async _generateOwnershipToken(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const raw = crypto.randomBytes(16).toString("hex").toUpperCase();
+      const token = `${raw.slice(0, 8)}-${raw.slice(8, 16)}-${raw.slice(16, 24)}-${raw.slice(24, 32)}`;
+      const result = await db.execute(sql`SELECT 1 FROM certificates WHERE ownership_token = ${token} LIMIT 1`);
+      if ((result.rows as unknown[]).length === 0) return token;
+    }
+    throw new Error("Could not generate unique ownership token after 10 attempts");
+  }
+
+  // Step 2: new owner clicks their confirmation link → transfer completes
+  async completeTransferByNewOwnerToken(token: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }> {
+    const newOwnerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash));
+
+    if (!verification) return { success: false, error: "Invalid confirmation link." };
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+    if (!verification.newOwnerExpiresAt || new Date() > verification.newOwnerExpiresAt) {
+      return { success: false, error: "This confirmation link has expired. Please ask the original owner to initiate a new transfer." };
+    }
+
+    const cert = await this.getCertificateByCertId(verification.certId);
+    if (!cert) return { success: false, error: "Certificate not found." };
+
+    let newOwner = await this.getUserByEmail(verification.toEmail);
+    if (!newOwner) {
+      newOwner = await this.createUser({ email: verification.toEmail });
+    }
+
+    const ownershipToken = await this._generateOwnershipToken();
+
+    await db.execute(sql`
+      UPDATE certificates
+      SET current_owner_user_id = ${newOwner.id},
+          ownership_status = 'claimed',
+          ownership_token = ${ownershipToken},
+          ownership_token_generated_at = NOW(),
+          owner_name = ${verification.newOwnerName ?? null},
+          owner_email = ${verification.toEmail},
+          updated_at = NOW()
+      WHERE certificate_number = ${verification.certId}
+    `);
+
+    await db.insert(ownershipHistory).values({
+      certId: verification.certId,
+      fromUserId: cert.currentOwnerUserId || null,
+      toUserId: newOwner.id,
+      toEmail: verification.toEmail,
+      eventType: "transfer",
+      notes: `Transferred from ${verification.fromEmail} — both parties confirmed by email`,
+    });
+
+    await db.update(transferVerifications)
+      .set({ usedAt: new Date() })
+      .where(eq(transferVerifications.id, verification.id));
+
+    return { success: true, certId: verification.certId, toEmail: verification.toEmail, ownerName: verification.newOwnerName ?? null };
+  }
+
+  // ── Customer dashboard queries ──────────────────────────────────────────────
+  async getSubmissionsByEmail(email: string): Promise<any[]> {
+    const normalEmail = email.toLowerCase().trim();
+    const result = await db.execute(sql`
+      SELECT * FROM submissions
+      WHERE LOWER(customer_email) = ${normalEmail}
+      ORDER BY created_at DESC
+    `);
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      submissionId: row.tracking_number,
+      status: row.status,
+      cardCount: row.card_count,
+      tier: row.tier,
+      serviceType: row.service_type,
+      totalAmount: row.total_amount,
+      createdAt: row.created_at,
+      receivedAt: row.received_at,
+      shippedAt: row.shipped_at,
+      completedAt: row.completed_at,
+      returnCarrier: row.return_carrier,
+      returnTrackingNumber: row.return_tracking_number,
+      customerFirstName: row.customer_first_name,
+      customerEmail: row.customer_email,
+    }));
+  }
+
+  async getCertificatesByEmail(email: string): Promise<CertificateRecord[]> {
+    const normalEmail = email.toLowerCase().trim();
+    // Certs linked via submission items
+    const linked = await db.execute(sql`
+      SELECT DISTINCT c.*
+      FROM certificates c
+      JOIN submission_items si ON c.submission_item_id = si.id
+      JOIN submissions s ON si.submission_id = s.id
+      WHERE LOWER(s.customer_email) = ${normalEmail}
+        AND c.status != 'voided'
+      ORDER BY c.created_at DESC
+    `);
+    // Certs owned by this email (claimed via registry)
+    const owned = await db.execute(sql`
+      SELECT c.*
+      FROM certificates c
+      WHERE LOWER(c.owner_email) = ${normalEmail}
+        AND c.ownership_status = 'claimed'
+        AND c.status != 'voided'
+      ORDER BY c.created_at DESC
+    `);
+    // Merge, dedup by id
+    const seen = new Set<number>();
+    const rows: CertificateRecord[] = [];
+    for (const row of [...linked.rows, ...owned.rows] as any[]) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push({
+        id: row.id,
+        cardId: row.card_id,
+        submissionItemId: row.submission_item_id,
+        nfcUid: row.nfc_uid,
+        nfcEnabled: row.nfc_enabled,
+        nfcChipType: row.nfc_chip_type,
+        nfcWrittenAt: row.nfc_written_at,
+        nfcWrittenBy: row.nfc_written_by,
+        nfcLocked: row.nfc_locked,
+        nfcScanCount: row.nfc_scan_count,
+        nfcLastScanAt: row.nfc_last_scan_at,
+        nfcLastScanIp: row.nfc_last_scan_ip,
+        certId: row.certificate_number,
+        gradeOverall: row.grade,
+        gradeType: row.grade_type,
+        gradeCentering: row.centering_score,
+        gradeCorners: row.corners_score,
+        gradeEdges: row.edges_score,
+        gradeSurface: row.surface_score,
+        status: row.status,
+        voidReason: row.void_reason,
+        replacedByCertId: row.replaced_by_cert_id,
+        integrityHash: row.integrity_hash,
+        cardName: row.card_name,
+        setName: row.set_name,
+        cardNumber: row.card_number_display,
+        year: row.year_text,
+        language: row.language,
+        variant: row.variant,
+        rarity: row.rarity,
+        collection: row.collection,
+        designations: row.designations,
+        cardGame: row.card_game,
+        notes: row.notes,
+        createdBy: row.created_by,
+        updatedAt: row.updated_at,
+        currentOwnerUserId: row.current_owner_user_id,
+        ownershipStatus: row.ownership_status,
+        claimCodeHash: row.claim_code_hash,
+        claimCodeCreatedAt: row.claim_code_created_at,
+        claimCodeUsedAt: row.claim_code_used_at,
+        ownershipToken: row.ownership_token,
+        ownershipTokenGeneratedAt: row.ownership_token_generated_at,
+        ownerName: row.owner_name,
+        ownerEmail: row.owner_email,
+        createdAt: row.issued_at,
+      } as unknown as CertificateRecord);
+    }
+    return rows;
+  }
+
+  async getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<{
+    cardGame: string | null; setName: string | null; cardName: string | null;
+    total: number; gBL: number; g10: number; g9: number;
+    g8: number; g7: number; gLow: number;
+  }[]> {
+    const conditions: string[] = [
+      `status = 'active'`,
+      `deleted_at IS NULL`,
+      `grade_type = 'numeric'`,
+    ];
+    if (filters.game) conditions.push(`LOWER(card_game) = LOWER('${filters.game.replace(/'/g, "''")}')`);
+    if (filters.set)  conditions.push(`LOWER(set_name)  LIKE LOWER('%${filters.set.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
+    if (filters.card) conditions.push(`LOWER(card_name) LIKE LOWER('%${filters.card.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
+
+    const where = conditions.join(" AND ");
+    const result = await db.execute(sql.raw(`
+      SELECT
+        card_game,
+        set_name,
+        card_name,
+        COUNT(*)::int AS total,
+        COUNT(CASE WHEN grade::numeric = 10
+          AND COALESCE(grade_centering::numeric, 0) = 10
+          AND COALESCE(grade_corners::numeric, 0)   = 10
+          AND COALESCE(grade_edges::numeric, 0)     = 10
+          AND COALESCE(grade_surface::numeric, 0)   = 10
+          THEN 1 END)::int AS gBL,
+        COUNT(CASE WHEN grade::numeric = 10 AND NOT (
+          COALESCE(grade_centering::numeric, 0) = 10
+          AND COALESCE(grade_corners::numeric, 0)   = 10
+          AND COALESCE(grade_edges::numeric, 0)     = 10
+          AND COALESCE(grade_surface::numeric, 0)   = 10
+        ) THEN 1 END)::int AS g10,
+        COUNT(CASE WHEN grade::numeric >= 9 AND grade::numeric < 10 THEN 1 END)::int AS g9,
+        COUNT(CASE WHEN grade::numeric >= 8 AND grade::numeric < 9  THEN 1 END)::int AS g8,
+        COUNT(CASE WHEN grade::numeric = 7 THEN 1 END)::int AS g7,
+        COUNT(CASE WHEN grade::numeric <= 6 THEN 1 END)::int AS gLow
+      FROM certificates
+      WHERE ${where}
+      GROUP BY card_game, set_name, card_name
+      ORDER BY total DESC
+      LIMIT 200
+    `));
+
+    return (result.rows as any[]).map(r => ({
+      cardGame: r.card_game ?? null,
+      setName:  r.set_name  ?? null,
+      cardName: r.card_name ?? null,
+      total:    Number(r.total),
+      gBL:      Number(r.gbl ?? r.gBL ?? 0),
+      g10:      Number(r.g10),
+      g9:       Number(r.g9),
+      g8:       Number(r.g8),
+      g7:       Number(r.g7),
+      gLow:     Number(r.glow ?? r.gLow ?? 0),
+    }));
   }
 }
 

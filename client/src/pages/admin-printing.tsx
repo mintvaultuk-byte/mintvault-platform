@@ -63,7 +63,7 @@ function EditLabelModal({
     queryFn: () => apiRequest("GET", `/api/admin/printing/override/${certId}`).then((r) => r.json()),
   });
 
-  const form = useForm({
+  const form = useForm<{ cardName: string; setName: string; variant: string; language: string; year: string }>({
     values: {
       cardName: existing?.cardNameOverride ?? cert?.cardName ?? "",
       setName:  existing?.setOverride      ?? cert?.setName  ?? "",
@@ -74,7 +74,7 @@ function EditLabelModal({
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: ReturnType<typeof form.getValues>) => {
+    mutationFn: async (data: { cardName: string; setName: string; variant: string; language: string; year: string }) => {
       const res = await apiRequest("POST", `/api/admin/printing/override/${certId}`, {
         cardNameOverride: data.cardName || null,
         setOverride:      data.setName  || null,
@@ -96,7 +96,7 @@ function EditLabelModal({
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent
-        className="bg-gray-950 border-gray-800 text-gray-100 max-w-md"
+        className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md"
         data-testid="edit-label-modal"
       >
         <DialogHeader>
@@ -114,7 +114,7 @@ function EditLabelModal({
             onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))}
             className="space-y-4"
           >
-            <div className="rounded-md bg-yellow-900/20 border border-yellow-700/30 p-3 text-[11px] text-yellow-300 flex gap-2">
+            <div className="rounded-md bg-[#FFF9E6] border border-yellow-700/30 p-3 text-[11px] text-yellow-300 flex gap-2">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               Label display only — grade, cert number, QR code and schema are not changed.
             </div>
@@ -127,13 +127,13 @@ function EditLabelModal({
               { id: "year",     label: "Year" },
             ].map(({ id, label }) => (
               <div key={id} className="space-y-1">
-                <Label htmlFor={`edit-${id}`} className="text-xs text-gray-400">
+                <Label htmlFor={`edit-${id}`} className="text-xs text-[#666666]">
                   {label}
                 </Label>
                 <Input
                   id={`edit-${id}`}
                   {...form.register(id as any)}
-                  className="h-8 text-sm bg-gray-900 border-gray-700 text-gray-100"
+                  className="h-8 text-sm bg-[#FAFAF8] border-[#E8E4DC] text-[#1A1A1A]"
                   data-testid={`input-edit-${id}`}
                 />
               </div>
@@ -142,7 +142,7 @@ function EditLabelModal({
             <DialogFooter>
               <Button
                 type="button" variant="ghost" onClick={onClose}
-                className="text-gray-500"
+                className="text-[#999999]"
               >
                 Cancel
               </Button>
@@ -182,8 +182,8 @@ function CertRow({
     <div
       className={`rounded-lg border transition-colors ${
         selected
-          ? "border-yellow-500/70 bg-yellow-900/20"
-          : "border-gray-800 hover:border-gray-700"
+          ? "border-yellow-500/70 bg-[#FFF9E6]"
+          : "border-[#E8E4DC] hover:border-[#E8E4DC]"
       }`}
       data-testid={`queue-row-${cert.certId}`}
     >
@@ -197,14 +197,14 @@ function CertRow({
         >
           {selected
             ? <CheckSquare className="h-4 w-4" />
-            : <Square className="h-4 w-4 text-gray-600" />}
+            : <Square className="h-4 w-4 text-[#999999]" />}
         </div>
 
         {/* Thumbnail */}
         <img
           src={imgUrl}
           alt={`Label ${cert.certId}`}
-          className="h-8 w-28 object-cover rounded border border-gray-700 shrink-0 cursor-pointer"
+          className="h-8 w-28 object-cover rounded border border-[#E8E4DC] shrink-0 cursor-pointer"
           onClick={onToggle}
           loading="lazy"
           data-testid={`thumb-${cert.certId}`}
@@ -216,7 +216,7 @@ function CertRow({
             <span className="font-mono text-xs text-yellow-400" data-testid={`certid-${cert.certId}`}>
               {cert.certId}
             </span>
-            <Badge variant="outline" className="text-[10px] px-1 py-0 text-gray-400 border-gray-700">
+            <Badge variant="outline" className="text-[10px] px-1 py-0 text-[#666666] border-[#E8E4DC]">
               {gradeDisplay(cert)}
             </Badge>
             {cert.lastPrintedAt && (
@@ -229,58 +229,82 @@ function CertRow({
               </Badge>
             )}
           </div>
-          <p className="text-xs text-gray-400 truncate leading-tight">{cert.cardName}</p>
+          <p className="text-xs text-[#666666] truncate leading-tight">{cert.cardName}</p>
           {cert.lastPrintedAt && (
-            <p className="text-[10px] text-gray-600">
+            <p className="text-[10px] text-[#999999]">
               Last printed {fmtDate(cert.lastPrintedAt)}
             </p>
           )}
         </div>
 
         {/* Action buttons — inline on right, never wrap */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Secondary actions: icon-only to save space */}
           <Button
             size="sm" variant="ghost"
             onClick={(e) => { e.stopPropagation(); setShowPreview((v) => !v); }}
-            className="h-7 px-2 text-[10px] text-gray-500 hover:text-yellow-400 gap-1"
+            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-preview-${cert.certId}`}
             title="Preview label"
           >
-            {showPreview
-              ? <EyeOff className="h-3 w-3" />
-              : <Eye className="h-3 w-3" />}
-            <span className="hidden sm:inline">Preview</span>
+            {showPreview ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </Button>
 
           <Button
             size="sm" variant="ghost"
             disabled={reprintPending}
             onClick={(e) => { e.stopPropagation(); onReprint(cert.certId); }}
-            className="h-7 px-2 text-[10px] text-gray-500 hover:text-yellow-400 gap-1"
+            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-reprint-${cert.certId}`}
-            title="Reprint single label"
+            title="Reprint label"
           >
-            {reprintPending
-              ? <Loader2 className="h-3 w-3 animate-spin" />
-              : <Printer className="h-3 w-3" />}
-            <span className="hidden sm:inline">Reprint</span>
+            {reprintPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
           </Button>
 
           <Button
             size="sm" variant="ghost"
             onClick={(e) => { e.stopPropagation(); onEditLabel(cert.certId, cert); }}
-            className="h-7 px-2 text-[10px] text-gray-500 hover:text-yellow-400 gap-1"
+            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-edit-label-${cert.certId}`}
             title="Edit label display data"
           >
-            <Pencil className="h-3 w-3" />
-            <span className="hidden sm:inline">Edit Label</span>
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
 
+          {/* Separator */}
+          <div className="h-4 w-px bg-[#E8E4DC] mx-0.5" />
+
+          {/* Certificate PDF download */}
+          <a
+            href={`/api/admin/certificates/${cert.certId}/certificate-document`}
+            onClick={(e) => e.stopPropagation()}
+            download={`MintVault-Certificate-${cert.certId}.pdf`}
+            className="inline-flex items-center gap-1 h-7 px-2 text-[10px] text-[#999999] hover:text-yellow-400 rounded-md hover:bg-[#FFF9E6] transition-colors whitespace-nowrap"
+            data-testid={`btn-cert-doc-${cert.certId}`}
+            title="Download Certificate PDF"
+          >
+            <FileDown className="h-3 w-3 shrink-0" />
+            Cert
+          </a>
+
+          {/* Claim Insert — most important, gold-highlighted */}
+          <a
+            href={`/api/admin/certificates/${cert.certId}/claim-insert`}
+            onClick={(e) => e.stopPropagation()}
+            download={`MintVault-ClaimInsert-${cert.certId}.pdf`}
+            className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1A1400] bg-[#D4AF37] hover:bg-[#B8960C] rounded-md transition-colors whitespace-nowrap"
+            data-testid={`btn-claim-insert-${cert.certId}`}
+            title="Download Claim Insert PDF"
+          >
+            <FileDown className="h-3 w-3 shrink-0" />
+            Claim Insert
+          </a>
+
+          {/* Add to sheet */}
           <Button
             size="sm" variant="ghost"
             onClick={(e) => { e.stopPropagation(); onToggle(); }}
-            className={`h-7 px-2 text-[10px] gap-1 ${
+            className={`h-7 px-2 text-[10px] gap-1 whitespace-nowrap ${
               selected
                 ? "text-yellow-400 hover:text-yellow-300"
                 : "text-emerald-500 hover:text-emerald-400"
@@ -288,8 +312,8 @@ function CertRow({
             data-testid={`btn-add-to-sheet-${cert.certId}`}
             title={selected ? "Remove from sheet" : "Add to sheet"}
           >
-            <PlusCircle className="h-3 w-3" />
-            <span className="hidden sm:inline">{selected ? "Remove" : "Add to Sheet"}</span>
+            <PlusCircle className="h-3 w-3 shrink-0" />
+            <span className="hidden sm:inline">{selected ? "Remove" : "Sheet"}</span>
           </Button>
         </div>
       </div>
@@ -297,7 +321,7 @@ function CertRow({
       {/* Inline label preview */}
       {showPreview && (
         <div className="px-2 pb-2">
-          <div className="rounded overflow-hidden border border-gray-700 max-w-xs">
+          <div className="rounded overflow-hidden border border-[#E8E4DC] max-w-xs">
             <img
               src={imgUrl}
               alt={`${cert.certId} front label preview`}
@@ -356,7 +380,7 @@ function LatestSheetSection({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-xs text-gray-600 py-2">
+      <div className="flex items-center gap-2 text-xs text-[#999999] py-2">
         <Loader2 className="h-3 w-3 animate-spin" /> Loading latest sheet…
       </div>
     );
@@ -369,10 +393,10 @@ function LatestSheetSection({
   return (
     <div className="space-y-1" data-testid="latest-sheet-section">
       {/* Latest Sheet card */}
-      <div className="rounded-lg border border-gray-800 overflow-hidden">
+      <div className="rounded-lg border border-[#E8E4DC] overflow-hidden">
         {/* Clickable header row */}
         <button
-          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-gray-900/50 hover:bg-gray-900 transition-colors text-left"
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-[#F5F3EF] hover:bg-[#FAFAF8] transition-colors text-left"
           onClick={() => setDetailOpen((v) => !v)}
           data-testid="btn-toggle-latest-detail"
         >
@@ -381,13 +405,13 @@ function LatestSheetSection({
               ? <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
               : <Clock className="h-4 w-4 text-yellow-500 shrink-0" />}
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-200">
+              <p className="text-sm font-semibold text-[#1A1A1A]">
                 Latest Sheet
-                <span className="ml-2 text-xs font-normal text-gray-500">
+                <span className="ml-2 text-xs font-normal text-[#999999]">
                   {sheetLabel(latest.sheetRef)}
                 </span>
               </p>
-              <p className="text-[11px] text-gray-500 mt-0.5">
+              <p className="text-[11px] text-[#999999] mt-0.5">
                 {latest.total} cert{latest.total !== 1 ? "s" : ""}
                 {" · "}
                 {latest.printed
@@ -403,7 +427,7 @@ function LatestSheetSection({
               variant="outline"
               disabled={isPending}
               onClick={(e) => { e.stopPropagation(); handleReprint(latest.sheetRef); }}
-              className="h-7 text-[10px] px-2 border-yellow-700/40 text-yellow-400 hover:bg-yellow-900/30"
+              className="h-7 text-[10px] px-2 border-yellow-700/40 text-yellow-400 hover:bg-[#FFF9E6]"
               data-testid="btn-reprint-latest-sheet"
             >
               {reprintingRef === latest.sheetRef
@@ -412,30 +436,30 @@ function LatestSheetSection({
               Reprint Sheet
             </Button>
             {detailOpen
-              ? <ChevronUp className="h-4 w-4 text-gray-500" />
-              : <ChevronDown className="h-4 w-4 text-gray-500" />}
+              ? <ChevronUp className="h-4 w-4 text-[#999999]" />
+              : <ChevronDown className="h-4 w-4 text-[#999999]" />}
           </div>
         </button>
 
         {/* Expanded cert list */}
         {detailOpen && (
-          <div className="border-t border-gray-800 p-3 space-y-1 max-h-64 overflow-y-auto">
+          <div className="border-t border-[#E8E4DC] p-3 space-y-1 max-h-64 overflow-y-auto">
             {detailLoading ? (
               <div className="flex justify-center py-4">
                 <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />
               </div>
             ) : detailItems.length === 0 ? (
-              <p className="text-xs text-gray-600 text-center py-2">No certificates on this sheet.</p>
+              <p className="text-xs text-[#999999] text-center py-2">No certificates on this sheet.</p>
             ) : (
               detailItems.map((item) => (
                 <div
                   key={item.certId}
-                  className="flex items-center gap-3 px-2 py-1.5 rounded text-xs text-gray-400 bg-gray-900/30"
+                  className="flex items-center gap-3 px-2 py-1.5 rounded text-xs text-[#666666] bg-gray-50"
                   data-testid={`latest-detail-cert-${item.certId}`}
                 >
                   <span className="font-mono text-yellow-600 shrink-0 w-14">{item.certId}</span>
                   <span className="truncate">{item.cert?.cardName ?? "—"}</span>
-                  <span className="ml-auto text-gray-600 shrink-0">{item.cert?.gradeOverall ?? "—"}</span>
+                  <span className="ml-auto text-[#999999] shrink-0">{item.cert?.gradeOverall ?? "—"}</span>
                 </div>
               ))
             )}
@@ -447,7 +471,7 @@ function LatestSheetSection({
       {older.length > 0 && (
         <div>
           <button
-            className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors pl-1"
+            className="text-[11px] text-[#999999] hover:text-[#666666] transition-colors pl-1"
             onClick={() => setHistoryOpen((v) => !v)}
             data-testid="btn-view-full-history"
           >
@@ -455,11 +479,11 @@ function LatestSheetSection({
           </button>
 
           {historyOpen && (
-            <div className="mt-1.5 rounded-lg border border-gray-800 divide-y divide-gray-800 overflow-hidden">
+            <div className="mt-1.5 rounded-lg border border-[#E8E4DC] divide-y divide-[#E8E4DC] overflow-hidden">
               {sheets.map((sheet, idx) => (
                 <div
                   key={sheet.sheetRef}
-                  className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-900/20 text-[11px] text-gray-500"
+                  className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 text-[11px] text-[#999999]"
                   data-testid={`full-history-row-${sheet.sheetRef}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -467,7 +491,7 @@ function LatestSheetSection({
                       ? <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
                       : <Clock className="h-3 w-3 text-yellow-600 shrink-0" />}
                     <span>{sheetLabel(sheet.sheetRef)}</span>
-                    <span className="text-gray-700">· {sheet.total} cert{sheet.total !== 1 ? "s" : ""}</span>
+                    <span className="text-[#AAAAAA]">· {sheet.total} cert{sheet.total !== 1 ? "s" : ""}</span>
                     {idx === 0 && (
                       <Badge variant="outline" className="text-[9px] border-yellow-700/40 text-yellow-600 py-0 px-1 ml-1">
                         latest
@@ -479,7 +503,7 @@ function LatestSheetSection({
                     variant="ghost"
                     disabled={reprintingRef === sheet.sheetRef || generating}
                     onClick={() => handleReprint(sheet.sheetRef)}
-                    className="h-6 text-[10px] px-2 text-gray-500 hover:text-yellow-400"
+                    className="h-6 text-[10px] px-2 text-[#999999] hover:text-yellow-400"
                     data-testid={`btn-reprint-history-${sheet.sheetRef}`}
                   >
                     <Printer className="h-3 w-3 mr-1" />
@@ -501,13 +525,13 @@ export default function AdminPrinting() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6" data-testid="admin-printing-root">
-      <div className="flex items-center gap-1 border-b border-gray-800 pb-0">
+      <div className="flex items-center gap-1 border-b border-[#E8E4DC] pb-0">
         <button
           onClick={() => setTab("sheet")}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t transition-colors border-b-2 ${
             tab === "sheet"
               ? "border-yellow-500 text-yellow-400"
-              : "border-transparent text-gray-500 hover:text-gray-300"
+              : "border-transparent text-[#999999] hover:text-[#666666]"
           }`}
           data-testid="tab-sheet-printing"
         >
@@ -518,7 +542,7 @@ export default function AdminPrinting() {
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t transition-colors border-b-2 ${
             tab === "browser"
               ? "border-yellow-500 text-yellow-400"
-              : "border-transparent text-gray-500 hover:text-gray-300"
+              : "border-transparent text-[#999999] hover:text-[#666666]"
           }`}
           data-testid="tab-cert-browser"
         >
@@ -679,6 +703,31 @@ function SheetPrintingPanel() {
     }
   }, [toast, invalidate, sheetRequest]);
 
+  // Download claim insert sheet
+  const [downloadingInserts, setDownloadingInserts] = useState(false);
+  const downloadClaimInserts = useCallback(async (certIds: string[]) => {
+    setDownloadingInserts(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/claim-insert-sheet", { certIds });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(error);
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `claim-inserts-${new Date().toISOString().split("T")[0]}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Claim inserts downloaded", description: `${certIds.length} insert${certIds.length !== 1 ? "s" : ""} generated` });
+    } catch (err: any) {
+      toast({ title: "Claim inserts failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloadingInserts(false);
+    }
+  }, [toast]);
+
   // Download SVG cut guide — matches print sheet positions exactly
   const [downloadingCut, setDownloadingCut] = useState(false);
   const downloadCutGuide = useCallback(async (certIds: string[]) => {
@@ -727,14 +776,14 @@ function SheetPrintingPanel() {
           <h2 className="text-lg font-bold text-yellow-400 tracking-wide flex items-center gap-2">
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-[#999999] mt-0.5">
             A4 · 10 certs per sheet · 70 × 20 mm labels · Brother ScanNCut CM300
           </p>
         </div>
         <Button
           size="sm" variant="ghost"
           onClick={() => refetchCerts()}
-          className="text-gray-500 hover:text-yellow-400"
+          className="text-[#999999] hover:text-yellow-400"
           data-testid="btn-refresh-printing"
         >
           <RefreshCw className="h-4 w-4" />
@@ -742,7 +791,7 @@ function SheetPrintingPanel() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex items-center gap-1 border-b border-gray-800">
+      <div className="flex items-center gap-1 border-b border-[#E8E4DC]">
         {(["all", "unprinted", "printed"] as FilterMode[]).map((mode) => {
           const label = mode === "all" ? "All" : mode === "unprinted" ? "Unprinted" : "Printed";
           const count = mode === "all" ? countAll : mode === "unprinted" ? countUnprinted : countPrinted;
@@ -754,12 +803,12 @@ function SheetPrintingPanel() {
               className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-t transition-colors border-b-2 ${
                 filterMode === mode
                   ? "border-yellow-500 text-yellow-400"
-                  : "border-transparent text-gray-500 hover:text-gray-300"
+                  : "border-transparent text-[#999999] hover:text-[#666666]"
               }`}
             >
               {label}
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                filterMode === mode ? "bg-yellow-900/40 text-yellow-400" : "bg-gray-800 text-gray-500"
+                filterMode === mode ? "bg-[#FFF9E6] text-yellow-400" : "bg-[#E8E4DC] text-[#999999]"
               }`}>
                 {count}
               </span>
@@ -771,18 +820,18 @@ function SheetPrintingPanel() {
       {/* Search + toolbar */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-500 pointer-events-none" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#999999] pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by cert ID or card name…"
-            className="pl-8 pr-8 h-8 text-xs bg-gray-900 border-gray-700 text-gray-200 placeholder-gray-600"
+            className="pl-8 pr-8 h-8 text-xs bg-[#FAFAF8] border-[#E8E4DC] text-[#1A1A1A] placeholder-[#AAAAAA]"
             data-testid="input-search-certs"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#666666]"
               data-testid="btn-clear-search"
             >
               <X className="h-3.5 w-3.5" />
@@ -791,14 +840,14 @@ function SheetPrintingPanel() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-[#999999]">
             {visibleCerts.length} cert{visibleCerts.length !== 1 ? "s" : ""}
             {search || filterMode !== "all" ? " (filtered)" : ""}
           </span>
           {selected.size > 0 && (
             <button
               onClick={clearSelection}
-              className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              className="text-[11px] text-[#999999] hover:text-[#666666] transition-colors"
               data-testid="btn-clear-selection"
             >
               Clear ({selected.size})
@@ -831,7 +880,7 @@ function SheetPrintingPanel() {
           <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
         </div>
       ) : visibleCerts.length === 0 ? (
-        <div className="rounded-lg border border-gray-800 p-10 text-center text-gray-600 text-sm">
+        <div className="rounded-lg border border-[#E8E4DC] p-10 text-center text-[#999999] text-sm">
           {search || filterMode !== "all"
             ? "No certificates match your filter."
             : "No certificates found."}
@@ -875,6 +924,17 @@ function SheetPrintingPanel() {
             ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
             : <><FileDown className="h-4 w-4 mr-2" /> Cut Guide SVG ({selected.size})</>}
         </Button>
+        <Button
+          onClick={() => downloadClaimInserts(Array.from(selected))}
+          disabled={selected.size === 0 || downloadingInserts}
+          data-testid="btn-claim-inserts"
+          variant="outline"
+          className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
+        >
+          {downloadingInserts
+            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+            : <><FileDown className="h-4 w-4 mr-2" /> Claim Inserts ({selected.size})</>}
+        </Button>
         {selected.size > CERTS_PER_SHEET && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">
             Max {CERTS_PER_SHEET} — deselect {selected.size - CERTS_PER_SHEET}
@@ -884,7 +944,7 @@ function SheetPrintingPanel() {
 
       {/* Post-generate mark-printed prompt */}
       {pendingSheetRef && (
-        <div className="rounded-md border border-yellow-700/40 bg-yellow-900/20 p-3 flex items-center justify-between gap-4">
+        <div className="rounded-md border border-yellow-700/40 bg-[#FFF9E6] p-3 flex items-center justify-between gap-4">
           <p className="text-xs text-yellow-300">
             <strong>PDF downloaded.</strong> Print the sheet, then confirm it was printed.
           </p>
@@ -893,7 +953,7 @@ function SheetPrintingPanel() {
             onClick={() => markPrintedMutation.mutate(pendingSheetRef)}
             disabled={markPrintedMutation.isPending}
             data-testid="btn-mark-printed-inline"
-            className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs shrink-0"
+            className="bg-emerald-700 hover:bg-emerald-600 text-[#1A1A1A] text-xs shrink-0"
           >
             {markPrintedMutation.isPending
               ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Marking…</>

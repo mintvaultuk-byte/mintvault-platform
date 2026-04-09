@@ -26,14 +26,14 @@ export default function FaqSection({ faqs, title = "Frequently Asked Questions" 
               aria-controls={`faq-answer-${i}`}
               data-testid={`button-faq-${i}`}
             >
-              <span className="text-white text-sm font-medium pr-4">{faq.question}</span>
+              <span className="text-[#1A1A1A] text-sm font-medium pr-4">{faq.question}</span>
               <ChevronDown
                 size={16}
                 className={`text-[#D4AF37] shrink-0 transition-transform ${openIndex === i ? "rotate-180" : ""}`}
               />
             </button>
             {openIndex === i && (
-              <div id={`faq-answer-${i}`} role="region" className="px-5 pb-4 text-gray-300 text-sm leading-relaxed border-t border-[#D4AF37]/10" data-testid={`text-faq-answer-${i}`}>
+              <div id={`faq-answer-${i}`} role="region" className="px-5 pb-4 text-[#444444] text-sm leading-relaxed border-t border-[#E8E4DC]" data-testid={`text-faq-answer-${i}`}>
                 <div className="pt-3" dangerouslySetInnerHTML={{ __html: faq.answer }} />
               </div>
             )}

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
-import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus } from "lucide-react";
+import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw } from "lucide-react";
 import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
@@ -70,6 +70,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
   const [form, setForm] = useState({
     gradeType: (certificate as any)?.gradeType || "numeric",
+    serviceTier: "",
     submissionItemId: (certificate as any)?.submissionItemId || "",
     cardGame: certificate?.cardGame || "",
     setName: certificate?.setName || "",
@@ -87,6 +88,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     year: certificate?.year || "",
     notes: certificate?.notes || "",
     gradeOverall: certificate?.gradeOverall || "",
+    labelType: (certificate as any)?.labelType || "standard",
     status: certificate?.status || "active",
   });
 
@@ -128,6 +130,184 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   const [languageChangedByFallback, setLanguageChangedByFallback] = useState(false);
 
   const [setId, setSetId] = useState("");
+
+  // ── Build 1: Grading image upload state ──────────────────────────────────
+  const [gradingImages, setGradingImages] = useState<{ front?: File; back?: File; angled?: File; closeup?: File }>({});
+  const [gradingUploading, setGradingUploading] = useState(false);
+  const [gradingUploadDone, setGradingUploadDone] = useState(false);
+  const [gradingQuality, setGradingQuality] = useState<Record<string, any>>({});
+  const [gradingUrls, setGradingUrls] = useState<Record<string, string | null>>({});
+  const [cardLookupQuery, setCardLookupQuery] = useState("");
+  const [cardLookupGame, setCardLookupGame] = useState("pokemon");
+  const [cardLookupResults, setCardLookupResults] = useState<any[]>([]);
+  const [cardLookupLoading, setCardLookupLoading] = useState(false);
+
+  async function uploadGradingImages() {
+    if (!isEdit || !certificate?.id) return;
+    if (!gradingImages.front && !gradingImages.back) {
+      toast({ title: "Upload required", description: "Please add at least a front image.", variant: "destructive" });
+      return;
+    }
+    setGradingUploading(true);
+    try {
+      const fd = new FormData();
+      if (gradingImages.front)   fd.append("front",   gradingImages.front);
+      if (gradingImages.back)    fd.append("back",    gradingImages.back);
+      if (gradingImages.angled)  fd.append("angled",  gradingImages.angled);
+      if (gradingImages.closeup) fd.append("closeup", gradingImages.closeup);
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/upload-images`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      setGradingUrls(data.urls || {});
+      setGradingQuality(data.quality || {});
+      setGradingUploadDone(true);
+      toast({ title: "Images uploaded", description: "Variants are being generated in the background." });
+    } catch (e: any) {
+      toast({ title: "Upload failed", description: e.message, variant: "destructive" });
+    } finally {
+      setGradingUploading(false);
+    }
+  }
+
+  async function runCardLookup() {
+    if (!cardLookupQuery.trim()) return;
+    setCardLookupLoading(true);
+    setCardLookupResults([]);
+    try {
+      const params = new URLSearchParams({ game: cardLookupGame, query: cardLookupQuery });
+      const res = await fetch(`/api/admin/card-lookup?${params}`, { credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Lookup failed");
+      setCardLookupResults(Array.isArray(data) ? data : []);
+    } catch (e: any) {
+      toast({ title: "Card lookup failed", description: e.message, variant: "destructive" });
+    } finally {
+      setCardLookupLoading(false);
+    }
+  }
+
+  // ── AI Card Identify state (from uploaded image) ──────────────────────────
+  const [aiIdentifyLoading, setAiIdentifyLoading] = useState(false);
+  const [aiIdentifyError, setAiIdentifyError] = useState("");
+
+  async function runAiIdentify(imageFile: File) {
+    setAiIdentifyLoading(true);
+    setAiIdentifyError("");
+    try {
+      const fd = new FormData();
+      fd.append("image", imageFile);
+      const res = await fetch("/api/admin/identify-image", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Identification failed");
+
+      const gameMap: Record<string, string> = {
+        pokemon: "Pokémon", yugioh: "Yu-Gi-Oh!", mtg: "Magic: The Gathering",
+        onepiece: "One Piece", sports: "Sports Card", "dragon ball": "Dragon Ball Super",
+      };
+
+      if (data.detected_name)  updateField("cardName", data.detected_name.toUpperCase());
+      if (data.detected_set)   updateField("setName", data.detected_set);
+      if (data.detected_year)  updateField("year", data.detected_year);
+      if (data.detected_number) updateField("cardNumber", data.detected_number.replace(/^#+/, ""));
+      if (data.detected_language) updateField("language", data.detected_language);
+      if (data.detected_game) {
+        const mapped = gameMap[data.detected_game.toLowerCase()] || data.detected_game;
+        updateField("cardGame", mapped);
+      }
+      if (data.detected_rarity) {
+        const { rarityCode } = mapRarityTextToCode(data.detected_rarity);
+        if (rarityCode && rarityCode !== "OTHER") {
+          applyUnifiedSelection(`RARITY:${rarityCode}`);
+        }
+      }
+      toast({
+        title: "Card identified!",
+        description: `${data.detected_name || "Unknown"} · ${data.detected_set || "Unknown set"} · Confidence: ${data.confidence || "unknown"}`,
+      });
+    } catch (e: any) {
+      setAiIdentifyError(e.message);
+      toast({ title: "Identification failed", description: e.message, variant: "destructive" });
+    } finally {
+      setAiIdentifyLoading(false);
+    }
+  }
+
+  // ── AI Grading state ──────────────────────────────────────────────────────
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
+  const [aiDraft, setAiDraft] = useState<{centering: string; corners: string; edges: string; surface: string; overall: string}>({ centering: "", corners: "", edges: "", surface: "", overall: "" });
+  const [aiDefects, setAiDefects] = useState<any[]>([]);
+  const [approveLoading, setApproveLoading] = useState(false);
+  const [approved, setApproved] = useState(false);
+
+  async function runAiAnalysis() {
+    if (!isEdit || !certificate?.id) return;
+    setAiLoading(true);
+    setAiError("");
+    setAiAnalysis(null);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/analyze`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      const a = data.analysis;
+      setAiAnalysis(a);
+      setAiDraft({
+        centering: String(a.centering?.subgrade ?? ""),
+        corners:   String(a.corners?.subgrade   ?? ""),
+        edges:     String(a.edges?.subgrade      ?? ""),
+        surface:   String(a.surface?.subgrade    ?? ""),
+        overall:   String(a.overall_grade         ?? ""),
+      });
+      setAiDefects(a.defects || []);
+    } catch (e: any) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function approveGrade() {
+    if (!isEdit || !certificate?.id) return;
+    setApproveLoading(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/approve-grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...aiDraft, gradeType: form.gradeType }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Approve failed");
+      setApproved(true);
+      // Update the form's grade fields to reflect the approved grade
+      updateField("gradeOverall", aiDraft.overall);
+    } catch (e: any) {
+      setAiError(e.message);
+    } finally {
+      setApproveLoading(false);
+    }
+  }
+
+  function subgradeColor(val: string): string {
+    const n = parseFloat(val);
+    if (isNaN(n)) return "#999999";
+    if (n >= 10) return "#D4AF37";
+    if (n >= 9)  return "#16A34A";
+    if (n >= 7)  return "#CA8A04";
+    return "#DC2626";
+  }
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -389,7 +569,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
         {isEdit ? `EDIT ${certificate.certId}` : "NEW CERTIFICATE"}
       </h2>
-      <p className="text-gray-500 text-sm mb-6">
+      <p className="text-[#999999] text-sm mb-6">
         {isEdit ? "Update certificate details" : "Certificate ID will be auto-generated"}
       </p>
 
@@ -435,7 +615,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   value={setId}
                   onChange={(e) => setSetId(e.target.value)}
                   placeholder="e.g. sv3pt5"
-                  className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1 text-white text-xs placeholder:text-[#D4AF37]/15 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/15 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
                   data-testid="input-set-id"
                 />
               </div>
@@ -461,7 +641,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                     value={form.cardNumber}
                     onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
                     placeholder="e.g. 125/198"
-                    className="flex-1 bg-transparent px-2 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none"
+                    className="flex-1 bg-transparent px-2 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none"
                     data-testid="input-card-number"
                   />
                 </div>
@@ -479,7 +659,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               </div>
 
               {suggestions.length > 0 && (
-                <div className="mt-2 border border-[#D4AF37]/20 rounded bg-black/80 max-h-40 overflow-y-auto" data-testid="autofill-suggestions">
+                <div className="mt-2 border border-[#D4AF37]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto" data-testid="autofill-suggestions">
                   <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">Suggestions</p>
                   {suggestions.map((s) => (
                     <button
@@ -490,19 +670,19 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                         applyCardData(s, null);
                         toast({ title: "Card details auto-filled" });
                       }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-[#D4AF37]/10 hover:text-white transition-colors"
+                      className="w-full text-left px-3 py-1.5 text-sm text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A] transition-colors"
                       data-testid={`suggestion-${s.id}`}
                     >
                       <span className="text-[#D4AF37]">{s.cardNumber}</span>
                       {" – "}
                       {s.cardName}
-                      {s.rarity && <span className="text-gray-500"> ({s.rarity})</span>}
+                      {s.rarity && <span className="text-[#999999]"> ({s.rarity})</span>}
                     </button>
                   ))}
                   <button
                     type="button"
                     onClick={() => setSuggestions([])}
-                    className="w-full text-center text-[10px] text-gray-500 py-1 hover:text-gray-400"
+                    className="w-full text-center text-[10px] text-[#999999] py-1 hover:text-[#666666]"
                     data-testid="button-dismiss-suggestions"
                   >
                     Dismiss
@@ -516,8 +696,8 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                     <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
                     <div className="flex-1">
                       <p className="text-amber-400 text-sm font-medium">Match found in different language</p>
-                      <p className="text-gray-400 text-xs mt-1">
-                        Found: <span className="text-white">{fallbackMatch.cardName}</span> ({fallbackMatch.language})
+                      <p className="text-[#666666] text-xs mt-1">
+                        Found: <span className="text-[#1A1A1A]">{fallbackMatch.cardName}</span> ({fallbackMatch.language})
                       </p>
                       <div className="flex gap-2 mt-2">
                         <button
@@ -531,7 +711,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                         <button
                           type="button"
                           onClick={() => setFallbackMatch(null)}
-                          className="px-3 py-1 text-xs text-gray-500 hover:text-gray-400 transition-colors flex items-center gap-1"
+                          className="px-3 py-1 text-xs text-[#999999] hover:text-[#666666] transition-colors flex items-center gap-1"
                           data-testid="button-dismiss-fallback"
                         >
                           <X size={12} /> Dismiss
@@ -561,7 +741,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                 <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <p className="text-amber-400 text-sm font-medium">Overwrite manually edited fields?</p>
-                  <p className="text-gray-400 text-xs mt-1">
+                  <p className="text-[#666666] text-xs mt-1">
                     You edited: {overwriteConfirm.fields.join(", ")}
                   </p>
                   <div className="flex gap-2 mt-2">
@@ -576,7 +756,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                     <button
                       type="button"
                       onClick={() => setOverwriteConfirm(null)}
-                      className="px-3 py-1 text-xs text-gray-500 hover:text-gray-400 transition-colors"
+                      className="px-3 py-1 text-xs text-[#999999] hover:text-[#666666] transition-colors"
                       data-testid="button-cancel-overwrite"
                     >
                       Cancel
@@ -635,7 +815,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[#D4AF37] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
                   data-testid="select-unified"
                 >
-                  <span className={form.unifiedSelect ? "text-white" : "text-[#D4AF37]/20"}>
+                  <span className={form.unifiedSelect ? "text-[#1A1A1A]" : "text-[#D4AF37]/20"}>
                     {form.unifiedSelect
                       ? (form.unifiedSelect === "OTHER" ? "OTHER (manual)" : getUnifiedDisplayLabel(form.unifiedSelect))
                       : "Select or type a variant..."}
@@ -643,7 +823,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   <ChevronDown size={14} className="text-[#D4AF37]/50" />
                 </button>
                 {unifiedOpen && (
-                  <div className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-black rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col" data-testid="unified-dropdown">
+                  <div className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col" data-testid="unified-dropdown">
                     <div className="p-2 border-b border-[#D4AF37]/10">
                       <input
                         type="text"
@@ -663,7 +843,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                           if (e.key === "Escape") setUnifiedOpen(false);
                         }}
                         placeholder="Type to filter or add a new variant..."
-                        className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1.5 text-white text-xs placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50"
+                        className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1.5 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50"
                         autoFocus
                         data-testid="input-unified-search"
                       />
@@ -673,7 +853,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                         <button
                           type="button"
                           onClick={() => { applyUnifiedSelection(""); setUnifiedOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:bg-[#D4AF37]/10 hover:text-gray-300 transition-colors border-b border-[#D4AF37]/10"
+                          className="w-full text-left px-3 py-2 text-xs text-[#999999] hover:bg-[#D4AF37]/10 hover:text-[#666666] transition-colors border-b border-[#D4AF37]/10"
                           data-testid="unified-clear"
                         >
                           Clear selection
@@ -695,11 +875,11 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                           key={o.value}
                           type="button"
                           onClick={() => { applyUnifiedSelection(o.value); setUnifiedOpen(false); setUnifiedSearch(""); }}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-gray-300 hover:bg-[#D4AF37]/10 hover:text-white"}`}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A]"}`}
                           data-testid={`unified-option-${o.value}`}
                         >
                           <span className="block">{o.label}</span>
-                          {o.help && <span className="block text-[10px] text-gray-500 group-hover:text-gray-400 mt-0.5">{o.help}</span>}
+                          {o.help && <span className="block text-[10px] text-[#999999] group-hover:text-[#666666] mt-0.5">{o.help}</span>}
                         </button>
                       ))}
                     </div>
@@ -708,7 +888,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                 {form.unifiedSelect && (() => {
                   const opt = allOptions.find((o) => o.value === form.unifiedSelect);
                   return opt?.help ? (
-                    <p className="text-gray-500 text-[10px] mt-1 flex items-center gap-1" data-testid="text-unified-help">
+                    <p className="text-[#999999] text-[10px] mt-1 flex items-center gap-1" data-testid="text-unified-help">
                       <HelpCircle size={10} className="shrink-0" /> {opt.help}
                     </p>
                   ) : null;
@@ -723,7 +903,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                         setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
                       }}
                       placeholder="Enter custom rarity / variant / collection..."
-                      className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
                       data-testid="input-other-text"
                     />
                     {dbRarityOthers.length > 0 && (
@@ -735,7 +915,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                               key={v}
                               type="button"
                               onClick={() => setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))}
-                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-gray-400 hover:border-[#D4AF37]/40 hover:text-gray-200"}`}
+                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#666666] hover:border-[#D4AF37]/40 hover:text-[#1A1A1A]"}`}
                               data-testid={`rarity-other-chip-${v}`}
                             >
                               {v}
@@ -759,7 +939,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                     key={d.code}
                     type="button"
                     onClick={() => toggleDesignation(d.code)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-gray-500 hover:border-[#D4AF37]/30 hover:text-gray-400"}`}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#999999] hover:border-[#D4AF37]/30 hover:text-[#666666]"}`}
                     data-testid={`designation-${d.code}`}
                     title={d.help}
                   >
@@ -770,7 +950,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               })}
             </div>
             {designations.length > 0 && (
-              <p className="text-gray-500 text-[10px] mt-1.5" data-testid="text-designations-summary">
+              <p className="text-[#999999] text-[10px] mt-1.5" data-testid="text-designations-summary">
                 Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
               </p>
             )}
@@ -833,7 +1013,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               onChange={(e) => updateField("notes", e.target.value)}
               rows={4}
               placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
+              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
               data-testid="input-cert-notes"
             />
 
@@ -856,7 +1036,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                       className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
                         alreadyAdded
                           ? "border-[#D4AF37]/15 text-[#D4AF37]/25 cursor-default"
-                          : "border-[#D4AF37]/25 text-gray-300 hover:border-[#D4AF37]/50 hover:text-white hover:bg-[#D4AF37]/5 cursor-pointer"
+                          : "border-[#D4AF37]/25 text-[#666666] hover:border-[#D4AF37]/50 hover:text-[#1A1A1A] hover:bg-[#D4AF37]/5 cursor-pointer"
                       }`}
                       data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
                     >
@@ -893,12 +1073,12 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   }),
                 }));
               }}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
               data-testid="select-grade-type"
             >
-              <option value="numeric" className="bg-black">Numeric (1–10)</option>
+              <option value="numeric" className="bg-white">Numeric (1–10)</option>
               {NON_NUMERIC_GRADES.map(ng => (
-                <option key={ng.value} value={ng.value} className="bg-black">{ng.value} – {ng.description}</option>
+                <option key={ng.value} value={ng.value} className="bg-white">{ng.value} – {ng.description}</option>
               ))}
             </select>
           </div>
@@ -908,7 +1088,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               <p className="text-[#D4AF37] text-sm font-semibold">
                 {form.gradeType === "NO" ? "AUTHENTIC – No Numerical Grade" : "AUTHENTIC ALTERED – No Numerical Grade"}
               </p>
-              <p className="text-gray-400 text-xs mt-1">
+              <p className="text-[#666666] text-xs mt-1">
                 {form.gradeType === "NO"
                   ? "Card verified as authentic. No numerical grade or subgrades assigned."
                   : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
@@ -921,18 +1101,45 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               <div>
                 <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Overall Grade *</label>
                 <select
-                  value={form.gradeOverall}
-                  onChange={(e) => updateField("gradeOverall", e.target.value)}
-                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  value={form.gradeOverall === "10" && form.labelType === "black" ? "black_label" : form.gradeOverall}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "black_label") {
+                      setForm(f => ({ ...f, gradeOverall: "10", labelType: "black" }));
+                    } else {
+                      setForm(f => ({ ...f, gradeOverall: v, labelType: "standard" }));
+                    }
+                  }}
+                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="select-grade-overall"
                 >
-                  <option value="" className="bg-black">Select grade...</option>
+                  <option value="" className="bg-white">Select grade...</option>
+                  <option value="black_label" className="bg-white">★ 10 — BLACK LABEL (Gem Mint)</option>
                   {NUMERIC_GRADES.map(g => (
-                    <option key={g.value} value={String(g.value)} className="bg-black">{g.value} – {g.label} ({g.description})</option>
+                    <option key={g.value} value={String(g.value)} className="bg-white">{g.value} – {g.label} ({g.description})</option>
                   ))}
                 </select>
               </div>
 
+              <div>
+                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Service Tier</label>
+                <select
+                  value={form.serviceTier}
+                  onChange={(e) => updateField("serviceTier", e.target.value)}
+                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  data-testid="select-service-tier"
+                >
+                  <option value="" className="bg-white">Standard (default)</option>
+                  <option value="standard" className="bg-white">Standard — £12</option>
+                  <option value="priority" className="bg-white">Priority — £15</option>
+                  <option value="express" className="bg-white">Express — £20</option>
+                  <option value="gold" className="bg-white">Gold — £85 (Black Label if grade 10)</option>
+                  <option value="gold-elite" className="bg-white">Gold Elite — £125 (Black Label if grade 10)</option>
+                </select>
+                {(form.serviceTier === "gold" || form.serviceTier === "gold-elite") && form.gradeOverall === "10" && (
+                  <p className="text-[#D4AF37] text-xs mt-1.5">⭐ This card will receive a Black Label.</p>
+                )}
+              </div>
             </>
           )}
         </fieldset>
@@ -954,7 +1161,326 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               testId="input-back-image"
             />
           </div>
+
+          {/* AI Identify button */}
+          {frontImage && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => runAiIdentify(frontImage)}
+                disabled={aiIdentifyLoading}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:opacity-90 disabled:opacity-50 transition-opacity"
+                data-testid="button-identify-ai"
+              >
+                {aiIdentifyLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
+                {aiIdentifyLoading ? "Identifying card…" : "Identify Card with AI"}
+              </button>
+              <p className="text-[#AAAAAA] text-[10px]">Uses Claude Vision to auto-fill card name, set, year, number, game, language and rarity from the front image.</p>
+              {aiIdentifyError && (
+                <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{aiIdentifyError}</p>
+              )}
+            </div>
+          )}
         </fieldset>
+
+        {/* ── Build 1: Grading Image Upload — only in edit mode ── */}
+        {isEdit && (
+          <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
+            <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+              <Upload size={12} />
+              Grading Images
+            </legend>
+
+            <p className="text-[#666666] text-xs">Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed into analysis variants.</p>
+
+            {/* 2×2 upload grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {(["front", "back", "angled", "closeup"] as const).map((angle) => {
+                const isRequired = angle === "front" || angle === "back";
+                const label = angle === "front" ? "Front (required)" : angle === "back" ? "Back (required)" : angle === "angled" ? "Angled (optional)" : "Closeup (optional)";
+                const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
+                const previewUrl = gradingImages[angle] ? URL.createObjectURL(gradingImages[angle]!) : null;
+                const displayUrl = previewUrl || existingUrl;
+                return (
+                  <label
+                    key={angle}
+                    className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
+                      ${gradingImages[angle] ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setGradingImages(prev => ({ ...prev, [angle]: f }));
+                      }}
+                    />
+                    {displayUrl ? (
+                      <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
+                    ) : (
+                      <Upload size={20} className={isRequired ? "text-[#D4AF37]/60" : "text-[#CCCCCC]"} />
+                    )}
+                    <span className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[#666666] font-semibold" : "text-[#AAAAAA]"}`}>{label}</span>
+                    {gradingImages[angle] && <span className="text-[9px] text-[#D4AF37] truncate w-full">{gradingImages[angle]!.name}</span>}
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* Upload button */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={uploadGradingImages}
+                disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
+                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-40"
+              >
+                {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {gradingUploading ? "Uploading…" : "Upload & Process"}
+              </button>
+              {gradingUploadDone && <span className="text-emerald-600 text-xs flex items-center gap-1"><CheckCircle2 size={12} /> Uploaded — variants generating in background</span>}
+            </div>
+
+            {/* Quality check results */}
+            {Object.keys(gradingQuality).length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[#666666] text-[10px] uppercase tracking-widest">Image Quality Checks</p>
+                {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
+                  <div key={angle} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+                    <p className="text-[#1A1A1A] text-[10px] font-bold uppercase mb-1">{angle} — {q.overall === "pass" ? <span className="text-emerald-600">PASS</span> : q.overall === "warn" ? <span className="text-amber-600">WARN</span> : <span className="text-red-600">FAIL</span>}</p>
+                    <div className="space-y-0.5">
+                      {(q.checks || []).map((c: any, i: number) => (
+                        <p key={i} className={`text-[10px] ${c.status === "pass" ? "text-[#888888]" : c.status === "warn" ? "text-amber-600" : "text-red-600"}`}>
+                          {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Card database lookup */}
+            <div className="space-y-2 pt-2 border-t border-[#E8E4DC]">
+              <p className="text-[#666666] text-[10px] uppercase tracking-widest">Verify Card Identity</p>
+              <div className="flex gap-2">
+                <select
+                  value={cardLookupGame}
+                  onChange={(e) => setCardLookupGame(e.target.value)}
+                  className="bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[#D4AF37]"
+                >
+                  <option value="pokemon">Pokémon</option>
+                  <option value="mtg">MTG</option>
+                  <option value="yugioh">Yu-Gi-Oh!</option>
+                </select>
+                <input
+                  type="text"
+                  value={cardLookupQuery}
+                  onChange={(e) => setCardLookupQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
+                  placeholder="Card name…"
+                  className="flex-1 bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-3 py-1.5 placeholder-[#AAAAAA] focus:outline-none focus:border-[#D4AF37]"
+                />
+                <button
+                  type="button"
+                  onClick={runCardLookup}
+                  disabled={cardLookupLoading || !cardLookupQuery.trim()}
+                  className="flex items-center gap-1 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[#D4AF37]/20"
+                >
+                  {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                </button>
+              </div>
+              {cardLookupResults.length > 0 && (
+                <div className="bg-white rounded-lg border border-[#E8E4DC] max-h-48 overflow-y-auto">
+                  {cardLookupResults.map((r, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        updateField("cardName", r.name);
+                        if (r.setName) updateField("setName", r.setName);
+                        if (r.year)    updateField("year", r.year);
+                        if (r.number)  updateField("cardNumber", r.number);
+                        if (r.rarity)  updateField("rarity", r.rarity);
+                        setCardLookupResults([]);
+                        toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0 flex items-start gap-3"
+                    >
+                      {r.imageUrl && <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />}
+                      <div>
+                        <p className="text-[#1A1A1A] font-medium">{r.name}</p>
+                        <p className="text-[#666666] text-[10px]">{r.setName}{r.number ? ` · #${r.number}` : ""}{r.rarity ? ` · ${r.rarity}` : ""}</p>
+                        <p className="text-[#AAAAAA] text-[9px]">{r.source}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
+                <p className="text-[#999999] text-[10px]">No results — check spelling or try a shorter name.</p>
+              )}
+            </div>
+          </fieldset>
+        )}
+
+        {/* ── AI Grading Panel — only in edit mode ── */}
+        {isEdit && (
+          <fieldset className="border border-[#D4AF37]/30 rounded-lg p-4 space-y-4">
+            <legend className="text-[#D4AF37] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+              <Cpu size={12} />
+              AI-Assisted Grading
+            </legend>
+
+            <div className="flex items-center justify-between">
+              <p className="text-[#666666] text-xs">Analyze card photos with Claude Vision to generate a draft grade.</p>
+              <button
+                type="button"
+                onClick={runAiAnalysis}
+                disabled={aiLoading}
+                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50"
+                data-testid="button-analyze-ai"
+              >
+                {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
+                {aiLoading ? "Analyzing…" : "Analyze with AI"}
+              </button>
+            </div>
+
+            {aiLoading && (
+              <div className="flex items-center gap-3 text-[#D4AF37] text-xs bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3">
+                <Loader2 size={14} className="animate-spin shrink-0" />
+                Sending images to Claude Vision. This takes 15–30 seconds…
+              </div>
+            )}
+
+            {aiError && (
+              <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg p-3">
+                <AlertTriangle size={14} className="shrink-0" />
+                {aiError}
+              </div>
+            )}
+
+            {aiAnalysis && !aiLoading && (
+              <div className="space-y-4">
+                {/* Subgrade cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
+                    <div key={cat} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3 text-center">
+                      <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
+                      <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>{aiDraft[cat] || "—"}</p>
+                      <input
+                        type="number"
+                        min="1" max="10" step="0.5"
+                        value={aiDraft[cat]}
+                        onChange={(e) => setAiDraft(d => ({ ...d, [cat]: e.target.value }))}
+                        className="w-full bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-xs text-center focus:outline-none focus:border-[#D4AF37]"
+                      />
+                      <p className="text-[#888888] text-[9px] leading-tight mt-1.5 line-clamp-2">
+                        {aiAnalysis[cat]?.notes || ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Centering ratios */}
+                {aiAnalysis.centering && (
+                  <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      ["Front L/R", aiAnalysis.centering.front_left_right],
+                      ["Front T/B", aiAnalysis.centering.front_top_bottom],
+                      ["Back L/R",  aiAnalysis.centering.back_left_right],
+                      ["Back T/B",  aiAnalysis.centering.back_top_bottom],
+                    ].map(([label, val]) => (
+                      <div key={label}>
+                        <p className="text-[#AAAAAA] text-[9px] uppercase">{label}</p>
+                        <p className="text-[#1A1A1A] font-mono font-bold">{val || "—"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Defects */}
+                {aiDefects.length > 0 && (
+                  <div>
+                    <p className="text-[#666666] text-[10px] uppercase tracking-widest mb-2">Identified Defects</p>
+                    <div className="space-y-1.5">
+                      {aiDefects.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 bg-[#FAFAF8] border border-[#E8E4DC] rounded px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[#D4AF37] text-xs font-semibold uppercase">{d.type?.replace(/_/g, " ")}</span>
+                            <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
+                            <span className="text-[#666666] text-xs">{d.location}</span>
+                            <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
+                            <span className="text-[#888888] text-xs italic">{d.severity}</span>
+                            <p className="text-[#666666] text-[11px] mt-0.5">{d.description}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAiDefects(prev => prev.filter((_, j) => j !== i))}
+                            className="text-[#CCCCCC] hover:text-red-500 transition-colors shrink-0 mt-0.5"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Overall grade + explanation */}
+                <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-[#888888] text-[10px] uppercase tracking-widest">AI Draft Overall</p>
+                      <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>{aiDraft.overall || "—"}</p>
+                      <p className="text-[#D4AF37] text-xs">{aiAnalysis.grade_label || ""}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">Override Overall</p>
+                      <input
+                        type="number"
+                        min="1" max="10" step="0.5"
+                        value={aiDraft.overall}
+                        onChange={(e) => setAiDraft(d => ({ ...d, overall: e.target.value }))}
+                        className="w-24 bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-sm text-center focus:outline-none focus:border-[#D4AF37]"
+                      />
+                    </div>
+                  </div>
+                  {aiAnalysis.grade_explanation && (
+                    <p className="text-[#555555] text-xs leading-relaxed border-t border-[#E8E4DC] pt-3">{aiAnalysis.grade_explanation}</p>
+                  )}
+                  {aiAnalysis.authentication_notes && (
+                    <p className="text-[#888888] text-[11px] leading-relaxed mt-2 italic">{aiAnalysis.authentication_notes}</p>
+                  )}
+                </div>
+
+                {/* Approve button */}
+                {!approved ? (
+                  <button
+                    type="button"
+                    onClick={approveGrade}
+                    disabled={approveLoading || !aiDraft.overall}
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
+                    data-testid="button-approve-grade"
+                  >
+                    {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    {approveLoading ? "Approving…" : "Approve Grade"}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <CheckCircle2 size={16} />
+                    Grade approved
+                  </div>
+                )}
+              </div>
+            )}
+
+            <p className="text-[#AAAAAA] text-[10px] leading-relaxed">
+              Upload high-res scans (600+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
+            </p>
+          </fieldset>
+        )}
 
         <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4">
           <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Status</legend>
@@ -969,7 +1495,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                 className="accent-[#D4AF37]"
                 data-testid="radio-status-draft"
               />
-              <span className="text-gray-400 text-sm">Draft</span>
+              <span className="text-[#666666] text-sm">Draft</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -1043,7 +1569,7 @@ function FormInput({
         step={step}
         min={min}
         max={max}
-        className={`w-full bg-transparent border rounded px-3 py-2 text-white text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors ${highlight ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
+        className={`w-full bg-transparent border rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors ${highlight ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
         data-testid={testId}
       />
     </div>
@@ -1065,7 +1591,7 @@ function FormSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
         data-testid={testId}
       >
         <option value="">Select...</option>
@@ -1086,14 +1612,11 @@ function FileUpload({
   testId: string;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
+  const handleFile = (file: File | null) => {
     onChange(file);
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setPreview(url);
-    }
+    if (file) setPreview(URL.createObjectURL(file));
   };
 
   const displaySrc = preview || current;
@@ -1101,22 +1624,40 @@ function FileUpload({
   return (
     <div>
       <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
-      <div className="border border-[#D4AF37]/20 rounded p-3">
-        {displaySrc && (
-          <img src={displaySrc} alt={label} className="w-full h-32 object-contain rounded mb-2 bg-gray-900" />
+      <label
+        className={`relative block border-2 border-dashed rounded-xl cursor-pointer transition-all overflow-hidden
+          ${dragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : displaySrc ? "border-[#D4AF37]/40 bg-[#FAFAF8]" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          const f = e.dataTransfer.files[0];
+          if (f) handleFile(f);
+        }}
+      >
+        {displaySrc ? (
+          <div className="relative">
+            <img src={displaySrc} alt={label} className="w-full h-40 object-contain rounded-xl bg-white p-2" />
+            <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/20 transition-all rounded-xl">
+              <span className="opacity-0 hover:opacity-100 text-white text-xs font-bold bg-black/50 px-2 py-1 rounded transition-opacity">Replace</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center min-h-[140px]">
+            <Upload size={24} className="text-[#D4AF37]/50" />
+            <p className="text-[#666666] text-xs font-medium">Drag & drop or click to upload</p>
+            <p className="text-[#AAAAAA] text-[10px]">JPG, PNG, WEBP</p>
+          </div>
         )}
-        <label className="flex items-center gap-2 cursor-pointer text-[#D4AF37]/60 hover:text-[#D4AF37] text-sm transition-colors">
-          <Upload size={14} />
-          <span>{current && !preview ? "Replace image" : "Upload image"}</span>
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            onChange={handleFile}
-            className="hidden"
-            data-testid={testId}
-          />
-        </label>
-      </div>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          onChange={(e) => handleFile(e.target.files?.[0] || null)}
+          className="sr-only"
+          data-testid={testId}
+        />
+      </label>
     </div>
   );
 }
@@ -1142,7 +1683,7 @@ function SubmissionItemLink({
       <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
         <Link2 size={12} /> Link to Submission
       </legend>
-      <p className="text-gray-500 text-xs">Optionally link this certificate to a customer submission item. Fields will auto-populate.</p>
+      <p className="text-[#999999] text-xs">Optionally link this certificate to a customer submission item. Fields will auto-populate.</p>
       <select
         value={value}
         onChange={(e) => {
@@ -1154,7 +1695,7 @@ function SubmissionItemLink({
           const item = items?.find((i: any) => String(i.id) === id);
           onChange(id, item);
         }}
-        className="w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
         data-testid="select-submission-item"
       >
         <option value="">No link (standalone certificate)</option>

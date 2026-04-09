@@ -16,9 +16,9 @@ export default function LiabilityPage() {
           LIABILITY & INSURANCE
         </h1>
       </div>
-      <p className="text-gray-500 text-sm text-center mb-10">Last updated: February 2026</p>
+      <p className="text-[#999999] text-sm text-center mb-10">Last updated: February 2026</p>
 
-      <div className="space-y-8 text-gray-300 text-sm leading-relaxed">
+      <div className="space-y-8 text-[#444444] text-sm leading-relaxed">
         <section>
           <h2 className="text-[#D4AF37] font-bold tracking-wider text-lg mb-3">1. Incoming Shipping</h2>
           <p>
