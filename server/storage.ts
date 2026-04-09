@@ -1664,3 +1664,45 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+/**
+ * Deduct AI credits from a user's balance. Returns { ok: true, remaining } if successful,
+ * or { ok: false, reason: 'insufficient' | 'no_user' } if the deduction failed.
+ * Uses a conditional UPDATE so deductions are atomic and can't go negative.
+ */
+export async function deductAiCredits(
+  userId: string,
+  amount: number,
+  reason: string
+): Promise<{ ok: true; remaining: number } | { ok: false; reason: 'insufficient' | 'no_user' }> {
+  if (amount <= 0) throw new Error('deductAiCredits: amount must be positive');
+
+  const result = await db.execute(sql`
+    UPDATE users
+       SET ai_credits_user_balance = ai_credits_user_balance - ${amount},
+           updated_at = NOW()
+     WHERE id = ${userId}
+       AND ai_credits_user_balance >= ${amount}
+    RETURNING ai_credits_user_balance
+  `);
+
+  if (result.rows.length === 0) {
+    // Either user doesn't exist OR they didn't have enough credits. Check which.
+    const check = await db.execute(sql`
+      SELECT ai_credits_user_balance FROM users WHERE id = ${userId} LIMIT 1
+    `);
+    if (check.rows.length === 0) return { ok: false, reason: 'no_user' };
+    return { ok: false, reason: 'insufficient' };
+  }
+
+  // Audit trail
+  await db.insert(auditLog).values({
+    entityType: 'user',
+    entityId: userId,
+    action: 'ai_credits.deducted',
+    adminUser: null,
+    details: { amount, reason },
+  });
+
+  return { ok: true, remaining: Number((result.rows[0] as any).ai_credits_user_balance) };
+}

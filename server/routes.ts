@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
-import { storage } from "./storage";
+import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { verifyAdminPassword, verifyAdminPin, requireAdmin, isLoginRateLimited, isPinRateLimited, recordFailedLogin, recordFailedPin, clearLoginAttempts, clearPinAttempts, isPendingAdminValid, clearPendingAdmin, ADMIN_EMAIL, FAILED_LOGIN_DELAY_MS } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
@@ -4968,17 +4968,12 @@ export async function registerRoutes(
 
       if (!isAdminFree) {
         if (sessionUserId) {
-          // Check user-level balance
-          const userRows = await db.execute(sql`
-            SELECT ai_credits_user_balance FROM users WHERE id = ${sessionUserId} AND deleted_at IS NULL LIMIT 1
-          `);
-          const userBalance = (userRows.rows[0] as any)?.ai_credits_user_balance ?? 0;
-          if (userBalance > 0) {
-            await db.execute(sql`
-              UPDATE users SET ai_credits_user_balance = ai_credits_user_balance - 1
-              WHERE id = ${sessionUserId} AND ai_credits_user_balance > 0
-            `);
+          // Try user-level AI credit balance first
+          const deduction = await deductAiCredits(sessionUserId, 1, 'ai_grading_estimate');
+          if (deduction.ok) {
             usedUserBalance = true;
+          } else if (deduction.reason === 'no_user') {
+            return res.status(401).json({ error: "User account not found." });
           } else if (email) {
             // Fall back to email-based credits (e.g. pre-account purchases)
             const rows = await db.execute(sql`
