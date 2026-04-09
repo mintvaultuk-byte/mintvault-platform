@@ -133,7 +133,7 @@ function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /\.(jpg|jpeg|png|webp)$/i;
     if (allowed.test(path.extname(file.originalname))) {
@@ -4865,7 +4865,7 @@ export async function registerRoutes(
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 
-  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image file provided" });

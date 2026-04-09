@@ -4,6 +4,7 @@
  */
 
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
 import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
@@ -152,6 +153,28 @@ async function rateLimit(): Promise<void> {
   lastAiCallTs = Date.now();
 }
 
+// ── Image resize for Claude Vision API ────────────────────────────────────
+
+/**
+ * Resize an image buffer to fit Anthropic Claude Vision API constraints.
+ * Resizes to max 2000x2000 (preserves aspect ratio) and re-encodes as JPEG quality 85.
+ * Output is typically 300-700 KB which is well under the 5 MB Anthropic limit.
+ * 2000px on the longest edge is plenty of detail for card identification and grading.
+ */
+async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaType: "image/jpeg" }> {
+  const inputSize = buffer.length;
+  const resized = await sharp(buffer)
+    .rotate() // auto-orient based on EXIF
+    .resize(2000, 2000, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 85, mozjpeg: true })
+    .toBuffer();
+  console.log(`[ai/resize] ${(inputSize / 1024 / 1024).toFixed(2)}MB -> ${(resized.length / 1024 / 1024).toFixed(2)}MB`);
+  return { buffer: resized, mediaType: "image/jpeg" };
+}
+
 // ── R2 image fetching ──────────────────────────────────────────────────────
 
 async function fetchR2Buffer(key: string): Promise<Buffer> {
@@ -181,7 +204,8 @@ async function r2KeyToBase64(key: string | null): Promise<string | null> {
   if (!key) return null;
   try {
     const buf = await fetchR2Buffer(key);
-    return buf.toString("base64");
+    const { buffer: resized } = await resizeForClaude(buf);
+    return resized.toString("base64");
   } catch {
     return null;
   }
@@ -234,10 +258,11 @@ function parseJson<T>(text: string): T {
 
 export async function identifyCardFromBuffer(
   buffer: Buffer,
-  mediaType: string
+  _mimeType: string // ignored — we re-encode to JPEG via resizeForClaude
 ): Promise<CardIdentification> {
   await rateLimit();
-  const base64 = buffer.toString("base64");
+  const { buffer: resized, mediaType } = await resizeForClaude(buffer);
+  const base64 = resized.toString("base64");
   const text = await callClaude(
     [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
     1024,
