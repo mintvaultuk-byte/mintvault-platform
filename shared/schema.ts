@@ -613,6 +613,7 @@ export interface PublicCertificate {
   ownershipStatus: string;
   ownershipRef: string | null;
   gradingReport: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string } | null;
+  isOwnedByViewer: boolean;
 }
 
 export interface PopulationData {

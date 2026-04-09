@@ -148,7 +148,7 @@ function normalizeCertId(raw: string): string {
   return raw;
 }
 
-async function certToPublic(c: any): Promise<PublicCertificate> {
+async function certToPublic(c: any, viewerUserId?: string | null): Promise<PublicCertificate> {
   const gradeType = c.gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
@@ -194,6 +194,7 @@ async function certToPublic(c: any): Promise<PublicCertificate> {
       ? `MV-REG-${String(c.certId).replace(/^MV-?0*/, "").padStart(10, "0")}`
       : null,
     gradingReport: c.gradingReport && Object.keys(c.gradingReport).length > 0 ? c.gradingReport : null,
+    isOwnedByViewer: !!(viewerUserId && c.currentOwnerUserId && viewerUserId === c.currentOwnerUserId),
   };
 }
 
@@ -469,12 +470,13 @@ export async function registerRoutes(
 
   app.get("/api/cert/:id", async (req, res) => {
     const certId = req.params.id;
+    const viewerUserId = (req.session as any)?.userId as string | undefined;
 
     const dbCert = await findCertByIdFlex(certId);
     if (!dbCert) {
       return res.status(404).json({ error: "Certificate not found" });
     }
-    return res.json(await certToPublic(dbCert));
+    return res.json(await certToPublic(dbCert, viewerUserId));
   });
 
   // ── PUBLIC VERIFICATION API (v1) ──────────────────────────────────────────
