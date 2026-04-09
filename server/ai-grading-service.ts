@@ -175,6 +175,90 @@ async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaT
   return { buffer: resized, mediaType: "image/jpeg" };
 }
 
+// ── Auto-crop card from scanner background ────────────────────────────────
+
+/**
+ * Auto-crop a card image to its actual edges and center it with a clean border.
+ * Uses sharp's trim to detect the card bounding box against a light background.
+ * Adds a uniform white border and resizes to max 2000px for Claude Vision.
+ */
+export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffer> {
+  const meta = await sharp(buffer).metadata();
+  if (!meta.width || !meta.height) throw new Error("Could not read image dimensions");
+
+  let trimmed: Buffer;
+  try {
+    trimmed = await sharp(buffer)
+      .rotate()
+      .trim({ background: "white", threshold: 25 })
+      .toBuffer();
+  } catch (err) {
+    console.warn("[ai/auto-crop] trim failed, falling back to original:", err);
+    trimmed = buffer;
+  }
+
+  const trimmedMeta = await sharp(trimmed).metadata();
+
+  const final = await sharp(trimmed)
+    .extend({
+      top: borderPx, bottom: borderPx, left: borderPx, right: borderPx,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .resize(2000, 2000, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+
+  console.log(
+    `[ai/auto-crop] ${meta.width}x${meta.height} -> ${trimmedMeta.width ?? "?"}x${trimmedMeta.height ?? "?"} (trimmed) -> ${(final.length / 1024).toFixed(0)}KB JPEG`
+  );
+  return final;
+}
+
+// ── Analyze card from raw buffers (no R2 keys needed) ─────────────────────
+
+/**
+ * Run full grading analysis on raw image buffers (already cropped/resized).
+ * This is the buffer-based counterpart to analyzeCard() which uses R2 keys.
+ */
+export async function analyzeCardFromBuffers(
+  frontBuffer: Buffer,
+  backBuffer: Buffer | null,
+  cardGame?: string
+): Promise<GradingAnalysis> {
+  await rateLimit();
+
+  const frontB64 = frontBuffer.toString("base64");
+  const backB64 = backBuffer ? backBuffer.toString("base64") : null;
+
+  const content: object[] = [imageBlock(frontB64)];
+  if (backB64) content.push(imageBlock(backB64));
+
+  let prompt = GRADING_SYSTEM_PROMPT;
+  if (cardGame && CARD_GAME_MODULES[cardGame]) {
+    prompt += "\n\n" + CARD_GAME_MODULES[cardGame];
+  }
+  content.push({ type: "text", text: prompt });
+
+  let text: string;
+  try {
+    text = await callClaude(content, 4096);
+  } catch (err: any) {
+    throw new Error(`Claude API call failed: ${err.message}`);
+  }
+
+  try {
+    return parseJson<GradingAnalysis>(text);
+  } catch {
+    const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
+    try {
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096);
+      return parseJson<GradingAnalysis>(fixedText);
+    } catch {
+      throw new Error("AI returned invalid JSON and could not be corrected automatically");
+    }
+  }
+}
+
 // ── R2 image fetching ──────────────────────────────────────────────────────
 
 async function fetchR2Buffer(key: string): Promise<Buffer> {

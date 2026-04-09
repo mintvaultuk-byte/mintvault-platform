@@ -19,7 +19,7 @@ import { sql } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, type ImageKeys } from "./ai-grading-service";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, type ImageKeys } from "./ai-grading-service";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -4862,6 +4862,127 @@ export async function registerRoutes(
       res.status(500).json({ error: err.message });
     }
   });
+
+  // ── Unified "Grade with AI" endpoint — auto-crop, identify, grade in one call ──
+
+  const gradeWithAiUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 100 * 1024 * 1024 },
+  });
+
+  app.post(
+    "/api/admin/certificates/grade-with-ai",
+    requireAdmin,
+    gradeWithAiUpload.fields([
+      { name: "front_image", maxCount: 1 },
+      { name: "back_image", maxCount: 1 },
+    ]),
+    async (req, res) => {
+      try {
+        const files = req.files as {
+          front_image?: Express.Multer.File[];
+          back_image?: Express.Multer.File[];
+        };
+        const frontFile = files.front_image?.[0];
+        if (!frontFile) return res.status(400).json({ error: "front_image is required" });
+        const backFile = files.back_image?.[0];
+        const certId = req.body.cert_id ? parseInt(req.body.cert_id) : null;
+
+        console.log("[grade-with-ai] starting workflow", {
+          certId,
+          frontSize: `${(frontFile.size / 1024 / 1024).toFixed(1)}MB`,
+          backSize: backFile ? `${(backFile.size / 1024 / 1024).toFixed(1)}MB` : "none",
+        });
+
+        // Step 1: Auto-crop both images
+        const frontCropped = await autoCropCard(frontFile.buffer);
+        const backCropped = backFile ? await autoCropCard(backFile.buffer) : null;
+
+        // Step 2: Upload cropped images to R2
+        const ts = Date.now();
+        const frontKey = `images/grade-ai/${ts}_front.jpg`;
+        const backKey = backCropped ? `images/grade-ai/${ts}_back.jpg` : null;
+        await uploadToR2(frontKey, frontCropped, "image/jpeg");
+        if (backCropped && backKey) await uploadToR2(backKey, backCropped, "image/jpeg");
+
+        // Step 3: Identify the card from front image
+        const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg");
+
+        // Step 4: Run full grading analysis
+        const cardGame = identification.detected_game || undefined;
+        const grading = await analyzeCardFromBuffers(frontCropped, backCropped, cardGame);
+
+        // Step 5: Get signed URLs for the cropped images
+        const frontUrl = await getR2SignedUrl(frontKey, 3600);
+        const backUrl = backKey ? await getR2SignedUrl(backKey, 3600) : null;
+
+        // Step 6: If cert_id provided, save AI analysis to existing cert
+        if (certId) {
+          await db.execute(sql`
+            UPDATE certificates SET
+              ai_analysis = ${JSON.stringify({ identification, grading })}::jsonb,
+              ai_draft_grade = ${typeof grading.overall_grade === "number" ? grading.overall_grade : null},
+              updated_at = NOW()
+            WHERE id = ${certId}
+          `);
+        }
+
+        console.log("[grade-with-ai] complete", {
+          certId,
+          card: identification.detected_name,
+          grade: grading.overall_grade,
+          defects: grading.defects?.length ?? 0,
+        });
+
+        res.json({
+          success: true,
+          cert_id: certId,
+          identification: {
+            card_name: identification.detected_name,
+            set_name: identification.detected_set,
+            card_number: identification.detected_number,
+            year: identification.detected_year,
+            language: identification.detected_language,
+            card_game: identification.detected_game,
+            rarity: identification.detected_rarity,
+            is_holo: identification.is_holo,
+            is_foil: identification.is_foil,
+            confidence: identification.confidence,
+          },
+          grading: {
+            overall_grade: grading.overall_grade,
+            grade_label: grading.grade_label,
+            subgrades: {
+              centering: grading.centering?.subgrade,
+              corners: grading.corners?.subgrade,
+              edges: grading.edges?.subgrade,
+              surface: grading.surface?.subgrade,
+            },
+            centering_measurements: {
+              front_left_right: grading.centering?.front_left_right,
+              front_top_bottom: grading.centering?.front_top_bottom,
+              back_left_right: grading.centering?.back_left_right,
+              back_top_bottom: grading.centering?.back_top_bottom,
+            },
+            defects: grading.defects || [],
+            confidence: grading.confidence,
+            grade_explanation: grading.grade_explanation,
+            is_authentic: grading.is_authentic,
+            is_altered: grading.is_altered,
+            authentication_notes: grading.authentication_notes,
+            recommendations: grading.recommendations,
+          },
+          image_urls: {
+            front_cropped: frontUrl,
+            back_cropped: backUrl,
+          },
+        });
+      } catch (err: any) {
+        console.error("[grade-with-ai] error:", err.message);
+        res.status(500).json({ error: "Grading failed", details: err.message });
+      }
+    }
+  );
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 

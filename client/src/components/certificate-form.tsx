@@ -190,6 +190,84 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     }
   }
 
+  // ── Grade With AI — unified workflow state ────────────────────────────────
+  const [isGrading, setIsGrading] = useState(false);
+  const [gradingStatus, setGradingStatus] = useState("");
+  const [gradeError, setGradeError] = useState("");
+  const [aiResult, setAiResult] = useState<any>(null);
+
+  async function runGradeWithAi() {
+    if (!frontImage) { setGradeError("Front image required"); return; }
+    setIsGrading(true);
+    setGradeError("");
+    setAiResult(null);
+
+    // Fake progress steps while waiting for the single API call
+    const steps = ["Cropping images…", "Identifying card…", "Analyzing subgrades…", "Detecting defects…", "Generating report…"];
+    let stepIdx = 0;
+    setGradingStatus(steps[0]);
+    const progressInterval = setInterval(() => {
+      stepIdx++;
+      if (stepIdx < steps.length) setGradingStatus(steps[stepIdx]);
+    }, 5000);
+
+    try {
+      const fd = new FormData();
+      fd.append("front_image", frontImage);
+      if (backImage) fd.append("back_image", backImage);
+      if (isEdit && certificate?.id) fd.append("cert_id", String(certificate.id));
+
+      const res = await fetch("/api/admin/certificates/grade-with-ai", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      clearInterval(progressInterval);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.details || "Grading failed");
+
+      // Auto-fill form fields with identification results
+      const id = data.identification;
+      if (id.card_name)  updateField("cardName", id.card_name.toUpperCase());
+      if (id.set_name)   updateField("setName", id.set_name);
+      if (id.card_number) updateField("cardNumber", id.card_number);
+      if (id.year)        updateField("year", id.year);
+      if (id.language)    updateField("language", id.language);
+      if (id.card_game) {
+        const gameMap: Record<string, string> = {
+          pokemon: "Pokémon", yugioh: "Yu-Gi-Oh!", mtg: "Magic: The Gathering",
+          onepiece: "One Piece", sports: "Sports Card", "dragon ball": "Dragon Ball Super",
+        };
+        updateField("cardGame", gameMap[id.card_game.toLowerCase()] || id.card_game);
+      }
+      if (id.rarity) {
+        const { rarityCode } = mapRarityTextToCode(id.rarity);
+        if (rarityCode && rarityCode !== "OTHER") {
+          applyUnifiedSelection(`RARITY:${rarityCode}`);
+        }
+      }
+
+      // Auto-fill grade fields from AI
+      const g = data.grading;
+      if (g.overall_grade && typeof g.overall_grade === "number") {
+        updateField("gradeOverall", String(g.overall_grade));
+      }
+
+      setAiResult(data);
+      toast({
+        title: "AI grading complete",
+        description: `${id.card_name || "Card"} — predicted grade: ${g.overall_grade}`,
+      });
+    } catch (e: any) {
+      clearInterval(progressInterval);
+      setGradeError(e.message);
+      toast({ title: "Grading failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIsGrading(false);
+      setGradingStatus("");
+    }
+  }
+
   // ── AI Card Identify state (from uploaded image) ──────────────────────────
   const [aiIdentifyLoading, setAiIdentifyLoading] = useState(false);
   const [aiIdentifyError, setAiIdentifyError] = useState("");
@@ -1182,6 +1260,142 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
             </div>
           )}
         </fieldset>
+
+        {/* ── GRADE WITH AI — unified button ── */}
+        {frontImage && (
+          <div className="my-4 p-5 border-2 border-[#D4AF37]/40 rounded-lg bg-gradient-to-br from-[#FFF9E6] to-white">
+            <div className="text-center mb-3">
+              <h3 className="font-sans text-lg font-extrabold text-[#1A1A1A] tracking-tight mb-1">
+                Grade This Card with AI
+              </h3>
+              <p className="font-sans text-xs text-[#666666] max-w-md mx-auto">
+                One click: auto-crops the image, identifies the card, detects defects,
+                measures centering, and predicts a grade with subgrades.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={runGradeWithAi}
+              disabled={!frontImage || isGrading}
+              className="btn-gold w-full text-sm font-bold uppercase tracking-[0.1em] py-3 px-6 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isGrading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  {gradingStatus}
+                </>
+              ) : (
+                <>
+                  <Cpu size={16} />
+                  GRADE WITH AI
+                </>
+              )}
+            </button>
+            {!frontImage && (
+              <p className="text-[10px] text-center text-[#888888] mt-2">Upload a front image to enable</p>
+            )}
+            {gradeError && (
+              <p className="text-xs text-center text-red-600 mt-2 flex items-center justify-center gap-1">
+                <AlertTriangle size={12} /> {gradeError}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── AI Grading Results ── */}
+        {aiResult && (
+          <div className="my-4 p-5 bg-white border border-[#E8E4DC] rounded-lg space-y-5">
+            <h3 className="font-sans text-base font-extrabold text-[#1A1A1A] tracking-tight">
+              AI Grading Results
+            </h3>
+
+            {/* Big grade display */}
+            <div className="text-center py-4">
+              <p className="text-[10px] uppercase tracking-[0.25em] text-[#D4AF37] font-bold mb-1">Predicted Grade</p>
+              <p className="font-sans text-6xl font-extrabold text-[#D4AF37] tracking-tighter leading-none">
+                {aiResult.grading.overall_grade}
+              </p>
+              <p className="text-xs text-[#999999] mt-1">{aiResult.grading.grade_label}</p>
+            </div>
+
+            {/* Subgrades */}
+            <div className="grid grid-cols-4 gap-3">
+              {(["centering", "corners", "edges", "surface"] as const).map(key => (
+                <div key={key} className="text-center p-2.5 border border-[#D4AF37]/20 rounded-lg">
+                  <p className="text-[10px] uppercase tracking-wide text-[#888888] mb-0.5">{key}</p>
+                  <p className="font-sans text-2xl font-extrabold text-[#1A1A1A]">
+                    {aiResult.grading.subgrades[key]}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Centering measurements */}
+            {aiResult.grading.centering_measurements && (
+              <div className="text-xs text-[#666666]">
+                <p className="font-bold uppercase tracking-wide text-[10px] text-[#888888] mb-1">Centering</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  <span>Front L/R: {aiResult.grading.centering_measurements.front_left_right}</span>
+                  <span>Front T/B: {aiResult.grading.centering_measurements.front_top_bottom}</span>
+                  <span>Back L/R: {aiResult.grading.centering_measurements.back_left_right}</span>
+                  <span>Back T/B: {aiResult.grading.centering_measurements.back_top_bottom}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Cropped card image with defect circles */}
+            {aiResult.image_urls?.front_cropped && (
+              <div>
+                <p className="font-bold uppercase tracking-wide text-[10px] text-[#888888] mb-2">
+                  Detected Defects ({aiResult.grading.defects?.length || 0})
+                </p>
+                <div className="relative inline-block max-w-full">
+                  <img
+                    src={aiResult.image_urls.front_cropped}
+                    alt="Front (cropped)"
+                    className="max-w-full h-auto rounded border border-[#E8E4DC]"
+                  />
+                  {(aiResult.grading.defects || []).map((defect: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="absolute border-2 border-red-500 rounded"
+                      style={{
+                        left: `${defect.position_x_percent - (defect.width_percent || 4) / 2}%`,
+                        top: `${defect.position_y_percent - (defect.height_percent || 4) / 2}%`,
+                        width: `${defect.width_percent || 4}%`,
+                        height: `${defect.height_percent || 4}%`,
+                        boxShadow: "0 0 6px rgba(239, 68, 68, 0.4)",
+                      }}
+                      title={`${defect.type}: ${defect.description}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Defects list */}
+            {aiResult.grading.defects?.length > 0 && (
+              <div>
+                <p className="font-bold uppercase tracking-wide text-[10px] text-[#888888] mb-1">Defect Details</p>
+                <ul className="text-xs text-[#666666] space-y-1">
+                  {aiResult.grading.defects.map((d: any, i: number) => (
+                    <li key={i}>
+                      <strong className="capitalize text-[#1A1A1A]">{d.type?.replace(/_/g, " ")}</strong>
+                      {" "}({d.severity}) — {d.description}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Grade explanation */}
+            {aiResult.grading.grade_explanation && (
+              <div className="text-xs text-[#666666] italic border-l-2 border-[#D4AF37] pl-3">
+                {aiResult.grading.grade_explanation}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Build 1: Grading Image Upload — only in edit mode ── */}
         {isEdit && (
