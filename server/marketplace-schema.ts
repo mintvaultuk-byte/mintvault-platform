@@ -16,6 +16,7 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS stripe_connect_account_id TEXT,
       ADD COLUMN IF NOT EXISTS seller_status TEXT DEFAULT 'none',
       ADD COLUMN IF NOT EXISTS seller_onboarded_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS seller_onboarding_lock_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS seller_kyc_completed_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS seller_kyc_requirements_json JSONB,
       ADD COLUMN IF NOT EXISTS seller_payouts_enabled BOOLEAN NOT NULL DEFAULT FALSE,

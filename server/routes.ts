@@ -37,6 +37,7 @@ import {
 import { requireAuth } from "./middleware/auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
+import { registerSellerRoutes } from "./marketplace-seller";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
 
 function getSignedUrlSecret(): string {
@@ -5634,6 +5635,9 @@ export async function registerRoutes(
 
   // ── Vault Club routes ────────────────────────────────────────────────────────
   registerVaultClubRoutes(app);
+
+  // ── Marketplace seller routes ──────────────────────────────────────────────
+  registerSellerRoutes(app);
 
   return httpServer;
 }
