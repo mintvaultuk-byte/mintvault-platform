@@ -265,7 +265,7 @@ Return ONLY valid JSON with no other text:
 {
   "detected_name": "Card Name",
   "detected_set": "Set Name",
-  "detected_number": "123/456",
+  "detected_number": "123",
   "detected_year": "2024",
   "detected_game": "pokemon",
   "detected_language": "English",
@@ -279,6 +279,7 @@ Return ONLY valid JSON with no other text:
   "confidence": "high"
 }
 
+For detected_number: Return ONLY the card number, NOT the "/total" suffix. For example, if you see "212/197" on the card, return just "212". If you see "025/078", return just "025". The number before the slash is the card number; the number after is the set total which should be ignored.
 For detected_game, use one of: "pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"
 For confidence, use: "high", "medium", "low"
 If you cannot identify the card, set confidence to "low" and fill in what you can detect.`;

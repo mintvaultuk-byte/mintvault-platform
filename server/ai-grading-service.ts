@@ -254,6 +254,14 @@ function parseJson<T>(text: string): T {
   return JSON.parse(cleaned) as T;
 }
 
+/** Strip "/total" suffix from card numbers (e.g. "212/197" → "212") */
+function normalizeCardNumber(result: CardIdentification): CardIdentification {
+  if (result.detected_number && typeof result.detected_number === "string") {
+    result.detected_number = result.detected_number.split("/")[0].trim();
+  }
+  return result;
+}
+
 // ── Card identification from raw buffer (for direct image uploads) ─────────
 
 export async function identifyCardFromBuffer(
@@ -269,7 +277,7 @@ export async function identifyCardFromBuffer(
     "claude-haiku-4-5-20251001"
   );
   try {
-    return parseJson<CardIdentification>(text);
+    return normalizeCardNumber(parseJson<CardIdentification>(text));
   } catch {
     throw new Error(`Card identification returned invalid JSON: ${text.slice(0, 200)}`);
   }
@@ -289,7 +297,7 @@ export async function identifyCard(frontKey: string): Promise<CardIdentification
   );
 
   try {
-    return parseJson<CardIdentification>(text);
+    return normalizeCardNumber(parseJson<CardIdentification>(text));
   } catch {
     throw new Error(`Card identification returned invalid JSON: ${text.slice(0, 200)}`);
   }
