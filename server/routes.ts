@@ -28,6 +28,7 @@ import {
   countRecentFailedAttempts, logLoginAttempt, writeAuthAudit,
   migrateAccountSchema,
 } from "./account-auth";
+import { migrateMarketplaceSchema } from "./marketplace-schema";
 import {
   sendWelcomeVerificationEmail, sendAccountMagicLinkEmail,
   sendPasswordResetEmail, sendPasswordChangedEmail,
@@ -384,7 +385,9 @@ export async function registerRoutes(
   createAiGradeCorrectionsTable().catch(() => {});
   createEbayPriceCacheTable().catch(() => {});
   seedTierCapacityTable().catch(() => {});
-  migrateAccountSchema().catch((e: any) => console.error("[account-auth] migration error:", e.message));
+  migrateAccountSchema()
+    .then(() => migrateMarketplaceSchema())
+    .catch((e: any) => console.error("[startup-migration] error:", e.message));
 
   // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
   // These fire for direct URL access (e.g. scanning an old QR code with a legacy URL format)

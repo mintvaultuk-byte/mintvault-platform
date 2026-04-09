@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, numeric, uniqueIndex, index, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, numeric, uniqueIndex, index, jsonb, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -835,3 +835,234 @@ export const pricingTiers: PricingTier[] = [
     ],
   },
 ];
+
+// ============================================================================
+// MARKETPLACE SCHEMA
+// ============================================================================
+
+export const MARKETPLACE_LISTING_STATUSES = ["draft", "active", "sold", "cancelled", "frozen", "expired"] as const;
+export type MarketplaceListingStatus = typeof MARKETPLACE_LISTING_STATUSES[number];
+
+export const MARKETPLACE_OFFER_STATUSES = ["pending", "accepted", "declined", "countered", "withdrawn", "expired"] as const;
+export type MarketplaceOfferStatus = typeof MARKETPLACE_OFFER_STATUSES[number];
+
+export const MARKETPLACE_ORDER_STATUSES = ["pending_payment", "paid", "shipped", "delivered", "completed", "cancelled", "refunded", "disputed"] as const;
+export type MarketplaceOrderStatus = typeof MARKETPLACE_ORDER_STATUSES[number];
+
+export const SELLER_STATUSES = ["none", "pending", "active", "suspended", "rejected"] as const;
+export type SellerStatus = typeof SELLER_STATUSES[number];
+
+export const MARKETPLACE_SHIPPING_METHODS = ["royal_mail_tracked_24", "royal_mail_tracked_48", "royal_mail_special_delivery"] as const;
+export type MarketplaceShippingMethod = typeof MARKETPLACE_SHIPPING_METHODS[number];
+
+export const MARKETPLACE_DISPUTE_REASONS = ["item_not_received", "not_as_described", "counterfeit", "damaged_in_transit", "wrong_card", "stolen_card", "seller_unresponsive", "other"] as const;
+export type MarketplaceDisputeReason = typeof MARKETPLACE_DISPUTE_REASONS[number];
+
+export const MARKETPLACE_DISPUTE_STATUSES = ["open", "seller_responded", "under_review", "resolved_buyer", "resolved_seller", "resolved_partial", "escalated"] as const;
+export type MarketplaceDisputeStatus = typeof MARKETPLACE_DISPUTE_STATUSES[number];
+
+export const marketplaceListings = pgTable("marketplace_listings", {
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(),
+  sellerUserId: text("seller_user_id").notNull(),
+  status: text("status").notNull().default("draft"),
+  pricePence: integer("price_pence").notNull(),
+  currency: text("currency").notNull().default("GBP"),
+  title: text("title").notNull(),
+  description: text("description"),
+  aiDescriptionUsed: boolean("ai_description_used").notNull().default(false),
+  conditionNotes: text("condition_notes"),
+  shippingMethod: text("shipping_method").notNull().default("royal_mail_tracked_48"),
+  shippingCostPence: integer("shipping_cost_pence").notNull().default(0),
+  viewCount: integer("view_count").notNull().default(0),
+  watchCount: integer("watch_count").notNull().default(0),
+  listedAt: timestamp("listed_at"),
+  soldAt: timestamp("sold_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  frozenAt: timestamp("frozen_at"),
+  frozenReason: text("frozen_reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type MarketplaceListing = typeof marketplaceListings.$inferSelect;
+
+export const marketplaceListingImages = pgTable("marketplace_listing_images", {
+  id: serial("id").primaryKey(),
+  listingId: integer("listing_id").notNull(),
+  imageUrl: text("image_url").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceListingImage = typeof marketplaceListingImages.$inferSelect;
+
+export const marketplaceOffers = pgTable("marketplace_offers", {
+  id: serial("id").primaryKey(),
+  listingId: integer("listing_id").notNull(),
+  buyerUserId: text("buyer_user_id").notNull(),
+  sellerUserId: text("seller_user_id").notNull(),
+  amountPence: integer("amount_pence").notNull(),
+  status: text("status").notNull().default("pending"),
+  message: text("message"),
+  counterOfferId: integer("counter_offer_id"),
+  expiresAt: timestamp("expires_at"),
+  respondedAt: timestamp("responded_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceOffer = typeof marketplaceOffers.$inferSelect;
+
+export const marketplaceOrders = pgTable("marketplace_orders", {
+  id: serial("id").primaryKey(),
+  orderNumber: text("order_number").notNull().unique(),
+  listingId: integer("listing_id").notNull(),
+  certId: text("cert_id").notNull(),
+  buyerUserId: text("buyer_user_id").notNull(),
+  sellerUserId: text("seller_user_id").notNull(),
+  status: text("status").notNull().default("pending_payment"),
+  pricePence: integer("price_pence").notNull(),
+  shippingPence: integer("shipping_pence").notNull().default(0),
+  totalPence: integer("total_pence").notNull(),
+  commissionRate: numeric("commission_rate", { precision: 5, scale: 4 }).notNull(),
+  commissionPence: integer("commission_pence").notNull(),
+  stripeFeePence: integer("stripe_fee_pence").notNull().default(0),
+  sellerNetPence: integer("seller_net_pence").notNull(),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  stripeChargeId: text("stripe_charge_id"),
+  stripeTransferId: text("stripe_transfer_id"),
+  escrowReleaseAt: timestamp("escrow_release_at"),
+  buyerName: text("buyer_name").notNull(),
+  buyerEmail: text("buyer_email").notNull(),
+  shipToName: text("ship_to_name").notNull(),
+  shipToLine1: text("ship_to_line1").notNull(),
+  shipToLine2: text("ship_to_line2"),
+  shipToCity: text("ship_to_city").notNull(),
+  shipToPostcode: text("ship_to_postcode").notNull(),
+  shipToCountry: text("ship_to_country").notNull().default("GB"),
+  paidAt: timestamp("paid_at"),
+  shippedAt: timestamp("shipped_at"),
+  deliveredAt: timestamp("delivered_at"),
+  completedAt: timestamp("completed_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  refundedAt: timestamp("refunded_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type MarketplaceOrder = typeof marketplaceOrders.$inferSelect;
+
+export const marketplaceOrderEvents = pgTable("marketplace_order_events", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  eventType: text("event_type").notNull(),
+  actorType: text("actor_type").notNull().default("system"),
+  actorId: text("actor_id"),
+  details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceOrderEvent = typeof marketplaceOrderEvents.$inferSelect;
+
+export const marketplaceShipments = pgTable("marketplace_shipments", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  carrier: text("carrier").notNull().default("royal_mail"),
+  serviceCode: text("service_code"),
+  trackingNumber: text("tracking_number"),
+  labelUrl: text("label_url"),
+  costPence: integer("cost_pence"),
+  weightGrams: integer("weight_grams"),
+  dispatchedAt: timestamp("dispatched_at"),
+  deliveredAt: timestamp("delivered_at"),
+  lastTrackingEvent: text("last_tracking_event"),
+  lastTrackingEventAt: timestamp("last_tracking_event_at"),
+  royalMailOrderId: text("royal_mail_order_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type MarketplaceShipment = typeof marketplaceShipments.$inferSelect;
+
+export const marketplaceConversations = pgTable("marketplace_conversations", {
+  id: serial("id").primaryKey(),
+  listingId: integer("listing_id"),
+  orderId: integer("order_id"),
+  buyerUserId: text("buyer_user_id").notNull(),
+  sellerUserId: text("seller_user_id").notNull(),
+  lastMessageAt: timestamp("last_message_at"),
+  buyerUnreadCount: integer("buyer_unread_count").notNull().default(0),
+  sellerUnreadCount: integer("seller_unread_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceConversation = typeof marketplaceConversations.$inferSelect;
+
+export const marketplaceMessages = pgTable("marketplace_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  senderUserId: text("sender_user_id").notNull(),
+  body: text("body").notNull(),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceMessage = typeof marketplaceMessages.$inferSelect;
+
+export const marketplaceReviews = pgTable("marketplace_reviews", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull().unique(),
+  reviewerUserId: text("reviewer_user_id").notNull(),
+  revieweeUserId: text("reviewee_user_id").notNull(),
+  direction: text("direction").notNull(),
+  rating: integer("rating").notNull(),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type MarketplaceReview = typeof marketplaceReviews.$inferSelect;
+
+export const marketplaceDisputes = pgTable("marketplace_disputes", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull(),
+  openedByUserId: text("opened_by_user_id").notNull(),
+  reason: text("reason").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default("open"),
+  resolution: text("resolution"),
+  resolutionNotes: text("resolution_notes"),
+  resolvedByAdminId: text("resolved_by_admin_id"),
+  resolvedAt: timestamp("resolved_at"),
+  refundAmountPence: integer("refund_amount_pence"),
+  evidenceJson: jsonb("evidence_json").$type<unknown[]>().notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type MarketplaceDispute = typeof marketplaceDisputes.$inferSelect;
+
+export const marketplaceWatchlist = pgTable("marketplace_watchlist", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  listingId: integer("listing_id").notNull(),
+  priceAlertThresholdPence: integer("price_alert_threshold_pence"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  userListingUnique: uniqueIndex("uniq_marketplace_watchlist_user_listing").on(table.userId, table.listingId),
+}));
+
+export type MarketplaceWatchlistEntry = typeof marketplaceWatchlist.$inferSelect;
+
+export const marketplaceDac7Quarterly = pgTable("marketplace_dac7_quarterly", {
+  id: serial("id").primaryKey(),
+  sellerUserId: text("seller_user_id").notNull(),
+  year: integer("year").notNull(),
+  quarter: integer("quarter").notNull(),
+  grossSalesPence: bigint("gross_sales_pence", { mode: "number" }).notNull().default(0),
+  transactionCount: integer("transaction_count").notNull().default(0),
+  commissionCollectedPence: bigint("commission_collected_pence", { mode: "number" }).notNull().default(0),
+  lastUpdatedAt: timestamp("last_updated_at").notNull().defaultNow(),
+});
+
+export type MarketplaceDac7Quarterly = typeof marketplaceDac7Quarterly.$inferSelect;
