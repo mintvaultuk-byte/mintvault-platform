@@ -232,12 +232,13 @@ export async function verifyPokemonCardWithTcgApi(
     // Strategy 1: If we have a set code, search by set.id + number (most precise)
     if (setCode) {
       const codeClean = setCode.replace(/\s+/g, "").toLowerCase();
-      // Try the code directly as set.id
       const setQuery = encodeURIComponent(`set.id:${codeClean} number:${detectedNumber}`);
+      console.log(`[identify-debug] TCG query strategy 1: set.id:${codeClean} number:${detectedNumber}`);
       const setRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`, { headers: { "X-Api-Key": apiKey } });
       if (setRes.ok) {
         const setData = await setRes.json();
         results = setData.data || [];
+        console.log(`[identify-debug] strategy 1 results: ${results.length} cards`);
         if (results.length > 0) {
           console.log(`[pokemon-tcg] set-code match: ${codeClean} + #${detectedNumber} → ${results.length} results`);
         }
@@ -246,6 +247,7 @@ export async function verifyPokemonCardWithTcgApi(
 
     // Strategy 2: Fallback to name + number search
     if (results.length === 0) {
+      console.log(`[identify-debug] TCG query strategy 2: name:"${detectedName}" number:${detectedNumber}`);
       const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
       const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, { headers: { "X-Api-Key": apiKey } });
       if (nameRes.ok) {
@@ -312,6 +314,12 @@ export async function verifyPokemonCardWithTcgApi(
         console.warn(`[pokemon-tcg] year mismatch: card ©${copyrightYear} vs set ${card.set.name} (${setYear}) — rejecting`);
         return { verified: false, rejectReason: `Year mismatch: card shows ©${copyrightYear} but TCG match is from ${setYear}` };
       }
+    }
+
+    // Number sanity check: TCG card number must match what the AI detected
+    if (detectedNumber && card.number && String(card.number) !== String(detectedNumber)) {
+      console.warn(`[pokemon-tcg] number mismatch: AI detected #${detectedNumber} but TCG match is #${card.number} — rejecting`);
+      return { verified: false, rejectReason: `Card number mismatch: detected #${detectedNumber} but TCG match is #${card.number}` };
     }
 
     console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (${card.rarity})`);
@@ -564,7 +572,9 @@ export async function identifyCardFromBuffer(
     "claude-haiku-4-5-20251001"
   );
   try {
-    return normalizeCardNumber(parseJson<CardIdentification>(text));
+    const parsed = normalizeCardNumber(parseJson<CardIdentification>(text));
+    console.log(`[identify-debug] raw Claude response: name="${parsed.detected_name}" set="${parsed.detected_set}" number="${parsed.detected_number}" year="${parsed.detected_year}" set_code="${parsed.set_code}" copyright_year="${parsed.copyright_year}" confidence="${parsed.confidence}" reasoning="${parsed.reasoning?.slice(0, 100)}"`);
+    return parsed;
   } catch {
     throw new Error(`Card identification returned invalid JSON: ${text.slice(0, 200)}`);
   }

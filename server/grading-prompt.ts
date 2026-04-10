@@ -316,6 +316,11 @@ Return ONLY valid JSON with no other text:
   "reasoning": "Set code OBF visible bottom-left, copyright ©2023, number 212/197 is secret rare."
 }
 
+REQUIRED FIELDS — never omit:
+- set_code: Read from bottom of card (e.g. "M24 EN", "OBF", "PAR"). If you cannot see it clearly, return null but explain in reasoning.
+- copyright_year: Read from bottom copyright line (e.g. ©2024 → "2024"). If not visible, return null.
+These two fields are CRITICAL for preventing wrong matches. The server uses them to verify against the TCG database.
+
 STEP 1 — READ THE SET CODE FIRST:
 Before anything else, look at the BOTTOM-LEFT or BOTTOM-RIGHT corner for a SET CODE. Common codes: M24 EN, OBF, PAR, PAL, TEF, SSP, SVI, BRS, FST, EVS, CRZ, SIT, LOR, PGO, ASR, SVP, SVPja, S-P, SP.
 The set code is the MOST RELIABLE identifier — it pins the exact set. Card name + number alone is NOT enough because the same name+number can exist in multiple sets (e.g., "Rayquaza 014" is in both POP Series 1 (2004) and M24 EN (2024)).

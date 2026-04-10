@@ -86,7 +86,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
       <div className="flex gap-2">
         {FIELDS.map(f => (
           <div key={f.key} className="flex-1">
-            <p className="text-[#555555] text-[9px] uppercase tracking-wider text-center mb-1">{f.shortLabel}</p>
+            <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider text-center mb-1">{f.label}</p>
             <button
               type="button"
               onClick={() => onFocusField(focusField === f.key ? null : f.key)}

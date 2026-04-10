@@ -91,13 +91,13 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
       {/* Subgrade summary */}
       <div className="grid grid-cols-4 gap-1.5">
         {[
-          { label: "C", val: sub.centering },
-          { label: "Co", val: sub.corners },
-          { label: "E", val: sub.edges },
-          { label: "S", val: sub.surface },
+          { label: "Centering", val: sub.centering },
+          { label: "Corners", val: sub.corners },
+          { label: "Edges", val: sub.edges },
+          { label: "Surface", val: sub.surface },
         ].map(({ label, val }) => (
           <div key={label} className="bg-[#111111] border border-[#222222] rounded p-2 text-center">
-            <p className="text-[#555555] text-[9px] uppercase">{label}</p>
+            <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider">{label}</p>
             <p className="text-sm font-black" style={{ color: subgradeColor(val) }}>{val}</p>
           </div>
         ))}
