@@ -100,33 +100,22 @@ export default function AdminDashboard({ onLogout }: Props) {
     setActiveTab("certs");
   };
 
-  const handleFormClose = () => {
+  const handleFormClose = (newCert?: any) => {
+    if (newCert && newCert.id) {
+      // A new cert was just created — switch to edit mode so workstation mounts
+      setEditingCert(newCert);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      return; // stay in showForm=true with the new cert loaded
+    }
     setShowForm(false);
     setEditingCert(null);
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
-  const handleNewCert = async () => {
-    // Create a draft cert to get an ID so the GradingPanel can mount
-    try {
-      const res = await fetch("/api/admin/certificates/draft", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.cert && data.cert.id) {
-          setEditingCert(data.cert);
-          setShowForm(true);
-          setActiveTab("certs");
-          queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-          return; // success — exit early
-        }
-      }
-    } catch { /* fall through to fallback */ }
-    // Fallback: open form in new-cert mode (no workstation)
+  const handleNewCert = () => {
+    // Open form in new-cert mode — no DB row created until admin clicks Save
     setEditingCert(null);
     setShowForm(true);
     setActiveTab("certs");

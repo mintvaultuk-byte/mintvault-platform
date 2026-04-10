@@ -12,7 +12,7 @@ import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptio
 
 interface Props {
   certificate: CertificateRecord | null;
-  onSuccess: () => void;
+  onSuccess: (newCert?: any) => void;
 }
 
 const cardGames = [
@@ -291,7 +291,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
       return res.json();
     },
-    onSuccess: () => onSuccess(),
+    onSuccess: (data: any) => onSuccess(isEdit ? undefined : data),
     onError: (err: any) => setError(err.message),
   });
 
@@ -300,15 +300,12 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     setError("");
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
-      setError("Please fill in all required fields");
+      setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
       return;
     }
 
-    if (!isNonNum) {
-      if (!form.gradeOverall) {
-        setError("Please select an overall grade");
-        return;
-      }
+    // Grade is optional on initial save — can be set later via the workstation
+    if (!isNonNum && form.gradeOverall) {
       const grade = parseFloat(form.gradeOverall);
       if (isNaN(grade) || grade < 1 || grade > 10) {
         setError("Overall grade must be between 1 and 10");
@@ -517,18 +514,12 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   return (
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
-        {isEdit
-          ? certificate.certId?.startsWith("DRAFT-")
-            ? "NEW CERTIFICATE (DRAFT)"
-            : `EDIT ${certificate.certId}`
-          : "NEW CERTIFICATE"}
+        {isEdit ? `EDIT ${certificate.certId}` : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">
         {isEdit
-          ? certificate.certId?.startsWith("DRAFT-")
-            ? "A cert number will be assigned when you upload an image or save"
-            : "Update certificate details"
-          : "Certificate ID will be auto-generated"}
+          ? "Update certificate details"
+          : "Fill in card details and click Save. A cert number will be assigned automatically."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -1403,48 +1394,6 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           </fieldset>
         )}
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Status</legend>
-          <div className="flex gap-4 mt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="draft"
-                checked={form.status === "draft"}
-                onChange={() => updateField("status", "draft")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-draft"
-              />
-              <span className="text-[#666666] text-sm">Draft</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="active"
-                checked={form.status === "active" || form.status === "published"}
-                onChange={() => updateField("status", "active")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-active"
-              />
-              <span className="text-emerald-400 text-sm">Active</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="voided"
-                checked={form.status === "voided"}
-                onChange={() => updateField("status", "voided")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-voided"
-              />
-              <span className="text-red-400 text-sm">Voided</span>
-            </label>
-          </div>
-        </fieldset>
-
         {error && (
           <p className="text-red-400 text-sm" data-testid="text-form-error">{error}</p>
         )}
@@ -1456,7 +1405,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           data-testid="button-save-cert"
         >
           <Save size={16} />
-          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Create Certificate"}
+          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Save Certificate"}
         </button>
       </form>
     </div>
