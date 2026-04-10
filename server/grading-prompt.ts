@@ -292,8 +292,16 @@ Return ONLY valid JSON with no other text:
   "is_full_art": false,
   "is_textured": false,
   "card_type": "Holo Rare",
-  "confidence": "high"
+  "confidence": "high",
+  "reasoning": "Set symbol matches Obsidian Flames (OBF), number 212 is beyond 197 indicating secret rare."
 }
+
+CONFIDENCE RULES:
+- "high": You can clearly read the set symbol/code AND the card name AND card number. TCG API can verify.
+- "medium": You can identify the card name and some details but the set is uncertain.
+- "low": You are guessing from training data. Set symbol is unreadable or this looks like a promo/foreign card.
+
+CRITICAL: If you cannot clearly read the set symbol or set code on the card, set confidence to "low" and set detected_set to null. Do NOT guess the set from your training data — the server will verify via TCG API. A null set with low confidence is BETTER than a wrong set with false high confidence.
 
 For detected_number: Return ONLY the card number, NOT the "/total" suffix. For example, if you see "212/197" on the card, return just "212". If you see "025/078", return just "025". The number before the slash is the card number; the number after is the set total which should be ignored.
 

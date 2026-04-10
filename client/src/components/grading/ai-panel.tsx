@@ -158,6 +158,8 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
   const [identification, setIdentification] = useState<AiIdentification | null>(null);
   const [showConfidenceNotes, setShowConfidenceNotes] = useState(false);
   const [showAuthNotes, setShowAuthNotes] = useState(false);
+  const [idConfidence, setIdConfidence] = useState<string | null>(null);
+  const [idVerified, setIdVerified] = useState(false);
 
   async function runAnalysis() {
     setStep("identifying");
@@ -192,9 +194,16 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
       setIdentification(data.identification ?? null);
       setResult(data.analysis);
+      setIdConfidence(data.identificationConfidence || null);
+      setIdVerified(data.identificationVerified || false);
       setStep("complete");
       onAnalysisComplete(data.analysis, data.identification ?? null);
-      toast({ title: "AI analysis complete" });
+
+      if (data.detailsWritten === false) {
+        toast({ title: "AI couldn't confidently identify this card", description: "Please fill in card details manually", variant: "destructive" });
+      } else {
+        toast({ title: "AI analysis complete" });
+      }
     } catch (e: any) {
       clearInterval(progressInterval);
       setStep("error");
@@ -222,6 +231,17 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
           {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze" : "Analyze with AI"}
         </button>
       </div>
+
+      {/* Confidence indicator */}
+      {step === "complete" && idConfidence && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`w-2 h-2 rounded-full ${idConfidence === "high" ? "bg-emerald-400" : idConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
+          <span className={idConfidence === "high" ? "text-emerald-400" : idConfidence === "medium" ? "text-yellow-400" : "text-red-400"}>
+            ID confidence: {idConfidence}{idVerified ? " (TCG API verified)" : ""}
+          </span>
+          {idConfidence === "low" && <span className="text-red-400/70">— manual verification recommended</span>}
+        </div>
+      )}
 
       {/* Loading progress */}
       {isLoading && (

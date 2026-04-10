@@ -26,6 +26,7 @@ export interface CardIdentification {
   is_textured: boolean;
   card_type: string | null;
   confidence: "high" | "medium" | "low";
+  reasoning: string | null;
 }
 
 export interface EnrichedCardData extends CardIdentification {
@@ -700,7 +701,7 @@ export async function identifyAndAnalyze(
         detected_name: "Unknown", detected_set: "Unknown", detected_number: null,
         detected_year: null, detected_game: cardGame || "other", detected_language: "English",
         detected_rarity: null, is_holo: false, is_foil: false, is_reverse_holo: false,
-        is_full_art: false, is_textured: false, card_type: null, confidence: "low" as const,
+        is_full_art: false, is_textured: false, card_type: null, confidence: "low" as const, reasoning: null,
         verified: false, officialName: "Unknown", officialSet: "Unknown",
         officialNumber: null, referenceImageUrl: null, dbSource: null,
       };

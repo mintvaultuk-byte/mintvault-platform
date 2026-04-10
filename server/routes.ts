@@ -5000,15 +5000,29 @@ export async function registerRoutes(
         `);
       }
 
-      // Step 9: Save full analysis + card details to certificate
-      const cardName = enrichedId.officialName || enrichedId.detected_name || null;
-      const setName = enrichedId.officialSet || enrichedId.detected_set || null;
-      const cardNumber = enrichedId.detected_number || null;
-      const yearText = enrichedId.detected_year || null;
-      const cardGame = enrichedId.detected_game || null;
-      const rarity = enrichedId.detected_rarity || null;
+      // Step 9: Confidence check — only write card details if we're confident
+      const aiConfidence = identification.confidence || "low";
+      const tcgVerified = enrichedId.verified && enrichedId.dbSource === "pokemon-tcg-api";
+      const shouldWriteDetails = tcgVerified || aiConfidence === "high";
 
-      console.log(`[ai-identify] writing to cert ${id}: name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}, game=${cardGame}, rarity=${rarity}`);
+      const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
+      const setName = shouldWriteDetails ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
+      const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
+      const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
+      const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
+
+      // Year guard: reject years >5 years off from current unless TCG API confirmed
+      const currentYear = new Date().getFullYear();
+      let yearText = shouldWriteDetails ? (enrichedId.detected_year || null) : null;
+      if (yearText && !tcgVerified) {
+        const y = parseInt(yearText, 10);
+        if (isNaN(y) || Math.abs(y - currentYear) > 5) {
+          console.warn(`[ai-identify] year guard: AI guessed ${yearText} but TCG API didn't verify — clearing`);
+          yearText = null;
+        }
+      }
+
+      console.log(`[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`);
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -5032,6 +5046,9 @@ export async function registerRoutes(
         identification: enrichedId,
         analysis,
         cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
+        identificationConfidence: aiConfidence,
+        identificationVerified: tcgVerified,
+        detailsWritten: shouldWriteDetails,
       });
     } catch (err: any) {
       console.error("[ai/identify-and-analyze] error:", err.message);
