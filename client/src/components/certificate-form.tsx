@@ -517,10 +517,18 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   return (
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
-        {isEdit ? `EDIT ${certificate.certId}` : "NEW CERTIFICATE"}
+        {isEdit
+          ? certificate.certId?.startsWith("DRAFT-")
+            ? "NEW CERTIFICATE (DRAFT)"
+            : `EDIT ${certificate.certId}`
+          : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">
-        {isEdit ? "Update certificate details" : "Certificate ID will be auto-generated"}
+        {isEdit
+          ? certificate.certId?.startsWith("DRAFT-")
+            ? "A cert number will be assigned when you upload an image or save"
+            : "Update certificate details"
+          : "Certificate ID will be auto-generated"}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">

@@ -845,6 +845,25 @@ export class DatabaseStorage implements IStorage {
     return `MV${nextNum}`;
   }
 
+  /**
+   * If a cert still has a DRAFT-xxx placeholder number, allocate a real MV### and update it.
+   * Returns the (possibly new) certificate_number.
+   */
+  async finalizeCertNumber(certId: number): Promise<string> {
+    const rows = await db.execute(sql`
+      SELECT certificate_number FROM certificates WHERE id = ${certId} LIMIT 1
+    `);
+    const current = (rows.rows[0] as any)?.certificate_number as string;
+    if (!current || !current.startsWith("DRAFT-")) return current; // already finalized
+
+    const realNumber = await this.getNextCertId();
+    await db.execute(sql`
+      UPDATE certificates SET certificate_number = ${realNumber}, updated_at = NOW() WHERE id = ${certId}
+    `);
+    console.log(`[storage] finalized cert number: id=${certId} ${current} → ${realNumber}`);
+    return realNumber;
+  }
+
   async getLastIssuedMvNumber(): Promise<{ lastIssued: number; mvNumber: string }> {
     const result = await db.execute(sql`SELECT last_issued FROM cert_counter WHERE id = 1`);
     const lastIssued = parseInt(result.rows[0]?.last_issued as string || "0", 10);

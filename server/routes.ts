@@ -2872,6 +2872,8 @@ export async function registerRoutes(
       const includeId = req.query.includeId ? Number(req.query.includeId) : null;
       const certs = allCerts.filter((c: any) => {
         if (includeId && c.id === includeId) return true;
+        // Hide placeholder drafts (DRAFT-xxx) and empty drafts from the list
+        if (c.certId?.startsWith("DRAFT-")) return false;
         if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
         return true;
       });
@@ -2896,15 +2898,34 @@ export async function registerRoutes(
   // ── Create a draft certificate (for "New Certificate" → immediate GradingPanel mount)
   app.post("/api/admin/certificates/draft", requireAdmin, async (_req, res) => {
     try {
-      // Allocate a real cert number (MV124, MV125, etc.) so the record is valid
-      const certNumber = await storage.getNextCertId();
-      const result = await db.execute(sql`
-        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, created_by, issued_at, updated_at)
-        VALUES (${certNumber}, 'draft', 'Standard', 'numeric', 'English', 'admin', NOW(), NOW())
-        RETURNING *
+      // Reuse an existing empty draft if one exists (prevents burning cert numbers on repeated clicks)
+      const existing = await db.execute(sql`
+        SELECT * FROM certificates
+        WHERE certificate_number LIKE 'DRAFT-%'
+          AND status = 'draft'
+          AND (card_name IS NULL OR card_name = '')
+          AND (set_name IS NULL OR set_name = '')
+          AND front_image_path IS NULL
+          AND back_image_path IS NULL
+          AND issued_at > NOW() - INTERVAL '24 hours'
+        ORDER BY issued_at DESC LIMIT 1
       `);
-      const row = result.rows[0] as any;
-      console.log(`[admin] created draft cert: id=${row.id} certId=${certNumber}`);
+
+      let row: any;
+      if (existing.rows.length > 0) {
+        row = existing.rows[0];
+        console.log(`[admin] reusing existing draft cert: id=${row.id} certId=${row.certificate_number}`);
+      } else {
+        // Create a new draft with a placeholder cert number (no real MV### burned)
+        const placeholder = `DRAFT-${crypto.randomUUID().slice(0, 8)}`;
+        const result = await db.execute(sql`
+          INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, created_by, issued_at, updated_at)
+          VALUES (${placeholder}, 'draft', 'Standard', 'numeric', 'English', 'admin', NOW(), NOW())
+          RETURNING *
+        `);
+        row = result.rows[0];
+        console.log(`[admin] created draft cert: id=${row.id} certId=${row.certificate_number}`);
+      }
       // Return full cert object with normalized certId so the frontend can use it directly as editingCert
       const cert = {
         ...row,
@@ -4280,12 +4301,15 @@ export async function registerRoutes(
         const cert = await storage.getCertificate(id);
         if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
+        // Finalize cert number if still a placeholder (DRAFT-xxx → MV###)
+        const finalizedNumber = await storage.finalizeCertNumber(id);
+
         const files = req.files as Record<string, Express.Multer.File[]> | undefined;
         if (!files || Object.keys(files).length === 0) {
           return res.status(400).json({ error: "No images provided" });
         }
 
-        const certId = normalizeCertId(cert.certId);
+        const certId = finalizedNumber ? normalizeCertId(finalizedNumber) : normalizeCertId(cert.certId);
         const updates: Record<string, string> = {};
         const qualityResults: Record<string, any> = {};
 
@@ -4491,6 +4515,9 @@ export async function registerRoutes(
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
+      // Finalize cert number if still a placeholder
+      await storage.finalizeCertNumber(id);
+
       const b = req.body;
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
@@ -4533,6 +4560,9 @@ export async function registerRoutes(
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // Finalize cert number if still a placeholder
+      await storage.finalizeCertNumber(id);
 
       const b = req.body;
       const overallGrade = b.overall_grade;
