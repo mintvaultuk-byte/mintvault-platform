@@ -74,7 +74,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     submissionItemId: (certificate as any)?.submissionItemId || "",
     cardGame: certificate?.cardGame || "",
     setName: certificate?.setName || "",
-    cardName: certificate?.cardName === "(untitled)" ? "" : (certificate?.cardName || ""),
+    cardName: (certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)") ? "" : (certificate?.cardName || ""),
     cardNumber: certificate?.cardNumber || "",
     rarity: initRarity,
     rarityOther: initRarityOther,
@@ -100,19 +100,28 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   // Only overwrite fields that are currently empty — never stomp manual edits
   useEffect(() => {
     if (!certificate) return;
+    const isEmpty = (v: any) => v === null || v === undefined || v === "" || v === "(pending)" || v === "(untitled)";
+    const normalizeYear = (v: any): string => {
+      if (!v) return "";
+      const m = String(v).match(/\d{4}/);
+      return m ? m[0] : "";
+    };
+    const clean = (v: any) => isEmpty(v) ? "" : String(v);
+
     setForm(prev => {
-      const cn = certificate.cardName === "(untitled)" ? "" : (certificate.cardName || "");
       let changed = false;
       const next = { ...prev };
-      if (!prev.cardName && cn)                { next.cardName = cn; changed = true; }
-      if (!prev.setName && certificate.setName) { next.setName = certificate.setName; changed = true; }
-      if (!prev.cardNumber && certificate.cardNumber) { next.cardNumber = certificate.cardNumber; changed = true; }
-      if (!prev.year && certificate.year)       { next.year = certificate.year; changed = true; }
-      if (!prev.cardGame && certificate.cardGame) { next.cardGame = certificate.cardGame; changed = true; }
-      if (!prev.language && certificate.language) { next.language = certificate.language; changed = true; }
-      if (!prev.rarity && (certificate as any)?.rarity) { next.rarity = (certificate as any).rarity; changed = true; }
-      if (!prev.variant && (certificate as any)?.variant) { next.variant = (certificate as any).variant; changed = true; }
-      if (!prev.gradeOverall && certificate.gradeOverall) { next.gradeOverall = certificate.gradeOverall; changed = true; }
+      const cn = clean(certificate.cardName);
+      const yr = normalizeYear(certificate.year);
+      if (isEmpty(prev.cardName) && cn)             { next.cardName = cn; changed = true; }
+      if (isEmpty(prev.setName) && clean(certificate.setName))  { next.setName = clean(certificate.setName); changed = true; }
+      if (isEmpty(prev.cardNumber) && clean(certificate.cardNumber)) { next.cardNumber = clean(certificate.cardNumber); changed = true; }
+      if (isEmpty(prev.year) && yr)                  { next.year = yr; changed = true; }
+      if (isEmpty(prev.cardGame) && clean(certificate.cardGame)) { next.cardGame = clean(certificate.cardGame); changed = true; }
+      if (isEmpty(prev.language) && clean(certificate.language)) { next.language = clean(certificate.language); changed = true; }
+      if (isEmpty(prev.rarity) && clean((certificate as any)?.rarity)) { next.rarity = clean((certificate as any).rarity); changed = true; }
+      if (isEmpty(prev.variant) && clean((certificate as any)?.variant)) { next.variant = clean((certificate as any).variant); changed = true; }
+      if (isEmpty(prev.gradeOverall) && certificate.gradeOverall) { next.gradeOverall = certificate.gradeOverall; changed = true; }
       if (changed) toast({ title: "Card details auto-filled from AI" });
       return changed ? next : prev;
     });
@@ -538,7 +547,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
         {isEdit
-          ? (certificate.cardName === "(untitled)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
+          ? (!certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
           : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">

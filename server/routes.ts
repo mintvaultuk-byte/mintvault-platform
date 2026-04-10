@@ -2900,7 +2900,7 @@ export async function registerRoutes(
       const certNumber = await storage.getNextCertId();
       const result = await db.execute(sql`
         INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at)
-        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', '(untitled)', 'admin', NOW(), NOW())
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW())
         RETURNING *
       `);
       const row = result.rows[0] as any;
@@ -4254,7 +4254,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, autoCrop, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -4280,9 +4280,13 @@ export async function registerRoutes(
           const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
 
           // 3. Auto-crop (now works on deskewed image for tighter/more accurate crop)
-          const { buffer: croppedBuf, cropped } = await autoCrop(deskewedBuf);
-          const cropKey = `grading/${certId}/${angle}_cropped.${ext}`;
-          await uploadToR2(cropKey, croppedBuf, "image/jpeg");
+          const { buffer: rectCropped, cropped } = await autoCrop(deskewedBuf);
+
+          // 4. Rounded corner mask (card-shaped output with transparent corners)
+          const croppedBuf = await maskRoundedCorners(rectCropped);
+          const ext2 = "png"; // PNG for transparency support
+          const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
+          await uploadToR2(cropKey, croppedBuf, "image/png");
           updates[`grading_${angle}_cropped`] = cropKey;
 
           // 4. Quality check on cropped image
@@ -5086,9 +5090,15 @@ export async function registerRoutes(
       const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
       const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
 
-      // Year guard: reject years >5 years off from current unless TCG API confirmed
+      // Year normalisation: extract 4-digit year from dates like "2013-05-08" or "2013/05/08"
       const currentYear = new Date().getFullYear();
-      let yearText = shouldWriteDetails ? (enrichedId.detected_year || null) : null;
+      let yearText: string | null = null;
+      if (shouldWriteDetails) {
+        const rawYear = enrichedId.detected_year || null;
+        const match = rawYear ? String(rawYear).match(/\d{4}/) : null;
+        yearText = match ? match[0] : null;
+      }
+      // Year guard: reject years >5 years off current unless TCG API confirmed
       if (yearText && !tcgVerified) {
         const y = parseInt(yearText, 10);
         if (isNaN(y) || Math.abs(y - currentYear) > 5) {
@@ -5103,7 +5113,7 @@ export async function registerRoutes(
         UPDATE certificates SET
           ai_analysis = ${JSON.stringify({ identification: enrichedId, grading: analysis })}::jsonb,
           ai_draft_grade = ${typeof analysis.overall_grade === "number" ? analysis.overall_grade : null},
-          card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' THEN ${cardName} ELSE card_name END,
+          card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
           set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
           card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
           year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,

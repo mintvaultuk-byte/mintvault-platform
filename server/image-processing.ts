@@ -4,6 +4,40 @@
  */
 import sharp from "sharp";
 
+// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
+const CARD_CORNER_RADIUS_PCT = 0.04;
+
+/**
+ * Apply rounded-rectangle mask matching card corner radius.
+ * Output is PNG with transparent corners.
+ */
+export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
+  try {
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return inputBuffer;
+
+    const w = meta.width;
+    const h = meta.height;
+    const r = Math.round(w * CARD_CORNER_RADIUS_PCT);
+
+    const svgMask = Buffer.from(
+      `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="white"/></svg>`
+    );
+
+    const masked = await sharp(inputBuffer)
+      .ensureAlpha()
+      .composite([{ input: svgMask, blend: "dest-in" }])
+      .png({ quality: 90 })
+      .toBuffer();
+
+    console.log(`[mask] rounded corners: r=${r}px on ${w}×${h}`);
+    return masked;
+  } catch (err: any) {
+    console.warn("[mask] rounded corner masking failed, returning original:", err.message);
+    return inputBuffer;
+  }
+}
+
 export interface QualityCheck {
   name: string;
   status: "pass" | "warn" | "fail";
