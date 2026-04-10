@@ -5012,16 +5012,18 @@ export async function registerRoutes(
       if (game === "pokemon") {
         const tcgResult = await verifyPokemonCardWithTcgApi(
           identification.detected_name,
-          identification.detected_number
+          identification.detected_number,
+          identification.detected_rarity
         );
         if (tcgResult.verified) {
-          console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}"`);
+          console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);
           enrichedId = {
             ...enrichedId,
             verified: true,
             officialName: tcgResult.officialCardName || enrichedId.officialName,
             officialSet: tcgResult.officialSetName || enrichedId.officialSet,
             officialNumber: identification.detected_number,
+            referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
             dbSource: "pokemon-tcg-api",
             detected_set: tcgResult.officialSetName || enrichedId.detected_set,
             detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,

@@ -196,7 +196,8 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
  */
 export async function verifyPokemonCardWithTcgApi(
   detectedName: string,
-  detectedNumber: string | null
+  detectedNumber: string | null,
+  detectedRarity?: string | null
 ): Promise<{
   verified: boolean;
   officialSetName?: string;
@@ -205,6 +206,7 @@ export async function verifyPokemonCardWithTcgApi(
   officialRarity?: string;
   officialYear?: string;
   apiCardId?: string;
+  referenceImageUrl?: string;
 }> {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   if (!apiKey) {
@@ -217,9 +219,10 @@ export async function verifyPokemonCardWithTcgApi(
   }
 
   try {
-    const query = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
+    // Primary query: name + exact number (pins the exact variant across all sets)
+    const exactQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
     const res = await fetch(
-      `https://api.pokemontcg.io/v2/cards?q=${query}&pageSize=5`,
+      `https://api.pokemontcg.io/v2/cards?q=${exactQuery}&pageSize=10`,
       { headers: { "X-Api-Key": apiKey } }
     );
 
@@ -229,27 +232,61 @@ export async function verifyPokemonCardWithTcgApi(
     }
 
     const data = await res.json();
-    if (!data.data || data.data.length === 0) {
-      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber}`);
-      return { verified: false };
+    const results = data.data as any[] || [];
+
+    if (results.length === 0) {
+      // Fallback: name-only search without number
+      console.warn(`[pokemon-tcg] no exact match for "${detectedName}" #${detectedNumber}, trying name-only`);
+      const fallbackQuery = encodeURIComponent(`name:"${detectedName}"`);
+      const fallbackRes = await fetch(
+        `https://api.pokemontcg.io/v2/cards?q=${fallbackQuery}&pageSize=10`,
+        { headers: { "X-Api-Key": apiKey } }
+      );
+      if (!fallbackRes.ok) return { verified: false };
+      const fallbackData = await fallbackRes.json();
+      if (!fallbackData.data?.length) {
+        console.log(`[pokemon-tcg] no match at all for "${detectedName}"`);
+        return { verified: false };
+      }
+      // Use first result from fallback
+      const card = fallbackData.data[0];
+      console.log(`[pokemon-tcg] fallback match: ${card.id} ${card.name} #${card.number} from ${card.set.name} (rarity: ${card.rarity})`);
+      return buildResult(card);
     }
 
-    const card = data.data[0];
-    console.log(`[pokemon-tcg] verified: ${card.name} from ${card.set.name} (${card.set.id})`);
+    // If multiple results, prefer the one whose rarity matches Claude's detection
+    let card = results[0];
+    if (results.length > 1 && detectedRarity) {
+      const rarityLower = detectedRarity.toLowerCase();
+      const rarityMatch = results.find((c: any) =>
+        c.rarity?.toLowerCase().includes(rarityLower) ||
+        rarityLower.includes(c.rarity?.toLowerCase() || "")
+      );
+      if (rarityMatch) {
+        card = rarityMatch;
+        console.log(`[pokemon-tcg] rarity-matched variant: ${card.id} (${card.rarity}) over ${results.length} candidates`);
+      }
+    }
 
-    return {
-      verified: true,
-      officialCardName: card.name,
-      officialSetName: card.set.name,
-      officialSetCode: card.set.id,
-      officialRarity: card.rarity,
-      officialYear: card.set.releaseDate?.split("-")[0],
-      apiCardId: card.id,
-    };
+    console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (rarity: ${card.rarity})`);
+    return buildResult(card);
   } catch (err: any) {
     console.error("[pokemon-tcg] verification failed:", err.message);
     return { verified: false };
   }
+}
+
+function buildResult(card: any) {
+  return {
+    verified: true,
+    officialCardName: card.name,
+    officialSetName: card.set.name,
+    officialSetCode: card.set.id,
+    officialRarity: card.rarity,
+    officialYear: card.set.releaseDate?.split("-")[0],
+    apiCardId: card.id,
+    referenceImageUrl: card.images?.large || card.images?.small || null,
+  };
 }
 
 // ── Grade clamping (whole numbers only) ───────────────────────────────────
