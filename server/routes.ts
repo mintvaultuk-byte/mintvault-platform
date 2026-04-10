@@ -5000,18 +5000,39 @@ export async function registerRoutes(
         `);
       }
 
-      // Step 9: Save full analysis to certificate
+      // Step 9: Save full analysis + card details to certificate
+      const cardName = enrichedId.officialName || enrichedId.detected_name || null;
+      const setName = enrichedId.officialSet || enrichedId.detected_set || null;
+      const cardNumber = enrichedId.detected_number || null;
+      const yearText = enrichedId.detected_year || null;
+      const cardGame = enrichedId.detected_game || null;
+      const rarity = enrichedId.detected_rarity || null;
+
+      console.log(`[ai-identify] writing to cert ${id}: name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}, game=${cardGame}, rarity=${rarity}`);
+
       await db.execute(sql`
         UPDATE certificates SET
           ai_analysis = ${JSON.stringify({ identification: enrichedId, grading: analysis })}::jsonb,
           ai_draft_grade = ${typeof analysis.overall_grade === "number" ? analysis.overall_grade : null},
+          card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' THEN ${cardName} ELSE card_name END,
+          set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+          card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+          year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+          card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+          rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
           updated_at = NOW()
         WHERE id = ${id}
       `);
 
-      console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${enrichedId.officialName}" set="${enrichedId.officialSet}" grade=${analysis.overall_grade} strength=${strengthScore}`);
+      console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${cardName}" set="${setName}" grade=${analysis.overall_grade} strength=${strengthScore}`);
 
-      res.json({ identification: enrichedId, analysis });
+      // Return the updated cert so the frontend can refresh form fields
+      const updatedCert = await storage.getCertificate(id);
+      res.json({
+        identification: enrichedId,
+        analysis,
+        cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
+      });
     } catch (err: any) {
       console.error("[ai/identify-and-analyze] error:", err.message);
       res.status(500).json({ error: err.message });

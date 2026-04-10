@@ -96,6 +96,29 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     () => (certificate?.designations as string[]) || []
   );
 
+  // Sync form state when the cert prop changes (e.g. after AI autofill refetches the cert)
+  // Only overwrite fields that are currently empty — never stomp manual edits
+  useEffect(() => {
+    if (!certificate) return;
+    setForm(prev => {
+      const cn = certificate.cardName === "(untitled)" ? "" : (certificate.cardName || "");
+      let changed = false;
+      const next = { ...prev };
+      if (!prev.cardName && cn)                { next.cardName = cn; changed = true; }
+      if (!prev.setName && certificate.setName) { next.setName = certificate.setName; changed = true; }
+      if (!prev.cardNumber && certificate.cardNumber) { next.cardNumber = certificate.cardNumber; changed = true; }
+      if (!prev.year && certificate.year)       { next.year = certificate.year; changed = true; }
+      if (!prev.cardGame && certificate.cardGame) { next.cardGame = certificate.cardGame; changed = true; }
+      if (!prev.language && certificate.language) { next.language = certificate.language; changed = true; }
+      if (!prev.rarity && (certificate as any)?.rarity) { next.rarity = (certificate as any).rarity; changed = true; }
+      if (!prev.variant && (certificate as any)?.variant) { next.variant = (certificate as any).variant; changed = true; }
+      if (!prev.gradeOverall && certificate.gradeOverall) { next.gradeOverall = certificate.gradeOverall; changed = true; }
+      if (changed) toast({ title: "Card details auto-filled from AI" });
+      return changed ? next : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [certificate?.cardName, certificate?.setName, certificate?.cardNumber, certificate?.year]);
+
   const isNonNum = isNonNumericGrade(form.gradeType);
 
   const [frontImage, setFrontImage] = useState<File | null>(null);
