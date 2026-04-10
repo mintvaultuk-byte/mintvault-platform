@@ -43,11 +43,27 @@ Final centering subgrade = LOWER of front and back centering grades.
 
 For borderless or minimal-border cards: note this in your response. Assess image position relative to the card's physical edges. If borders are too thin to measure reliably, estimate and note your confidence is lower.
 
-INNER FRAME COORDINATES: For each side (front and back), return the inner artwork/frame border position as percentages of the cropped image dimensions. These are used to draw a centering overlay on the grading workstation.
-- front_inner_frame: { left_pct, right_pct, top_pct, bottom_pct } — the inner border rectangle as % from image edges
-- back_inner_frame: same for the back
-- For example, if the left border is 5% of card width, left_pct = 5.0, right_pct = 95.0
-- These should represent where the artwork/frame boundary actually IS, not where it should be
+FRAME COORDINATES (critical for centering accuracy):
+
+Return TWO rectangles per side as percentages of the IMAGE dimensions (0-100):
+
+OUTER FRAME = the card's actual physical border (yellow/black outer edge).
+- front_outer_frame: { left_pct, right_pct, top_pct, bottom_pct }
+- If the crop is tight, these will be close to 0/100/0/100.
+- If there's residual white margin, return WHERE THE CARD EDGE ACTUALLY IS.
+- Example: card starts at 1.5% from left → left_pct = 1.5
+
+INNER FRAME = the artwork/illustration box inside the card border.
+- front_inner_frame: { left_pct, right_pct, top_pct, bottom_pct }
+- The boundary where the illustration meets the border.
+
+Same for back: back_outer_frame, back_inner_frame.
+
+These coordinates let the grading workstation COMPUTE centering geometrically:
+- left_margin = inner_left - outer_left
+- right_margin = outer_right - inner_right
+- L/R ratio = left_margin / (left_margin + right_margin)
+This is MORE ACCURATE than estimating ratios by eye.
 
 ---
 
@@ -189,7 +205,9 @@ You MUST respond with ONLY valid JSON. No other text before or after. No markdow
     "back_top_bottom": "60/40",
     "front_grade": 9,
     "back_grade": 9,
+    "front_outer_frame": { "left_pct": 0.5, "right_pct": 99.5, "top_pct": 0.3, "bottom_pct": 99.7 },
     "front_inner_frame": { "left_pct": 5.2, "right_pct": 94.8, "top_pct": 7.1, "bottom_pct": 92.9 },
+    "back_outer_frame": { "left_pct": 0.4, "right_pct": 99.6, "top_pct": 0.5, "bottom_pct": 99.5 },
     "back_inner_frame": { "left_pct": 4.9, "right_pct": 95.1, "top_pct": 6.8, "bottom_pct": 93.2 },
     "notes": "Front centering is good. Back within tolerance."
   },

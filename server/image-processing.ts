@@ -132,16 +132,16 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 }
 
 /**
- * Auto-crop: detect card in scan and crop tight.
- * Uses Sharp trim() to remove scanner background, then validates the result.
- * Falls back to original if card detection is ambiguous.
+ * Auto-crop: detect card in scan and crop tight to the actual card edges.
+ * Two-pass approach: aggressive trim first, then validate white border %.
+ * Falls back to softer trim if aggressive is too tight.
  */
 export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean }> {
   try {
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false };
 
-    // Downscale huge scanner images first to prevent OOM (e.g. 1600 DPI = 4000x5600px)
+    // Downscale huge scanner images first to prevent OOM
     let workBuffer = inputBuffer;
     if (meta.width > 4000 || meta.height > 4000) {
       workBuffer = await sharp(inputBuffer)
@@ -150,35 +150,85 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
         .toBuffer();
     }
 
-    // Trim background using threshold — works for dark and light scanner beds
-    const trimmed = await sharp(workBuffer)
-      .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
-      .toBuffer({ resolveWithObject: true });
-
-    const { info } = trimmed;
-
-    // Validate: trimmed result must be at least 40% of original size (avoid over-trim)
-    const areaRatio = (info.width * info.height) / (meta.width * meta.height);
-    if (areaRatio < 0.15 || info.width < 100 || info.height < 100) {
-      return { buffer: inputBuffer, cropped: false };
+    // Pass 1: Aggressive trim (threshold 80 — catches subtle yellow-on-white card borders)
+    let trimBuf: Buffer;
+    let trimInfo: sharp.OutputInfo;
+    try {
+      const result = await sharp(workBuffer)
+        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 80 })
+        .toBuffer({ resolveWithObject: true });
+      trimBuf = result.data;
+      trimInfo = result.info;
+    } catch {
+      // Aggressive trim failed — try softer
+      const result = await sharp(workBuffer)
+        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
+        .toBuffer({ resolveWithObject: true });
+      trimBuf = result.data;
+      trimInfo = result.info;
     }
 
-    // Add 1% margin on each side
-    const padW = Math.round(info.width * 0.01);
-    const padH = Math.round(info.height * 0.01);
-    const finalW = info.width + padW * 2;
-    const finalH = info.height + padH * 2;
+    // Validate: trimmed result must be reasonable
+    const origArea = (meta.width || 1) * (meta.height || 1);
+    const trimArea = trimInfo.width * trimInfo.height;
+    if (trimArea / origArea < 0.15 || trimInfo.width < 100 || trimInfo.height < 100) {
+      console.warn(`[crop] trim too aggressive: ${trimInfo.width}x${trimInfo.height} (${((trimArea / origArea) * 100).toFixed(1)}% of original)`);
+      return { buffer: workBuffer, cropped: false };
+    }
 
-    const padded = await sharp(trimmed.data)
+    // Check white border percentage — sample 5px border on all 4 sides
+    const borderWhite = await measureBorderWhiteness(trimBuf, trimInfo.width, trimInfo.height);
+    if (borderWhite > 5) {
+      // >5% white on border — try even more aggressive trim
+      console.log(`[crop] first pass: ${borderWhite.toFixed(1)}% white border, re-trimming`);
+      try {
+        const tighter = await sharp(trimBuf)
+          .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 120 })
+          .toBuffer({ resolveWithObject: true });
+        if (tighter.info.width > 100 && tighter.info.height > 100) {
+          trimBuf = tighter.data;
+          trimInfo = tighter.info;
+        }
+      } catch { /* keep first pass result */ }
+    }
+
+    // Minimal padding (0.5% each side — just enough to avoid clipping card edge)
+    const padW = Math.max(1, Math.round(trimInfo.width * 0.005));
+    const padH = Math.max(1, Math.round(trimInfo.height * 0.005));
+
+    const padded = await sharp(trimBuf)
       .extend({ top: padH, bottom: padH, left: padW, right: padW, background: { r: 255, g: 255, b: 255, alpha: 1 } })
-      .resize(finalW, finalH)
       .jpeg({ quality: 95 })
       .toBuffer();
+
+    const ratio = trimInfo.width / trimInfo.height;
+    const expectedRatio = 0.714; // 2.5/3.5 = standard card
+    const ratioDiff = Math.abs(ratio - expectedRatio) / expectedRatio;
+    console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} white=${borderWhite.toFixed(1)}%`);
 
     return { buffer: padded, cropped: true };
   } catch {
     return { buffer: inputBuffer, cropped: false };
   }
+}
+
+/** Measure percentage of near-white pixels in a 5px border ring around the image */
+async function measureBorderWhiteness(buf: Buffer, w: number, h: number): Promise<number> {
+  try {
+    const { data } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const pixels = new Uint8Array(data);
+    let white = 0, total = 0;
+    const border = 5;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (x < border || x >= w - border || y < border || y >= h - border) {
+          total++;
+          if (pixels[y * w + x] > 240) white++;
+        }
+      }
+    }
+    return total > 0 ? (white / total) * 100 : 0;
+  } catch { return 0; }
 }
 
 /**

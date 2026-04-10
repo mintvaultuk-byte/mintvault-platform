@@ -26,10 +26,13 @@ interface ImageUrls {
   closeup_cropped?: string | null;
 }
 
+interface FrameRect { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number; }
+
 export interface CenteringOverlayData {
   ratioLR: string;
   ratioTB: string;
-  innerFrame?: { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number } | null;
+  outerFrame?: FrameRect | null;
+  innerFrame?: FrameRect | null;
 }
 
 interface Props {
@@ -253,26 +256,49 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           <div className="relative w-full h-full" style={{ transform: transformStyle, transition: transitionStyle }}>
             <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain" draggable={false} />
 
-            {/* Centering overlay */}
+            {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
             {showCentering && (() => {
               const cd = side === "front" ? centeringFront : centeringBack;
               if (!cd) return null;
-              const frame = cd.innerFrame;
-              const lr = cd.ratioLR?.split("/").map(Number) || [50, 50];
-              const tb = cd.ratioTB?.split("/").map(Number) || [50, 50];
+              const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
+              const inner = cd.innerFrame;
+              // Compute geometric centering from outer + inner frame coordinates
+              let lPct = 50, rPct = 50, tPct = 50, bPct = 50;
+              if (inner) {
+                const leftM = inner.left_pct - outer.left_pct;
+                const rightM = outer.right_pct - inner.right_pct;
+                const topM = inner.top_pct - outer.top_pct;
+                const botM = outer.bottom_pct - inner.bottom_pct;
+                const lrTotal = leftM + rightM;
+                const tbTotal = topM + botM;
+                if (lrTotal > 0) { lPct = Math.round(leftM / lrTotal * 100); rPct = 100 - lPct; }
+                if (tbTotal > 0) { tPct = Math.round(topM / tbTotal * 100); bPct = 100 - tPct; }
+              }
+              // Fallback to AI ratios if no frame coords
+              const lr = inner ? [lPct, rPct] : (cd.ratioLR?.split("/").map(Number) || [50, 50]);
+              const tb = inner ? [tPct, bPct] : (cd.ratioTB?.split("/").map(Number) || [50, 50]);
+              const midY = inner ? (inner.top_pct + inner.bottom_pct) / 2 : 50;
+              const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
               return (
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.6" />
-                  {frame && <rect x={frame.left_pct} y={frame.top_pct} width={frame.right_pct - frame.left_pct} height={frame.bottom_pct - frame.top_pct} fill="none" stroke="#D4AF37" strokeWidth="0.5" opacity="0.8" />}
-                  {frame && <>
-                    <line x1="0" y1="50" x2={frame.left_pct} y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                    <text x={frame.left_pct / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
-                    <line x1={frame.right_pct} y1="50" x2="100" y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                    <text x={(frame.right_pct + 100) / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
-                    <line x1="50" y1="0" x2="50" y2={frame.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                    <text x="50" y={frame.top_pct / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
-                    <line x1="50" y1={frame.bottom_pct} x2="50" y2="100" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                    <text x="50" y={(frame.bottom_pct + 100) / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
+                  {/* Outer frame — solid gold, traces card physical edge */}
+                  <rect x={outer.left_pct} y={outer.top_pct}
+                    width={outer.right_pct - outer.left_pct} height={outer.bottom_pct - outer.top_pct}
+                    fill="none" stroke="#D4AF37" strokeWidth="0.6" opacity="0.7" />
+                  {/* Inner frame — dashed gold, traces artwork boundary */}
+                  {inner && <rect x={inner.left_pct} y={inner.top_pct}
+                    width={inner.right_pct - inner.left_pct} height={inner.bottom_pct - inner.top_pct}
+                    fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.8" />}
+                  {/* Measurement lines + computed percentages */}
+                  {inner && <>
+                    <line x1={outer.left_pct} y1={midY} x2={inner.left_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
+                    <text x={(outer.left_pct + inner.left_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
+                    <line x1={inner.right_pct} y1={midY} x2={outer.right_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
+                    <text x={(inner.right_pct + outer.right_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
+                    <line x1={midX} y1={outer.top_pct} x2={midX} y2={inner.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
+                    <text x={midX} y={(outer.top_pct + inner.top_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
+                    <line x1={midX} y1={inner.bottom_pct} x2={midX} y2={outer.bottom_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
+                    <text x={midX} y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
                   </>}
                 </svg>
               );

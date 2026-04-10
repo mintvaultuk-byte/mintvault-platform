@@ -411,11 +411,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             centeringFront={frontLR ? {
               ratioLR: frontLR,
               ratioTB: frontTB,
+              outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
               innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
             } : null}
             centeringBack={backLR ? {
               ratioLR: backLR,
               ratioTB: backTB,
+              outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
               innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
             } : null}
           />
