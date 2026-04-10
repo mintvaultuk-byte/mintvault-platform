@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { Pencil, Eye, EyeOff } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Pencil, Eye, EyeOff, X, Maximize2 } from "lucide-react";
 import DefectHeatmap from "./defect-heatmap";
 import { DefectForm } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
@@ -61,7 +61,6 @@ function hasAny(urls: ImageUrls, side: Side): boolean {
   return !!(urls[`${side}_original`] || urls[`${side}_cropped`]);
 }
 
-// ── CSS for marker pulse animation (injected once) ────────────────────────
 const PULSE_CSS = `
 @keyframes defect-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.4); }
@@ -81,6 +80,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const [showDefects, setShowDefects] = useState(true);
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkMode] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
     type: "Scratch", severity: "minor" as "minor" | "moderate" | "significant",
@@ -95,15 +95,46 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const frontDefectCount = defects.filter(d => d.image_side === "front").length;
   const backDefectCount = defects.filter(d => d.image_side === "back").length;
 
+  // Keyboard shortcuts for fullscreen mode
+  useEffect(() => {
+    if (!fullscreen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { setFullscreen(false); setMarkMode(false); setPendingXY(null); }
+      else if (e.key === "f" || e.key === "F") setSide("front");
+      else if (e.key === "b" || e.key === "B") setSide("back");
+      // Severity shortcuts when defect popup is open
+      if (pendingXY) {
+        if (e.key === "1") setPendingDefect(p => ({ ...p, severity: "minor" }));
+        if (e.key === "2") setPendingDefect(p => ({ ...p, severity: "moderate" }));
+        if (e.key === "3") setPendingDefect(p => ({ ...p, severity: "significant" }));
+        if (e.key === "Enter" && pendingDefect.type && pendingDefect.description.trim()) {
+          e.preventDefault();
+          saveNewDefect();
+        }
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, pendingXY, pendingDefect]);
+
+  function enterMarkMode() {
+    setMarkMode(true);
+    setFullscreen(true);
+  }
+
+  function exitMarkMode() {
+    setFullscreen(false);
+    setMarkMode(false);
+    setPendingXY(null);
+  }
+
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (dragging) return;
-
     if (markMode && imgElRef.current) {
-      // Calculate click position relative to the IMAGE element (not container)
       const imgRect = imgElRef.current.getBoundingClientRect();
       const xPct = ((e.clientX - imgRect.left) / imgRect.width) * 100;
       const yPct = ((e.clientY - imgRect.top) / imgRect.height) * 100;
-      // Clamp to 0-100
       const cx = Math.max(0, Math.min(100, xPct));
       const cy = Math.max(0, Math.min(100, yPct));
       setPendingXY({ x: cx, y: cy });
@@ -111,20 +142,12 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       setPendingDefect(p => ({ ...p, image_side: side, x_percent: cx, y_percent: cy, location: locDesc }));
       return;
     }
-
-    // Cycle zoom
     if (zoom === 1) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const xPct = ((e.clientX - rect.left) / rect.width) * 100;
-      const yPct = ((e.clientY - rect.top) / rect.height) * 100;
       setZoom(2);
-      setPan({ x: xPct, y: yPct });
-    } else if (zoom === 2) {
-      setZoom(4);
-    } else {
-      setZoom(1);
-      setPan({ x: 50, y: 50 });
-    }
+      setPan({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
+    } else if (zoom === 2) setZoom(4);
+    else { setZoom(1); setPan({ x: 50, y: 50 }); }
   }
 
   function handleWheel(e: React.WheelEvent) {
@@ -133,7 +156,8 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   }
 
   function handleMouseDown(e: React.MouseEvent) {
-    if (zoom <= 1 || markMode) return;
+    if (zoom <= 1 && !markMode) return;
+    if (markMode && zoom <= 1) return;
     setDragging(true);
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   }
@@ -157,78 +181,202 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
     : "none";
   const transitionStyle = dragging ? "none" : "transform 0.15s";
 
+  // ── Shared tab bar ──────────────────────────────────────────────────────
+  function renderTabs() {
+    return (
+      <div className="space-y-1">
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {SIDES.map(s => {
+            const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
+            return (
+              <button key={s} type="button"
+                onClick={() => { setSide(s); setShowReference(false); }}
+                disabled={!hasAny(urls, s)}
+                className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                  side === s && !showReference
+                    ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                    : hasAny(urls, s) ? "border-[#333333] text-[#888888] hover:border-[#555555]" : "border-[#222222] text-[#333333] cursor-not-allowed"
+                }`}
+              >{s}{count > 0 ? ` (${count})` : ""}</button>
+            );
+          })}
+          {!fullscreen && referenceImageUrl && (
+            <button type="button" onClick={() => setShowReference(v => !v)}
+              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#333333] text-[#888888] hover:border-[#555555]"}`}
+            >Reference</button>
+          )}
+        </div>
+        <div className="flex gap-1 overflow-x-auto">
+          {VARIANTS.map(v => (
+            <button key={v.key} type="button" onClick={() => setVariant(v.key)}
+              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#888888]"}`}
+            >{v.label}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Shared image area ───────────────────────────────────────────────────
+  function renderImageArea(maxH: string | number) {
+    return (
+      <div
+        ref={containerRef}
+        className={`relative overflow-hidden rounded-lg bg-[#0A0A0A] border border-[#222222] select-none ${
+          markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
+        }`}
+        style={{ aspectRatio: "5/7", maxHeight: maxH }}
+        onClick={handleContainerClick}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        {currentUrl ? (
+          <div className="relative w-full h-full" style={{ transform: transformStyle, transition: transitionStyle }}>
+            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain" draggable={false} />
+
+            {/* Centering overlay */}
+            {showCentering && (() => {
+              const cd = side === "front" ? centeringFront : centeringBack;
+              if (!cd) return null;
+              const frame = cd.innerFrame;
+              const lr = cd.ratioLR?.split("/").map(Number) || [50, 50];
+              const tb = cd.ratioTB?.split("/").map(Number) || [50, 50];
+              return (
+                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.6" />
+                  {frame && <rect x={frame.left_pct} y={frame.top_pct} width={frame.right_pct - frame.left_pct} height={frame.bottom_pct - frame.top_pct} fill="none" stroke="#D4AF37" strokeWidth="0.5" opacity="0.8" />}
+                  {frame && <>
+                    <line x1="0" y1="50" x2={frame.left_pct} y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                    <text x={frame.left_pct / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
+                    <line x1={frame.right_pct} y1="50" x2="100" y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                    <text x={(frame.right_pct + 100) / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
+                    <line x1="50" y1="0" x2="50" y2={frame.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                    <text x="50" y={frame.top_pct / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
+                    <line x1="50" y1={frame.bottom_pct} x2="50" y2="100" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                    <text x="50" y={(frame.bottom_pct + 100) / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
+                  </>}
+                </svg>
+              );
+            })()}
+
+            {/* Heatmap */}
+            {showDefects && sideDefects.length > 0 && (
+              <DefectHeatmap defects={sideDefects} width={containerRef.current?.clientWidth || 300} height={containerRef.current?.clientHeight || 420} />
+            )}
+
+            {/* Defect ring markers */}
+            {showDefects && sideDefects.map(d => {
+              const isAi = !!(d as any).detected_in;
+              const isHL = highlightId === d.id;
+              const col = isAi ? "#DC2626" : "#D4AF37";
+              return (
+                <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
+                  style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
+                  <div className="w-full h-full rounded-full transition-all"
+                    style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }} />
+                  <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
+                    style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{isAi ? "AI" : d.id}</span>
+                </div>
+              );
+            })}
+
+            {/* Pending marker */}
+            {pendingXY && (
+              <div className="absolute pointer-events-none animate-pulse"
+                style={{ left: `${pendingXY.x}%`, top: `${pendingXY.y}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
+                <div className="w-full h-full rounded-full border-2 border-yellow-400" style={{ background: "transparent" }} />
+                <span className="absolute -top-1 -right-1 text-[8px] font-black bg-yellow-400 text-black px-1 rounded-full leading-none py-0.5">?</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="text-[#333333] text-xs">No image</p>
+          </div>
+        )}
+
+        {zoom > 1 && (
+          <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded z-10">
+            {Math.round(zoom * 100)}%
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Fullscreen overlay ──────────────────────────────────────────────────
+  if (fullscreen) {
+    return (
+      <>
+        <style>{PULSE_CSS}</style>
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+          {/* Top bar */}
+          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
+            <div className="flex-1">{renderTabs()}</div>
+            <button type="button" onClick={exitMarkMode}
+              className="ml-4 text-[#888888] hover:text-white transition-colors p-1">
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Main image — fills remaining space */}
+          <div className="flex-1 flex items-center justify-center p-4 min-h-0">
+            <div className="w-full h-full max-w-[85vh]">
+              {renderImageArea("85vh")}
+            </div>
+          </div>
+
+          {/* Defect form modal — centered over fullscreen */}
+          {pendingXY && (
+            <div className="absolute inset-0 flex items-center justify-center z-[60] pointer-events-none">
+              <div className="pointer-events-auto w-80">
+                <DefectForm
+                  pending={pendingDefect}
+                  onChange={setPendingDefect}
+                  onSave={saveNewDefect}
+                  onCancel={() => setPendingXY(null)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Bottom toolbar */}
+          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
+            <p className="text-[#888888] text-xs">
+              {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
+              <span className="text-[#555555] ml-3">Click on the card to mark a defect · F/B to switch sides · Esc to exit</span>
+            </p>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={exitMarkMode}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all">
+                Done Marking
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ── Normal (inline) view ────────────────────────────────────────────────
   return (
     <div className="space-y-2">
       <style>{PULSE_CSS}</style>
 
-      {/* Side tabs with defect counts */}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {SIDES.map(s => {
-          const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => { setSide(s); setShowReference(false); }}
-              disabled={!hasAny(urls, s)}
-              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
-                side === s && !showReference
-                  ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                  : hasAny(urls, s)
-                    ? "border-[#333333] text-[#888888] hover:border-[#555555]"
-                    : "border-[#222222] text-[#333333] cursor-not-allowed"
-              }`}
-            >
-              {s}{count > 0 ? ` (${count})` : ""}
-            </button>
-          );
-        })}
-        {referenceImageUrl && (
-          <button
-            type="button"
-            onClick={() => setShowReference(v => !v)}
-            className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
-              showReference
-                ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                : "border-[#333333] text-[#888888] hover:border-[#555555]"
-            }`}
-          >
-            Reference
-          </button>
-        )}
-      </div>
+      {renderTabs()}
 
-      {/* Variant tabs */}
-      <div className="flex gap-1 overflow-x-auto">
-        {VARIANTS.map(v => (
-          <button
-            key={v.key}
-            type="button"
-            onClick={() => setVariant(v.key)}
-            className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${
-              variant === v.key
-                ? "text-[#D4AF37] border-[#D4AF37]"
-                : "text-[#555555] border-transparent hover:text-[#888888]"
-            }`}
-          >
-            {v.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Reference comparison view */}
+      {/* Reference comparison */}
       {showReference && referenceImageUrl && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
             <div className="rounded-lg bg-[#0A0A0A] border border-[#222222] overflow-hidden" style={{ aspectRatio: "5/7" }}>
-              {urls.front_cropped || urls.front_original ? (
-                <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <p className="text-[#333333] text-xs">No scan</p>
-                </div>
-              )}
+              {urls.front_cropped || urls.front_original
+                ? <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
+                : <div className="w-full h-full flex items-center justify-center"><p className="text-[#333333] text-xs">No scan</p></div>}
             </div>
           </div>
           <div className="space-y-1">
@@ -240,180 +388,24 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
         </div>
       )}
 
-      {/* Main image area — outer container handles click/scroll/drag events */}
-      {!showReference && (
-        <div
-          ref={containerRef}
-          className={`relative overflow-hidden rounded-lg bg-[#0A0A0A] border border-[#222222] select-none ${
-            markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
-          }`}
-          style={{ aspectRatio: "5/7", maxHeight: 500 }}
-          onClick={handleContainerClick}
-          onWheel={handleWheel}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          {currentUrl ? (
-            /* Single transformed wrapper — image + all overlays move together on zoom/pan */
-            <div
-              className="relative w-full h-full"
-              style={{ transform: transformStyle, transition: transitionStyle }}
-            >
-              <img
-                ref={imgElRef}
-                src={currentUrl}
-                alt={`${side} ${variant}`}
-                className="w-full h-full object-contain"
-                draggable={false}
-              />
-
-              {/* Centering overlay (inside transform wrapper — zooms with image) */}
-              {showCentering && (() => {
-                const cd = side === "front" ? centeringFront : centeringBack;
-                if (!cd) return null;
-                const frame = cd.innerFrame;
-                const lr = cd.ratioLR?.split("/").map(Number) || [50, 50];
-                const tb = cd.ratioTB?.split("/").map(Number) || [50, 50];
-                return (
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.6" />
-                    {frame && (
-                      <rect
-                        x={frame.left_pct} y={frame.top_pct}
-                        width={frame.right_pct - frame.left_pct}
-                        height={frame.bottom_pct - frame.top_pct}
-                        fill="none" stroke="#D4AF37" strokeWidth="0.5" opacity="0.8"
-                      />
-                    )}
-                    {frame && <>
-                      <line x1="0" y1="50" x2={frame.left_pct} y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                      <text x={frame.left_pct / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
-                      <line x1={frame.right_pct} y1="50" x2="100" y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                      <text x={(frame.right_pct + 100) / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
-                      <line x1="50" y1="0" x2="50" y2={frame.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                      <text x="50" y={frame.top_pct / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
-                      <line x1="50" y1={frame.bottom_pct} x2="50" y2="100" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
-                      <text x="50" y={(frame.bottom_pct + 100) / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
-                    </>}
-                  </svg>
-                );
-              })()}
-
-              {/* Heatmap overlay */}
-              {showDefects && sideDefects.length > 0 && (
-                <DefectHeatmap
-                  defects={sideDefects}
-                  width={containerRef.current?.clientWidth || 300}
-                  height={containerRef.current?.clientHeight || 420}
-                />
-              )}
-
-              {/* Defect ring markers — anchored to image coordinates */}
-              {showDefects && sideDefects.map(d => {
-                const isAi = !!(d as any).detected_in;
-                const isHighlighted = highlightId === d.id;
-                const ringColor = isAi ? "#DC2626" : "#D4AF37";
-                return (
-                  <div
-                    key={d.id}
-                    className={`absolute pointer-events-none ${isHighlighted ? "defect-ring-pulse" : ""}`}
-                    style={{
-                      left: `${d.x_percent}%`,
-                      top: `${d.y_percent}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: 32,
-                      height: 32,
-                    }}
-                  >
-                    {/* Transparent ring */}
-                    <div
-                      className="w-full h-full rounded-full transition-all"
-                      style={{
-                        border: `${isHighlighted ? 3 : 2}px solid ${ringColor}`,
-                        background: "transparent",
-                        boxShadow: isHighlighted ? `0 0 8px ${ringColor}80` : "none",
-                      }}
-                    />
-                    {/* Label badge — top-right of ring */}
-                    <span
-                      className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
-                      style={{
-                        background: ringColor,
-                        color: isAi ? "#fff" : "#1A1400",
-                      }}
-                    >
-                      {isAi ? "AI" : d.id}
-                    </span>
-                  </div>
-                );
-              })}
-
-              {/* Pending defect marker */}
-              {pendingXY && (
-                <div
-                  className="absolute pointer-events-none animate-pulse"
-                  style={{
-                    left: `${pendingXY.x}%`,
-                    top: `${pendingXY.y}%`,
-                    transform: "translate(-50%, -50%)",
-                    width: 32,
-                    height: 32,
-                  }}
-                >
-                  <div className="w-full h-full rounded-full border-2 border-yellow-400" style={{ background: "transparent" }} />
-                  <span className="absolute -top-1 -right-1 text-[8px] font-black bg-yellow-400 text-black px-1 rounded-full leading-none py-0.5">?</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-[#333333] text-xs">No image</p>
-            </div>
-          )}
-
-          {/* Zoom indicator (outside transform — stays in corner) */}
-          {zoom > 1 && (
-            <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded z-10">
-              {Math.round(zoom * 100)}%
-            </div>
-          )}
-        </div>
-      )}
+      {/* Main image (normal size) */}
+      {!showReference && renderImageArea(500)}
 
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => { setMarkMode(!markMode); setPendingXY(null); }}
-          className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${
-            markMode
-              ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-              : "border-[#333333] text-[#888888] hover:border-[#555555]"
-          }`}
-        >
-          <Pencil size={11} />
-          {markMode ? "Marking…" : "Mark Defects"}
+        <button type="button" onClick={enterMarkMode}
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#333333] text-[#888888] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+          <Maximize2 size={11} />
+          Mark Defects
         </button>
-        <button
-          type="button"
-          onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#888888] hover:text-[#CCCCCC] border border-[#333333] px-3 py-1.5 rounded transition-all"
-        >
+        <button type="button" onClick={() => setShowDefects(!showDefects)}
+          className="flex items-center gap-1.5 text-[10px] text-[#888888] hover:text-[#CCCCCC] border border-[#333333] px-3 py-1.5 rounded transition-all">
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
         {(centeringFront || centeringBack) && (
-          <button
-            type="button"
-            onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${
-              showCentering
-                ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                : "border-[#333333] text-[#888888] hover:border-[#555555]"
-            }`}
-          >
+          <button type="button" onClick={() => setShowCentering(!showCentering)}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#333333] text-[#888888] hover:border-[#555555]"}`}>
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
         )}
@@ -423,16 +415,6 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </button>
         )}
       </div>
-
-      {/* Pending defect form */}
-      {pendingXY && (
-        <DefectForm
-          pending={pendingDefect}
-          onChange={setPendingDefect}
-          onSave={saveNewDefect}
-          onCancel={() => { setPendingXY(null); }}
-        />
-      )}
     </div>
   );
 }
