@@ -25,8 +25,17 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false };
 
+    // Downscale huge scanner images first to prevent OOM (e.g. 1600 DPI = 4000x5600px)
+    let workBuffer = inputBuffer;
+    if (meta.width > 4000 || meta.height > 4000) {
+      workBuffer = await sharp(inputBuffer)
+        .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 95 })
+        .toBuffer();
+    }
+
     // Trim background using threshold — works for dark and light scanner beds
-    const trimmed = await sharp(inputBuffer)
+    const trimmed = await sharp(workBuffer)
       .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
       .toBuffer({ resolveWithObject: true });
 
@@ -58,6 +67,8 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
 
 /**
  * Generate all image variants for grading analysis.
+ * Resizes to max 2000px first to reduce memory usage,
+ * then processes sequentially to avoid OOM on 512MB-1GB machines.
  */
 export async function generateVariants(inputBuffer: Buffer): Promise<{
   greyscale: Buffer;
@@ -65,33 +76,34 @@ export async function generateVariants(inputBuffer: Buffer): Promise<{
   edgeenhanced: Buffer;
   inverted: Buffer;
 }> {
-  const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
-    sharp(inputBuffer)
-      .greyscale()
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  // Resize to 2000px max first — keeps peak RAM manageable
+  const resized = await sharp(inputBuffer)
+    .resize(2000, 2000, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 90 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .modulate({ brightness: 1.1 })
-      .linear(1.6, -(128 * 1.6 - 128))
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  // Sequential processing to limit peak memory
+  const greyscale = await sharp(resized)
+    .greyscale()
+    .jpeg({ quality: 85 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .greyscale()
-      .convolve({
-        width: 3,
-        height: 3,
-        kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1],
-      })
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  const highcontrast = await sharp(resized)
+    .modulate({ brightness: 1.1 })
+    .linear(1.6, -(128 * 1.6 - 128))
+    .jpeg({ quality: 85 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .negate()
-      .jpeg({ quality: 90 })
-      .toBuffer(),
-  ]);
+  const edgeenhanced = await sharp(resized)
+    .greyscale()
+    .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+
+  const inverted = await sharp(resized)
+    .negate()
+    .jpeg({ quality: 85 })
+    .toBuffer();
 
   return { greyscale, highcontrast, edgeenhanced, inverted };
 }

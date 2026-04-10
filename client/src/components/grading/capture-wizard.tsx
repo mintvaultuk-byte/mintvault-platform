@@ -100,8 +100,13 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
         credentials: "include",
         body: fd,
       });
+      if (!res.ok) {
+        let errMsg = `Upload failed (${res.status})`;
+        try { const body = await res.json(); errMsg = body.error || errMsg; } catch {}
+        console.error(`[capture-wizard] upload failed for cert ${certId}, side ${side}:`, errMsg);
+        throw new Error(errMsg);
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
 
       setProcessed(prev => {
         const next = { ...prev, [side]: true };
