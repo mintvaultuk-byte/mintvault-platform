@@ -173,7 +173,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
         }));
         toast({ title: "Card identified", description: `${data.identification?.officialName || data.identification?.detected_name || "Card"} — ${data.identification?.officialSet || data.identification?.detected_set || "Unknown set"}` });
       } else {
-        toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
+        toast({ title: "Couldn't identify confidently", description: data.rejectReason || "Please fill in card details manually", variant: "destructive" });
       }
     } catch (e: any) {
       toast({ title: "Identification failed", description: e.message, variant: "destructive" });

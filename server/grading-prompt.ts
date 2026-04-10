@@ -292,9 +292,19 @@ Return ONLY valid JSON with no other text:
   "is_full_art": false,
   "is_textured": false,
   "card_type": "Holo Rare",
+  "set_code": "OBF",
+  "copyright_year": "2023",
   "confidence": "high",
-  "reasoning": "Set symbol matches Obsidian Flames (OBF), number 212 is beyond 197 indicating secret rare."
+  "reasoning": "Set code OBF visible bottom-left, copyright ©2023, number 212/197 is secret rare."
 }
+
+STEP 1 — READ THE SET CODE FIRST:
+Before anything else, look at the BOTTOM-LEFT or BOTTOM-RIGHT corner for a SET CODE. Common codes: M24 EN, OBF, PAR, PAL, TEF, SSP, SVI, BRS, FST, EVS, CRZ, SIT, LOR, PGO, ASR, SVP, SVPja, S-P, SP.
+The set code is the MOST RELIABLE identifier — it pins the exact set. Card name + number alone is NOT enough because the same name+number can exist in multiple sets (e.g., "Rayquaza 014" is in both POP Series 1 (2004) and M24 EN (2024)).
+Return the code in "set_code" (string or null if not visible).
+
+STEP 2 — READ THE COPYRIGHT YEAR:
+Look at the bottom of the card for ©YEAR (e.g., ©2024 Pokémon, ©2023 Nintendo). Return as "copyright_year" (4-digit string or null).
 
 CONFIDENCE RULES:
 - "high": You can clearly read the set symbol/code AND the card name AND card number. TCG API can verify.

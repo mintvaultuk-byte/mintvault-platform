@@ -4957,7 +4957,7 @@ export async function registerRoutes(
       const tcgVerified = game === "pokemon";
       let tcgResult: any = { verified: false };
       if (game === "pokemon") {
-        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity);
+        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
         if (tcgResult.verified) {
           enrichedId = {
             ...enrichedId, verified: true,
@@ -5009,6 +5009,7 @@ export async function registerRoutes(
         confidence: aiConfidence,
         tcgVerified: verified,
         detailsWritten: shouldWrite,
+        rejectReason: !shouldWrite ? (tcgResult.rejectReason || "Low confidence — manual entry needed") : undefined,
         cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
       });
     } catch (err: any) {
@@ -5130,7 +5131,9 @@ export async function registerRoutes(
         const tcgResult = await verifyPokemonCardWithTcgApi(
           identification.detected_name,
           identification.detected_number,
-          identification.detected_rarity
+          identification.detected_rarity,
+          identification.set_code,
+          identification.copyright_year
         );
         if (tcgResult.verified) {
           console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);

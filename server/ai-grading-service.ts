@@ -25,6 +25,8 @@ export interface CardIdentification {
   is_full_art: boolean;
   is_textured: boolean;
   card_type: string | null;
+  set_code: string | null;
+  copyright_year: string | null;
   confidence: "high" | "medium" | "low";
   reasoning: string | null;
 }
@@ -198,7 +200,9 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
 export async function verifyPokemonCardWithTcgApi(
   detectedName: string,
   detectedNumber: string | null,
-  detectedRarity?: string | null
+  detectedRarity?: string | null,
+  setCode?: string | null,
+  copyrightYear?: string | null
 ): Promise<{
   verified: boolean;
   officialSetName?: string;
@@ -208,72 +212,113 @@ export async function verifyPokemonCardWithTcgApi(
   officialYear?: string;
   apiCardId?: string;
   referenceImageUrl?: string;
+  rejectReason?: string;
 }> {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   if (!apiKey) {
     console.warn("[pokemon-tcg] API key not set, skipping verification");
-    return { verified: false };
+    return { verified: false, rejectReason: "API key not configured" };
   }
   if (!detectedNumber) {
-    console.log("[pokemon-tcg] no card number, skipping verification");
-    return { verified: false };
+    return { verified: false, rejectReason: "No card number detected" };
   }
 
-  try {
-    // Primary query: name + exact number (pins the exact variant across all sets)
-    const exactQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
-    const res = await fetch(
-      `https://api.pokemontcg.io/v2/cards?q=${exactQuery}&pageSize=10`,
-      { headers: { "X-Api-Key": apiKey } }
-    );
+  // Detect Japanese/promo patterns
+  const isPromoPattern = setCode && /^(M\d+|S-?P|SVP|SVPja|.*ja$)/i.test(setCode);
 
-    if (!res.ok) {
-      console.warn(`[pokemon-tcg] API error: ${res.status}`);
-      return { verified: false };
+  try {
+    let results: any[] = [];
+
+    // Strategy 1: If we have a set code, search by set.id + number (most precise)
+    if (setCode) {
+      const codeClean = setCode.replace(/\s+/g, "").toLowerCase();
+      // Try the code directly as set.id
+      const setQuery = encodeURIComponent(`set.id:${codeClean} number:${detectedNumber}`);
+      const setRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`, { headers: { "X-Api-Key": apiKey } });
+      if (setRes.ok) {
+        const setData = await setRes.json();
+        results = setData.data || [];
+        if (results.length > 0) {
+          console.log(`[pokemon-tcg] set-code match: ${codeClean} + #${detectedNumber} → ${results.length} results`);
+        }
+      }
     }
 
-    const data = await res.json();
-    const results = data.data as any[] || [];
+    // Strategy 2: Fallback to name + number search
+    if (results.length === 0) {
+      const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
+      const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, { headers: { "X-Api-Key": apiKey } });
+      if (nameRes.ok) {
+        const nameData = await nameRes.json();
+        results = nameData.data || [];
+      }
+    }
 
     if (results.length === 0) {
-      // Fallback: name-only search without number
-      console.warn(`[pokemon-tcg] no exact match for "${detectedName}" #${detectedNumber}, trying name-only`);
-      const fallbackQuery = encodeURIComponent(`name:"${detectedName}"`);
-      const fallbackRes = await fetch(
-        `https://api.pokemontcg.io/v2/cards?q=${fallbackQuery}&pageSize=10`,
-        { headers: { "X-Api-Key": apiKey } }
-      );
-      if (!fallbackRes.ok) return { verified: false };
-      const fallbackData = await fallbackRes.json();
-      if (!fallbackData.data?.length) {
-        console.log(`[pokemon-tcg] no match at all for "${detectedName}"`);
-        return { verified: false };
-      }
-      // Use first result from fallback
-      const card = fallbackData.data[0];
-      console.log(`[pokemon-tcg] fallback match: ${card.id} ${card.name} #${card.number} from ${card.set.name} (rarity: ${card.rarity})`);
-      return buildResult(card);
+      const reason = isPromoPattern ? "Japanese/promo set — TCG database doesn't have this card" : "No match found in TCG database";
+      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber} (code=${setCode})`);
+      return { verified: false, rejectReason: reason };
     }
 
-    // If multiple results, prefer the one whose rarity matches Claude's detection
+    // Ambiguity check: if name+number appears in multiple DIFFERENT sets, reject unless we can disambiguate
+    const uniqueSets = new Set(results.map((c: any) => c.set.id));
+    if (uniqueSets.size > 1) {
+      // Try to disambiguate by copyright year
+      if (copyrightYear) {
+        const yearNum = parseInt(copyrightYear, 10);
+        const yearFiltered = results.filter((c: any) => {
+          const setYear = parseInt(c.set.releaseDate?.split("-")[0] || "0", 10);
+          return Math.abs(setYear - yearNum) <= 1;
+        });
+        if (yearFiltered.length === 1) {
+          const card = yearFiltered[0];
+          console.log(`[pokemon-tcg] year-disambiguated: ${card.id} from ${card.set.name} (©${copyrightYear} matches ${card.set.releaseDate})`);
+          return buildResult(card);
+        }
+        if (yearFiltered.length > 1) {
+          // Still ambiguous within the year range — try rarity match
+          if (detectedRarity) {
+            const rarityLower = detectedRarity.toLowerCase();
+            const rarityMatch = yearFiltered.find((c: any) => c.rarity?.toLowerCase().includes(rarityLower));
+            if (rarityMatch) {
+              console.log(`[pokemon-tcg] year+rarity match: ${rarityMatch.id} (${rarityMatch.rarity})`);
+              return buildResult(rarityMatch);
+            }
+          }
+        }
+      }
+
+      // Can't disambiguate — reject
+      const setNames = [...uniqueSets].map(sid => results.find((c: any) => c.set.id === sid)?.set.name).join(", ");
+      console.warn(`[pokemon-tcg] ambiguous: "${detectedName}" #${detectedNumber} found in ${uniqueSets.size} sets: ${setNames}`);
+      return { verified: false, rejectReason: `Multiple sets contain ${detectedName} ${detectedNumber} — please specify set` };
+    }
+
+    // Single set match — pick best variant by rarity if multiple
     let card = results[0];
     if (results.length > 1 && detectedRarity) {
       const rarityLower = detectedRarity.toLowerCase();
       const rarityMatch = results.find((c: any) =>
-        c.rarity?.toLowerCase().includes(rarityLower) ||
-        rarityLower.includes(c.rarity?.toLowerCase() || "")
+        c.rarity?.toLowerCase().includes(rarityLower) || rarityLower.includes(c.rarity?.toLowerCase() || "")
       );
-      if (rarityMatch) {
-        card = rarityMatch;
-        console.log(`[pokemon-tcg] rarity-matched variant: ${card.id} (${card.rarity}) over ${results.length} candidates`);
+      if (rarityMatch) card = rarityMatch;
+    }
+
+    // Year sanity check: reject if set release year differs >1 from copyright year
+    if (copyrightYear) {
+      const yearNum = parseInt(copyrightYear, 10);
+      const setYear = parseInt(card.set.releaseDate?.split("-")[0] || "0", 10);
+      if (setYear > 0 && Math.abs(setYear - yearNum) > 1) {
+        console.warn(`[pokemon-tcg] year mismatch: card ©${copyrightYear} vs set ${card.set.name} (${setYear}) — rejecting`);
+        return { verified: false, rejectReason: `Year mismatch: card shows ©${copyrightYear} but TCG match is from ${setYear}` };
       }
     }
 
-    console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (rarity: ${card.rarity})`);
+    console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (${card.rarity})`);
     return buildResult(card);
   } catch (err: any) {
     console.error("[pokemon-tcg] verification failed:", err.message);
-    return { verified: false };
+    return { verified: false, rejectReason: "TCG API error" };
   }
 }
 
@@ -701,7 +746,7 @@ export async function identifyAndAnalyze(
         detected_name: "Unknown", detected_set: "Unknown", detected_number: null,
         detected_year: null, detected_game: cardGame || "other", detected_language: "English",
         detected_rarity: null, is_holo: false, is_foil: false, is_reverse_holo: false,
-        is_full_art: false, is_textured: false, card_type: null, confidence: "low" as const, reasoning: null,
+        is_full_art: false, is_textured: false, card_type: null, set_code: null, copyright_year: null, confidence: "low" as const, reasoning: null,
         verified: false, officialName: "Unknown", officialSet: "Unknown",
         officialNumber: null, referenceImageUrl: null, dbSource: null,
       };
