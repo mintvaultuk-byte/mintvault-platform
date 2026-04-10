@@ -343,6 +343,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             onDefectAdded={d => setDefects(prev => [...prev, d])}
             highlightId={highlightDefect}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
+            centeringFront={frontLR ? {
+              ratioLR: frontLR,
+              ratioTB: frontTB,
+              innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
+            } : null}
+            centeringBack={backLR ? {
+              ratioLR: backLR,
+              ratioTB: backTB,
+              innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
+            } : null}
           />
           <div className="bg-[#0D0D0D] border border-[#222222] rounded-lg p-3 space-y-2">
             <p className="text-[#D4AF37]/70 text-[10px] uppercase tracking-widest font-bold">Defects</p>

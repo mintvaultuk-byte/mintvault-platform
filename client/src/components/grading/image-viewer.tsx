@@ -26,12 +26,20 @@ interface ImageUrls {
   closeup_cropped?: string | null;
 }
 
+export interface CenteringOverlayData {
+  ratioLR: string;  // e.g. "52/48"
+  ratioTB: string;  // e.g. "58/42"
+  innerFrame?: { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number } | null;
+}
+
 interface Props {
   urls: ImageUrls;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
   highlightId: number | null;
   referenceImageUrl?: string | null;
+  centeringFront?: CenteringOverlayData | null;
+  centeringBack?: CenteringOverlayData | null;
 }
 
 const SIDES: Side[] = ["front", "back"];
@@ -53,7 +61,7 @@ function hasAny(urls: ImageUrls, side: Side): boolean {
   return !!(urls[`${side}_original`] || urls[`${side}_cropped`]);
 }
 
-export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl }: Props) {
+export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack }: Props) {
   const [side, setSide] = useState<Side>("front");
   const [variant, setVariant] = useState<Variant>("original");
   const [showReference, setShowReference] = useState(false);
@@ -62,6 +70,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [showDefects, setShowDefects] = useState(true);
+  const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkMode] = useState(false);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
@@ -235,6 +244,45 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           />
         )}
 
+        {/* Centering overlay */}
+        {showCentering && (() => {
+          const cd = side === "front" ? centeringFront : centeringBack;
+          if (!cd) return null;
+          const frame = cd.innerFrame;
+          const lr = cd.ratioLR?.split("/").map(Number) || [50, 50];
+          const tb = cd.ratioTB?.split("/").map(Number) || [50, 50];
+          return (
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {/* Outer card edge */}
+              <rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.6" />
+              {/* Inner frame rectangle */}
+              {frame && (
+                <rect
+                  x={frame.left_pct} y={frame.top_pct}
+                  width={frame.right_pct - frame.left_pct}
+                  height={frame.bottom_pct - frame.top_pct}
+                  fill="none" stroke="#D4AF37" strokeWidth="0.5" opacity="0.8"
+                />
+              )}
+              {/* Centering measurement lines + labels */}
+              {frame && <>
+                {/* Left measurement */}
+                <line x1="0" y1="50" x2={frame.left_pct} y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                <text x={frame.left_pct / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
+                {/* Right measurement */}
+                <line x1={frame.right_pct} y1="50" x2="100" y2="50" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                <text x={(frame.right_pct + 100) / 2} y="48" textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
+                {/* Top measurement */}
+                <line x1="50" y1="0" x2="50" y2={frame.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                <text x="50" y={frame.top_pct / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
+                {/* Bottom measurement */}
+                <line x1="50" y1={frame.bottom_pct} x2="50" y2="100" stroke="#D4AF37" strokeWidth="0.3" opacity="0.5" />
+                <text x="50" y={(frame.bottom_pct + 100) / 2 + 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3.5" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
+              </>}
+            </svg>
+          );
+        })()}
+
         {/* Defect markers */}
         {showDefects && defects
           .filter(d => d.image_side === side)
@@ -294,6 +342,19 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
+        {(centeringFront || centeringBack) && (
+          <button
+            type="button"
+            onClick={() => setShowCentering(!showCentering)}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${
+              showCentering
+                ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                : "border-[#333333] text-[#888888] hover:border-[#555555]"
+            }`}
+          >
+            {showCentering ? "Hide Centering" : "Show Centering"}
+          </button>
+        )}
         {zoom > 1 && (
           <button type="button" onClick={() => { setZoom(1); setPan({ x: 50, y: 50 }); }} className="text-[10px] text-[#555555] hover:text-[#888888]">
             Reset zoom

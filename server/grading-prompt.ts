@@ -43,6 +43,12 @@ Final centering subgrade = LOWER of front and back centering grades.
 
 For borderless or minimal-border cards: note this in your response. Assess image position relative to the card's physical edges. If borders are too thin to measure reliably, estimate and note your confidence is lower.
 
+INNER FRAME COORDINATES: For each side (front and back), return the inner artwork/frame border position as percentages of the cropped image dimensions. These are used to draw a centering overlay on the grading workstation.
+- front_inner_frame: { left_pct, right_pct, top_pct, bottom_pct } — the inner border rectangle as % from image edges
+- back_inner_frame: same for the back
+- For example, if the left border is 5% of card width, left_pct = 5.0, right_pct = 95.0
+- These should represent where the artwork/frame boundary actually IS, not where it should be
+
 ---
 
 ## CORNERS (examine all 8 — 4 front, 4 back)
@@ -183,6 +189,8 @@ You MUST respond with ONLY valid JSON. No other text before or after. No markdow
     "back_top_bottom": "60/40",
     "front_grade": 9,
     "back_grade": 9,
+    "front_inner_frame": { "left_pct": 5.2, "right_pct": 94.8, "top_pct": 7.1, "bottom_pct": 92.9 },
+    "back_inner_frame": { "left_pct": 4.9, "right_pct": 95.1, "top_pct": 6.8, "bottom_pct": 93.2 },
     "notes": "Front centering is good. Back within tolerance."
   },
   "corners": {

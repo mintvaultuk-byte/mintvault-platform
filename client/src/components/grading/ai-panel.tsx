@@ -36,6 +36,8 @@ export interface AiAnalysisResult {
     front_top_bottom: string;
     back_left_right: string;
     back_top_bottom: string;
+    front_inner_frame?: { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number } | null;
+    back_inner_frame?: { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number } | null;
     notes: string;
   };
   corners: {
