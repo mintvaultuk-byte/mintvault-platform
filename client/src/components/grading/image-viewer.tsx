@@ -34,7 +34,7 @@ interface Props {
   referenceImageUrl?: string | null;
 }
 
-const SIDES: Side[] = ["front", "back", "angled", "closeup"];
+const SIDES: Side[] = ["front", "back"];
 const VARIANTS: { key: Variant; label: string }[] = [
   { key: "original",     label: "Original" },
   { key: "greyscale",    label: "Greyscale" },

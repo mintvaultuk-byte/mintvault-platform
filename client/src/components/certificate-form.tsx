@@ -190,56 +190,6 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     }
   }
 
-  // ── AI Card Identify state (from uploaded image) ──────────────────────────
-  const [aiIdentifyLoading, setAiIdentifyLoading] = useState(false);
-  const [aiIdentifyError, setAiIdentifyError] = useState("");
-
-  async function runAiIdentify(imageFile: File) {
-    setAiIdentifyLoading(true);
-    setAiIdentifyError("");
-    try {
-      const fd = new FormData();
-      fd.append("image", imageFile);
-      const res = await fetch("/api/admin/identify-image", {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Identification failed");
-
-      const gameMap: Record<string, string> = {
-        pokemon: "Pokémon", yugioh: "Yu-Gi-Oh!", mtg: "Magic: The Gathering",
-        onepiece: "One Piece", sports: "Sports Card", "dragon ball": "Dragon Ball Super",
-      };
-
-      if (data.detected_name)  updateField("cardName", data.detected_name.toUpperCase());
-      if (data.detected_set)   updateField("setName", data.detected_set);
-      if (data.detected_year)  updateField("year", data.detected_year);
-      if (data.detected_number) updateField("cardNumber", data.detected_number.replace(/^#+/, ""));
-      if (data.detected_language) updateField("language", data.detected_language);
-      if (data.detected_game) {
-        const mapped = gameMap[data.detected_game.toLowerCase()] || data.detected_game;
-        updateField("cardGame", mapped);
-      }
-      if (data.detected_rarity) {
-        const { rarityCode } = mapRarityTextToCode(data.detected_rarity);
-        if (rarityCode && rarityCode !== "OTHER") {
-          applyUnifiedSelection(`RARITY:${rarityCode}`);
-        }
-      }
-      toast({
-        title: "Card identified!",
-        description: `${data.detected_name || "Unknown"} · ${data.detected_set || "Unknown set"} · Confidence: ${data.confidence || "unknown"}`,
-      });
-    } catch (e: any) {
-      setAiIdentifyError(e.message);
-      toast({ title: "Identification failed", description: e.message, variant: "destructive" });
-    } finally {
-      setAiIdentifyLoading(false);
-    }
-  }
-
   // ── AI Grading state ──────────────────────────────────────────────────────
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -1144,47 +1094,10 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           )}
         </fieldset>
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Images</legend>
+        {/* ── Card images and AI grading are handled by the GradingPanel workstation below ── */}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FileUpload
-              label="Front Image"
-              current={(certificate as any)?.frontImageUrl || certificate?.frontImagePath}
-              onChange={setFrontImage}
-              testId="input-front-image"
-            />
-            <FileUpload
-              label="Back Image"
-              current={(certificate as any)?.backImageUrl || certificate?.backImagePath}
-              onChange={setBackImage}
-              testId="input-back-image"
-            />
-          </div>
-
-          {/* AI Identify button */}
-          {frontImage && (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => runAiIdentify(frontImage)}
-                disabled={aiIdentifyLoading}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:opacity-90 disabled:opacity-50 transition-opacity"
-                data-testid="button-identify-ai"
-              >
-                {aiIdentifyLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
-                {aiIdentifyLoading ? "Identifying card…" : "Identify Card with AI"}
-              </button>
-              <p className="text-[#AAAAAA] text-[10px]">Uses Claude Vision to auto-fill card name, set, year, number, game, language and rarity from the front image.</p>
-              {aiIdentifyError && (
-                <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{aiIdentifyError}</p>
-              )}
-            </div>
-          )}
-        </fieldset>
-
-        {/* ── Build 1: Grading Image Upload — only in edit mode ── */}
-        {isEdit && (
+        {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
+        {false && isEdit && (
           <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
             <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Upload size={12} />
@@ -1325,8 +1238,8 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           </fieldset>
         )}
 
-        {/* ── AI Grading Panel — only in edit mode ── */}
-        {isEdit && (
+        {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
+        {false && isEdit && (
           <fieldset className="border border-[#D4AF37]/30 rounded-lg p-4 space-y-4">
             <legend className="text-[#D4AF37] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Cpu size={12} />

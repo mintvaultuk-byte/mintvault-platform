@@ -12,10 +12,10 @@ interface Props {
   hotFolderActive?: boolean;
 }
 
-type WizardStep = "setup" | "front" | "back" | "angled" | "closeup" | "quality";
+type WizardStep = "setup" | "front" | "back" | "quality";
 
-const STEP_ORDER: WizardStep[] = ["setup", "front", "back", "angled", "closeup", "quality"];
-const STEP_PROGRESS: Record<WizardStep, number> = { setup: 0, front: 25, back: 50, angled: 75, closeup: 90, quality: 100 };
+const STEP_ORDER: WizardStep[] = ["setup", "front", "back", "quality"];
+const STEP_PROGRESS: Record<WizardStep, number> = { setup: 0, front: 33, back: 66, quality: 100 };
 
 const STATUS_ICON = {
   pass: <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />,
@@ -267,7 +267,7 @@ export default function CaptureWizard({ certId, onComplete, existingQuality, hot
       {/* Step: Front */}
       {step === "front" && (
         <div className="space-y-4">
-          <h3 className="text-white text-base font-bold">Step 1 of 4 — Front of Card</h3>
+          <h3 className="text-white text-base font-bold">Step 1 of 2 — Front of Card</h3>
           <p className="text-[#888888] text-sm">Place the card <strong className="text-white">FACE UP</strong> on the scanner. All four edges and corners must be fully visible.</p>
           <UploadZone file={files.front || null} onFile={f => setFiles(p => ({ ...p, front: f }))} label="Drop your front scan here or click to browse" hotFolderActive={hotFolderActive} />
           <NavRow onBack={back} onNext={next} nextDisabled={!files.front} />
@@ -277,43 +277,23 @@ export default function CaptureWizard({ certId, onComplete, existingQuality, hot
       {/* Step: Back */}
       {step === "back" && (
         <div className="space-y-4">
-          <h3 className="text-white text-base font-bold">Step 2 of 4 — Back of Card</h3>
+          <h3 className="text-white text-base font-bold">Step 2 of 2 — Back of Card</h3>
           <p className="text-[#888888] text-sm">Flip the card <strong className="text-white">FACE DOWN</strong> — same position. Do not move the scanner or adjust lighting.</p>
           <UploadZone file={files.back || null} onFile={f => setFiles(p => ({ ...p, back: f }))} label="Drop your back scan here or click to browse" hotFolderActive={hotFolderActive} />
           <NavRow onBack={back} onNext={next} nextDisabled={!files.back} />
         </div>
       )}
 
-      {/* Step: Angled */}
-      {step === "angled" && (
-        <div className="space-y-4">
-          <h3 className="text-white text-base font-bold">Step 3 of 4 — Angled View <span className="text-[#888888] text-sm font-normal">(Optional)</span></h3>
-          <p className="text-[#888888] text-sm">Tilt the card <strong className="text-white">45° under direct light</strong>. This reveals scratches on holographic and foil surfaces invisible in flat scans.</p>
-          <p className="text-[#555555] text-xs">Recommended for holo, reverse holo, foil, and full art cards.</p>
-          <UploadZone file={files.angled || null} onFile={f => setFiles(p => ({ ...p, angled: f }))} label="Drop angled shot here or click to browse" hotFolderActive={hotFolderActive} />
-          <PhoneQRPanel certId={certId} imageType="angled" />
-          <NavRow onBack={back} onNext={next} onSkip={next} skipLabel="Skip — not holographic" />
-        </div>
-      )}
-
-      {/* Step: Close-up */}
-      {step === "closeup" && (
-        <div className="space-y-4">
-          <h3 className="text-white text-base font-bold">Step 4 of 4 — Close-up <span className="text-[#888888] text-sm font-normal">(Optional)</span></h3>
-          <p className="text-[#888888] text-sm">Photograph <strong className="text-white">any area of concern</strong>. If you've spotted a defect, capture a close-up for documentation.</p>
-          <UploadZone file={files.closeup || null} onFile={f => setFiles(p => ({ ...p, closeup: f }))} label="Drop close-up here or click to browse" hotFolderActive={hotFolderActive} />
-          <PhoneQRPanel certId={certId} imageType="closeup" />
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={back} className="flex items-center gap-1 text-[#888888] hover:text-[#CCCCCC] text-xs"><ChevronLeft size={13} /> Back</button>
-            <button
-              type="button" onClick={uploadAndCheck} disabled={uploading}
-              className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2.5 rounded-lg disabled:opacity-40 hover:opacity-90"
-            >
-              {uploading ? <Loader2 size={13} className="animate-spin" /> : null}
-              {uploading ? "Uploading…" : "Upload & Check Quality"}
-            </button>
-            {!uploading && <button type="button" onClick={uploadAndCheck} className="text-[#555555] text-xs hover:text-[#888888]">Skip close-up</button>}
-          </div>
+      {/* Upload + quality check — auto-triggered when entering quality step */}
+      {step === "quality" && !uploading && !Object.keys(quality).length && (
+        <div className="text-center py-4">
+          <button
+            type="button" onClick={uploadAndCheck} disabled={uploading}
+            className="flex items-center gap-2 mx-auto bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2.5 rounded-lg disabled:opacity-40 hover:opacity-90"
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : null}
+            {uploading ? "Uploading…" : "Upload & Check Quality"}
+          </button>
         </div>
       )}
 
