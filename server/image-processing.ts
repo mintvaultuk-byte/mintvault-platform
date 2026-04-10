@@ -16,6 +16,88 @@ export interface QualityResult {
 }
 
 /**
+ * Deskew: detect and correct slight rotation of a card scan.
+ * Samples the top edge of the thresholded image to find the card boundary slope,
+ * then rotates the original by the inverse angle. Capped at ±5°.
+ */
+export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
+  try {
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
+
+    // Work at reduced size for speed (max 1500px wide for angle detection)
+    const scale = Math.min(1, 1500 / meta.width);
+    const workW = Math.round(meta.width * scale);
+    const workH = Math.round(meta.height * scale);
+
+    // Greyscale → threshold → raw pixels
+    const { data, info } = await sharp(inputBuffer)
+      .resize(workW, workH, { fit: "fill" })
+      .greyscale()
+      .threshold(200) // white background → 255, card → 0
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const w = info.width;
+    const h = info.height;
+
+    // Sample top edge: for each column, find the first dark pixel (row)
+    const sampleCols = Math.min(w, 200);
+    const step = Math.max(1, Math.floor(w / sampleCols));
+    const points: { x: number; y: number }[] = [];
+
+    for (let col = Math.round(w * 0.1); col < Math.round(w * 0.9); col += step) {
+      for (let row = 0; row < Math.round(h * 0.4); row++) {
+        if (pixels[row * w + col] < 128) { // dark pixel = card
+          points.push({ x: col, y: row });
+          break;
+        }
+      }
+    }
+
+    if (points.length < 10) {
+      console.log("[deskew] not enough edge points detected, skipping");
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    // Linear regression: y = mx + b → angle = atan(m)
+    const n = points.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const denom = n * sumX2 - sumX * sumX;
+    if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
+
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const angle = Math.atan(slope) * (180 / Math.PI);
+
+    // Cap at ±5° — beyond that it's a bad scan, not a slight rotation
+    if (Math.abs(angle) > 5) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    // Skip tiny rotations (<0.2°) — not worth the processing
+    if (Math.abs(angle) < 0.2) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° too small, skipping`);
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    // Rotate the ORIGINAL full-resolution image by -angle
+    const rotated = await sharp(inputBuffer)
+      .rotate(-angle, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    console.log(`[deskew] corrected ${angle.toFixed(2)}°`);
+    return { buffer: rotated, angle };
+  } catch (err: any) {
+    console.warn("[deskew] detection failed, skipping:", err.message);
+    return { buffer: inputBuffer, angle: 0 };
+  }
+}
+
+/**
  * Auto-crop: detect card in scan and crop tight.
  * Uses Sharp trim() to remove scanner background, then validates the result.
  * Falls back to original if card detection is ambiguous.

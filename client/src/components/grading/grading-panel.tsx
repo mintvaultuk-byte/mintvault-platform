@@ -367,12 +367,36 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         />
       )}
 
-      {/* AI Panel */}
-      <AiPanel
-        certId={certId}
-        onAnalysisComplete={handleAiComplete}
-        referenceImageUrl={aiIdentification?.referenceImageUrl}
-      />
+      {/* AI Panel + Reprocess */}
+      <div className="flex items-start gap-3">
+        <div className="flex-1">
+          <AiPanel
+            certId={certId}
+            onAnalysisComplete={handleAiComplete}
+            referenceImageUrl={aiIdentification?.referenceImageUrl}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={async () => {
+            toast({ title: "Reprocessing images…" });
+            try {
+              const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, {
+                method: "POST", credentials: "include",
+              });
+              const d = await r.json();
+              if (!r.ok) throw new Error(d.error);
+              toast({ title: "Images reprocessed (deskewed + re-cropped)" });
+              queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
+            } catch (e: any) {
+              toast({ title: "Reprocess failed", description: e.message, variant: "destructive" });
+            }
+          }}
+          className="flex-shrink-0 flex items-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1"
+        >
+          Reprocess
+        </button>
+      </div>
 
       {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">

@@ -4254,7 +4254,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { autoCrop, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, autoCrop, generateVariants, checkImageQuality } = await import("./image-processing");
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -4276,17 +4276,20 @@ export async function registerRoutes(
           await uploadToR2(origKey, buffer, "image/jpeg");
           updates[`grading_${angle}_original`] = origKey;
 
-          // 2. Auto-crop
-          const { buffer: croppedBuf, cropped } = await autoCrop(buffer);
+          // 2. Deskew (straighten slight rotation before cropping)
+          const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
+
+          // 3. Auto-crop (now works on deskewed image for tighter/more accurate crop)
+          const { buffer: croppedBuf, cropped } = await autoCrop(deskewedBuf);
           const cropKey = `grading/${certId}/${angle}_cropped.${ext}`;
           await uploadToR2(cropKey, croppedBuf, "image/jpeg");
           updates[`grading_${angle}_cropped`] = cropKey;
 
-          // 3. Quality check on cropped image
+          // 4. Quality check on cropped image
           const quality = await checkImageQuality(croppedBuf);
-          qualityResults[angle] = { ...quality, cropped };
+          qualityResults[angle] = { ...quality, cropped, deskewAngle };
 
-          // 4. Also update the primary front/back image paths used for display + AI
+          // 5. Also update the primary front/back image paths used for display + AI
           if (angle === "front") {
             updates["front_image_path"] = r2KeyForImage(certId, "front", ext);
             await uploadToR2(r2KeyForImage(certId, "front", ext), croppedBuf, "image/jpeg");
@@ -4295,7 +4298,7 @@ export async function registerRoutes(
             await uploadToR2(r2KeyForImage(certId, "back", ext), croppedBuf, "image/jpeg");
           }
 
-          // 5. Variants — fire-and-forget (don't block the response)
+          // 6. Variants — fire-and-forget (don't block the response)
           setImmediate(async () => {
             try {
               const { greyscale, highcontrast, edgeenhanced, inverted } = await generateVariants(croppedBuf);
@@ -4389,6 +4392,78 @@ export async function registerRoutes(
       }
     }
   );
+
+  // ── Reprocess images: re-run deskew + crop + variants on existing originals
+  app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
+    try {
+      const { deskewCard: dsk, autoCrop: ac, generateVariants: gv } = await import("./image-processing");
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+      const results: Record<string, any> = {};
+
+      for (const side of ["front", "back"] as const) {
+        const origKey = c[`gradingFront${side === "front" ? "" : ""}Original`] ||
+          (side === "front" ? c.gradingFrontOriginal : c.gradingBackOriginal) ||
+          (side === "front" ? c.frontImagePath : c.backImagePath);
+        if (!origKey) continue;
+
+        // Fetch original from R2
+        let origBuf: Buffer;
+        try {
+          const url = await getR2SignedUrl(origKey, 300);
+          const resp = await fetch(url);
+          origBuf = Buffer.from(await resp.arrayBuffer());
+        } catch { continue; }
+
+        console.log(`[reprocess] ${certIdStr} ${side}: fetched ${(origBuf.length / 1024).toFixed(0)}KB`);
+
+        // Run pipeline: deskew → crop → save
+        const { buffer: deskewed, angle } = await dsk(origBuf);
+        const { buffer: cropped } = await ac(deskewed);
+
+        const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
+        await uploadToR2(cropKey, cropped, "image/jpeg");
+
+        // Update display path
+        if (side === "front") {
+          const displayKey = r2KeyForImage(certIdStr, "front", "jpg");
+          await uploadToR2(displayKey, cropped, "image/jpeg");
+          await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        } else {
+          const displayKey = r2KeyForImage(certIdStr, "back", "jpg");
+          await uploadToR2(displayKey, cropped, "image/jpeg");
+          await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        }
+
+        // Regenerate variants sequentially
+        const variants = await gv(cropped);
+        for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
+          const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
+          await uploadToR2(vKey, vBuf, "image/jpeg");
+          const col = `grading_${side}_${vName}`;
+          await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${id}`);
+          // Update the specific variant column
+          if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+          if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
+          if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
+          if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+        }
+
+        results[side] = { angle, processed: true };
+        console.log(`[reprocess] ${certIdStr} ${side}: deskew=${angle.toFixed(2)}° variants=4`);
+      }
+
+      res.json({ success: true, results });
+    } catch (err: any) {
+      console.error("[reprocess] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/admin/certificates/:id/images", requireAdmin, async (req, res) => {
     try {
