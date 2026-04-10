@@ -280,6 +280,21 @@ Return ONLY valid JSON with no other text:
 }
 
 For detected_number: Return ONLY the card number, NOT the "/total" suffix. For example, if you see "212/197" on the card, return just "212". If you see "025/078", return just "025". The number before the slash is the card number; the number after is the set total which should be ignored.
+
+IMPORTANT SET NAME IDENTIFICATION:
+The set name is the official TCG expansion name (e.g. "Obsidian Flames", "Paldea Evolved", "Paradox Rift", "Temporal Forces", "Twilight Masquerade", "Surging Sparks", "Prismatic Evolutions").
+
+Do NOT confuse these with:
+- Pokémon mechanics words printed on cards: "Tera", "V", "VMAX", "VSTAR", "ex", "GX", "EX"
+- Card rarity indicators: "Rare", "Ultra Rare", "Secret Rare"
+- Series names: "Scarlet & Violet", "Sword & Shield" (these are parent series, not the set)
+
+To find the correct set:
+1. Look at the small set symbol in the bottom-left corner of modern Pokémon cards
+2. Look for the set code stamp (e.g. "OBF" = Obsidian Flames, "PAR" = Paradox Rift, "PAL" = Paldea Evolved, "TEF" = Temporal Forces, "SSP" = Surging Sparks, "SV" = Scarlet & Violet base, "MEW" = 151, "PRE" = Prismatic Evolutions)
+3. A card number HIGHER than the set total (e.g. 212/197) means it is a secret rare
+4. If you are not sure of the set, return "Unknown" — do NOT guess by using mechanic words like "Tera" as the set name
+
 For detected_game, use one of: "pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"
 For confidence, use: "high", "medium", "low"
 If you cannot identify the card, set confidence to "low" and fill in what you can detect.`;

@@ -2867,7 +2867,14 @@ export async function registerRoutes(
       if (req.query.status && req.query.status !== "all") filters.status = req.query.status as string;
       if (req.query.ownershipStatus && req.query.ownershipStatus !== "all") filters.ownershipStatus = req.query.ownershipStatus as string;
 
-      const certs = await storage.listCertificates(Object.keys(filters).length > 0 ? filters : undefined);
+      const allCerts = await storage.listCertificates(Object.keys(filters).length > 0 ? filters : undefined);
+      // Hide empty drafts (no card name, no images, no grade) unless a specific ID is requested
+      const includeId = req.query.includeId ? Number(req.query.includeId) : null;
+      const certs = allCerts.filter((c: any) => {
+        if (includeId && c.id === includeId) return true;
+        if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
+        return true;
+      });
       const certsWithUrls = await Promise.all(certs.map(async (c: any) => {
         let frontImageUrl: string | null = null;
         let backImageUrl: string | null = null;
@@ -2883,6 +2890,43 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("List certs error:", error.message, error.stack);
       res.status(500).json({ error: `Failed to list certificates: ${error.message}` });
+    }
+  });
+
+  // ── Create a draft certificate (for "New Certificate" → immediate GradingPanel mount)
+  app.post("/api/admin/certificates/draft", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        INSERT INTO certificates (status, label_type, grade_type, created_by, issued_at, updated_at)
+        VALUES ('draft', 'Standard', 'numeric', 'admin', NOW(), NOW())
+        RETURNING id, certificate_number
+      `);
+      const row = result.rows[0] as any;
+      console.log(`[admin] created draft cert: id=${row.id} certId=${row.certificate_number}`);
+      res.json({ id: row.id, certId: row.certificate_number });
+    } catch (err: any) {
+      console.error("[admin] draft cert error:", err.message);
+      res.status(500).json({ error: "Failed to create draft certificate" });
+    }
+  });
+
+  // ── Cleanup abandoned drafts (manual trigger for now)
+  app.delete("/api/admin/certificates/cleanup-drafts", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        DELETE FROM certificates
+        WHERE status = 'draft'
+          AND issued_at < NOW() - INTERVAL '24 hours'
+          AND front_image_path IS NULL
+          AND grade IS NULL
+        RETURNING id, certificate_number
+      `);
+      const deleted = result.rows.length;
+      console.log(`[admin] cleaned up ${deleted} abandoned draft certs`);
+      res.json({ deleted, ids: result.rows.map((r: any) => r.certificate_number) });
+    } catch (err: any) {
+      console.error("[admin] cleanup-drafts error:", err.message);
+      res.status(500).json({ error: "Failed to cleanup drafts" });
     }
   });
 

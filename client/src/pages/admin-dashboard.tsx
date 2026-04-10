@@ -107,10 +107,36 @@ export default function AdminDashboard({ onLogout }: Props) {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
-  const handleNewCert = () => {
-    setEditingCert(null);
-    setShowForm(true);
-    setActiveTab("certs");
+  const handleNewCert = async () => {
+    try {
+      // Create a draft cert to get an ID for the GradingPanel
+      const res = await fetch("/api/admin/certificates/draft", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create draft");
+      // Refetch certs so the draft appears, then edit it
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      // Find the new draft cert in the refreshed data
+      const certRes = await fetch(`/api/admin/certificates?includeId=${data.id}`, { credentials: "include" });
+      const certs = await certRes.json();
+      const draftCert = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === data.id);
+      if (draftCert) {
+        setEditingCert(draftCert);
+      } else {
+        // Fallback: create a minimal cert object to edit
+        setEditingCert({ id: data.id, certId: data.certId, status: "draft" } as any);
+      }
+      setShowForm(true);
+      setActiveTab("certs");
+    } catch (err: any) {
+      console.error("[admin] new cert error:", err);
+      // Fallback to old behavior
+      setEditingCert(null);
+      setShowForm(true);
+      setActiveTab("certs");
+    }
   };
 
   const handleGoToCerts = (filter: CertsFilter = {}) => {
