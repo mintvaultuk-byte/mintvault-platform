@@ -88,7 +88,7 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
         <textarea
           value={pending.description}
           onChange={e => onChange({ ...pending, description: e.target.value })}
-          placeholder="Brief description of the defect…"
+          placeholder="Optional notes"
           rows={2}
           className="w-full bg-[#0A0A0A] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1.5 placeholder-[#444444] resize-none"
         />
@@ -108,7 +108,7 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
         <button
           type="button"
           onClick={onSave}
-          disabled={!pending.type || !pending.description.trim()}
+          disabled={!pending.type}
           className="flex-1 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase px-3 py-1.5 rounded hover:bg-[#D4AF37]/20 disabled:opacity-40"
         >
           Save

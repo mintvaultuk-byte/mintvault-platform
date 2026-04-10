@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Pencil, Eye, EyeOff, X, Maximize2 } from "lucide-react";
+import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import DefectHeatmap from "./defect-heatmap";
 import { DefectForm } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
@@ -59,6 +59,18 @@ function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
 
 function hasAny(urls: ImageUrls, side: Side): boolean {
   return !!(urls[`${side}_original`] || urls[`${side}_cropped`]);
+}
+
+const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
+
+function nextZoomStep(current: number): number {
+  for (const s of ZOOM_STEPS) { if (s > current + 0.01) return s; }
+  return ZOOM_STEPS[ZOOM_STEPS.length - 1];
+}
+
+function prevZoomStep(current: number): number {
+  for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) { if (ZOOM_STEPS[i] < current - 0.01) return ZOOM_STEPS[i]; }
+  return 1;
 }
 
 const PULSE_CSS = `
@@ -142,18 +154,22 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       setPendingDefect(p => ({ ...p, image_side: side, x_percent: cx, y_percent: cy, location: locDesc }));
       return;
     }
-    if (zoom === 1) {
+    if (zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.01) {
+      zoomReset();
+    } else {
       const rect = e.currentTarget.getBoundingClientRect();
-      setZoom(2);
       setPan({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
-    } else if (zoom === 2) setZoom(4);
-    else { setZoom(1); setPan({ x: 50, y: 50 }); }
+      setZoom(nextZoomStep(zoom));
+    }
   }
 
   function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    setZoom(z => Math.max(1, Math.min(8, z - e.deltaY * 0.005)));
+    e.preventDefault(); // prevent page scroll but don't zoom — use buttons instead
   }
+
+  function zoomIn() { setZoom(z => nextZoomStep(z)); }
+  function zoomOut() { setZoom(z => prevZoomStep(z)); }
+  function zoomReset() { setZoom(1); setPan({ x: 50, y: 50 }); }
 
   function handleMouseDown(e: React.MouseEvent) {
     if (zoom <= 1 && !markMode) return;
@@ -190,7 +206,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
             return (
               <button key={s} type="button"
-                onClick={() => { setSide(s); setShowReference(false); }}
+                onClick={() => { setSide(s); setShowReference(false); zoomReset(); }}
                 disabled={!hasAny(urls, s)}
                 className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                   side === s && !showReference
@@ -268,20 +284,25 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             )}
 
             {/* Defect ring markers */}
-            {showDefects && sideDefects.map(d => {
-              const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
-              const isHL = highlightId === d.id;
-              const col = isAi ? "#DC2626" : "#D4AF37";
-              return (
-                <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
-                  style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                  <div className="w-full h-full rounded-full transition-all"
-                    style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }} />
-                  <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
-                    style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{isAi ? "AI" : d.id}</span>
-                </div>
-              );
-            })}
+            {showDefects && (() => {
+              let humanIdx = 0;
+              return sideDefects.map(d => {
+                const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
+                if (!isAi) humanIdx++;
+                const isHL = highlightId === d.id;
+                const col = isAi ? "#DC2626" : "#D4AF37";
+                const badge = isAi ? "AI" : String(humanIdx);
+                return (
+                  <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
+                    style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
+                    <div className="w-full h-full rounded-full transition-all"
+                      style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }} />
+                    <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
+                      style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{badge}</span>
+                  </div>
+                );
+              });
+            })()}
 
             {/* Pending marker */}
             {pendingXY && (
@@ -298,11 +319,24 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </div>
         )}
 
-        {zoom > 1 && (
-          <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded z-10">
-            {Math.round(zoom * 100)}%
-          </div>
-        )}
+        {/* Zoom toolbar */}
+        <div className="absolute bottom-2 right-2 z-10 flex items-center gap-0.5 bg-black/70 rounded-full px-1 py-0.5">
+          <button type="button" onClick={(e) => { e.stopPropagation(); zoomOut(); }} disabled={zoom <= 1}
+            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
+            <ZoomOut size={14} />
+          </button>
+          <span className="text-white text-[10px] font-mono w-10 text-center select-none">{Math.round(zoom * 100)}%</span>
+          <button type="button" onClick={(e) => { e.stopPropagation(); zoomIn(); }} disabled={zoom >= 6}
+            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
+            <ZoomIn size={14} />
+          </button>
+          {zoom > 1 && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); zoomReset(); }}
+              className="w-7 h-7 flex items-center justify-center text-[#888888] hover:text-white transition-colors rounded-full">
+              <RotateCcw size={12} />
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -407,11 +441,6 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           <button type="button" onClick={() => setShowCentering(!showCentering)}
             className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#333333] text-[#888888] hover:border-[#555555]"}`}>
             {showCentering ? "Hide Centering" : "Show Centering"}
-          </button>
-        )}
-        {zoom > 1 && (
-          <button type="button" onClick={() => { setZoom(1); setPan({ x: 50, y: 50 }); }} className="text-[10px] text-[#555555] hover:text-[#888888]">
-            Reset zoom
           </button>
         )}
       </div>

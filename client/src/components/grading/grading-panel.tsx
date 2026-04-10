@@ -283,7 +283,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     }
   }
 
-  async function approveGrade() {
+  async function approveGrade(andNext = false) {
     setApproving(true);
     try {
       const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
@@ -296,7 +296,26 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       if (!res.ok) throw new Error(data.error || "Approve failed");
       setApproved(true);
       setShowConfirm(false);
-      toast({ title: `Grade approved — ${finalGradeOverall} ${label}` });
+      toast({ title: `${certIdStr || "Certificate"} approved — ${finalGradeOverall} ${label}` });
+
+      if (andNext) {
+        // Create next cert and switch to it
+        try {
+          const nextRes = await fetch("/api/admin/certificates/new", {
+            method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+          });
+          if (nextRes.ok) {
+            const nextCert = await nextRes.json();
+            if (nextCert?.id) {
+              onGradeApproved?.(certIdStr, finalGradeOverall);
+              onCertUpdated?.(); // triggers parent refetch which will switch to the new cert
+              // Parent handles the navigation via onGradeApproved
+              return;
+            }
+          }
+        } catch { /* fall through to normal close */ }
+      }
+
       onGradeApproved?.(certIdStr, finalGradeOverall);
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
@@ -543,15 +562,23 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 <span>This card qualifies for a BLACK LABEL — all subgrades are perfect 10.0</span>
               </div>
             )}
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setShowConfirm(false)} className="flex-1 border border-[#333333] text-[#888888] text-xs py-2 rounded hover:bg-[#1A1A1A]">Cancel</button>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowConfirm(false)} className="border border-[#333333] text-[#888888] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]">Cancel</button>
               <button
                 type="button"
-                onClick={approveGrade}
+                onClick={() => approveGrade(false)}
+                disabled={approving}
+                className="flex-1 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold py-2 rounded hover:bg-[#D4AF37]/10 disabled:opacity-40"
+              >
+                {approving ? "Approving…" : "Approve & Close"}
+              </button>
+              <button
+                type="button"
+                onClick={() => approveGrade(true)}
                 disabled={approving}
                 className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
-                {approving ? "Approving…" : "Approve"}
+                {approving ? "Approving…" : "Approve & Next"}
               </button>
             </div>
           </div>

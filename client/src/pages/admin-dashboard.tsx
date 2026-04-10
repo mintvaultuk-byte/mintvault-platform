@@ -172,7 +172,22 @@ export default function AdminDashboard({ onLogout }: Props) {
                 cardName={editingCert.cardName || ""}
                 cardSet={editingCert.setName || ""}
                 existingGrade={editingCert.gradeOverall}
-                onGradeApproved={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] })}
+                onGradeApproved={async () => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                  // Check if a new cert was just created (from "Approve & Next") — switch to it
+                  try {
+                    const r = await fetch("/api/admin/certificates?limit=1&sort=newest", { credentials: "include" });
+                    const certs = await r.json();
+                    const newest = Array.isArray(certs) ? certs[0] : null;
+                    if (newest && newest.id !== editingCert.id && newest.cardName === "(untitled)") {
+                      setEditingCert(newest);
+                      return;
+                    }
+                  } catch { /* ignore */ }
+                  // No new cert → close form
+                  setShowForm(false);
+                  setEditingCert(null);
+                }}
                 onCertUpdated={async () => {
                   // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
                   try {
