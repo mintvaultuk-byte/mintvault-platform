@@ -136,6 +136,51 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
   const [autofillLoading, setAutofillLoading] = useState(false);
   const [autofillRan, setAutofillRan] = useState(false);
+
+  // AI Identify-only state
+  const [identifyLoading, setIdentifyLoading] = useState(false);
+  const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
+  const [identifyVerified, setIdentifyVerified] = useState(false);
+
+  async function runIdentifyOnly() {
+    if (!isEdit || !certificate?.id) return;
+    setIdentifyLoading(true);
+    setIdentifyConfidence(null);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify-only`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Identification failed");
+
+      setIdentifyConfidence(data.confidence);
+      setIdentifyVerified(data.tcgVerified);
+
+      if (data.detailsWritten && data.cert) {
+        // Directly update form fields from the returned cert
+        const c = data.cert;
+        const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
+        const yearMatch = String(c.year || "").match(/\d{4}/);
+        setForm(prev => ({
+          ...prev,
+          cardName: isEmpty(prev.cardName) ? (c.cardName || prev.cardName) : prev.cardName,
+          setName: isEmpty(prev.setName) ? (c.setName || prev.setName) : prev.setName,
+          cardNumber: isEmpty(prev.cardNumber) ? (c.cardNumber || prev.cardNumber) : prev.cardNumber,
+          year: isEmpty(prev.year) ? (yearMatch ? yearMatch[0] : prev.year) : prev.year,
+          cardGame: isEmpty(prev.cardGame) ? (c.cardGame || prev.cardGame) : prev.cardGame,
+          rarity: isEmpty(prev.rarity) ? (c.rarity || prev.rarity) : prev.rarity,
+          language: isEmpty(prev.language) ? (c.language || prev.language) : prev.language,
+        }));
+        toast({ title: "Card identified", description: `${data.identification?.officialName || data.identification?.detected_name || "Card"} — ${data.identification?.officialSet || data.identification?.detected_set || "Unknown set"}` });
+      } else {
+        toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Identification failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIdentifyLoading(false);
+    }
+  }
   const [manuallyEdited, setManuallyEdited] = useState<Set<ProtectedField>>(new Set());
   const [suggestions, setSuggestions] = useState<CardMaster[]>([]);
   const [fallbackMatch, setFallbackMatch] = useState<CardMaster | null>(null);
@@ -573,6 +618,40 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
             }));
           }}
         />}
+        {/* AI Identify button — populate card details from uploaded scans */}
+        {isEdit && certificate?.id && (
+          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Card Identification</p>
+                <p className="text-[#888888] text-[10px] mt-0.5">Auto-fill card details from the uploaded scan (fast, no grading)</p>
+              </div>
+              <button
+                type="button"
+                onClick={runIdentifyOnly}
+                disabled={identifyLoading}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shrink-0"
+              >
+                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {identifyLoading ? "Identifying…" : "Identify Card"}
+              </button>
+            </div>
+            {identifyConfidence && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
+                <span className={identifyConfidence === "high" ? "text-emerald-600" : identifyConfidence === "medium" ? "text-yellow-600" : "text-red-600"}>
+                  {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                </span>
+                {identifyConfidence !== "high" && !identifyVerified && (
+                  <button type="button" onClick={runIdentifyOnly} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
 

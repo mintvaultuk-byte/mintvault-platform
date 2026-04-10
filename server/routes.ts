@@ -4929,6 +4929,94 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/certificates/:id/identify-only — cheap Haiku + TCG API, no grading
+  app.post("/api/admin/certificates/:id/identify-only", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image — upload images first" });
+
+      // Fetch front image from R2
+      let frontBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(frontKey, 300);
+        const resp = await fetch(url);
+        frontBuf = Buffer.from(await resp.arrayBuffer());
+      } catch { return res.status(400).json({ error: "Could not fetch front image" }); }
+
+      // Identify with Claude Haiku
+      const rawId = await identifyCardFromBuffer(frontBuf, "image/jpeg");
+
+      // Verify with Pokemon TCG API
+      let enrichedId = await verifyAndEnrichCardData(rawId);
+      const game = rawId.detected_game?.toLowerCase();
+      const tcgVerified = game === "pokemon";
+      let tcgResult: any = { verified: false };
+      if (game === "pokemon") {
+        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity);
+        if (tcgResult.verified) {
+          enrichedId = {
+            ...enrichedId, verified: true,
+            officialName: tcgResult.officialCardName || enrichedId.officialName,
+            officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+            officialNumber: rawId.detected_number,
+            referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+            dbSource: "pokemon-tcg-api",
+            detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+            detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+            detected_year: tcgResult.officialYear || enrichedId.detected_year,
+          };
+        }
+      }
+
+      // Confidence guard — same logic as v184
+      const aiConfidence = rawId.confidence || "low";
+      const verified = tcgResult.verified === true;
+      const shouldWrite = verified || aiConfidence === "high";
+
+      if (shouldWrite) {
+        const cardName = enrichedId.officialName || enrichedId.detected_name;
+        const setName = enrichedId.officialSet || enrichedId.detected_set;
+        const cardNumber = enrichedId.detected_number;
+        const cardGame = enrichedId.detected_game || "pokemon";
+        const rarity = enrichedId.detected_rarity;
+        const yearMatch = String(enrichedId.detected_year || "").match(/\d{4}/);
+        const yearText = yearMatch ? yearMatch[0] : null;
+
+        await db.execute(sql`
+          UPDATE certificates SET
+            card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+            set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+            card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+            year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+            card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+            rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+        console.log(`[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText}`);
+      } else {
+        console.log(`[identify-only] cert ${id}: confidence=${aiConfidence} tcg=${verified} — NOT writing details`);
+      }
+
+      const updatedCert = await storage.getCertificate(id);
+      res.json({
+        identification: enrichedId,
+        confidence: aiConfidence,
+        tcgVerified: verified,
+        detailsWritten: shouldWrite,
+        cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
+      });
+    } catch (err: any) {
+      console.error("[identify-only] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/admin/certificates/:id/analyze
   app.post("/api/admin/certificates/:id/analyze", requireAdmin, async (req, res) => {
     try {
