@@ -2896,13 +2896,15 @@ export async function registerRoutes(
   // ── Create a draft certificate (for "New Certificate" → immediate GradingPanel mount)
   app.post("/api/admin/certificates/draft", requireAdmin, async (_req, res) => {
     try {
+      // Allocate a real cert number (MV124, MV125, etc.) so the record is valid
+      const certNumber = await storage.getNextCertId();
       const result = await db.execute(sql`
-        INSERT INTO certificates (status, label_type, grade_type, language, created_by, issued_at, updated_at)
-        VALUES ('draft', 'Standard', 'numeric', 'English', 'admin', NOW(), NOW())
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, created_by, issued_at, updated_at)
+        VALUES (${certNumber}, 'draft', 'Standard', 'numeric', 'English', 'admin', NOW(), NOW())
         RETURNING *
       `);
       const row = result.rows[0] as any;
-      console.log(`[admin] created draft cert: id=${row.id} certId=${row.certificate_number}`);
+      console.log(`[admin] created draft cert: id=${row.id} certId=${certNumber}`);
       // Return full cert object with normalized certId so the frontend can use it directly as editingCert
       const cert = {
         ...row,

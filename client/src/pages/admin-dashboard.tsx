@@ -108,27 +108,28 @@ export default function AdminDashboard({ onLogout }: Props) {
   };
 
   const handleNewCert = async () => {
+    // Create a draft cert to get an ID so the GradingPanel can mount
     try {
-      // Create a draft cert to get an ID so the GradingPanel can mount immediately
       const res = await fetch("/api/admin/certificates/draft", {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create draft");
-
-      // Use the full cert object returned by the draft endpoint
-      setEditingCert(data.cert);
-      setShowForm(true);
-      setActiveTab("certs");
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-    } catch (err: any) {
-      console.error("[admin] new cert error:", err);
-      // Fallback to old behavior (no workstation, but at least the form works)
-      setEditingCert(null);
-      setShowForm(true);
-      setActiveTab("certs");
-    }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.cert && data.cert.id) {
+          setEditingCert(data.cert);
+          setShowForm(true);
+          setActiveTab("certs");
+          queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+          return; // success — exit early
+        }
+      }
+    } catch { /* fall through to fallback */ }
+    // Fallback: open form in new-cert mode (no workstation)
+    setEditingCert(null);
+    setShowForm(true);
+    setActiveTab("certs");
   };
 
   const handleGoToCerts = (filter: CertsFilter = {}) => {
