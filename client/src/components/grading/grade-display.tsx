@@ -13,10 +13,10 @@ interface Props {
   isBlack: boolean;
 }
 
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1];
+const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function subgradeColor(g: number): string {
-  if (g >= 9.5) return "#D4AF37";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
@@ -35,7 +35,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
   const display = manualOverride ?? overall;
 
   const weighted = (sub.centering * 0.10) + (sub.corners * 0.25) + (sub.edges * 0.25) + (sub.surface * 0.40);
-  const rounded = Math.round(weighted * 2) / 2;
+  const rounded = Math.floor(weighted);
   const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
   const capped = Math.min(rounded, lowest + 1.0);
   const creaseCap = hasCrease ? 5.0 : 99;
@@ -83,7 +83,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
       {showCalc && (
         <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-3 text-[10px] text-[#666666] font-mono space-y-1">
           <p>Weighted: ({sub.centering}×10%) + ({sub.corners}×25%) + ({sub.edges}×25%) + ({sub.surface}×40%) = {weighted.toFixed(2)}</p>
-          <p>→ Rounded to nearest 0.5: {rounded}</p>
+          <p>→ Floored to whole number: {rounded}</p>
           <p>→ Lowest subgrade ({lowest}) + 1.0 = max {lowest + 1.0} — result: {capped}</p>
           {hasCrease && <p className="text-red-400">→ Crease cap applied: max 5.0 — result: {Math.min(capped, creaseCap)}</p>}
           {hasTear   && <p className="text-red-400">→ Tear cap applied: max 3.0 — result: {Math.min(capped, tearCap)}</p>}

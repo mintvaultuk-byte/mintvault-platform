@@ -252,6 +252,27 @@ export async function verifyPokemonCardWithTcgApi(
   }
 }
 
+// ── Grade clamping (whole numbers only) ───────────────────────────────────
+
+/** Clamp any grade value to a whole number 1-10 */
+function clampGrade(value: unknown): number {
+  const n = typeof value === "number" ? value : parseFloat(String(value));
+  if (isNaN(n)) return 1;
+  return Math.max(1, Math.min(10, Math.floor(n)));
+}
+
+/** Enforce whole-number grades on all fields of a GradingAnalysis result */
+function clampAllGrades(result: GradingAnalysis): GradingAnalysis {
+  if (typeof result.overall_grade === "number") {
+    result.overall_grade = clampGrade(result.overall_grade);
+  }
+  if (result.centering) result.centering.subgrade = clampGrade(result.centering.subgrade);
+  if (result.corners)   result.corners.subgrade   = clampGrade(result.corners.subgrade);
+  if (result.edges)     result.edges.subgrade     = clampGrade(result.edges.subgrade);
+  if (result.surface)   result.surface.subgrade   = clampGrade(result.surface.subgrade);
+  return result;
+}
+
 // ── Image resize for Claude Vision API ────────────────────────────────────
 
 /**
@@ -346,12 +367,12 @@ export async function analyzeCardFromBuffers(
   }
 
   try {
-    return parseJson<GradingAnalysis>(text);
+    return clampAllGrades(parseJson<GradingAnalysis>(text));
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
       const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096);
-      return parseJson<GradingAnalysis>(fixedText);
+      return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
     }
@@ -604,7 +625,7 @@ export async function analyzeCard(
 
   // Parse with one retry if invalid JSON
   try {
-    return parseJson<GradingAnalysis>(text);
+    return clampAllGrades(parseJson<GradingAnalysis>(text));
   } catch {
     // Retry: ask Claude to fix the JSON
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
@@ -613,7 +634,7 @@ export async function analyzeCard(
         [{ type: "text", text: fixPrompt }],
         4096
       );
-      return parseJson<GradingAnalysis>(fixedText);
+      return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
     }

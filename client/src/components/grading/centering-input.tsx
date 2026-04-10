@@ -12,11 +12,11 @@ interface Props {
   onOverride: (val: number | null) => void;
 }
 
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1];
+const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number | null): string {
   if (g === null) return "#888888";
-  if (g >= 9.5) return "#D4AF37";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8) return "#16A34A";
   if (g >= 6) return "#CA8A04";
   return "#DC2626";

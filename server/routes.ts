@@ -2897,13 +2897,33 @@ export async function registerRoutes(
   app.post("/api/admin/certificates/draft", requireAdmin, async (_req, res) => {
     try {
       const result = await db.execute(sql`
-        INSERT INTO certificates (status, label_type, grade_type, created_by, issued_at, updated_at)
-        VALUES ('draft', 'Standard', 'numeric', 'admin', NOW(), NOW())
-        RETURNING id, certificate_number
+        INSERT INTO certificates (status, label_type, grade_type, language, created_by, issued_at, updated_at)
+        VALUES ('draft', 'Standard', 'numeric', 'English', 'admin', NOW(), NOW())
+        RETURNING *
       `);
       const row = result.rows[0] as any;
       console.log(`[admin] created draft cert: id=${row.id} certId=${row.certificate_number}`);
-      res.json({ id: row.id, certId: row.certificate_number });
+      // Return full cert object with normalized certId so the frontend can use it directly as editingCert
+      const cert = {
+        ...row,
+        certId: normalizeCertId(row.certificate_number),
+        cardName: row.card_name || "",
+        setName: row.set_name || "",
+        cardNumber: row.card_number_display || "",
+        cardGame: row.card_game || "",
+        language: row.language || "English",
+        year: row.year_text || "",
+        notes: row.notes || "",
+        gradeOverall: row.grade || "",
+        gradeType: row.grade_type || "numeric",
+        labelType: row.label_type || "Standard",
+        frontImagePath: row.front_image_path || null,
+        backImagePath: row.back_image_path || null,
+        rarity: row.rarity || "",
+        variant: row.variant || "",
+        designations: row.designations || [],
+      };
+      res.json({ id: row.id, certId: cert.certId, cert });
     } catch (err: any) {
       console.error("[admin] draft cert error:", err.message);
       res.status(500).json({ error: "Failed to create draft certificate" });

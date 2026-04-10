@@ -109,30 +109,22 @@ export default function AdminDashboard({ onLogout }: Props) {
 
   const handleNewCert = async () => {
     try {
-      // Create a draft cert to get an ID for the GradingPanel
+      // Create a draft cert to get an ID so the GradingPanel can mount immediately
       const res = await fetch("/api/admin/certificates/draft", {
         method: "POST",
         credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create draft");
-      // Refetch certs so the draft appears, then edit it
-      await queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      // Find the new draft cert in the refreshed data
-      const certRes = await fetch(`/api/admin/certificates?includeId=${data.id}`, { credentials: "include" });
-      const certs = await certRes.json();
-      const draftCert = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === data.id);
-      if (draftCert) {
-        setEditingCert(draftCert);
-      } else {
-        // Fallback: create a minimal cert object to edit
-        setEditingCert({ id: data.id, certId: data.certId, status: "draft" } as any);
-      }
+
+      // Use the full cert object returned by the draft endpoint
+      setEditingCert(data.cert);
       setShowForm(true);
       setActiveTab("certs");
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
     } catch (err: any) {
       console.error("[admin] new cert error:", err);
-      // Fallback to old behavior
+      // Fallback to old behavior (no workstation, but at least the form works)
       setEditingCert(null);
       setShowForm(true);
       setActiveTab("certs");
