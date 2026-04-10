@@ -150,7 +150,7 @@ export default function AdminDashboard({ onLogout }: Props) {
             certificate={editingCert}
             onSuccess={handleFormClose}
           />
-          {editingCert && editingCert.id && (
+          {editingCert && editingCert.id ? (
             <div className="mt-6 space-y-6">
               <GradingPanel
                 certId={editingCert.id}
@@ -164,6 +164,11 @@ export default function AdminDashboard({ onLogout }: Props) {
                 cert={editingCert}
                 onUpdated={(updated) => setEditingCert(updated)}
               />
+            </div>
+          ) : (
+            <div className="mt-6 border border-[#D4AF37]/20 rounded-lg p-6 text-center">
+              <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Image Capture & AI Grading</p>
+              <p className="text-[#888888] text-sm">Save the certificate first to enable image upload and AI grading.</p>
             </div>
           )}
         </div>
