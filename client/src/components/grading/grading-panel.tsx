@@ -471,6 +471,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               onOverride={setOverallOverride}
               gradeLabel={label}
               isBlack={isBlack}
+              strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
             />
           )}
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Star } from "lucide-react";
+import { Star, Info } from "lucide-react";
 import type { SubGrades } from "./grade-logic";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   onOverride: (val: number | null) => void;
   gradeLabel: string;
   isBlack: boolean;
+  strengthScore?: number | null;
 }
 
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -29,7 +30,13 @@ function overallBg(g: number): string {
   return "from-[#444444] to-[#222222]";
 }
 
-export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, gradeLabel, isBlack }: Props) {
+function strengthColor(s: number): string {
+  if (s >= 80) return "#16A34A"; // green — strong
+  if (s >= 40) return "#D4AF37"; // gold — solid
+  return "#D97706"; // amber — weak
+}
+
+export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, gradeLabel, isBlack, strengthScore }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const display = manualOverride ?? overall;
@@ -52,6 +59,26 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
           <p className="text-[#1A1400]/60 text-[9px] mt-1">(manual override)</p>
         )}
       </div>
+
+      {/* Grade Strength Score */}
+      {strengthScore != null && (
+        <div className="bg-[#111111] border border-[#222222] rounded-lg p-3 text-center">
+          <div className="flex items-center justify-center gap-1 mb-1">
+            <p className="text-[#555555] text-[10px] font-bold uppercase tracking-widest">Grade Strength</p>
+            <div className="relative group">
+              <Info size={10} className="text-[#555555] cursor-help" />
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-48 bg-[#1A1A1A] border border-[#333333] rounded p-2 text-[9px] text-[#888888] leading-relaxed hidden group-hover:block z-20">
+                Where this card sits within its grade tier. Higher = stronger example. Internal use only — not shown on customer reports.
+              </div>
+            </div>
+          </div>
+          <p className="leading-none">
+            <span className="text-3xl font-black" style={{ color: strengthColor(strengthScore) }}>{strengthScore}</span>
+            <span className="text-sm text-[#555555] font-bold">/100</span>
+          </p>
+          <p className="text-[#555555] text-[9px] mt-1">Position within tier — higher = stronger</p>
+        </div>
+      )}
 
       {/* Black Label candidate */}
       {isBlack && (

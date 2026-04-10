@@ -284,7 +284,7 @@ You MUST respond with ONLY valid JSON. No other text before or after. No markdow
   "grade_strength_score": 55
 }
 
-ADDITIONALLY, return a "grade_strength_score" from 0 to 99 that represents how strong the card is WITHIN its assigned grade tier. Examples:
+ADDITIONALLY, return a "grade_strength_score" from 0 to 100 that represents how strong the card is WITHIN its assigned grade tier. Examples:
 - A card that barely qualifies for its grade (close to being demoted) should score 5-15.
 - A card that is a solid, typical specimen for its grade should score 40-60.
 - A card that is exceptional for its grade and nearly qualifies for the next grade up should score 85-95.

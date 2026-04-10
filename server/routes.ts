@@ -4537,6 +4537,7 @@ export async function registerRoutes(
         privateNotes:     c.privateNotes     || "",
         gradeApprovedBy:  c.gradeApprovedBy  || null,
         gradeApprovedAt:  c.gradeApprovedAt  || null,
+        gradeStrengthScore: c.gradeStrengthScore ?? (c as any).grade_strength_score ?? null,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -5161,7 +5162,7 @@ export async function registerRoutes(
 
       // Step 8: Extract and log grade strength score
       const strengthScore = typeof (analysis as any).grade_strength_score === "number"
-        ? Math.max(0, Math.min(99, Math.round((analysis as any).grade_strength_score)))
+        ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
         : null;
       if (strengthScore !== null) {
         console.log(`[grade-strength] cert=${id} grade=${analysis.overall_grade} strength=${strengthScore}`);
