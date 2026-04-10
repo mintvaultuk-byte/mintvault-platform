@@ -43,6 +43,11 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       ON users(stripe_connect_account_id) WHERE stripe_connect_account_id IS NOT NULL
   `);
 
+  // ── Grade strength score on certificates (internal, not displayed in UI)
+  await db.execute(sql`
+    ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_strength_score INTEGER
+  `);
+
   // ── Listing pointer on certificates ───────────────────────────────────────
   await db.execute(sql`
     ALTER TABLE certificates ADD COLUMN IF NOT EXISTS current_listing_id INTEGER

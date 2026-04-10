@@ -254,8 +254,16 @@ You MUST respond with ONLY valid JSON. No other text before or after. No markdow
   "is_authentic": true,
   "is_altered": false,
   "authentication_notes": "Card appears genuine.",
-  "recommendations": []
+  "recommendations": [],
+  "grade_strength_score": 55
 }
+
+ADDITIONALLY, return a "grade_strength_score" from 0 to 99 that represents how strong the card is WITHIN its assigned grade tier. Examples:
+- A card that barely qualifies for its grade (close to being demoted) should score 5-15.
+- A card that is a solid, typical specimen for its grade should score 40-60.
+- A card that is exceptional for its grade and nearly qualifies for the next grade up should score 85-95.
+- Use centering tolerance, corner sharpness, and defect severity to compute this.
+Return this as an integer 0-99, not a decimal.
 `;
 
 export const CARD_IDENTIFICATION_PROMPT = `You are examining a high-resolution image of the FRONT of a trading card. Identify this card precisely.

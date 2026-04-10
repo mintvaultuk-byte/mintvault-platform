@@ -19,7 +19,7 @@ import { sql } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, type ImageKeys } from "./ai-grading-service";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, type ImageKeys } from "./ai-grading-service";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -4396,13 +4396,14 @@ export async function registerRoutes(
 
       const c = cert as any;
       const imageKeys: Record<string, string | null> = {
-        front_original:      c.gradingFrontOriginal   || null,
+        // Grading-specific images (from capture wizard / upload-images endpoint)
+        front_original:      c.gradingFrontOriginal   || c.frontImagePath || null,
         front_cropped:       c.gradingFrontCropped    || null,
         front_greyscale:     c.gradingFrontGreyscale  || null,
         front_highcontrast:  c.gradingFrontHighcontrast || null,
         front_edgeenhanced:  c.gradingFrontEdgeenhanced || null,
         front_inverted:      c.gradingFrontInverted   || null,
-        back_original:       c.gradingBackOriginal    || null,
+        back_original:       c.gradingBackOriginal    || c.backImagePath || null,
         back_cropped:        c.gradingBackCropped     || null,
         back_greyscale:      c.gradingBackGreyscale   || null,
         back_highcontrast:   c.gradingBackHighcontrast || null,
@@ -4878,6 +4879,7 @@ export async function registerRoutes(
   });
 
   // POST /api/admin/certificates/:id/identify-and-analyze
+  // Full pipeline: auto-crop → generate 5 views → save to R2 → identify → verify → grade → save
   app.post("/api/admin/certificates/:id/identify-and-analyze", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
@@ -4885,22 +4887,127 @@ export async function registerRoutes(
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
       const c = cert as any;
-      const keys = getCertImageKeys(c);
-      if (!keys.frontOriginal && !c.frontImagePath) {
-        return res.status(400).json({ error: "No images available for AI analysis" });
+      const frontKey = c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available for AI analysis" });
+
+      console.log(`[ai/identify-and-analyze] starting for cert ${id}`);
+
+      // Step 1: Fetch raw images from R2
+      const { default: sharpImport } = await import("sharp");
+      const fetchR2 = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const resp = await fetch(url);
+          return Buffer.from(await resp.arrayBuffer());
+        } catch { return null; }
+      };
+
+      const frontRaw = await fetchR2(frontKey);
+      if (!frontRaw) return res.status(400).json({ error: "Could not fetch front image from storage" });
+      const backRaw = await fetchR2(backKey);
+
+      // Step 2: Generate 5 image variants for front (and back if available)
+      const frontVariants = await generateImageVariants(frontRaw);
+      const backVariants = backRaw ? await generateImageVariants(backRaw) : null;
+
+      // Step 3: Upload all variants to R2
+      const prefix = `images/grading/${id}`;
+      const uploadKeys: Record<string, string> = {};
+      const uploads: Promise<void>[] = [];
+
+      for (const [vName, buf] of Object.entries(frontVariants) as [string, Buffer][]) {
+        const k = `${prefix}/front_${vName}.jpg`;
+        uploadKeys[`front_${vName}`] = k;
+        uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
       }
-      if (!keys.frontOriginal) keys.frontOriginal = c.frontImagePath;
-      if (!keys.backOriginal)  keys.backOriginal  = c.backImagePath;
+      if (backVariants) {
+        for (const [vName, buf] of Object.entries(backVariants) as [string, Buffer][]) {
+          const k = `${prefix}/back_${vName}.jpg`;
+          uploadKeys[`back_${vName}`] = k;
+          uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
+        }
+      }
+      await Promise.all(uploads);
+      console.log(`[ai/identify-and-analyze] uploaded ${uploads.length} image variants to R2`);
 
-      const cardGame = req.body?.card_game || c.gameType || undefined;
-      const result = await identifyAndAnalyze(keys, cardGame);
+      // Step 4: Save image keys to certificate
+      await db.execute(sql`
+        UPDATE certificates SET
+          grading_front_original = ${uploadKeys.front_original || null},
+          grading_front_cropped = ${uploadKeys.front_cropped || null},
+          grading_front_greyscale = ${uploadKeys.front_greyscale || null},
+          grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
+          grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
+          grading_front_inverted = ${uploadKeys.front_inverted || null},
+          grading_back_original = ${uploadKeys.back_original || null},
+          grading_back_cropped = ${uploadKeys.back_cropped || null},
+          grading_back_greyscale = ${uploadKeys.back_greyscale || null},
+          grading_back_highcontrast = ${uploadKeys.back_highcontrast || null},
+          grading_back_edgeenhanced = ${uploadKeys.back_edgeenhanced || null},
+          grading_back_inverted = ${uploadKeys.back_inverted || null},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
 
-      // Persist both
-      await storage.updateCertificate(id, {
-        aiAnalysis: { identification: result.identification, grading: result.analysis } as any,
-      });
+      // Step 5: Identify the card (uses cropped front)
+      const identification = await identifyCardFromBuffer(frontVariants.cropped, "image/jpeg");
 
-      res.json(result);
+      // Step 6: Pokémon TCG API verification
+      const game = identification.detected_game?.toLowerCase();
+      let enrichedId = await verifyAndEnrichCardData(identification);
+      if (game === "pokemon") {
+        const tcgResult = await verifyPokemonCardWithTcgApi(
+          identification.detected_name,
+          identification.detected_number
+        );
+        if (tcgResult.verified) {
+          console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}"`);
+          enrichedId = {
+            ...enrichedId,
+            verified: true,
+            officialName: tcgResult.officialCardName || enrichedId.officialName,
+            officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+            officialNumber: identification.detected_number,
+            dbSource: "pokemon-tcg-api",
+            detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+            detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+            detected_year: tcgResult.officialYear || enrichedId.detected_year,
+          };
+        }
+      }
+
+      // Step 7: Full grading analysis (uses cropped front + back + greyscale + hicontrast)
+      const analysis = await analyzeCardFromBuffers(
+        frontVariants.cropped,
+        backVariants?.cropped || null,
+        game
+      );
+
+      // Step 8: Extract and log grade strength score
+      const strengthScore = typeof (analysis as any).grade_strength_score === "number"
+        ? Math.max(0, Math.min(99, Math.round((analysis as any).grade_strength_score)))
+        : null;
+      if (strengthScore !== null) {
+        console.log(`[grade-strength] cert=${id} grade=${analysis.overall_grade} strength=${strengthScore}`);
+        await db.execute(sql`
+          UPDATE certificates SET grade_strength_score = ${strengthScore} WHERE id = ${id}
+        `);
+      }
+
+      // Step 9: Save full analysis to certificate
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = ${JSON.stringify({ identification: enrichedId, grading: analysis })}::jsonb,
+          ai_draft_grade = ${typeof analysis.overall_grade === "number" ? analysis.overall_grade : null},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${enrichedId.officialName}" set="${enrichedId.officialSet}" grade=${analysis.overall_grade} strength=${strengthScore}`);
+
+      res.json({ identification: enrichedId, analysis });
     } catch (err: any) {
       console.error("[ai/identify-and-analyze] error:", err.message);
       res.status(500).json({ error: err.message });

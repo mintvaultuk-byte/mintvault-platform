@@ -153,6 +153,105 @@ async function rateLimit(): Promise<void> {
   lastAiCallTs = Date.now();
 }
 
+// ── Image variant generation (greyscale, hi-contrast, edge, inverted) ─────
+
+export interface ImageVariants {
+  original: Buffer;
+  cropped: Buffer;
+  greyscale: Buffer;
+  highcontrast: Buffer;
+  edgeenhanced: Buffer;
+  inverted: Buffer;
+}
+
+/**
+ * Generate all 5 analysis views from a single card image buffer.
+ * Input is auto-cropped first, then 4 variants are derived.
+ */
+export async function generateImageVariants(buffer: Buffer): Promise<ImageVariants> {
+  const cropped = await autoCropCard(buffer);
+
+  const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
+    sharp(cropped).grayscale().jpeg({ quality: 85 }).toBuffer(),
+    sharp(cropped).linear(1.5, -30).jpeg({ quality: 85 }).toBuffer(),
+    sharp(cropped)
+      .greyscale()
+      .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
+      .normalize()
+      .jpeg({ quality: 85 })
+      .toBuffer(),
+    sharp(cropped).negate().jpeg({ quality: 85 }).toBuffer(),
+  ]);
+
+  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB`);
+
+  return { original: buffer, cropped, greyscale, highcontrast, edgeenhanced, inverted };
+}
+
+// ── Pokémon TCG API verification ──────────────────────────────────────────
+
+/**
+ * Verify Claude's card identification against the official Pokémon TCG API.
+ * If the API finds a match, use its set name and card details (source of truth).
+ */
+export async function verifyPokemonCardWithTcgApi(
+  detectedName: string,
+  detectedNumber: string | null
+): Promise<{
+  verified: boolean;
+  officialSetName?: string;
+  officialCardName?: string;
+  officialSetCode?: string;
+  officialRarity?: string;
+  officialYear?: string;
+  apiCardId?: string;
+}> {
+  const apiKey = process.env.POKEMON_TCG_API_KEY;
+  if (!apiKey) {
+    console.warn("[pokemon-tcg] API key not set, skipping verification");
+    return { verified: false };
+  }
+  if (!detectedNumber) {
+    console.log("[pokemon-tcg] no card number, skipping verification");
+    return { verified: false };
+  }
+
+  try {
+    const query = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
+    const res = await fetch(
+      `https://api.pokemontcg.io/v2/cards?q=${query}&pageSize=5`,
+      { headers: { "X-Api-Key": apiKey } }
+    );
+
+    if (!res.ok) {
+      console.warn(`[pokemon-tcg] API error: ${res.status}`);
+      return { verified: false };
+    }
+
+    const data = await res.json();
+    if (!data.data || data.data.length === 0) {
+      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber}`);
+      return { verified: false };
+    }
+
+    const card = data.data[0];
+    console.log(`[pokemon-tcg] verified: ${card.name} from ${card.set.name} (${card.set.id})`);
+
+    return {
+      verified: true,
+      officialCardName: card.name,
+      officialSetName: card.set.name,
+      officialSetCode: card.set.id,
+      officialRarity: card.rarity,
+      officialYear: card.set.releaseDate?.split("-")[0],
+      apiCardId: card.id,
+    };
+  } catch (err: any) {
+    console.error("[pokemon-tcg] verification failed:", err.message);
+    return { verified: false };
+  }
+}
+
 // ── Image resize for Claude Vision API ────────────────────────────────────
 
 /**
