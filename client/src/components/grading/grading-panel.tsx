@@ -25,13 +25,14 @@ interface Props {
   cardSet: string;
   existingGrade?: string | null;
   onGradeApproved?: (certId?: string, grade?: string) => void;
+  onCertUpdated?: () => void;
 }
 
 const DEFAULT_CORNERS: CornerValues = { frontTL: 10, frontTR: 10, frontBL: 10, frontBR: 10, backTL: 10, backTR: 10, backBL: 10, backBR: 10 };
 const DEFAULT_EDGES: EdgeValues = { frontTop: 10, frontBottom: 10, frontLeft: 10, frontRight: 10, backTop: 10, backBottom: 10, backLeft: 10, backRight: 10 };
 const DEFAULT_SURFACE: SurfaceValues = { front: 10, back: 10, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
 
-export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved }: Props) {
+export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -190,6 +191,24 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       hasTear: analysis.defects?.some(d => d.type === "tear"),
     }));
 
+    // Convert AI defects to Defect format and merge with any existing human defects
+    if (analysis.defects?.length > 0) {
+      const humanDefects = defects.filter((d: any) => !d._aiSource);
+      const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map(d => d.id)) : 0;
+      const aiDefects: Defect[] = analysis.defects.map((ad, i) => ({
+        id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
+        type: ad.type?.replace(/_/g, " ") || "Unknown",
+        severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
+        description: ad.description || "",
+        location: ad.location || (ad as any).detected_in || "front",
+        image_side: ad.location === "back" ? "back" : "front",
+        x_percent: ad.position_x_percent ?? 50,
+        y_percent: ad.position_y_percent ?? 50,
+        _aiSource: true, // flag so image-viewer can render as red ring
+      } as Defect & { _aiSource: boolean }));
+      setDefects([...humanDefects, ...aiDefects]);
+    }
+
     // Populate grade explanation
     if (analysis.grade_explanation) setGradeExplanation(analysis.grade_explanation);
 
@@ -197,6 +216,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (!analysis.is_authentic) setAuthStatus("not_original");
     else if (analysis.is_altered) setAuthStatus("authentic_altered");
     if (analysis.authentication_notes) setAuthNotes(analysis.authentication_notes);
+
+    // Notify parent to refresh cert data (AI autofills card name/set/number on the server)
+    onCertUpdated?.();
   }
 
   const hasImages = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);

@@ -269,7 +269,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
 
             {/* Defect ring markers */}
             {showDefects && sideDefects.map(d => {
-              const isAi = !!(d as any).detected_in;
+              const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
               const isHL = highlightId === d.id;
               const col = isAi ? "#DC2626" : "#D4AF37";
               return (

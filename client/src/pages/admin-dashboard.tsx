@@ -114,8 +114,23 @@ export default function AdminDashboard({ onLogout }: Props) {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
-  const handleNewCert = () => {
-    // Open form in new-cert mode — no DB row created until admin clicks Save
+  const handleNewCert = async () => {
+    try {
+      const res = await fetch("/api/admin/certificates/new", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const cert = await res.json();
+        if (cert && cert.id) {
+          setEditingCert(cert);
+          setShowForm(true);
+          setActiveTab("certs");
+          queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+          return;
+        }
+      }
+    } catch { /* fall through */ }
+    // Fallback: open blank form
     setEditingCert(null);
     setShowForm(true);
     setActiveTab("certs");
@@ -150,7 +165,7 @@ export default function AdminDashboard({ onLogout }: Props) {
             certificate={editingCert}
             onSuccess={handleFormClose}
           />
-          {editingCert && editingCert.id ? (
+          {editingCert && editingCert.id && (
             <div className="mt-6 space-y-6">
               <GradingPanel
                 certId={editingCert.id}
@@ -158,17 +173,22 @@ export default function AdminDashboard({ onLogout }: Props) {
                 cardSet={editingCert.setName || ""}
                 existingGrade={editingCert.gradeOverall}
                 onGradeApproved={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] })}
+                onCertUpdated={async () => {
+                  // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
+                  try {
+                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" });
+                    const certs = await r.json();
+                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                    if (updated) setEditingCert(updated);
+                  } catch { /* ignore */ }
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                }}
               />
               <OwnershipSection cert={editingCert} />
               <NfcSection
                 cert={editingCert}
                 onUpdated={(updated) => setEditingCert(updated)}
               />
-            </div>
-          ) : (
-            <div className="mt-6 border border-[#D4AF37]/20 rounded-lg p-6 text-center">
-              <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Image Capture & AI Grading</p>
-              <p className="text-[#888888] text-sm">Save the certificate first to enable image upload and AI grading.</p>
             </div>
           )}
         </div>

@@ -74,7 +74,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     submissionItemId: (certificate as any)?.submissionItemId || "",
     cardGame: certificate?.cardGame || "",
     setName: certificate?.setName || "",
-    cardName: certificate?.cardName || "",
+    cardName: certificate?.cardName === "(untitled)" ? "" : (certificate?.cardName || ""),
     cardNumber: certificate?.cardNumber || "",
     rarity: initRarity,
     rarityOther: initRarityOther,
@@ -514,7 +514,9 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   return (
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
-        {isEdit ? `EDIT ${certificate.certId}` : "NEW CERTIFICATE"}
+        {isEdit
+          ? (certificate.cardName === "(untitled)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
+          : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">
         {isEdit
