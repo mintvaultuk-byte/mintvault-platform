@@ -9,6 +9,7 @@ interface Props {
   hasTear: boolean;
   manualOverride: number | null;
   onOverride: (val: number | null) => void;
+  onSubgradeChange?: (key: keyof SubGrades, value: number) => void;
   gradeLabel: string;
   isBlack: boolean;
   strengthScore?: number | null;
@@ -36,7 +37,7 @@ function strengthColor(s: number): string {
   return "#D97706"; // amber — weak
 }
 
-export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, gradeLabel, isBlack, strengthScore }: Props) {
+export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const display = manualOverride ?? overall;
@@ -51,10 +52,10 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
   return (
     <div className="space-y-3">
       {/* Main grade box */}
-      <div className={`rounded-xl p-4 bg-gradient-to-br ${overallBg(display)} text-center`}>
+      <div className={`rounded-xl p-4 bg-gradient-to-br ${display > 0 ? overallBg(display) : "from-[#333333] to-[#222222]"} text-center`}>
         <p className="text-[#1A1400]/70 text-[10px] font-bold uppercase tracking-widest mb-1">Overall Grade</p>
-        <p className="text-5xl font-black text-[#1A1400] leading-none">{display}</p>
-        <p className="text-[#1A1400] text-xs font-bold uppercase tracking-widest mt-1">{gradeLabel}</p>
+        <p className="text-5xl font-black text-[#1A1400] leading-none">{display > 0 ? display : "—"}</p>
+        <p className="text-[#1A1400] text-xs font-bold uppercase tracking-widest mt-1">{display > 0 ? gradeLabel : "Not graded yet"}</p>
         {manualOverride !== null && (
           <p className="text-[#1A1400]/60 text-[9px] mt-1">(manual override)</p>
         )}
@@ -88,17 +89,29 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Subgrade summary */}
+      {/* Subgrade summary — editable */}
       <div className="grid grid-cols-4 gap-1.5">
-        {[
-          { label: "Centering", val: sub.centering },
-          { label: "Corners", val: sub.corners },
-          { label: "Edges", val: sub.edges },
-          { label: "Surface", val: sub.surface },
-        ].map(({ label, val }) => (
+        {([
+          { label: "Centering", key: "centering" as keyof SubGrades, val: sub.centering },
+          { label: "Corners", key: "corners" as keyof SubGrades, val: sub.corners },
+          { label: "Edges", key: "edges" as keyof SubGrades, val: sub.edges },
+          { label: "Surface", key: "surface" as keyof SubGrades, val: sub.surface },
+        ]).map(({ label, key, val }) => (
           <div key={label} className="bg-[#111111] border border-[#222222] rounded p-2 text-center">
             <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider">{label}</p>
-            <p className="text-sm font-black" style={{ color: subgradeColor(val) }}>{val}</p>
+            <div className="flex items-center justify-center gap-1 mt-0.5">
+              {onSubgradeChange && (
+                <button type="button" onClick={() => onSubgradeChange(key, Math.max(1, val - 1))}
+                  className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▼</button>
+              )}
+              <p className="text-sm font-black min-w-[1.5em]" style={{ color: val > 0 ? subgradeColor(val) : "#555555" }}>
+                {val > 0 ? val : "—"}
+              </p>
+              {onSubgradeChange && (
+                <button type="button" onClick={() => onSubgradeChange(key, Math.min(10, val + 1))}
+                  className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▲</button>
+              )}
+            </div>
           </div>
         ))}
       </div>

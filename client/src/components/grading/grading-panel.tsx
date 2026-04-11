@@ -66,9 +66,10 @@ interface Props {
   onCertUpdated?: () => void;
 }
 
-const DEFAULT_CORNERS: CornerValues = { frontTL: 10, frontTR: 10, frontBL: 10, frontBR: 10, backTL: 10, backTR: 10, backBL: 10, backBR: 10 };
-const DEFAULT_EDGES: EdgeValues = { frontTop: 10, frontBottom: 10, frontLeft: 10, frontRight: 10, backTop: 10, backBottom: 10, backLeft: 10, backRight: 10 };
-const DEFAULT_SURFACE: SurfaceValues = { front: 10, back: 10, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
+// Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
+const DEFAULT_CORNERS: CornerValues = { frontTL: 0, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0 };
+const DEFAULT_EDGES: EdgeValues = { frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0, backTop: 0, backBottom: 0, backLeft: 0, backRight: 0 };
+const DEFAULT_SURFACE: SurfaceValues = { front: 0, back: 0, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
 
 export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated }: Props) {
   const { toast } = useToast();
@@ -499,6 +500,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               gradeLabel={label}
               isBlack={isBlack}
               strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
+              onSubgradeChange={(key, val) => {
+                if (key === "centering") setCenteringOverride(val);
+                else if (key === "corners") setCornersOverride(val);
+                else if (key === "edges") setEdgesOverride(val);
+                else if (key === "surface") setSurfaceOverride(val);
+              }}
             />
           )}
 
@@ -607,11 +614,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             <button
               type="button"
               onClick={() => setShowConfirm(true)}
-              disabled={approving}
+              disabled={approving || overall <= 0}
+              title={overall <= 0 ? "Set all subgrades before approving" : undefined}
               className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
             >
               {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              Approve Grade
+              {overall <= 0 ? "Set subgrades first" : "Approve Grade"}
             </button>
           </div>
         </div>
