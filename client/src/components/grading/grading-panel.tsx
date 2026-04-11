@@ -258,9 +258,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     onCertUpdated?.();
   }
 
-  const hasImages = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
+  const hasFront = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
+  const hasBack = !!(imageData?.urls?.back_display || imageData?.urls?.back_original);
+  const hasAnyImage = hasFront || hasBack;
 
-  if (!hasImages) {
+  if (!hasAnyImage) {
     return (
       <CaptureWizard
         certId={certId}

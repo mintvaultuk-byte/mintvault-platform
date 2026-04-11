@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2 } from "lucide-react";
+import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2 } from "lucide-react";
 import DefectHeatmap from "./defect-heatmap";
 import { DefectForm } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
@@ -374,6 +374,9 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
               </div>
             )}
           </div>
+        ) : certId ? (
+          /* Inline drop zone for missing side */
+          <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-[#333333] text-xs">No image</p>
@@ -505,6 +508,52 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Inline drop zone for uploading a single missing side */
+function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: number; onUploaded: () => void }) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(f: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append(side, f);
+      const res = await fetch(`/api/admin/certificates/${certId}/upload-images`, {
+        method: "POST", credentials: "include", body: fd,
+      });
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+      onUploaded();
+    } catch {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div
+      className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[#D4AF37]/10" : ""}`}
+      onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+      onClick={() => !uploading && inputRef.current?.click()}
+    >
+      <input ref={inputRef} type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+      {uploading ? (
+        <>
+          <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
+          <p className="text-[#888888] text-xs">Uploading {side}…</p>
+        </>
+      ) : (
+        <>
+          <Upload size={24} className="text-[#555555]" />
+          <p className="text-[#888888] text-xs font-bold">Drop new {side} image here</p>
+          <p className="text-[#555555] text-[10px]">or click to browse</p>
+        </>
+      )}
     </div>
   );
 }
