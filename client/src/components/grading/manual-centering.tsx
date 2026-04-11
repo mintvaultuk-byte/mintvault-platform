@@ -180,7 +180,7 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
         <div className="flex items-center gap-6">
           <div>
             <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
-            <p className="text-[#888888] text-[10px]">Drag the <span className="text-[#D4AF37]">gold outer</span> rect to card edges, <span className="text-[#16A34A]">green inner</span> rect to border interior</p>
+            <p className="text-[#888888] text-[10px]">Drag the <span className="text-[#EF4444]">red outer</span> rect to card edges, <span className="text-[#16A34A]">green inner</span> rect to border interior</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-center">
@@ -212,7 +212,7 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
             <img ref={imgRef} src={imageUrl} alt={side} className="w-full h-full object-contain" draggable={false} />
             <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
               style={{ pointerEvents: dragTarget !== "none" ? "none" : "auto" }}>
-              {renderRect(outer, "outer", "#D4AF37", false)}
+              {renderRect(outer, "outer", "#EF4444", true)}
               {renderRect(inner, "inner", "#16A34A", true)}
               {/* Measurement lines */}
               <line x1={outer.left} y1={(inner.top + inner.bottom) / 2} x2={inner.left} y2={(inner.top + inner.bottom) / 2} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
