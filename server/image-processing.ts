@@ -56,80 +56,178 @@ export interface QualityResult {
  */
 export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
   try {
-    console.log(`[deskew] START angle detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[deskew] START corner-based detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
 
-    // Work at reduced size for speed (max 1500px wide for angle detection)
-    const scale = Math.min(1, 1500 / meta.width);
+    // Work at reduced size for speed
+    const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
     const workW = Math.round(meta.width * scale);
     const workH = Math.round(meta.height * scale);
 
-    // Greyscale → threshold → raw pixels
+    // Get raw RGB pixels
     const { data, info } = await sharp(inputBuffer)
       .resize(workW, workH, { fit: "fill" })
-      .greyscale()
-      .threshold(200) // white background → 255, card → 0
+      .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
     const w = info.width;
     const h = info.height;
+    const ch = info.channels;
 
-    // Sample top edge: for each column, find the first dark pixel (row)
-    const sampleCols = Math.min(w, 200);
-    const step = Math.max(1, Math.floor(w / sampleCols));
-    const points: { x: number; y: number }[] = [];
+    // Detect yellow pixels (Pokemon card border) and find top-left + top-right corners
+    // Strategy: scan rows from top, for each row find leftmost and rightmost yellow pixel
+    // The first rows with significant yellow presence define the top edge of the card
 
-    for (let col = Math.round(w * 0.1); col < Math.round(w * 0.9); col += step) {
-      for (let row = 0; row < Math.round(h * 0.4); row++) {
-        if (pixels[row * w + col] < 128) { // dark pixel = card
-          points.push({ x: col, y: row });
-          break;
+    let topLeftX = -1, topLeftY = -1;
+    let topRightX = -1, topRightY = -1;
+    let foundTopEdge = false;
+    const topEdgePoints: { x: number; y: number }[] = [];
+
+    for (let row = 0; row < Math.round(h * 0.4); row++) {
+      let rowLeftX = -1, rowRightX = -1;
+      let yellowInRow = 0;
+
+      for (let col = 0; col < w; col++) {
+        const idx = (row * w + col) * ch;
+        const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+        // Yellow detection — same thresholds as cropToYellowBorder
+        if (r > 200 && g > 150 && g < 240 && b < 100) {
+          yellowInRow++;
+          if (rowLeftX === -1) rowLeftX = col;
+          rowRightX = col;
         }
+      }
+
+      // Need a meaningful amount of yellow in the row to count as card edge
+      if (yellowInRow > w * 0.05) {
+        if (!foundTopEdge) {
+          topLeftX = rowLeftX;
+          topLeftY = row;
+          topRightX = rowRightX;
+          topRightY = row;
+          foundTopEdge = true;
+        }
+        topEdgePoints.push({ x: rowLeftX, y: row });
+        topEdgePoints.push({ x: rowRightX, y: row });
+
+        // Collect ~20 rows of data for regression
+        if (topEdgePoints.length > 40) break;
       }
     }
 
-    if (points.length < 10) {
-      console.log("[deskew] not enough edge points detected, skipping");
+    if (!foundTopEdge || topEdgePoints.length < 10) {
+      console.log(`[deskew] not enough yellow edge points (${topEdgePoints.length}), trying greyscale fallback`);
+      // Fallback: greyscale threshold method
+      return deskewGreyscaleFallback(inputBuffer, meta, scale, workW, workH);
+    }
+
+    // Linear regression on the top-edge yellow points for more stable angle
+    const n = topEdgePoints.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (const p of topEdgePoints) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const denom = n * sumX2 - sumX * sumX;
+    if (Math.abs(denom) < 0.001) {
+      console.log("[deskew] degenerate regression, skipping");
       return { buffer: inputBuffer, angle: 0 };
     }
 
-    // Linear regression: y = mx + b → angle = atan(m)
-    const n = points.length;
-    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
-    const denom = n * sumX2 - sumX * sumX;
-    if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
-
     const slope = (n * sumXY - sumX * sumY) / denom;
-    const angle = Math.atan(slope) * (180 / Math.PI);
+    const radians = Math.atan(slope);
+    const angle = radians * (180 / Math.PI);
 
-    // Cap at ±5° — beyond that it's a bad scan, not a slight rotation
+    console.log(`[deskew] corner-based: topLeft(${topLeftX},${topLeftY}) topRight(${topRightX},${topRightY}) points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
+
+    // Cap at ±5°
     if (Math.abs(angle) > 5) {
       console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
 
-    // Skip tiny rotations (<0.2°) — not worth the processing
-    if (Math.abs(angle) < 0.2) {
-      console.log(`[deskew] angle ${angle.toFixed(2)}° too small, skipping`);
+    // Very low threshold — rotate even 0.05° rotations
+    if (Math.abs(angle) < 0.05) {
+      console.log(`[deskew] angle ${angle.toFixed(4)}° below 0.05° threshold, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
 
-    // Rotate the ORIGINAL full-resolution image by -angle
+    // Warn if exactly 0.00
+    if (angle === 0) {
+      console.warn("[deskew] WARNING: detected exactly 0.00° — detection may have failed");
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    // Rotate the ORIGINAL full-resolution image
     const rotated = await sharp(inputBuffer)
       .rotate(-angle, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
       .jpeg({ quality: 95 })
       .toBuffer();
 
-    console.log(`[deskew] corrected ${angle.toFixed(2)}°`);
+    console.log(`[deskew] corrected ${angle.toFixed(2)}° (corner-based, ${n} edge points)`);
     return { buffer: rotated, angle };
   } catch (err: any) {
     console.warn("[deskew] detection failed, skipping:", err.message);
     return { buffer: inputBuffer, angle: 0 };
   }
+}
+
+/** Fallback deskew for non-yellow cards using greyscale threshold */
+async function deskewGreyscaleFallback(
+  inputBuffer: Buffer,
+  meta: sharp.Metadata,
+  scale: number,
+  workW: number,
+  workH: number
+): Promise<{ buffer: Buffer; angle: number }> {
+  const { data, info } = await sharp(inputBuffer)
+    .resize(workW, workH, { fit: "fill" })
+    .greyscale()
+    .threshold(200)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const pixels = new Uint8Array(data);
+  const w = info.width;
+  const h = info.height;
+  const points: { x: number; y: number }[] = [];
+  const step = Math.max(1, Math.floor(w / 200));
+
+  for (let col = Math.round(w * 0.1); col < Math.round(w * 0.9); col += step) {
+    for (let row = 0; row < Math.round(h * 0.4); row++) {
+      if (pixels[row * w + col] < 128) {
+        points.push({ x: col, y: row });
+        break;
+      }
+    }
+  }
+
+  if (points.length < 10) {
+    console.log("[deskew] greyscale fallback: not enough points, skipping");
+    return { buffer: inputBuffer, angle: 0 };
+  }
+
+  const n = points.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+  const denom = n * sumX2 - sumX * sumX;
+  if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
+
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const angle = Math.atan(slope) * (180 / Math.PI);
+
+  if (Math.abs(angle) > 5 || Math.abs(angle) < 0.05) {
+    console.log(`[deskew] greyscale fallback: ${angle.toFixed(4)}° — ${Math.abs(angle) > 5 ? "too large" : "too small"}, skipping`);
+    return { buffer: inputBuffer, angle: 0 };
+  }
+
+  const rotated = await sharp(inputBuffer)
+    .rotate(-angle, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+
+  console.log(`[deskew] corrected ${angle.toFixed(2)}° (greyscale fallback)`);
+  return { buffer: rotated, angle };
 }
 
 /**
