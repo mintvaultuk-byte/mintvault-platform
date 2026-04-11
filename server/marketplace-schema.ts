@@ -312,6 +312,23 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_seller ON marketplace_dac7_quarterly(seller_user_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_year ON marketplace_dac7_quarterly(year)`);
 
+  // ── Custom sets (cards not in public TCG API) ────────────────────────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS custom_sets (
+      id SERIAL PRIMARY KEY,
+      set_id TEXT NOT NULL UNIQUE,
+      set_name TEXT NOT NULL,
+      series TEXT,
+      ptcgo_code TEXT,
+      release_date DATE,
+      total_cards INTEGER,
+      card_game TEXT NOT NULL DEFAULT 'pokemon',
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      created_by TEXT
+    )
+  `);
+
   // ── Manual centering columns on certificates ─────────────────────────────
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_front JSONB`);
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_back JSONB`);

@@ -1694,22 +1694,27 @@ function SubmissionItemLink({
 
 // ── Pokemon Set Picker — searchable dropdown from TCG API ────────────────
 
-interface PokemonSet { id: string; name: string; series: string; ptcgoCode: string | null; releaseDate: string; total: number; }
+interface PokemonSet { id: string; name: string; series: string; ptcgoCode: string | null; releaseDate: string; total: number; source?: string; }
 
 function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange: (name: string, id?: string) => void; testId?: string }) {
+  const { toast } = useToast();
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
   const [sets, setSets] = useState<PokemonSet[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState({ setId: "", setName: "", series: "Promo", releaseYear: "", totalCards: "" });
+  const [addSaving, setAddSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setQuery(value); }, [value]);
 
-  useEffect(() => {
+  function fetchSets() {
     fetch("/api/pokemon-sets").then(r => r.json()).then(d => { if (Array.isArray(d)) setSets(d); }).catch(() => {});
-  }, []);
+  }
+  useEffect(() => { fetchSets(); }, []);
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowAddForm(false); } }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
@@ -1718,6 +1723,36 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
   const filtered = q ? sets.filter(s =>
     s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.ptcgoCode || "").toLowerCase().includes(q) || s.series.toLowerCase().includes(q)
   ).slice(0, 12) : sets.slice(0, 12);
+
+  async function saveNewSet() {
+    if (!addForm.setId || !addForm.setName) return;
+    setAddSaving(true);
+    try {
+      const r = await fetch("/api/admin/custom-sets", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          setId: addForm.setId.replace(/\s+/g, "").toLowerCase(),
+          setName: addForm.setName,
+          series: addForm.series || null,
+          releaseDate: addForm.releaseYear ? `${addForm.releaseYear}-01-01` : null,
+          totalCards: addForm.totalCards ? parseInt(addForm.totalCards) : null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      toast({ title: `Custom set added: ${addForm.setId}` });
+      fetchSets();
+      onChange(addForm.setName, addForm.setId.replace(/\s+/g, "").toLowerCase());
+      setQuery(addForm.setName);
+      setShowAddForm(false);
+      setOpen(false);
+    } catch (e: any) {
+      toast({ title: "Failed to add set", description: e.message, variant: "destructive" });
+    } finally {
+      setAddSaving(false);
+    }
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -1731,8 +1766,8 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
         data-testid={testId}
         className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]"
       />
-      {open && filtered.length > 0 && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-64 overflow-y-auto">
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-72 overflow-y-auto">
           {filtered.map(s => (
             <button key={s.id} type="button"
               onClick={() => { onChange(s.name, s.id); setQuery(s.name); setOpen(false); }}
@@ -1740,9 +1775,60 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
             >
               <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
               <span className="text-[#1A1A1A] font-medium">{s.name}</span>
+              {(s as any).source === "custom" && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">Custom</span>}
               <span className="text-[#999999] ml-2">· {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}</span>
             </button>
           ))}
+          {/* Add new set button */}
+          <button type="button"
+            onClick={() => { setShowAddForm(true); setAddForm(f => ({ ...f, setId: query, setName: "" })); }}
+            className="w-full text-left px-3 py-2.5 text-xs text-[#D4AF37] font-bold hover:bg-[#D4AF37]/5 border-t border-[#E8E4DC] flex items-center gap-1"
+          >
+            <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
+          </button>
+        </div>
+      )}
+
+      {/* Add set modal */}
+      {showAddForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddForm(false)}>
+          <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
+            <div>
+              <label className="text-[#666666] text-[10px] block mb-0.5">Set Code *</label>
+              <input value={addForm.setId} onChange={e => setAddForm(f => ({ ...f, setId: e.target.value }))}
+                placeholder="e.g. M24 EN" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+            </div>
+            <div>
+              <label className="text-[#666666] text-[10px] block mb-0.5">Set Name *</label>
+              <input value={addForm.setName} onChange={e => setAddForm(f => ({ ...f, setName: e.target.value }))}
+                placeholder="e.g. McDonald's Match Battle 2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Series</label>
+                <input value={addForm.series} onChange={e => setAddForm(f => ({ ...f, series: e.target.value }))}
+                  placeholder="Promo" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Year</label>
+                <input type="number" value={addForm.releaseYear} onChange={e => setAddForm(f => ({ ...f, releaseYear: e.target.value }))}
+                  placeholder="2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Total Cards</label>
+                <input type="number" value={addForm.totalCards} onChange={e => setAddForm(f => ({ ...f, totalCards: e.target.value }))}
+                  placeholder="15" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setShowAddForm(false)} className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]">Cancel</button>
+              <button type="button" onClick={saveNewSet} disabled={addSaving || !addForm.setId || !addForm.setName}
+                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50">
+                {addSaving ? "Saving…" : "Add Set"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

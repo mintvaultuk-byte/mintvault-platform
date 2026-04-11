@@ -6590,40 +6590,71 @@ export async function registerRoutes(
     }
   });
 
-  // ── Pokemon TCG sets list (cached 24h) ─────────────────────────────────────
-  let cachedSets: any[] | null = null;
-  let cacheTime = 0;
+  // ── Pokemon TCG sets list (cached 24h, merged with custom sets) ──────────
+  let cachedTcgSets: any[] | null = null;
+  let tcgCacheTime = 0;
 
   app.get("/api/pokemon-sets", async (_req, res) => {
     try {
-      // Return cache if fresh (<24h)
-      if (cachedSets && Date.now() - cacheTime < 24 * 60 * 60 * 1000) {
-        return res.json(cachedSets);
+      // Fetch TCG API sets (cached 24h)
+      if (!cachedTcgSets || Date.now() - tcgCacheTime > 24 * 60 * 60 * 1000) {
+        const apiKey = process.env.POKEMON_TCG_API_KEY;
+        const headers: Record<string, string> = {};
+        if (apiKey) headers["X-Api-Key"] = apiKey;
+        const r = await fetch("https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate&pageSize=250", { headers });
+        if (r.ok) {
+          const data = await r.json();
+          cachedTcgSets = (data.data || []).map((s: any) => ({
+            id: s.id, name: s.name, series: s.series, ptcgoCode: s.ptcgoCode || null,
+            releaseDate: s.releaseDate, total: s.total, source: "tcg",
+          }));
+          tcgCacheTime = Date.now();
+        }
       }
 
-      const apiKey = process.env.POKEMON_TCG_API_KEY;
-      const headers: Record<string, string> = {};
-      if (apiKey) headers["X-Api-Key"] = apiKey;
-
-      const r = await fetch("https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate&pageSize=250", { headers });
-      if (!r.ok) throw new Error(`TCG API error ${r.status}`);
-      const data = await r.json();
-
-      cachedSets = (data.data || []).map((s: any) => ({
-        id: s.id,
-        name: s.name,
-        series: s.series,
-        ptcgoCode: s.ptcgoCode || null,
-        releaseDate: s.releaseDate,
-        total: s.total,
-        images: s.images?.symbol || null,
+      // Fetch custom sets from DB
+      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
+      const customSets = (customRows.rows as any[]).map(s => ({
+        id: s.set_id, name: s.set_name, series: s.series || "Custom", ptcgoCode: s.ptcgo_code || null,
+        releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
+        total: s.total_cards || 0, source: "custom",
       }));
-      cacheTime = Date.now();
 
-      res.json(cachedSets);
+      // Merge: custom sets first, then TCG API sets (dedup by id)
+      const tcg = cachedTcgSets || [];
+      const customIds = new Set(customSets.map(s => s.id));
+      const merged = [...customSets, ...tcg.filter(s => !customIds.has(s.id))];
+
+      res.json(merged);
     } catch (err: any) {
       console.error("[pokemon-sets] error:", err.message);
-      res.json(cachedSets || []);
+      res.json(cachedTcgSets || []);
+    }
+  });
+
+  // ── Custom sets CRUD ────────────────────────────────────────────────────────
+  app.post("/api/admin/custom-sets", requireAdmin, async (req, res) => {
+    try {
+      const { setId, setName, series, ptcgoCode, releaseDate, totalCards, notes } = req.body;
+      if (!setId || !setName) return res.status(400).json({ error: "setId and setName required" });
+      await db.execute(sql`
+        INSERT INTO custom_sets (set_id, set_name, series, ptcgo_code, release_date, total_cards, notes, created_by)
+        VALUES (${setId}, ${setName}, ${series || null}, ${ptcgoCode || null}, ${releaseDate || null}, ${totalCards || null}, ${notes || null}, ${(req.session as any)?.adminEmail || "admin"})
+      `);
+      console.log(`[custom-set] added "${setId}" — ${setName}`);
+      res.json({ ok: true, setId, setName });
+    } catch (err: any) {
+      if (err.code === "23505") return res.status(409).json({ error: `Set ID "${req.body.setId}" already exists` });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/custom-sets/:setId", requireAdmin, async (req, res) => {
+    try {
+      await db.execute(sql`DELETE FROM custom_sets WHERE set_id = ${req.params.setId}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 
