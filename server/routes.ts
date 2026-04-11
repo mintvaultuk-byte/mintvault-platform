@@ -6590,6 +6590,43 @@ export async function registerRoutes(
     }
   });
 
+  // ── Pokemon TCG sets list (cached 24h) ─────────────────────────────────────
+  let cachedSets: any[] | null = null;
+  let cacheTime = 0;
+
+  app.get("/api/pokemon-sets", async (_req, res) => {
+    try {
+      // Return cache if fresh (<24h)
+      if (cachedSets && Date.now() - cacheTime < 24 * 60 * 60 * 1000) {
+        return res.json(cachedSets);
+      }
+
+      const apiKey = process.env.POKEMON_TCG_API_KEY;
+      const headers: Record<string, string> = {};
+      if (apiKey) headers["X-Api-Key"] = apiKey;
+
+      const r = await fetch("https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate&pageSize=250", { headers });
+      if (!r.ok) throw new Error(`TCG API error ${r.status}`);
+      const data = await r.json();
+
+      cachedSets = (data.data || []).map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        series: s.series,
+        ptcgoCode: s.ptcgoCode || null,
+        releaseDate: s.releaseDate,
+        total: s.total,
+        images: s.images?.symbol || null,
+      }));
+      cacheTime = Date.now();
+
+      res.json(cachedSets);
+    } catch (err: any) {
+      console.error("[pokemon-sets] error:", err.message);
+      res.json(cachedSets || []);
+    }
+  });
+
   // ── Showroom routes ──────────────────────────────────────────────────────────
   registerShowroomRoutes(app);
 

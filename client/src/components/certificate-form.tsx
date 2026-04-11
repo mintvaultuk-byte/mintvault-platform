@@ -664,10 +664,9 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               testId="select-card-game"
             />
             <div>
-              <FormInput
-                label="Set Name *"
+              <PokemonSetPicker
                 value={form.setName}
-                onChange={(v) => updateField("setName", v)}
+                onChange={(name, id) => { updateField("setName", name); if (id) setSetId(id); }}
                 testId="input-set-name"
               />
               <div className="mt-1.5">
@@ -1690,5 +1689,62 @@ function SubmissionItemLink({
         ))}
       </select>
     </fieldset>
+  );
+}
+
+// ── Pokemon Set Picker — searchable dropdown from TCG API ────────────────
+
+interface PokemonSet { id: string; name: string; series: string; ptcgoCode: string | null; releaseDate: string; total: number; }
+
+function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange: (name: string, id?: string) => void; testId?: string }) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [sets, setSets] = useState<PokemonSet[]>([]);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setQuery(value); }, [value]);
+
+  useEffect(() => {
+    fetch("/api/pokemon-sets").then(r => r.json()).then(d => { if (Array.isArray(d)) setSets(d); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const q = query.toLowerCase();
+  const filtered = q ? sets.filter(s =>
+    s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.ptcgoCode || "").toLowerCase().includes(q) || s.series.toLowerCase().includes(q)
+  ).slice(0, 12) : sets.slice(0, 12);
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[#D4AF37]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
+      <input
+        type="text"
+        value={query}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Type to search sets…"
+        data-testid={testId}
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]"
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          {filtered.map(s => (
+            <button key={s.id} type="button"
+              onClick={() => { onChange(s.name, s.id); setQuery(s.name); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0"
+            >
+              <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
+              <span className="text-[#1A1A1A] font-medium">{s.name}</span>
+              <span className="text-[#999999] ml-2">· {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
