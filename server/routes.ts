@@ -19,7 +19,7 @@ import { sql } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, type ImageKeys } from "./ai-grading-service";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, type ImageKeys } from "./ai-grading-service";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -5015,6 +5015,208 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("[identify-only] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/measure-centering — Sonnet centering-only
+  app.post("/api/admin/certificates/:id/measure-centering", requireAdmin, async (req, res) => {
+    try {
+      const { CENTERING_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available" });
+
+      // Fetch images
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+      if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
+      const backBuf = await fetchBuf(backKey);
+
+      const { resizeForClaude } = await import("./ai-grading-service");
+      const { buffer: frontResized } = await resizeForClaude(frontBuf);
+      const content: object[] = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontResized.toString("base64") } },
+      ];
+      if (backBuf) {
+        const { buffer: backResized } = await resizeForClaude(backBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+      }
+      content.push({ type: "text", text: CENTERING_ONLY_PROMPT });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2048, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiData = await response.json() as { content: { text: string }[] };
+      const text = aiData.content?.[0]?.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const centering = JSON.parse(cleaned);
+
+      // Save to cert
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{centering_measured}', ${JSON.stringify(centering)}::jsonb),
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[measure-centering] cert=${id} front=${centering.front_left_right} back=${centering.back_left_right}`);
+      res.json({ centering });
+    } catch (err: any) {
+      console.error("[measure-centering] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/detect-defects — Sonnet defect-only
+  app.post("/api/admin/certificates/:id/detect-defects", requireAdmin, async (req, res) => {
+    try {
+      const { DEFECTS_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available" });
+
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+      if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
+      const backBuf = await fetchBuf(backKey);
+
+      const { resizeForClaude } = await import("./ai-grading-service");
+      const { buffer: frontResized } = await resizeForClaude(frontBuf);
+      const content: object[] = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontResized.toString("base64") } },
+      ];
+      if (backBuf) {
+        const { buffer: backResized } = await resizeForClaude(backBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+      }
+      content.push({ type: "text", text: DEFECTS_ONLY_PROMPT });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiData = await response.json() as { content: { text: string }[] };
+      const text = aiData.content?.[0]?.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const defectResult = JSON.parse(cleaned);
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{defects_detected}', ${JSON.stringify(defectResult)}::jsonb),
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[detect-defects] cert=${id} defects=${defectResult.defects?.length || 0}`);
+      res.json({ defects: defectResult });
+    } catch (err: any) {
+      console.error("[detect-defects] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/grade-card — Sonnet grade-only using context from previous steps
+  app.post("/api/admin/certificates/:id/grade-card", requireAdmin, async (req, res) => {
+    try {
+      const { GRADE_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const aiData = c.aiAnalysis || {};
+
+      // Build context from previous steps
+      const cardContext = `${c.cardName || "Unknown"} from ${c.setName || "Unknown"} #${c.cardNumber || "?"} (${c.year || "?"})`;
+      const centeringContext = aiData.centering_measured
+        ? `Front: ${aiData.centering_measured.front_left_right}, Back: ${aiData.centering_measured.back_left_right}, Subgrade: ${aiData.centering_measured.centering_subgrade}`
+        : "Not measured yet";
+      const defectsContext = aiData.defects_detected?.defects
+        ? `${aiData.defects_detected.defects.length} defects: ${aiData.defects_detected.defects.map((d: any) => `${d.type} (${d.severity})`).join(", ")}`
+        : "Not detected yet";
+
+      const prompt = GRADE_ONLY_PROMPT
+        .replace("{CARD_CONTEXT}", cardContext)
+        .replace("{CENTERING_CONTEXT}", centeringContext)
+        .replace("{DEFECTS_CONTEXT}", defectsContext);
+
+      // Also send images for visual context
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+
+      const content: object[] = [];
+      if (frontBuf) {
+        const { resizeForClaude } = await import("./ai-grading-service");
+        const { buffer: resized } = await resizeForClaude(frontBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") } });
+      }
+      content.push({ type: "text", text: prompt });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2048, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiResp = await response.json() as { content: { text: string }[] };
+      const text = aiResp.content?.[0]?.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const gradeResult = JSON.parse(cleaned);
+
+      // Clamp grades to whole numbers
+      const clamp = (v: any) => { const n = typeof v === "number" ? v : parseFloat(v); return isNaN(n) ? 1 : Math.max(1, Math.min(10, Math.floor(n))); };
+      if (typeof gradeResult.overall_grade === "number") gradeResult.overall_grade = clamp(gradeResult.overall_grade);
+      if (gradeResult.centering_subgrade) gradeResult.centering_subgrade = clamp(gradeResult.centering_subgrade);
+      if (gradeResult.corners_subgrade) gradeResult.corners_subgrade = clamp(gradeResult.corners_subgrade);
+      if (gradeResult.edges_subgrade) gradeResult.edges_subgrade = clamp(gradeResult.edges_subgrade);
+      if (gradeResult.surface_subgrade) gradeResult.surface_subgrade = clamp(gradeResult.surface_subgrade);
+      const strength = typeof gradeResult.grade_strength_score === "number" ? Math.max(0, Math.min(100, Math.round(gradeResult.grade_strength_score))) : null;
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{grade_result}', ${JSON.stringify(gradeResult)}::jsonb),
+          ai_draft_grade = ${gradeResult.overall_grade},
+          grade_strength_score = ${strength},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[grade-card] cert=${id} grade=${gradeResult.overall_grade} strength=${strength}`);
+      res.json({ grade: gradeResult });
+    } catch (err: any) {
+      console.error("[grade-card] error:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

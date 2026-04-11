@@ -428,3 +428,125 @@ export const GRADE_LABELS: Record<string, string> = {
   'AA': 'AUTHENTIC ALTERED',
   'NO': 'NOT ORIGINAL',
 };
+
+// ── Focused prompts for individual AI actions ─────────────────────────────
+
+export const CENTERING_ONLY_PROMPT = `You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
+
+For each side (front and back), identify:
+1. The OUTER FRAME — the card's physical border (yellow/black edge)
+2. The INNER FRAME — the artwork/illustration boundary inside the border
+
+Return the coordinates as percentages of the image dimensions (0-100).
+
+Measure the border widths:
+- left_margin = distance from outer left edge to inner left edge
+- right_margin = distance from inner right edge to outer right edge
+- top_margin = distance from outer top edge to inner top edge
+- bottom_margin = distance from inner bottom edge to outer bottom edge
+
+Calculate ratios:
+- L/R = left_margin / (left_margin + right_margin) expressed as "55/45" format
+- T/B = top_margin / (top_margin + bottom_margin) expressed as "55/45" format
+- The LARGER side goes first (e.g. if left is 55% and right is 45%, write "55/45")
+
+Return ONLY valid JSON:
+{
+  "front_left_right": "52/48",
+  "front_top_bottom": "55/45",
+  "back_left_right": "50/50",
+  "back_top_bottom": "53/47",
+  "front_outer_frame": { "left_pct": 0.5, "right_pct": 99.5, "top_pct": 0.3, "bottom_pct": 99.7 },
+  "front_inner_frame": { "left_pct": 5.2, "right_pct": 94.8, "top_pct": 7.1, "bottom_pct": 92.9 },
+  "back_outer_frame": { "left_pct": 0.4, "right_pct": 99.6, "top_pct": 0.5, "bottom_pct": 99.5 },
+  "back_inner_frame": { "left_pct": 4.9, "right_pct": 95.1, "top_pct": 6.8, "bottom_pct": 93.2 },
+  "front_centering_grade": 9,
+  "back_centering_grade": 10,
+  "centering_subgrade": 9,
+  "notes": "Front slightly off-centre left. Back is well-centred."
+}
+
+Grade thresholds (front): 10=55/45 or better, 9=60/40, 8=65/35, 7=70/30, 6=80/20, 5=85/15
+Grade thresholds (back): 10=75/25 or better, 9=90/10, 7=worse than 90/10
+Final centering subgrade = LOWER of front and back grades. Whole numbers only (1-10).`;
+
+export const DEFECTS_ONLY_PROMPT = `You are examining high-resolution images of a trading card. Your ONLY task is to detect and locate physical defects.
+
+Examine BOTH front and back images carefully. Look for:
+- Scratches (surface, holo)
+- Whitening (corners, edges — especially on the blue Pokemon back)
+- Print lines
+- Indentations / roller marks
+- Staining / discolouration
+- Creases / bends
+- Edge chips / roughness
+- Corner softness / rounding
+- Foil peeling
+- Ink spots / colour registration errors
+
+For each defect found, return its position as x/y percentages of the IMAGE (0-100 for both axes).
+
+Return ONLY valid JSON:
+{
+  "defects": [
+    {
+      "id": 1,
+      "type": "whitening",
+      "location": "back",
+      "position_x_percent": 92,
+      "position_y_percent": 8,
+      "width_percent": 5,
+      "height_percent": 4,
+      "severity": "minor",
+      "description": "Minor whitening on back top-right corner",
+      "detected_in": "original"
+    }
+  ],
+  "surface_front_grade": 9,
+  "surface_back_grade": 9,
+  "corners_subgrade": 9,
+  "edges_subgrade": 9,
+  "surface_subgrade": 9,
+  "notes": "Clean card with minor back corner whitening only."
+}
+
+Severity: "minor" (barely visible), "moderate" (clearly visible), "major" (significant impact on grade).
+Grades must be whole numbers 1-10. No half grades.`;
+
+export const GRADE_ONLY_PROMPT = `You are a professional trading card grader. You are given VERIFIED card details and pre-measured data. Your task is to assign the final grade.
+
+CONTEXT (provided by previous analysis steps):
+- Card identification: {CARD_CONTEXT}
+- Centering measurements: {CENTERING_CONTEXT}
+- Detected defects: {DEFECTS_CONTEXT}
+
+Using this verified data, determine:
+1. Overall grade (whole number 1-10)
+2. Confirm or adjust each subgrade (centering, corners, edges, surface)
+3. Grade explanation
+4. Authentication assessment
+5. Grade strength score (0-100)
+
+Grading formula:
+- Weighted: (centering × 10%) + (corners × 25%) + (edges × 25%) + (surface × 40%)
+- Floor to whole number
+- Cap by lowest subgrade + 1
+- Crease = max 5, Tear = max 3
+
+Return ONLY valid JSON:
+{
+  "overall_grade": 8,
+  "grade_label": "NM-MT",
+  "centering_subgrade": 9,
+  "corners_subgrade": 8,
+  "edges_subgrade": 9,
+  "surface_subgrade": 8,
+  "grade_explanation": "Solid NM-MT with minor corner whitening on back.",
+  "is_authentic": true,
+  "is_altered": false,
+  "authentication_notes": "Card appears genuine.",
+  "grade_strength_score": 65,
+  "recommendations": []
+}
+
+Grades must be whole numbers 1-10. grade_strength_score is 0-100.`;

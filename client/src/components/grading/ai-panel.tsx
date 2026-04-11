@@ -152,8 +152,38 @@ function ConfidenceBadge({ level }: { level: Confidence }) {
   );
 }
 
+type ActionStatus = "idle" | "loading" | "done" | "error";
+
+function ActionButton({ label, status, error: err, onClick, cost }: {
+  label: string; status: ActionStatus; error?: string; onClick: () => void; cost: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <button type="button" onClick={onClick} disabled={status === "loading"}
+        className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-xs font-bold uppercase transition-all ${
+          status === "done" ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-400" :
+          status === "error" ? "border-red-600/40 bg-red-950/20 text-red-400" :
+          status === "loading" ? "border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]" :
+          "border-[#333333] text-[#888888] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
+        }`}>
+        <span className="flex items-center gap-2">
+          {status === "loading" ? <Loader2 size={13} className="animate-spin" /> :
+           status === "done" ? <CheckCircle2 size={13} /> :
+           status === "error" ? <AlertTriangle size={13} /> :
+           <Bot size={13} />}
+          {status === "loading" ? `Running ${label}…` : status === "done" ? `${label} ✓` : status === "error" ? `${label} — retry` : label}
+        </span>
+        <span className="text-[9px] text-[#555555] font-normal normal-case">{cost}</span>
+      </button>
+      {status === "error" && err && <p className="text-red-400 text-[10px] px-1">{err}</p>}
+    </div>
+  );
+}
+
 export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl }: Props) {
   const { toast } = useToast();
+
+  // Legacy state for full analysis (kept for backward compat)
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState<string>("");
   const [result, setResult] = useState<AiAnalysisResult | null>(null);
@@ -162,6 +192,64 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
   const [showAuthNotes, setShowAuthNotes] = useState(false);
   const [idConfidence, setIdConfidence] = useState<string | null>(null);
   const [idVerified, setIdVerified] = useState(false);
+
+  // Individual action states
+  const [centeringStatus, setCenteringStatus] = useState<ActionStatus>("idle");
+  const [centeringError, setCenteringError] = useState("");
+  const [centeringResult, setCenteringResult] = useState<any>(null);
+
+  const [defectsStatus, setDefectsStatus] = useState<ActionStatus>("idle");
+  const [defectsError, setDefectsError] = useState("");
+  const [defectsResult, setDefectsResult] = useState<any>(null);
+
+  const [gradeStatus, setGradeStatus] = useState<ActionStatus>("idle");
+  const [gradeError, setGradeError] = useState("");
+  const [gradeResult, setGradeResult] = useState<any>(null);
+
+  async function runCentering() {
+    setCenteringStatus("loading"); setCenteringError("");
+    try {
+      const r = await fetch(`/api/admin/certificates/${certId}/measure-centering`, { method: "POST", credentials: "include" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setCenteringResult(d.centering);
+      setCenteringStatus("done");
+      toast({ title: `Centering: ${d.centering.front_left_right} L/R` });
+    } catch (e: any) { setCenteringStatus("error"); setCenteringError(e.message); }
+  }
+
+  async function runDefects() {
+    setDefectsStatus("loading"); setDefectsError("");
+    try {
+      const r = await fetch(`/api/admin/certificates/${certId}/detect-defects`, { method: "POST", credentials: "include" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setDefectsResult(d.defects);
+      setDefectsStatus("done");
+      toast({ title: `${d.defects.defects?.length || 0} defects detected` });
+    } catch (e: any) { setDefectsStatus("error"); setDefectsError(e.message); }
+  }
+
+  async function runGrade() {
+    setGradeStatus("loading"); setGradeError("");
+    try {
+      const r = await fetch(`/api/admin/certificates/${certId}/grade-card`, { method: "POST", credentials: "include" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      setGradeResult(d.grade);
+      setGradeStatus("done");
+      toast({ title: `Grade: ${d.grade.overall_grade} ${d.grade.grade_label}` });
+    } catch (e: any) { setGradeStatus("error"); setGradeError(e.message); }
+  }
+
+  async function runAllFour() {
+    // Run identify (already on form), centering, defects in parallel, then grade
+    const promises = [runCentering(), runDefects()];
+    await Promise.allSettled(promises);
+    await runGrade();
+    // Also trigger legacy full analysis for the workstation integration
+    runAnalysis();
+  }
 
   async function runAnalysis() {
     setStep("identifying");
@@ -217,22 +305,36 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
   return (
     <div className="bg-[#0A0A0A] border border-[#D4AF37]/20 rounded-xl p-4 space-y-4">
-      {/* Header + button */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Bot size={16} className="text-[#D4AF37]" />
-          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Grading Assistant</p>
-        </div>
-        <button
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <Bot size={16} className="text-[#D4AF37]" />
+        <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Grading Assistant</p>
+      </div>
+
+      {/* Four individual action buttons */}
+      <div className="grid grid-cols-2 gap-2">
+        <ActionButton label="Measure Centering" status={centeringStatus} error={centeringError} onClick={runCentering} cost="~£0.03" />
+        <ActionButton label="Detect Defects" status={defectsStatus} error={defectsError} onClick={runDefects} cost="~£0.04" />
+        <ActionButton label="Grade Card" status={gradeStatus} error={gradeError} onClick={runGrade} cost="~£0.03" />
+        <button type="button" onClick={runAllFour}
+          disabled={centeringStatus === "loading" || defectsStatus === "loading" || gradeStatus === "loading" || isLoading}
+          className="flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-3 py-2.5 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all"
+        >
+          <Bot size={13} />
+          Run All
+        </button>
+      </div>
+
+      {/* Legacy full analyze button (smaller, below) */}
+      <button
           type="button"
           onClick={runAnalysis}
           disabled={isLoading}
-          className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 hover:opacity-90 transition-all"
+          className="w-full flex items-center justify-center gap-2 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
         >
           {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
-          {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze" : "Analyze with AI"}
+          {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze (Full)" : "Analyze with AI (Full)"}
         </button>
-      </div>
 
       {/* Confidence indicator */}
       {step === "complete" && idConfidence && (

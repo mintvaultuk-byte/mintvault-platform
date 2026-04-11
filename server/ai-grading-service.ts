@@ -372,7 +372,7 @@ function clampAllGrades(result: GradingAnalysis): GradingAnalysis {
  * Output is typically 300-700 KB which is well under the 5 MB Anthropic limit.
  * 2000px on the longest edge is plenty of detail for card identification and grading.
  */
-async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaType: "image/jpeg" }> {
+export async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaType: "image/jpeg" }> {
   const inputSize = buffer.length;
   const resized = await sharp(buffer)
     .rotate() // auto-orient based on EXIF
