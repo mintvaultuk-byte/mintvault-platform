@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
-import { X, RotateCcw, Save, ZoomIn, ZoomOut } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { X, Save, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-interface Point { x: number; y: number; }
+interface Rect { left: number; top: number; right: number; bottom: number; }
 
 interface Props {
   certId: number;
@@ -14,121 +14,148 @@ interface Props {
 
 export interface CenteringResult {
   side: "front" | "back";
-  points: Point[];
-  leftRight: string;  // "54/46"
-  topBottom: string;   // "47/53"
+  outer: Rect;
+  inner: Rect;
+  leftRight: string;
+  topBottom: string;
   subgrade: number;
 }
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
 
-const STEP_LABELS = [
-  "Click OUTER top-left corner (where card border meets background)",
-  "Click OUTER top-right corner",
-  "Click OUTER bottom-right corner",
-  "Click OUTER bottom-left corner",
-  "Click INNER top-left corner (where border meets card content)",
-  "Click INNER top-right corner",
-  "Click INNER bottom-right corner",
-  "Click INNER bottom-left corner",
-];
+function computeCentering(outer: Rect, inner: Rect) {
+  const leftB = inner.left - outer.left;
+  const rightB = outer.right - inner.right;
+  const topB = inner.top - outer.top;
+  const bottomB = outer.bottom - inner.bottom;
+  const totalH = leftB + rightB;
+  const totalV = topB + bottomB;
 
-const POINT_COLORS = [
-  "#D4AF37", "#D4AF37", "#D4AF37", "#D4AF37", // outer = gold
-  "#16A34A", "#16A34A", "#16A34A", "#16A34A", // inner = green
-];
-
-function calculateCentering(points: Point[]): { lr: string; tb: string; subgrade: number } {
-  if (points.length < 8) return { lr: "50/50", tb: "50/50", subgrade: 10 };
-
-  const [oTL, oTR, oBR, oBL, iTL, iTR, iBR, iBL] = points;
-
-  const outerLeft = (oTL.x + oBL.x) / 2;
-  const outerRight = (oTR.x + oBR.x) / 2;
-  const outerTop = (oTL.y + oTR.y) / 2;
-  const outerBottom = (oBL.y + oBR.y) / 2;
-
-  const innerLeft = (iTL.x + iBL.x) / 2;
-  const innerRight = (iTR.x + iBR.x) / 2;
-  const innerTop = (iTL.y + iTR.y) / 2;
-  const innerBottom = (iBL.y + iBR.y) / 2;
-
-  const leftBorder = innerLeft - outerLeft;
-  const rightBorder = outerRight - innerRight;
-  const topBorder = innerTop - outerTop;
-  const bottomBorder = outerBottom - innerBottom;
-
-  const totalH = leftBorder + rightBorder;
-  const totalV = topBorder + bottomBorder;
-
-  const lPct = totalH > 0 ? Math.round((leftBorder / totalH) * 1000) / 10 : 50;
+  const lPct = totalH > 0 ? Math.round((leftB / totalH) * 1000) / 10 : 50;
   const rPct = Math.round((100 - lPct) * 10) / 10;
-  const tPct = totalV > 0 ? Math.round((topBorder / totalV) * 1000) / 10 : 50;
+  const tPct = totalV > 0 ? Math.round((topB / totalV) * 1000) / 10 : 50;
   const bPct = Math.round((100 - tPct) * 10) / 10;
 
-  // Subgrade from worst ratio
   const worstDev = Math.max(Math.abs(lPct - 50), Math.abs(tPct - 50));
-  let subgrade: number;
-  if (worstDev <= 2) subgrade = 10;
-  else if (worstDev <= 5) subgrade = 9;
-  else if (worstDev <= 10) subgrade = 8;
-  else if (worstDev <= 15) subgrade = 7;
-  else if (worstDev <= 20) subgrade = 6;
-  else if (worstDev <= 35) subgrade = 5;
-  else subgrade = 4;
+  const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
 
-  // Format: larger side first
   const lr = lPct >= rPct ? `${lPct}/${rPct}` : `${rPct}/${lPct}`;
   const tb = tPct >= bPct ? `${tPct}/${bPct}` : `${bPct}/${tPct}`;
 
-  return { lr, tb, subgrade };
+  return { lr, tb, subgrade, lPct, rPct, tPct, bPct };
 }
+
+type DragTarget = "none" | "outer-tl" | "outer-tr" | "outer-br" | "outer-bl" | "outer-t" | "outer-r" | "outer-b" | "outer-l" | "outer-body" | "inner-tl" | "inner-tr" | "inner-br" | "inner-bl" | "inner-t" | "inner-r" | "inner-b" | "inner-l" | "inner-body";
 
 export default function ManualCentering({ certId, side, imageUrl, onSave, onCancel }: Props) {
   const { toast } = useToast();
-  const [points, setPoints] = useState<Point[]>([]);
+  const [outer, setOuter] = useState<Rect>({ left: 1, top: 1, right: 99, bottom: 99 });
+  const [inner, setInner] = useState<Rect>({ left: 5, top: 4, right: 95, bottom: 96 });
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 50, y: 50 });
-  const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [saving, setSaving] = useState(false);
+  const [dragTarget, setDragTarget] = useState<DragTarget>("none");
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0, rect: { left: 0, top: 0, right: 0, bottom: 0 } });
   const imgRef = useRef<HTMLImageElement>(null);
 
-  const step = points.length;
-  const isDone = step >= 8;
-  const result = isDone ? calculateCentering(points) : null;
+  const result = computeCentering(outer, inner);
 
-  function handleImageClick(e: React.MouseEvent) {
-    if (dragging || isDone) return;
-    if (!imgRef.current) return;
+  const toImagePct = useCallback((clientX: number, clientY: number) => {
+    if (!imgRef.current) return { x: 50, y: 50 };
+    const r = imgRef.current.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)),
+      y: Math.max(0, Math.min(100, ((clientY - r.top) / r.height) * 100)),
+    };
+  }, []);
 
-    const imgRect = imgRef.current.getBoundingClientRect();
-    const x = ((e.clientX - imgRect.left) / imgRect.width) * 100;
-    const y = ((e.clientY - imgRect.top) / imgRect.height) * 100;
-
-    setPoints(prev => [...prev, { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) }]);
+  function startDrag(e: React.MouseEvent, target: DragTarget) {
+    e.stopPropagation();
+    e.preventDefault();
+    const pos = toImagePct(e.clientX, e.clientY);
+    const rect = target.startsWith("outer") ? outer : inner;
+    setDragTarget(target);
+    setDragStart({ x: pos.x, y: pos.y, rect: { ...rect } });
   }
 
-  function undo() {
-    setPoints(prev => prev.slice(0, -1));
+  function onMouseMove(e: React.MouseEvent) {
+    if (dragTarget === "none") return;
+    const pos = toImagePct(e.clientX, e.clientY);
+    const dx = pos.x - dragStart.x;
+    const dy = pos.y - dragStart.y;
+    const s = dragStart.rect;
+    const isOuter = dragTarget.startsWith("outer");
+    const setRect = isOuter ? setOuter : setInner;
+
+    if (dragTarget.endsWith("-body")) {
+      setRect({ left: s.left + dx, top: s.top + dy, right: s.right + dx, bottom: s.bottom + dy });
+    } else if (dragTarget.endsWith("-tl")) {
+      setRect({ ...s, left: s.left + dx, top: s.top + dy });
+    } else if (dragTarget.endsWith("-tr")) {
+      setRect({ ...s, right: s.right + dx, top: s.top + dy });
+    } else if (dragTarget.endsWith("-br")) {
+      setRect({ ...s, right: s.right + dx, bottom: s.bottom + dy });
+    } else if (dragTarget.endsWith("-bl")) {
+      setRect({ ...s, left: s.left + dx, bottom: s.bottom + dy });
+    } else if (dragTarget.endsWith("-t")) {
+      setRect({ ...s, top: s.top + dy });
+    } else if (dragTarget.endsWith("-b")) {
+      setRect({ ...s, bottom: s.bottom + dy });
+    } else if (dragTarget.endsWith("-l")) {
+      setRect({ ...s, left: s.left + dx });
+    } else if (dragTarget.endsWith("-r")) {
+      setRect({ ...s, right: s.right + dx });
+    }
   }
 
-  function reset() {
-    setPoints([]);
+  function onMouseUp() { setDragTarget("none"); }
+
+  function renderRect(rect: Rect, prefix: "outer" | "inner", color: string, dashed: boolean) {
+    const w = rect.right - rect.left;
+    const h = rect.bottom - rect.top;
+    const handleSize = 1.2; // percentage
+    const handles = [
+      { id: `${prefix}-tl`, x: rect.left, y: rect.top },
+      { id: `${prefix}-tr`, x: rect.right, y: rect.top },
+      { id: `${prefix}-br`, x: rect.right, y: rect.bottom },
+      { id: `${prefix}-bl`, x: rect.left, y: rect.bottom },
+      { id: `${prefix}-t`, x: rect.left + w / 2, y: rect.top },
+      { id: `${prefix}-b`, x: rect.left + w / 2, y: rect.bottom },
+      { id: `${prefix}-l`, x: rect.left, y: rect.top + h / 2 },
+      { id: `${prefix}-r`, x: rect.right, y: rect.top + h / 2 },
+    ];
+
+    return (
+      <>
+        {/* Rectangle border */}
+        <rect x={rect.left} y={rect.top} width={w} height={h}
+          fill="none" stroke={color} strokeWidth="0.4"
+          strokeDasharray={dashed ? "1.5,1" : "none"} opacity="0.9" />
+        {/* Invisible body drag area */}
+        <rect x={rect.left} y={rect.top} width={w} height={h}
+          fill="transparent" cursor="move"
+          onMouseDown={(e) => startDrag(e as any, `${prefix}-body` as DragTarget)} />
+        {/* Corner + edge handles */}
+        {handles.map(h => (
+          <circle key={h.id} cx={h.x} cy={h.y} r={handleSize}
+            fill={color} stroke="white" strokeWidth="0.2"
+            cursor="pointer" opacity="0.9"
+            onMouseDown={(e) => startDrag(e as any, h.id as DragTarget)} />
+        ))}
+      </>
+    );
   }
 
   async function save() {
-    if (!result) return;
     setSaving(true);
     try {
       const r = await fetch(`/api/admin/certificates/${certId}/manual-centering`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ side, points }),
+        body: JSON.stringify({ side, outer, inner }),
       });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
-      onSave({ side, points, leftRight: result.lr, topBottom: result.tb, subgrade: result.subgrade });
-      toast({ title: `${side} centering saved: ${result.lr} L/R, ${result.tb} T/B → grade ${result.subgrade}` });
+      onSave({ side, outer, inner, leftRight: result.lr, topBottom: result.tb, subgrade: result.subgrade });
+      toast({ title: `${side} centering: ${result.lr} L/R, ${result.tb} T/B → grade ${result.subgrade}` });
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -136,79 +163,58 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
     }
   }
 
-  const zoomIn = () => { const idx = ZOOM_STEPS.indexOf(zoom); if (idx < ZOOM_STEPS.length - 1) setZoom(ZOOM_STEPS[idx + 1]); };
-  const zoomOut = () => { const idx = ZOOM_STEPS.indexOf(zoom); if (idx > 0) setZoom(ZOOM_STEPS[idx - 1]); };
-
-  const transformStyle = zoom > 1
-    ? `scale(${zoom}) translate(${(50 - pan.x) / zoom}%, ${(50 - pan.y) / zoom}%)`
-    : "none";
+  const zoomIn = () => { const i = ZOOM_STEPS.indexOf(zoom); if (i < ZOOM_STEPS.length - 1) setZoom(ZOOM_STEPS[i + 1]); };
+  const zoomOut = () => { const i = ZOOM_STEPS.indexOf(zoom); if (i > 0) setZoom(ZOOM_STEPS[i - 1]); };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
-      {/* Top bar */}
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col select-none"
+      onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
+
+      {/* Top bar: live stats */}
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
-        <div>
-          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
-          <p className="text-[#888888] text-xs mt-0.5">
-            {isDone ? "Review your points and save" : `Step ${step + 1}/8: ${STEP_LABELS[step]}`}
-          </p>
+        <div className="flex items-center gap-6">
+          <div>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
+            <p className="text-[#888888] text-[10px]">Drag the <span className="text-[#D4AF37]">gold outer</span> rect to card edges, <span className="text-[#16A34A]">green inner</span> rect to border interior</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-center">
+              <p className="text-[#555555] text-[9px] uppercase">L/R</p>
+              <p className="text-white text-lg font-bold font-mono leading-none">{result.lr}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[#555555] text-[9px] uppercase">T/B</p>
+              <p className="text-white text-lg font-bold font-mono leading-none">{result.tb}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-[#555555] text-[9px] uppercase">Grade</p>
+              <p className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[#D4AF37]" : result.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}>{result.subgrade}</p>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors">
-            <ZoomOut size={16} />
-          </button>
+          <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"><ZoomOut size={16} /></button>
           <span className="text-white text-xs font-mono w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={zoomIn} disabled={zoom >= 6} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors">
-            <ZoomIn size={16} />
-          </button>
-          <button type="button" onClick={onCancel} className="ml-4 text-[#888888] hover:text-white p-1">
-            <X size={20} />
-          </button>
+          <button type="button" onClick={zoomIn} disabled={zoom >= 6} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"><ZoomIn size={16} /></button>
+          <button type="button" onClick={onCancel} className="ml-4 text-[#888888] hover:text-white"><X size={20} /></button>
         </div>
       </div>
 
-      {/* Main image area */}
+      {/* Image area with rects */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-        <div
-          className="relative overflow-hidden rounded-lg bg-[#0A0A0A] w-full h-full max-w-[85vh] cursor-crosshair"
-          onClick={handleImageClick}
-          onMouseDown={e => { if (zoom > 1) { setDragging(true); setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y }); } }}
-          onMouseMove={e => { if (dragging) setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }); }}
-          onMouseUp={() => setDragging(false)}
-          onMouseLeave={() => setDragging(false)}
-        >
-          <div className="relative w-full h-full" style={{ transform: transformStyle, transition: dragging ? "none" : "transform 0.15s" }}>
+        <div className="relative w-full h-full max-w-[85vh] overflow-hidden rounded-lg bg-[#0A0A0A]">
+          <div className="relative w-full h-full" style={{ transform: zoom > 1 ? `scale(${zoom})` : "none", transition: "transform 0.15s" }}>
             <img ref={imgRef} src={imageUrl} alt={side} className="w-full h-full object-contain" draggable={false} />
-
-            {/* Placed points */}
-            {points.map((p, i) => (
-              <div
-                key={i}
-                className="absolute pointer-events-none"
-                style={{ left: `${p.x}%`, top: `${p.y}%`, transform: "translate(-50%, -50%)" }}
-              >
-                <div className="w-5 h-5 rounded-full border-2 flex items-center justify-center text-[8px] font-black"
-                  style={{ borderColor: POINT_COLORS[i], color: POINT_COLORS[i], background: `${POINT_COLORS[i]}20` }}>
-                  {i + 1}
-                </div>
-              </div>
-            ))}
-
-            {/* Lines connecting outer points */}
-            {points.length >= 4 && (
-              <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <polygon
-                  points={points.slice(0, 4).map(p => `${p.x},${p.y}`).join(" ")}
-                  fill="none" stroke="#D4AF37" strokeWidth="0.3" opacity="0.6"
-                />
-                {points.length >= 8 && (
-                  <polygon
-                    points={points.slice(4, 8).map(p => `${p.x},${p.y}`).join(" ")}
-                    fill="none" stroke="#16A34A" strokeWidth="0.3" opacity="0.6" strokeDasharray="1,1"
-                  />
-                )}
-              </svg>
-            )}
+            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
+              style={{ pointerEvents: dragTarget !== "none" ? "none" : "auto" }}>
+              {renderRect(outer, "outer", "#D4AF37", false)}
+              {renderRect(inner, "inner", "#16A34A", true)}
+              {/* Measurement lines */}
+              <line x1={outer.left} y1={(inner.top + inner.bottom) / 2} x2={inner.left} y2={(inner.top + inner.bottom) / 2} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={inner.right} y1={(inner.top + inner.bottom) / 2} x2={outer.right} y2={(inner.top + inner.bottom) / 2} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={(inner.left + inner.right) / 2} y1={outer.top} x2={(inner.left + inner.right) / 2} y2={inner.top} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={(inner.left + inner.right) / 2} y1={inner.bottom} x2={(inner.left + inner.right) / 2} y2={outer.bottom} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+            </svg>
           </div>
         </div>
       </div>
@@ -216,46 +222,15 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
       {/* Bottom toolbar */}
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
         <div className="flex items-center gap-3">
-          <button type="button" onClick={undo} disabled={points.length === 0}
-            className="text-[#888888] hover:text-white text-xs disabled:opacity-30 transition-colors">
-            Undo last point
-          </button>
-          <button type="button" onClick={reset} disabled={points.length === 0}
-            className="flex items-center gap-1 text-[#888888] hover:text-white text-xs disabled:opacity-30 transition-colors">
-            <RotateCcw size={12} /> Reset all
-          </button>
-          <span className="text-[#555555] text-xs">{points.length}/8 points placed</span>
+          <button type="button" onClick={() => { setOuter({ left: 1, top: 1, right: 99, bottom: 99 }); setInner({ left: 5, top: 4, right: 95, bottom: 96 }); }}
+            className="flex items-center gap-1 text-[#888888] hover:text-white text-xs"><RotateCcw size={12} /> Reset</button>
         </div>
-
-        {/* Result display */}
-        {result && (
-          <div className="flex items-center gap-4">
-            <div className="text-center">
-              <p className="text-[#888888] text-[9px] uppercase">L/R</p>
-              <p className="text-white text-sm font-bold font-mono">{result.lr}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-[#888888] text-[9px] uppercase">T/B</p>
-              <p className="text-white text-sm font-bold font-mono">{result.tb}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-[#888888] text-[9px] uppercase">Grade</p>
-              <p className="text-[#D4AF37] text-sm font-black">{result.subgrade}</p>
-            </div>
-          </div>
-        )}
-
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">
-            Cancel
+          <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">Cancel</button>
+          <button type="button" onClick={save} disabled={saving}
+            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
+            <Save size={13} /> {saving ? "Saving…" : "Save Centering"}
           </button>
-          {isDone && (
-            <button type="button" onClick={save} disabled={saving}
-              className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
-              <Save size={13} />
-              {saving ? "Saving…" : "Save Centering"}
-            </button>
-          )}
         </div>
       </div>
     </div>

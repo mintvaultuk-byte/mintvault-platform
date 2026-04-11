@@ -5178,29 +5178,19 @@ export async function registerRoutes(
     }
   });
 
-  // POST /api/admin/certificates/:id/manual-centering — save 8-point manual measurement
+  // POST /api/admin/certificates/:id/manual-centering — save two-rect manual measurement
   app.post("/api/admin/certificates/:id/manual-centering", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      const { side, points } = req.body;
+      const { side, outer, inner } = req.body;
       if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
-      if (!Array.isArray(points) || points.length !== 8) return res.status(400).json({ error: "Exactly 8 points required" });
+      if (!outer || !inner) return res.status(400).json({ error: "outer and inner rects required" });
 
-      // Calculate centering from points
-      const [oTL, oTR, oBR, oBL, iTL, iTR, iBR, iBL] = points;
-      const outerLeft = (oTL.x + oBL.x) / 2;
-      const outerRight = (oTR.x + oBR.x) / 2;
-      const outerTop = (oTL.y + oTR.y) / 2;
-      const outerBottom = (oBL.y + oBR.y) / 2;
-      const innerLeft = (iTL.x + iBL.x) / 2;
-      const innerRight = (iTR.x + iBR.x) / 2;
-      const innerTop = (iTL.y + iTR.y) / 2;
-      const innerBottom = (iBL.y + iBR.y) / 2;
-
-      const leftB = innerLeft - outerLeft;
-      const rightB = outerRight - innerRight;
-      const topB = innerTop - outerTop;
-      const bottomB = outerBottom - innerBottom;
+      // Calculate centering from the two rectangles
+      const leftB = inner.left - outer.left;
+      const rightB = outer.right - inner.right;
+      const topB = inner.top - outer.top;
+      const bottomB = outer.bottom - inner.bottom;
       const totalH = leftB + rightB;
       const totalV = topB + bottomB;
 
@@ -5212,13 +5202,21 @@ export async function registerRoutes(
       const worstDev = Math.max(Math.abs(lPct - 50), Math.abs(tPct - 50));
       const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
 
-      const col = side === "front" ? "centering_points_front" : "centering_points_back";
+      const outerCol = side === "front" ? "centering_outer_front" : "centering_outer_back";
+      const innerCol = side === "front" ? "centering_inner_front" : "centering_inner_back";
       const lrCol = side === "front" ? "centering_front_lr" : "centering_back_lr";
       const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
 
+      // Add new columns if they don't exist yet
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`); } catch {}
+
       await db.execute(sql.raw(`
         UPDATE certificates SET
-          ${col} = '${JSON.stringify(points)}'::jsonb,
+          ${outerCol} = '${JSON.stringify(outer)}'::jsonb,
+          ${innerCol} = '${JSON.stringify(inner)}'::jsonb,
           ${lrCol} = '${lr}',
           ${tbCol} = '${tb}',
           centering_method = 'manual',
@@ -5227,7 +5225,7 @@ export async function registerRoutes(
       `));
 
       console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
-      res.json({ lr, tb, subgrade, points });
+      res.json({ lr, tb, subgrade, outer, inner });
     } catch (err: any) {
       console.error("[manual-centering] error:", err.message);
       res.status(500).json({ error: err.message });
