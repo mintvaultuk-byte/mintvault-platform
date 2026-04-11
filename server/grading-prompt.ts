@@ -431,7 +431,9 @@ export const GRADE_LABELS: Record<string, string> = {
 
 // ── Focused prompts for individual AI actions ─────────────────────────────
 
-export const CENTERING_ONLY_PROMPT = `You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
+export const CENTERING_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object. No preamble, no prose, no markdown fences. First character must be {, last must be }.
+
+You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
 
 For each side (front and back), identify:
 1. The OUTER FRAME — the card's physical border (yellow/black edge)
@@ -470,7 +472,9 @@ Grade thresholds (front): 10=55/45 or better, 9=60/40, 8=65/35, 7=70/30, 6=80/20
 Grade thresholds (back): 10=75/25 or better, 9=90/10, 7=worse than 90/10
 Final centering subgrade = LOWER of front and back grades. Whole numbers only (1-10).`;
 
-export const DEFECTS_ONLY_PROMPT = `You are examining high-resolution images of a trading card. Your ONLY task is to detect and locate physical defects.
+export const DEFECTS_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object. No preamble, no prose, no markdown fences. First character must be {, last must be }.
+
+You are examining high-resolution images of a trading card. Your ONLY task is to detect and locate physical defects.
 
 Examine BOTH front and back images carefully. Look for:
 - Scratches (surface, holo)
@@ -513,7 +517,9 @@ Return ONLY valid JSON:
 Severity: "minor" (barely visible), "moderate" (clearly visible), "major" (significant impact on grade).
 Grades must be whole numbers 1-10. No half grades.`;
 
-export const GRADE_ONLY_PROMPT = `You are a professional trading card grader. You are given VERIFIED card details and pre-measured data. Your task is to assign the final grade.
+export const GRADE_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object. No preamble, no prose, no markdown fences. First character must be {, last must be }.
+
+You are a professional trading card grader. You are given VERIFIED card details and pre-measured data. Your task is to assign the final grade.
 
 CONTEXT (provided by previous analysis steps):
 - Card identification: {CARD_CONTEXT}

@@ -232,28 +232,54 @@ export async function verifyPokemonCardWithTcgApi(
 
     // Strategy 1: If we have a set code, search by set.id + number (most precise)
     if (setCode) {
-      const codeClean = setCode.replace(/\s+/g, "").toLowerCase();
-      const setQuery = encodeURIComponent(`set.id:${codeClean} number:${detectedNumber}`);
-      console.log(`[identify-debug] TCG query strategy 1: set.id:${codeClean} number:${detectedNumber}`);
-      const setRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`, { headers: { "X-Api-Key": apiKey } });
-      if (setRes.ok) {
-        const setData = await setRes.json();
-        results = setData.data || [];
-        console.log(`[identify-debug] strategy 1 results: ${results.length} cards`);
-        if (results.length > 0) {
-          console.log(`[pokemon-tcg] set-code match: ${codeClean} + #${detectedNumber} → ${results.length} results`);
+      const codeClean = normaliseSetCode(setCode).toLowerCase();
+      // Try multiple code formats (TCG API is inconsistent: "svp", "sv-p", "pop1", etc.)
+      const codeVariants = [codeClean, setCode.replace(/\s+/g, "-").toLowerCase(), setCode.toLowerCase()];
+      const uniqueCodes = [...new Set(codeVariants)];
+      for (const code of uniqueCodes) {
+        if (results.length > 0) break;
+        const setQuery = encodeURIComponent(`set.id:${code} number:${detectedNumber}`);
+        console.log(`[identify-debug] TCG query strategy 1: set.id:${code} number:${detectedNumber}`);
+        const setRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`, { headers: { "X-Api-Key": apiKey } });
+        if (setRes.ok) {
+          const setData = await setRes.json();
+          results = setData.data || [];
+          console.log(`[identify-debug] strategy 1 (${code}): ${results.length} cards`);
         }
       }
     }
 
-    // Strategy 2: Fallback to name + number search
+    // Strategy 2: Fallback to name + number search, with guards
     if (results.length === 0) {
       console.log(`[identify-debug] TCG query strategy 2: name:"${detectedName}" number:${detectedNumber}`);
       const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
       const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, { headers: { "X-Api-Key": apiKey } });
       if (nameRes.ok) {
         const nameData = await nameRes.json();
-        results = nameData.data || [];
+        const rawResults = nameData.data || [];
+
+        // Filter out mismatches: reject if card number or year doesn't match
+        results = rawResults.filter((card: any) => {
+          // Number guard: TCG card number must match AI-detected number
+          if (detectedNumber && card.number && String(card.number) !== String(detectedNumber)) {
+            console.log(`[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — number mismatch (AI: ${detectedNumber}, TCG: ${card.number})`);
+            return false;
+          }
+          // Year guard: set release year must be within 1 year of copyright_year
+          if (copyrightYear) {
+            const cardYear = parseInt(copyrightYear, 10);
+            const setYear = parseInt(card.set.releaseDate?.split("-")[0] || "0", 10);
+            if (setYear > 0 && Math.abs(setYear - cardYear) > 1) {
+              console.log(`[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — year mismatch (AI: ${copyrightYear}, TCG: ${setYear})`);
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (rawResults.length > 0 && results.length === 0) {
+          console.log(`[tcg-verify] strategy 2: all ${rawResults.length} results rejected by guards`);
+        }
       }
     }
 
@@ -597,6 +623,11 @@ async function identifyWithGpt(base64: string): Promise<CardIdentification | nul
   }
 }
 
+/** Normalise set code: strip whitespace, uppercase. "M24 EN" and "M24EN" become "M24EN" */
+function normaliseSetCode(code: string | null | undefined): string {
+  return String(code || "").replace(/\s+/g, "").toUpperCase();
+}
+
 /** Reconcile Claude + GPT results. Returns the best identification. */
 function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentification | null): CardIdentification {
   if (!gpt) {
@@ -604,7 +635,7 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
     return claude;
   }
 
-  const codeAgree = claude.set_code && gpt.set_code && claude.set_code.toLowerCase() === gpt.set_code.toLowerCase();
+  const codeAgree = claude.set_code && gpt.set_code && normaliseSetCode(claude.set_code) === normaliseSetCode(gpt.set_code);
   const numberAgree = claude.detected_number === gpt.detected_number;
   const yearAgree = claude.copyright_year === gpt.copyright_year;
 

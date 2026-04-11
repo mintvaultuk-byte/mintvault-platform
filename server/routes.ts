@@ -40,6 +40,19 @@ import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
 
+/** Resilient JSON extraction: handles Claude prose preambles, markdown fences */
+function extractJson<T = any>(raw: string, label: string): T {
+  const cleaned = raw.replace(/```json|```/g, "").trim();
+  try { return JSON.parse(cleaned); } catch {}
+  // Try to extract JSON object from prose
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch {}
+  }
+  console.error(`[${label}] could not extract JSON from response (first 300 chars): ${raw.slice(0, 300)}`);
+  throw new Error(`AI returned invalid response for ${label}`);
+}
+
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
   if (!s) throw new Error("SIGNED_URL_SECRET environment secret is required");
@@ -5066,8 +5079,8 @@ export async function registerRoutes(
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      const centering = JSON.parse(cleaned);
+      console.log(`[measure-centering] raw response (200 chars): ${text.slice(0, 200)}`);
+      const centering = extractJson(text, "measure-centering");
 
       // Save to cert
       await db.execute(sql`
@@ -5127,8 +5140,8 @@ export async function registerRoutes(
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      const defectResult = JSON.parse(cleaned);
+      console.log(`[detect-defects] raw response (200 chars): ${text.slice(0, 200)}`);
+      const defectResult = extractJson(text, "detect-defects");
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -5196,8 +5209,8 @@ export async function registerRoutes(
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiResp = await response.json() as { content: { text: string }[] };
       const text = aiResp.content?.[0]?.text || "";
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      const gradeResult = JSON.parse(cleaned);
+      console.log(`[grade-card] raw response (200 chars): ${text.slice(0, 200)}`);
+      const gradeResult = extractJson(text, "grade-card");
 
       // Clamp grades to whole numbers
       const clamp = (v: any) => { const n = typeof v === "number" ? v : parseFloat(v); return isNaN(n) ? 1 : Math.max(1, Math.min(10, Math.floor(n))); };
