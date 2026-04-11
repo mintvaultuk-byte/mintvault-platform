@@ -5178,6 +5178,62 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/certificates/:id/manual-centering — save 8-point manual measurement
+  app.post("/api/admin/certificates/:id/manual-centering", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const { side, points } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (!Array.isArray(points) || points.length !== 8) return res.status(400).json({ error: "Exactly 8 points required" });
+
+      // Calculate centering from points
+      const [oTL, oTR, oBR, oBL, iTL, iTR, iBR, iBL] = points;
+      const outerLeft = (oTL.x + oBL.x) / 2;
+      const outerRight = (oTR.x + oBR.x) / 2;
+      const outerTop = (oTL.y + oTR.y) / 2;
+      const outerBottom = (oBL.y + oBR.y) / 2;
+      const innerLeft = (iTL.x + iBL.x) / 2;
+      const innerRight = (iTR.x + iBR.x) / 2;
+      const innerTop = (iTL.y + iTR.y) / 2;
+      const innerBottom = (iBL.y + iBR.y) / 2;
+
+      const leftB = innerLeft - outerLeft;
+      const rightB = outerRight - innerRight;
+      const topB = innerTop - outerTop;
+      const bottomB = outerBottom - innerBottom;
+      const totalH = leftB + rightB;
+      const totalV = topB + bottomB;
+
+      const lPct = totalH > 0 ? Math.round((leftB / totalH) * 1000) / 10 : 50;
+      const tPct = totalV > 0 ? Math.round((topB / totalV) * 1000) / 10 : 50;
+      const lr = lPct >= (100 - lPct) ? `${lPct}/${(100 - lPct).toFixed(1)}` : `${(100 - lPct).toFixed(1)}/${lPct}`;
+      const tb = tPct >= (100 - tPct) ? `${tPct}/${(100 - tPct).toFixed(1)}` : `${(100 - tPct).toFixed(1)}/${tPct}`;
+
+      const worstDev = Math.max(Math.abs(lPct - 50), Math.abs(tPct - 50));
+      const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
+
+      const col = side === "front" ? "centering_points_front" : "centering_points_back";
+      const lrCol = side === "front" ? "centering_front_lr" : "centering_back_lr";
+      const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
+
+      await db.execute(sql.raw(`
+        UPDATE certificates SET
+          ${col} = '${JSON.stringify(points)}'::jsonb,
+          ${lrCol} = '${lr}',
+          ${tbCol} = '${tb}',
+          centering_method = 'manual',
+          updated_at = NOW()
+        WHERE id = ${id}
+      `));
+
+      console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
+      res.json({ lr, tb, subgrade, points });
+    } catch (err: any) {
+      console.error("[manual-centering] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/admin/certificates/:id/detect-defects — Sonnet defect-only
   app.post("/api/admin/certificates/:id/detect-defects", requireAdmin, async (req, res) => {
     try {

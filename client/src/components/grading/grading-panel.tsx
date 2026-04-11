@@ -14,6 +14,7 @@ import GradingNotes from "./grading-notes";
 import CaptureWizard from "./capture-wizard";
 import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
+import ManualCentering, { type CenteringResult } from "./manual-centering";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade } from "./grade-logic";
@@ -93,6 +94,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       return res.json();
     },
   });
+
+  // Manual centering state
+  const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
+  const [centeringMethod, setCenteringMethod] = useState<"ai" | "manual" | null>(null);
 
   // State
   const [frontLR, setFrontLR] = useState("50/50");
@@ -504,7 +509,23 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             </div>
           )}
 
-          {/* Centering */}
+          {/* Centering — manual measurement buttons */}
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={() => setManualCenteringSide("front")}
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              Manual Centering (Front)
+            </button>
+            <button type="button" onClick={() => setManualCenteringSide("back")}
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              Manual Centering (Back)
+            </button>
+            {centeringMethod && (
+              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-950/30 text-emerald-400 border border-emerald-800/40" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}>
+                {centeringMethod}
+              </span>
+            )}
+          </div>
+
           <div className="bg-[#111111] rounded-lg p-3">
             <CenteringInput
               frontLR={frontLR} frontTB={frontTB} backLR={backLR} backTB={backTB}
@@ -595,6 +616,32 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
         </div>
       </div>
+
+      {/* Manual centering picker */}
+      {manualCenteringSide && (
+        <ManualCentering
+          certId={certId}
+          side={manualCenteringSide}
+          imageUrl={
+            manualCenteringSide === "front"
+              ? (urls.front_cropped || urls.front_original || "")
+              : (urls.back_cropped || urls.back_original || "")
+          }
+          onSave={(result) => {
+            if (result.side === "front") {
+              setFrontLR(result.leftRight);
+              setFrontTB(result.topBottom);
+              setCenteringOverride(result.subgrade);
+            } else {
+              setBackLR(result.leftRight);
+              setBackTB(result.topBottom);
+            }
+            setCenteringMethod("manual");
+            setManualCenteringSide(null);
+          }}
+          onCancel={() => setManualCenteringSide(null)}
+        />
+      )}
 
       {/* Confirm modal */}
       {showConfirm && (

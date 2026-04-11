@@ -312,6 +312,11 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_seller ON marketplace_dac7_quarterly(seller_user_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_year ON marketplace_dac7_quarterly(year)`);
 
+  // ── Manual centering columns on certificates ─────────────────────────────
+  await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_front JSONB`);
+  await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_back JSONB`);
+  await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_method TEXT`);
+
   // ── Tier capacity management (extend existing table) ──────────────────────
   await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS tier_id TEXT`);
   await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open'`);
