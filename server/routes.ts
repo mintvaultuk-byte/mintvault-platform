@@ -4267,7 +4267,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -4292,8 +4292,9 @@ export async function registerRoutes(
           // 2. Deskew (straighten slight rotation before cropping)
           const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
 
-          // 3. Auto-crop (now works on deskewed image for tighter/more accurate crop)
-          const { buffer: rectCropped, cropped } = await autoCrop(deskewedBuf);
+          // 3. Yellow border crop (precise), then fallback to autoCrop
+          const yellowResult = await cropToYellowBorder(deskewedBuf);
+          const { buffer: rectCropped, cropped } = yellowResult || await autoCrop(deskewedBuf);
 
           // 4. Rounded corner mask (card-shaped output with transparent corners)
           const croppedBuf = await maskRoundedCorners(rectCropped);
@@ -4413,7 +4414,7 @@ export async function registerRoutes(
   // ── Reprocess images: re-run deskew + crop + variants on existing originals
   app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
     try {
-      const { deskewCard: dsk, autoCrop: ac, generateVariants: gv } = await import("./image-processing");
+      const { deskewCard: dsk, cropToYellowBorder: cyb, autoCrop: ac, generateVariants: gv } = await import("./image-processing");
 
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -4439,9 +4440,10 @@ export async function registerRoutes(
 
         console.log(`[reprocess] ${certIdStr} ${side}: fetched ${(origBuf.length / 1024).toFixed(0)}KB`);
 
-        // Run pipeline: deskew → crop → save
+        // Run pipeline: deskew → yellow crop → fallback autoCrop → save
         const { buffer: deskewed, angle } = await dsk(origBuf);
-        const { buffer: cropped } = await ac(deskewed);
+        const yellowResult = await cyb(deskewed);
+        const { buffer: cropped } = yellowResult || await ac(deskewed);
 
         const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
         await uploadToR2(cropKey, cropped, "image/jpeg");

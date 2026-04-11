@@ -434,6 +434,8 @@ export const CENTERING_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object.
 
 You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
 
+NOTE: The card images have been auto-cropped to the outer yellow border. Image edges should be very close to the card edges. If the outer border appears at 0-2% from image edges, it's a tight crop — report outer_frame as those actual values, not exactly 0/100.
+
 CENTERING MEASUREMENT — CRITICAL REFERENCE LINES:
 
 For Pokemon cards, measure centering between TWO yellow borders:

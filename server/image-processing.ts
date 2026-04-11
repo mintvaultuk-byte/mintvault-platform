@@ -132,6 +132,88 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 }
 
 /**
+ * Crop to the yellow border of a Pokemon card by detecting yellow pixels.
+ * More precise than threshold-based trim — targets the card's actual border colour.
+ * Returns null if yellow detection fails (caller should fall back to autoCrop).
+ */
+export async function cropToYellowBorder(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+  try {
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return null;
+
+    // Work at reduced size for speed (max 1500px)
+    const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
+    const workW = Math.round(meta.width * scale);
+    const workH = Math.round(meta.height * scale);
+
+    const { data, info } = await sharp(inputBuffer)
+      .resize(workW, workH, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const w = info.width;
+    const h = info.height;
+    const ch = info.channels;
+
+    // Scan for yellow pixels — Pokemon card border colour
+    let minX = w, maxX = 0, minY = h, maxY = 0;
+    let yellowCount = 0;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * ch;
+        const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
+        // Yellow detection: high red, medium-high green, low blue
+        if (r > 200 && g > 150 && g < 240 && b < 100) {
+          yellowCount++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    const totalPixels = w * h;
+    const yellowPct = (yellowCount / totalPixels) * 100;
+
+    // Need at least 3% yellow pixels to be confident this is a Pokemon card border
+    if (yellowPct < 3 || maxX <= minX || maxY <= minY) {
+      console.log(`[crop-yellow] only ${yellowPct.toFixed(1)}% yellow pixels — skipping (not enough border detected)`);
+      return null;
+    }
+
+    // Scale coordinates back to original image dimensions
+    const origMinX = Math.max(0, Math.round(minX / scale));
+    const origMinY = Math.max(0, Math.round(minY / scale));
+    const origMaxX = Math.min(meta.width, Math.round(maxX / scale));
+    const origMaxY = Math.min(meta.height, Math.round(maxY / scale));
+    const cropW = origMaxX - origMinX;
+    const cropH = origMaxY - origMinY;
+
+    // Validate: cropped area must be at least 30% of original
+    if (cropW * cropH < meta.width * meta.height * 0.3) {
+      console.log(`[crop-yellow] yellow bbox too small: ${cropW}x${cropH} — skipping`);
+      return null;
+    }
+
+    const cropped = await sharp(inputBuffer)
+      .extract({ left: origMinX, top: origMinY, width: cropW, height: cropH })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    const ratio = cropW / cropH;
+    console.log(`[crop-yellow] ${meta.width}x${meta.height} → ${cropW}x${cropH} (yellow ${yellowPct.toFixed(1)}%, ratio=${ratio.toFixed(3)})`);
+    return { buffer: cropped, cropped: true };
+  } catch (err: any) {
+    console.warn(`[crop-yellow] detection failed: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Auto-crop: detect card in scan and crop tight to the actual card edges.
  * Two-pass approach: aggressive trim first, then validate white border %.
  * Falls back to softer trim if aggressive is too tight.
