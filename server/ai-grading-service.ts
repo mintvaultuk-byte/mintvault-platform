@@ -239,8 +239,9 @@ export async function verifyPokemonCardWithTcgApi(
       for (const code of uniqueCodes) {
         if (results.length > 0) break;
         const setQuery = encodeURIComponent(`set.id:${code} number:${detectedNumber}`);
-        console.log(`[identify-debug] TCG query strategy 1: set.id:${code} number:${detectedNumber}`);
-        const setRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`, { headers: { "X-Api-Key": apiKey } });
+        const queryUrl = `https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`;
+        console.log(`[tcg-verify] strategy 1 URL: ${queryUrl}`);
+        const setRes = await fetch(queryUrl, { headers: { "X-Api-Key": apiKey } });
         if (setRes.ok) {
           const setData = await setRes.json();
           results = setData.data || [];
@@ -635,9 +636,15 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
     return claude;
   }
 
-  const codeAgree = claude.set_code && gpt.set_code && normaliseSetCode(claude.set_code) === normaliseSetCode(gpt.set_code);
+  const claudeNorm = normaliseSetCode(claude.set_code);
+  const gptNorm = normaliseSetCode(gpt.set_code);
+  console.log(`[normalise-debug] claude raw: "${claude.set_code}" → normalised: "${claudeNorm}"`);
+  console.log(`[normalise-debug] gpt raw: "${gpt.set_code}" → normalised: "${gptNorm}"`);
+
+  const codeAgree = claudeNorm && gptNorm && claudeNorm === gptNorm;
   const numberAgree = claude.detected_number === gpt.detected_number;
   const yearAgree = claude.copyright_year === gpt.copyright_year;
+  console.log(`[normalise-debug] agreement after normalise: code=${codeAgree} number=${numberAgree} year=${yearAgree}`);
 
   console.log(`[identify-debug] claude=${claude.detected_name}/${claude.set_code}/${claude.detected_number}/${claude.copyright_year} gpt=${gpt.detected_name}/${gpt.set_code}/${gpt.detected_number}/${gpt.copyright_year} agreement: code=${codeAgree} number=${numberAgree} year=${yearAgree}`);
 

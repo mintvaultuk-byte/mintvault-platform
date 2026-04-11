@@ -18,6 +18,43 @@ import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-pane
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade } from "./grade-logic";
 
+function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
+  const { toast } = useToast();
+  const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
+  return (
+    <button
+      type="button"
+      disabled={status === "loading"}
+      onClick={async () => {
+        if (status === "loading") { toast({ title: "Already reprocessing, please wait" }); return; }
+        setStatus("loading");
+        toast({ title: "Reprocessing images…" });
+        try {
+          const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, { method: "POST", credentials: "include" });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error);
+          setStatus("done");
+          toast({ title: "Images reprocessed ✓" });
+          onDone();
+          setTimeout(() => setStatus("idle"), 3000);
+        } catch (e: any) {
+          setStatus("idle");
+          toast({ title: "Reprocess failed", description: e.message, variant: "destructive" });
+        }
+      }}
+      className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
+        status === "done" ? "border border-emerald-600/40 text-emerald-400 bg-emerald-950/20" :
+        status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5" :
+        "border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+      }`}
+    >
+      {status === "loading" ? <><Loader2 size={11} className="animate-spin" /> Reprocessing…</> :
+       status === "done" ? <><CheckCircle2 size={11} /> Reprocessed ✓</> :
+       "Reprocess"}
+    </button>
+  );
+}
+
 interface Props {
   certId: number;
   certIdStr?: string;
@@ -376,26 +413,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             referenceImageUrl={aiIdentification?.referenceImageUrl}
           />
         </div>
-        <button
-          type="button"
-          onClick={async () => {
-            toast({ title: "Reprocessing images…" });
-            try {
-              const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, {
-                method: "POST", credentials: "include",
-              });
-              const d = await r.json();
-              if (!r.ok) throw new Error(d.error);
-              toast({ title: "Images reprocessed (deskewed + re-cropped)" });
-              queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
-            } catch (e: any) {
-              toast({ title: "Reprocess failed", description: e.message, variant: "destructive" });
-            }
-          }}
-          className="flex-shrink-0 flex items-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1"
-        >
-          Reprocess
-        </button>
+        <ReprocessButton certId={certId} onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })} />
       </div>
 
       {/* Two-panel layout */}

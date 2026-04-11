@@ -56,6 +56,7 @@ export interface QualityResult {
  */
 export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
   try {
+    console.log(`[deskew] START angle detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
 
@@ -138,6 +139,7 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
  */
 export async function cropToYellowBorder(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
   try {
+    console.log(`[crop-yellow] START yellow detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return null;
 

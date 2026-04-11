@@ -4425,20 +4425,26 @@ export async function registerRoutes(
       const results: Record<string, any> = {};
 
       for (const side of ["front", "back"] as const) {
-        const origKey = c[`gradingFront${side === "front" ? "" : ""}Original`] ||
-          (side === "front" ? c.gradingFrontOriginal : c.gradingBackOriginal) ||
-          (side === "front" ? c.frontImagePath : c.backImagePath);
-        if (!origKey) continue;
+        // ALWAYS fetch from the ORIGINAL (pre-processed) image, never the cropped version
+        const origKey = side === "front"
+          ? (c.gradingFrontOriginal || c.frontImagePath)
+          : (c.gradingBackOriginal || c.backImagePath);
+        if (!origKey) {
+          console.log(`[reprocess] ${certIdStr} ${side}: no original image path found, skipping`);
+          continue;
+        }
 
-        // Fetch original from R2
         let origBuf: Buffer;
         try {
           const url = await getR2SignedUrl(origKey, 300);
           const resp = await fetch(url);
           origBuf = Buffer.from(await resp.arrayBuffer());
-        } catch { continue; }
+        } catch (err: any) {
+          console.error(`[reprocess] ${certIdStr} ${side}: failed to fetch original: ${err.message}`);
+          continue;
+        }
 
-        console.log(`[reprocess] ${certIdStr} ${side}: fetched ${(origBuf.length / 1024).toFixed(0)}KB`);
+        console.log(`[reprocess] ${certIdStr} ${side}: fetched original ${(origBuf.length / 1024).toFixed(0)}KB from ${origKey}`);
 
         // Run pipeline: deskew → yellow crop → fallback autoCrop → save
         const { buffer: deskewed, angle } = await dsk(origBuf);
