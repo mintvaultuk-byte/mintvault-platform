@@ -49,23 +49,63 @@ export interface QualityResult {
   checks: QualityCheck[];
 }
 
+// ── Background-subtraction card detection (works on ALL card colours) ──────
+// Assumes scanner uses a BLACK background mat. Any non-black pixel = card.
+const BLACK_THRESHOLD = 30; // R,G,B all below this = scanner background
+
+/** Check if a pixel is scanner background (black) */
+function isBackground(r: number, g: number, b: number): boolean {
+  return r < BLACK_THRESHOLD && g < BLACK_THRESHOLD && b < BLACK_THRESHOLD;
+}
+
 /**
- * Deskew: detect and correct slight rotation of a card scan.
- * Samples the top edge of the thresholded image to find the card boundary slope,
- * then rotates the original by the inverse angle. Capped at ±5°.
+ * Detect card boundary by finding all non-black pixels.
+ * Returns bounding box or null if detection fails.
+ */
+export function detectCardBoundary(
+  pixels: Uint8Array, w: number, h: number, ch: number
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  let minX = w, maxX = 0, minY = h, maxY = 0;
+  let nonBlackCount = 0;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * ch;
+      if (!isBackground(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+        nonBlackCount++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const totalPixels = w * h;
+  const nonBlackPct = (nonBlackCount / totalPixels) * 100;
+
+  // Sanity: card should be 20-95% of image
+  if (nonBlackPct < 20 || nonBlackPct > 95 || maxX <= minX || maxY <= minY) {
+    return null;
+  }
+
+  return { minX, maxX, minY, maxY, nonBlackPct };
+}
+
+/**
+ * Deskew using non-black edge detection. Works on ANY card colour
+ * as long as the scanner background is black.
  */
 export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
   try {
-    console.log(`[deskew] START corner-based detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[deskew] START non-black edge detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
 
-    // Work at reduced size for speed
     const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
     const workW = Math.round(meta.width * scale);
     const workH = Math.round(meta.height * scale);
 
-    // Get raw RGB pixels
     const { data, info } = await sharp(inputBuffer)
       .resize(workW, workH, { fit: "fill" })
       .removeAlpha()
@@ -77,94 +117,59 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
     const h = info.height;
     const ch = info.channels;
 
-    // Detect yellow pixels (Pokemon card border) and find top-left + top-right corners
-    // Strategy: scan rows from top, for each row find leftmost and rightmost yellow pixel
-    // The first rows with significant yellow presence define the top edge of the card
-
-    let topLeftX = -1, topLeftY = -1;
-    let topRightX = -1, topRightY = -1;
-    let foundTopEdge = false;
+    // Scan top 30% of image: for each row, find leftmost+rightmost non-black pixel
     const topEdgePoints: { x: number; y: number }[] = [];
-
-    for (let row = 0; row < Math.round(h * 0.4); row++) {
-      let rowLeftX = -1, rowRightX = -1;
-      let yellowInRow = 0;
-
+    for (let row = 0; row < Math.round(h * 0.3); row++) {
+      let rowLeft = -1, rowRight = -1, nonBlackInRow = 0;
       for (let col = 0; col < w; col++) {
         const idx = (row * w + col) * ch;
-        const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-        // Yellow detection — same thresholds as cropToYellowBorder
-        if (r > 200 && g > 150 && g < 240 && b < 100) {
-          yellowInRow++;
-          if (rowLeftX === -1) rowLeftX = col;
-          rowRightX = col;
+        if (!isBackground(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+          nonBlackInRow++;
+          if (rowLeft === -1) rowLeft = col;
+          rowRight = col;
         }
       }
-
-      // Need a meaningful amount of yellow in the row to count as card edge
-      if (yellowInRow > w * 0.05) {
-        if (!foundTopEdge) {
-          topLeftX = rowLeftX;
-          topLeftY = row;
-          topRightX = rowRightX;
-          topRightY = row;
-          foundTopEdge = true;
-        }
-        topEdgePoints.push({ x: rowLeftX, y: row });
-        topEdgePoints.push({ x: rowRightX, y: row });
-
-        // Collect ~20 rows of data for regression
-        if (topEdgePoints.length > 40) break;
+      // Row must have >30% non-black pixels to count as card content
+      if (nonBlackInRow > w * 0.3 && rowLeft >= 0) {
+        topEdgePoints.push({ x: rowLeft, y: row });
+        topEdgePoints.push({ x: rowRight, y: row });
+        if (topEdgePoints.length > 60) break;
       }
     }
 
-    if (!foundTopEdge || topEdgePoints.length < 10) {
-      console.log(`[deskew] not enough yellow edge points (${topEdgePoints.length}), trying greyscale fallback`);
-      // Fallback: greyscale threshold method
-      return deskewGreyscaleFallback(inputBuffer, meta, scale, workW, workH);
+    if (topEdgePoints.length < 10) {
+      console.log(`[deskew] not enough non-black edge points (${topEdgePoints.length}), skipping`);
+      return { buffer: inputBuffer, angle: 0 };
     }
 
-    // Linear regression on the top-edge yellow points for more stable angle
+    // Linear regression on edge points
     const n = topEdgePoints.length;
     let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
     for (const p of topEdgePoints) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
     const denom = n * sumX2 - sumX * sumX;
-    if (Math.abs(denom) < 0.001) {
-      console.log("[deskew] degenerate regression, skipping");
-      return { buffer: inputBuffer, angle: 0 };
-    }
+    if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
 
     const slope = (n * sumXY - sumX * sumY) / denom;
     const radians = Math.atan(slope);
     const angle = radians * (180 / Math.PI);
 
-    console.log(`[deskew] corner-based: topLeft(${topLeftX},${topLeftY}) topRight(${topRightX},${topRightY}) points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
+    console.log(`[deskew] non-black edge: points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
 
-    // Cap at ±5°
     if (Math.abs(angle) > 5) {
       console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
-
-    // Very low threshold — rotate even 0.05° rotations
     if (Math.abs(angle) < 0.05) {
       console.log(`[deskew] angle ${angle.toFixed(4)}° below 0.05° threshold, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
 
-    // Warn if exactly 0.00
-    if (angle === 0) {
-      console.warn("[deskew] WARNING: detected exactly 0.00° — detection may have failed");
-      return { buffer: inputBuffer, angle: 0 };
-    }
-
-    // Rotate the ORIGINAL full-resolution image
     const rotated = await sharp(inputBuffer)
-      .rotate(-angle, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
+      .rotate(-angle, { background: { r: 0, g: 0, b: 0, alpha: 1 } }) // black background fill for rotated edges
       .jpeg({ quality: 95 })
       .toBuffer();
 
-    console.log(`[deskew] corrected ${angle.toFixed(2)}° (corner-based, ${n} edge points)`);
+    console.log(`[deskew] corrected ${angle.toFixed(2)}° (non-black, ${n} edge points)`);
     return { buffer: rotated, angle };
   } catch (err: any) {
     console.warn("[deskew] detection failed, skipping:", err.message);
@@ -172,76 +177,17 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
   }
 }
 
-/** Fallback deskew for non-yellow cards using greyscale threshold */
-async function deskewGreyscaleFallback(
-  inputBuffer: Buffer,
-  meta: sharp.Metadata,
-  scale: number,
-  workW: number,
-  workH: number
-): Promise<{ buffer: Buffer; angle: number }> {
-  const { data, info } = await sharp(inputBuffer)
-    .resize(workW, workH, { fit: "fill" })
-    .greyscale()
-    .threshold(200)
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const pixels = new Uint8Array(data);
-  const w = info.width;
-  const h = info.height;
-  const points: { x: number; y: number }[] = [];
-  const step = Math.max(1, Math.floor(w / 200));
-
-  for (let col = Math.round(w * 0.1); col < Math.round(w * 0.9); col += step) {
-    for (let row = 0; row < Math.round(h * 0.4); row++) {
-      if (pixels[row * w + col] < 128) {
-        points.push({ x: col, y: row });
-        break;
-      }
-    }
-  }
-
-  if (points.length < 10) {
-    console.log("[deskew] greyscale fallback: not enough points, skipping");
-    return { buffer: inputBuffer, angle: 0 };
-  }
-
-  const n = points.length;
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-  for (const p of points) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
-  const denom = n * sumX2 - sumX * sumX;
-  if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
-
-  const slope = (n * sumXY - sumX * sumY) / denom;
-  const angle = Math.atan(slope) * (180 / Math.PI);
-
-  if (Math.abs(angle) > 5 || Math.abs(angle) < 0.05) {
-    console.log(`[deskew] greyscale fallback: ${angle.toFixed(4)}° — ${Math.abs(angle) > 5 ? "too large" : "too small"}, skipping`);
-    return { buffer: inputBuffer, angle: 0 };
-  }
-
-  const rotated = await sharp(inputBuffer)
-    .rotate(-angle, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
-    .jpeg({ quality: 95 })
-    .toBuffer();
-
-  console.log(`[deskew] corrected ${angle.toFixed(2)}° (greyscale fallback)`);
-  return { buffer: rotated, angle };
-}
-
 /**
- * Crop to the yellow border of a Pokemon card by detecting yellow pixels.
- * More precise than threshold-based trim — targets the card's actual border colour.
- * Returns null if yellow detection fails (caller should fall back to autoCrop).
+ * Crop to card boundary by detecting non-black pixels.
+ * Works on ANY card colour as long as scanner uses a black background mat.
+ * Returns null if detection fails (caller should fall back to autoCrop).
  */
-export async function cropToYellowBorder(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
   try {
-    console.log(`[crop-yellow] START yellow detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return null;
 
-    // Work at reduced size for speed (max 1500px)
     const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
     const workW = Math.round(meta.width * scale);
     const workH = Math.round(meta.height * scale);
@@ -253,49 +199,25 @@ export async function cropToYellowBorder(inputBuffer: Buffer): Promise<{ buffer:
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
-    const w = info.width;
-    const h = info.height;
-    const ch = info.channels;
+    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels);
 
-    // Scan for yellow pixels — Pokemon card border colour
-    let minX = w, maxX = 0, minY = h, maxY = 0;
-    let yellowCount = 0;
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const idx = (y * w + x) * ch;
-        const r = pixels[idx], g = pixels[idx + 1], b = pixels[idx + 2];
-        // Yellow detection: high red, medium-high green, low blue
-        if (r > 200 && g > 150 && g < 240 && b < 100) {
-          yellowCount++;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    const totalPixels = w * h;
-    const yellowPct = (yellowCount / totalPixels) * 100;
-
-    // Need at least 3% yellow pixels to be confident this is a Pokemon card border
-    if (yellowPct < 3 || maxX <= minX || maxY <= minY) {
-      console.log(`[crop-yellow] only ${yellowPct.toFixed(1)}% yellow pixels — skipping (not enough border detected)`);
+    if (!boundary) {
+      console.log("[card-detect] boundary detection failed (not enough non-black or too much)");
       return null;
     }
 
-    // Scale coordinates back to original image dimensions
-    const origMinX = Math.max(0, Math.round(minX / scale));
-    const origMinY = Math.max(0, Math.round(minY / scale));
-    const origMaxX = Math.min(meta.width, Math.round(maxX / scale));
-    const origMaxY = Math.min(meta.height, Math.round(maxY / scale));
+    // Scale back to original dimensions
+    const origMinX = Math.max(0, Math.round(boundary.minX / scale));
+    const origMinY = Math.max(0, Math.round(boundary.minY / scale));
+    const origMaxX = Math.min(meta.width, Math.round(boundary.maxX / scale));
+    const origMaxY = Math.min(meta.height, Math.round(boundary.maxY / scale));
     const cropW = origMaxX - origMinX;
     const cropH = origMaxY - origMinY;
 
-    // Validate: cropped area must be at least 30% of original
-    if (cropW * cropH < meta.width * meta.height * 0.3) {
-      console.log(`[crop-yellow] yellow bbox too small: ${cropW}x${cropH} — skipping`);
+    // Safety: cropped area must be 20-95% of original
+    const areaRatio = (cropW * cropH) / (meta.width * meta.height);
+    if (areaRatio < 0.2) {
+      console.log(`[crop-safety] cropped to ${(areaRatio * 100).toFixed(0)}% — REJECTED, using uncropped`);
       return null;
     }
 
@@ -305,13 +227,16 @@ export async function cropToYellowBorder(inputBuffer: Buffer): Promise<{ buffer:
       .toBuffer();
 
     const ratio = cropW / cropH;
-    console.log(`[crop-yellow] ${meta.width}x${meta.height} → ${cropW}x${cropH} (yellow ${yellowPct.toFixed(1)}%, ratio=${ratio.toFixed(3)})`);
+    console.log(`[card-detect] ${meta.width}x${meta.height} → ${cropW}x${cropH} (non-black ${boundary.nonBlackPct.toFixed(1)}%, ratio=${ratio.toFixed(3)})`);
     return { buffer: cropped, cropped: true };
   } catch (err: any) {
-    console.warn(`[crop-yellow] detection failed: ${err.message}`);
+    console.warn(`[card-detect] detection failed: ${err.message}`);
     return null;
   }
 }
+
+// Keep cropToYellowBorder as alias for backward compat (routes.ts references it)
+export const cropToYellowBorder = cropToCardBoundary;
 
 /**
  * Auto-crop: detect card in scan and crop tight to the actual card edges.
