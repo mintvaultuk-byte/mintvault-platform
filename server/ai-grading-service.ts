@@ -213,6 +213,7 @@ export async function verifyPokemonCardWithTcgApi(
   apiCardId?: string;
   referenceImageUrl?: string;
   rejectReason?: string;
+  trustAi?: boolean;
 }> {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   if (!apiKey) {
@@ -257,9 +258,16 @@ export async function verifyPokemonCardWithTcgApi(
     }
 
     if (results.length === 0) {
-      const reason = isPromoPattern ? "Japanese/promo set — TCG database doesn't have this card" : "No match found in TCG database";
-      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber} (code=${setCode})`);
-      return { verified: false, rejectReason: reason };
+      // If Claude has high confidence + set_code, trust its identification even without TCG match
+      // (many promos, Japanese sets, and new releases aren't in the TCG database)
+      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber} (code=${setCode}, promo=${isPromoPattern})`);
+      return {
+        verified: false,
+        trustAi: true, // signal to caller: use Claude's raw data for name/number/year, but leave set_name for manual entry
+        rejectReason: isPromoPattern
+          ? "Japanese/promo set — not in TCG database. AI data used for name/number/year."
+          : "Not found in TCG database. AI data used for name/number/year.",
+      };
     }
 
     // Ambiguity check: if name+number appears in multiple DIFFERENT sets, reject unless we can disambiguate

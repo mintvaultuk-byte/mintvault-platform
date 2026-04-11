@@ -350,7 +350,7 @@ To find the correct set:
 1. Look at the small set symbol in the bottom-left corner of modern Pokémon cards
 2. Look for the set code stamp (e.g. "OBF" = Obsidian Flames, "PAR" = Paradox Rift, "PAL" = Paldea Evolved, "TEF" = Temporal Forces, "SSP" = Surging Sparks, "SV" = Scarlet & Violet base, "MEW" = 151, "PRE" = Prismatic Evolutions)
 3. A card number HIGHER than the set total (e.g. 212/197) means it is a secret rare
-4. If you are not sure of the set, return "Unknown" — do NOT guess by using mechanic words like "Tera" as the set name
+4. CRITICAL: Do NOT guess set_name from memory or artwork. Only return a set_name if you can see the FULL set name written on the card OR if the set_code you read matches a set you are 100% certain of. If you only have a set_code, return detected_set as null — the server will handle the name lookup. Returning null is ALWAYS better than guessing wrong. Never return "Temporal Forces", "Surging Sparks", etc. unless you can actually SEE that text or its exact set code on the card
 
 For detected_game, use one of: "pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"
 For confidence, use: "high", "medium", "low"

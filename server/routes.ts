@@ -4974,18 +4974,22 @@ export async function registerRoutes(
         }
       }
 
-      // Confidence guard — same logic as v184
+      // Confidence guard
       const aiConfidence = rawId.confidence || "low";
       const verified = tcgResult.verified === true;
-      const shouldWrite = verified || aiConfidence === "high";
+      const trustAi = tcgResult.trustAi === true;
+      const shouldWrite = verified || aiConfidence === "high" || trustAi;
 
       if (shouldWrite) {
         const cardName = enrichedId.officialName || enrichedId.detected_name;
-        const setName = enrichedId.officialSet || enrichedId.detected_set;
+        // When trusting AI without TCG verification, leave set_name null for manual entry
+        const setName = verified ? (enrichedId.officialSet || enrichedId.detected_set) : null;
         const cardNumber = enrichedId.detected_number;
         const cardGame = enrichedId.detected_game || "pokemon";
         const rarity = enrichedId.detected_rarity;
-        const yearMatch = String(enrichedId.detected_year || "").match(/\d{4}/);
+        // Prefer copyright_year from Claude for better accuracy
+        const rawYear = rawId.copyright_year || enrichedId.detected_year;
+        const yearMatch = String(rawYear || "").match(/\d{4}/);
         const yearText = yearMatch ? yearMatch[0] : null;
 
         await db.execute(sql`
@@ -5330,6 +5334,7 @@ export async function registerRoutes(
       // Step 6: Pokémon TCG API verification
       const game = identification.detected_game?.toLowerCase();
       let enrichedId = await verifyAndEnrichCardData(identification);
+      let tcgTrustAiFlag = false;
       if (game === "pokemon") {
         const tcgResult = await verifyPokemonCardWithTcgApi(
           identification.detected_name,
@@ -5353,6 +5358,7 @@ export async function registerRoutes(
             detected_year: tcgResult.officialYear || enrichedId.detected_year,
           };
         }
+        if (tcgResult.trustAi) tcgTrustAiFlag = true;
       }
 
       // Step 7: Full grading analysis (uses cropped front + back + greyscale + hicontrast)
@@ -5373,22 +5379,23 @@ export async function registerRoutes(
         `);
       }
 
-      // Step 9: Confidence check — only write card details if we're confident
+      // Step 9: Confidence check — trust AI when TCG has zero results
       const aiConfidence = identification.confidence || "low";
       const tcgVerified = enrichedId.verified && enrichedId.dbSource === "pokemon-tcg-api";
-      const shouldWriteDetails = tcgVerified || aiConfidence === "high";
+      const shouldWriteDetails = tcgVerified || aiConfidence === "high" || tcgTrustAiFlag;
 
       const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
-      const setName = shouldWriteDetails ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
+      // When trusting AI without TCG verification, leave set_name null for manual entry
+      const setName = tcgVerified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
       const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
       const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
       const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
 
-      // Year normalisation: extract 4-digit year from dates like "2013-05-08" or "2013/05/08"
+      // Year normalisation: prefer copyright_year from Claude
       const currentYear = new Date().getFullYear();
       let yearText: string | null = null;
       if (shouldWriteDetails) {
-        const rawYear = enrichedId.detected_year || null;
+        const rawYear = identification.copyright_year || enrichedId.detected_year || null;
         const match = rawYear ? String(rawYear).match(/\d{4}/) : null;
         yearText = match ? match[0] : null;
       }
