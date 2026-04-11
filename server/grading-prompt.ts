@@ -19,6 +19,8 @@ Evaluate the card across four categories. Assign subgrades as whole numbers only
 
 IMPORTANT: Use ALL provided images. The greyscale and high-contrast variants reveal defects that may be invisible in the colour original. Surface scratches especially show up in greyscale. Corner whitening shows up in high-contrast. Edge chips show up in edge-enhanced views. Do not rely solely on the colour image.
 
+IMAGE BOUNDARIES: The images may have a BLACK SCANNER BACKGROUND around the card. ONLY analyse defects within the actual card boundary. Ignore any marks, scratches, or anomalies in the black background area. All defect coordinates must fall within the card's surface, not in the background.
+
 ---
 
 ## CENTERING
@@ -434,7 +436,7 @@ export const CENTERING_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object.
 
 You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
 
-NOTE: The card images have been auto-cropped to the outer yellow border. Image edges should be very close to the card edges. If the outer border appears at 0-2% from image edges, it's a tight crop — report outer_frame as those actual values, not exactly 0/100.
+NOTE: The image may have a BLACK SCANNER BACKGROUND around the card. The OUTER frame of the card is the coloured border where it meets the black background. Measure from the CARD edges, not the image edges. If the card is tightly cropped (card fills most of the image), outer_frame will be near 0/100. If there's visible black background, outer_frame will be wherever the card border actually starts.
 
 CENTERING MEASUREMENT — CRITICAL REFERENCE LINES:
 
@@ -486,6 +488,17 @@ Final centering subgrade = LOWER of front and back grades. Whole numbers only (1
 export const DEFECTS_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object. No preamble, no prose, no markdown fences. First character must be {, last must be }.
 
 You are examining high-resolution images of a trading card. Your ONLY task is to detect and locate physical defects.
+
+IMPORTANT — IMAGE BOUNDARIES:
+The image has a BLACK SCANNER BACKGROUND around the card. The card itself is somewhere inside this image.
+CRITICAL RULES:
+- ONLY analyse defects within the CARD BOUNDARY (where card content is, not the black background)
+- DO NOT report defects in the black scanner background area
+- DO NOT report 'whitening' on the black background — that is the scanner mat, not card damage
+- DO NOT report 'edge wear' that is actually the transition between card and black background
+- Ignore ANY scratches, marks, or anomalies in pure black areas outside the card
+- All defect coordinates (x, y as percentages) must fall within the card's actual area
+- Before reporting any defect, confirm it is ON the card surface, not in the background
 
 Examine BOTH front and back images carefully. Look for:
 - Scratches (surface, holo)

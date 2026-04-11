@@ -5223,6 +5223,20 @@ export async function registerRoutes(
       console.log(`[detect-defects] raw response (200 chars): ${text.slice(0, 200)}`);
       const defectResult = extractJson(text, "detect-defects");
 
+      // Filter out defects that are in the background (outside card boundary)
+      const rawCount = defectResult.defects?.length || 0;
+      if (defectResult.defects) {
+        defectResult.defects = defectResult.defects.filter((d: any) => {
+          const x = d.position_x_percent ?? d.x_percent ?? 50;
+          const y = d.position_y_percent ?? d.y_percent ?? 50;
+          if (x < 3 || x > 97 || y < 3 || y > 97) {
+            console.log(`[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`);
+            return false;
+          }
+          return true;
+        });
+      }
+
       await db.execute(sql`
         UPDATE certificates SET
           ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{defects_detected}', ${JSON.stringify(defectResult)}::jsonb),
@@ -5230,7 +5244,7 @@ export async function registerRoutes(
         WHERE id = ${id}
       `);
 
-      console.log(`[detect-defects] cert=${id} defects=${defectResult.defects?.length || 0}`);
+      console.log(`[detect-defects] cert=${id} defects=${defectResult.defects?.length || 0} (${rawCount - (defectResult.defects?.length || 0)} filtered out)`);
       res.json({ defects: defectResult });
     } catch (err: any) {
       console.error("[detect-defects] error:", err.message);
