@@ -274,6 +274,18 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                 if (lrTotal > 0) { lPct = Math.round(leftM / lrTotal * 100); rPct = 100 - lPct; }
                 if (tbTotal > 0) { tPct = Math.round(topM / tbTotal * 100); bPct = 100 - tPct; }
               }
+              // Sanity checks
+              let warning = "";
+              if (inner) {
+                const innerW = inner.right_pct - inner.left_pct;
+                const innerH = inner.bottom_pct - inner.top_pct;
+                const outerW = outer.right_pct - outer.left_pct;
+                const outerH = outer.bottom_pct - outer.top_pct;
+                const areaRatio = (innerW * innerH) / (outerW * outerH);
+                if (areaRatio < 0.4) warning = "⚠ Inner frame too small — may be measuring art window, not card border";
+                if (Math.abs(lPct - tPct) > 20) warning = "⚠ L/R and T/B differ significantly — verify inner frame";
+              }
+
               // Fallback to AI ratios if no frame coords
               const lr = inner ? [lPct, rPct] : (cd.ratioLR?.split("/").map(Number) || [50, 50]);
               const tb = inner ? [tPct, bPct] : (cd.ratioTB?.split("/").map(Number) || [50, 50]);
@@ -281,6 +293,8 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
               const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
               return (
                 <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  {/* Sanity warning */}
+                  {warning && <text x="50" y="3" textAnchor="middle" fill="#FF6600" fontSize="2.5" fontWeight="bold">{warning}</text>}
                   {/* Outer frame — solid gold, traces card physical edge */}
                   <rect x={outer.left_pct} y={outer.top_pct}
                     width={outer.right_pct - outer.left_pct} height={outer.bottom_pct - outer.top_pct}

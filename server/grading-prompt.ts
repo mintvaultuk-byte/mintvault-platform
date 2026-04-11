@@ -53,9 +53,8 @@ OUTER FRAME = the card's actual physical border (yellow/black outer edge).
 - If there's residual white margin, return WHERE THE CARD EDGE ACTUALLY IS.
 - Example: card starts at 1.5% from left → left_pct = 1.5
 
-INNER FRAME = the artwork/illustration box inside the card border.
+INNER FRAME = the INNERMOST edge of the yellow card border (where yellow meets the card interior). This is the FULL-CARD frame — it surrounds the illustration, text boxes, weakness line, and copyright area as ONE rectangle. DO NOT use the illustration window border. The inner frame covers ~90% of card height on Pokemon cards.
 - front_inner_frame: { left_pct, right_pct, top_pct, bottom_pct }
-- The boundary where the illustration meets the border.
 
 Same for back: back_outer_frame, back_inner_frame.
 
@@ -435,38 +434,48 @@ export const CENTERING_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object.
 
 You are examining high-resolution images of a trading card (front and back). Your ONLY task is to measure centering precisely.
 
-For each side (front and back), identify:
-1. The OUTER FRAME — the card's physical border (yellow/black edge)
-2. The INNER FRAME — the artwork/illustration boundary inside the border
+CENTERING MEASUREMENT — CRITICAL REFERENCE LINES:
 
-Return the coordinates as percentages of the image dimensions (0-100).
+For Pokemon cards, measure centering between TWO yellow borders:
 
-Measure the border widths:
-- left_margin = distance from outer left edge to inner left edge
-- right_margin = distance from inner right edge to outer right edge
-- top_margin = distance from outer top edge to inner top edge
-- bottom_margin = distance from inner bottom edge to outer bottom edge
+OUTER BORDER = the outermost edge of the yellow card border (where card meets background/scanner). Return as front_outer_frame / back_outer_frame.
 
-Calculate ratios:
-- L/R = left_margin / (left_margin + right_margin) expressed as "55/45" format
-- T/B = top_margin / (top_margin + bottom_margin) expressed as "55/45" format
-- The LARGER side goes first (e.g. if left is 55% and right is 45%, write "55/45")
+INNER BORDER = the INNERMOST edge of the yellow card border (where yellow meets the white/coloured interior of the card). This is the CONTINUOUS line that runs around the ENTIRE card interior — it surrounds the illustration, the attack text box, the weakness line, AND the copyright area ALL TOGETHER as one big rectangle. Return as front_inner_frame / back_inner_frame.
+
+DO NOT use the illustration window border (the thin line around just the art).
+DO NOT use attack text boundaries or the HP area border.
+The inner border is the FULL-CARD frame border — the big rectangle you'd see if you stripped the card of all content and just looked at the yellow frame shape.
+
+For the BACK: the outer border is the card edge, the inner border is where the blue design meets the yellow border.
+
+Measure border widths from outer to inner:
+- left_margin = outer_left to inner_left
+- right_margin = inner_right to outer_right
+- top_margin = outer_top to inner_top
+- bottom_margin = inner_bottom to outer_bottom
+
+Calculate ratios (LARGER side first):
+- L/R = max(left,right) / (left+right) expressed as "55/45"
+- T/B = max(top,bottom) / (top+bottom) expressed as "55/45"
 
 Return ONLY valid JSON:
 {
   "front_left_right": "52/48",
-  "front_top_bottom": "55/45",
+  "front_top_bottom": "51/49",
   "back_left_right": "50/50",
-  "back_top_bottom": "53/47",
+  "back_top_bottom": "51/49",
   "front_outer_frame": { "left_pct": 0.5, "right_pct": 99.5, "top_pct": 0.3, "bottom_pct": 99.7 },
-  "front_inner_frame": { "left_pct": 5.2, "right_pct": 94.8, "top_pct": 7.1, "bottom_pct": 92.9 },
+  "front_inner_frame": { "left_pct": 4.8, "right_pct": 95.2, "top_pct": 3.5, "bottom_pct": 96.5 },
   "back_outer_frame": { "left_pct": 0.4, "right_pct": 99.6, "top_pct": 0.5, "bottom_pct": 99.5 },
-  "back_inner_frame": { "left_pct": 4.9, "right_pct": 95.1, "top_pct": 6.8, "bottom_pct": 93.2 },
-  "front_centering_grade": 9,
+  "back_inner_frame": { "left_pct": 4.5, "right_pct": 95.5, "top_pct": 4.0, "bottom_pct": 96.0 },
+  "front_centering_grade": 10,
   "back_centering_grade": 10,
-  "centering_subgrade": 9,
-  "notes": "Front slightly off-centre left. Back is well-centred."
+  "centering_subgrade": 10,
+  "centering_description": "Inner frame traced the continuous yellow border running around the full card content, from top of HP area to bottom of copyright line.",
+  "notes": "Well-centred on both sides."
 }
+
+Note: front_inner_frame top_pct should be around 3-5% (where the yellow border ends at the top) and bottom_pct around 95-97% (where the yellow border starts at the bottom). If your inner frame is only 40-70% of card height, you're likely measuring the illustration window, NOT the full yellow frame border. The full inner frame on a Pokemon card covers ~90% of the card height.
 
 Grade thresholds (front): 10=55/45 or better, 9=60/40, 8=65/35, 7=70/30, 6=80/20, 5=85/15
 Grade thresholds (back): 10=75/25 or better, 9=90/10, 7=worse than 90/10
