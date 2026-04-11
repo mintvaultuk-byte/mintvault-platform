@@ -31,18 +31,23 @@ function computeCentering(outer: Rect, inner: Rect) {
   const totalH = leftB + rightB;
   const totalV = topB + bottomB;
 
-  const lPct = totalH > 0 ? Math.round((leftB / totalH) * 1000) / 10 : 50;
-  const rPct = Math.round((100 - lPct) * 10) / 10;
-  const tPct = totalV > 0 ? Math.round((topB / totalV) * 1000) / 10 : 50;
-  const bPct = Math.round((100 - tPct) * 10) / 10;
+  // Float values for accurate subgrade calculation
+  const lFloat = totalH > 0 ? (leftB / totalH) * 100 : 50;
+  const tFloat = totalV > 0 ? (topB / totalV) * 100 : 50;
 
-  const worstDev = Math.max(Math.abs(lPct - 50), Math.abs(tPct - 50));
+  const worstDev = Math.max(Math.abs(lFloat - 50), Math.abs(tFloat - 50));
   const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
 
-  const lr = lPct >= rPct ? `${lPct}/${rPct}` : `${rPct}/${lPct}`;
-  const tb = tPct >= bPct ? `${tPct}/${bPct}` : `${bPct}/${tPct}`;
+  // Rounded to whole numbers for display and save (round left, derive right = always sums to 100)
+  const lRound = Math.round(lFloat);
+  const rRound = 100 - lRound;
+  const tRound = Math.round(tFloat);
+  const bRound = 100 - tRound;
 
-  return { lr, tb, subgrade, lPct, rPct, tPct, bPct };
+  const lr = lRound >= rRound ? `${lRound}/${rRound}` : `${rRound}/${lRound}`;
+  const tb = tRound >= bRound ? `${tRound}/${bRound}` : `${bRound}/${tRound}`;
+
+  return { lr, tb, subgrade };
 }
 
 type DragTarget = "none" | "outer-tl" | "outer-tr" | "outer-br" | "outer-bl" | "outer-t" | "outer-r" | "outer-b" | "outer-l" | "outer-body" | "inner-tl" | "inner-tr" | "inner-br" | "inner-bl" | "inner-t" | "inner-r" | "inner-b" | "inner-l" | "inner-body";

@@ -5194,12 +5194,15 @@ export async function registerRoutes(
       const totalH = leftB + rightB;
       const totalV = topB + bottomB;
 
-      const lPct = totalH > 0 ? Math.round((leftB / totalH) * 1000) / 10 : 50;
-      const tPct = totalV > 0 ? Math.round((topB / totalV) * 1000) / 10 : 50;
-      const lr = lPct >= (100 - lPct) ? `${lPct}/${(100 - lPct).toFixed(1)}` : `${(100 - lPct).toFixed(1)}/${lPct}`;
-      const tb = tPct >= (100 - tPct) ? `${tPct}/${(100 - tPct).toFixed(1)}` : `${(100 - tPct).toFixed(1)}/${tPct}`;
+      // Float for accurate subgrade, rounded for display/save
+      const lFloat = totalH > 0 ? (leftB / totalH) * 100 : 50;
+      const tFloat = totalV > 0 ? (topB / totalV) * 100 : 50;
+      const lRound = Math.round(lFloat);
+      const tRound = Math.round(tFloat);
+      const lr = lRound >= (100 - lRound) ? `${lRound}/${100 - lRound}` : `${100 - lRound}/${lRound}`;
+      const tb = tRound >= (100 - tRound) ? `${tRound}/${100 - tRound}` : `${100 - tRound}/${tRound}`;
 
-      const worstDev = Math.max(Math.abs(lPct - 50), Math.abs(tPct - 50));
+      const worstDev = Math.max(Math.abs(lFloat - 50), Math.abs(tFloat - 50));
       const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
 
       const outerCol = side === "front" ? "centering_outer_front" : "centering_outer_back";
