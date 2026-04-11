@@ -565,27 +565,104 @@ function normalizeCardNumber(result: CardIdentification): CardIdentification {
   return result;
 }
 
+// ── GPT-5 second opinion for card identification ──────────────────────────
+
+async function identifyWithGpt(base64: string): Promise<CardIdentification | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const OpenAI = (await import("openai")).default;
+    const client = new OpenAI({ apiKey });
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 1024,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } },
+          { type: "text", text: CARD_IDENTIFICATION_PROMPT },
+        ],
+      }],
+    });
+
+    const text = response.choices[0]?.message?.content || "";
+    const parsed = normalizeCardNumber(parseJson<CardIdentification>(text));
+    console.log(`[identify-debug] GPT response: name="${parsed.detected_name}" set="${parsed.detected_set}" number="${parsed.detected_number}" set_code="${parsed.set_code}" copyright_year="${parsed.copyright_year}" confidence="${parsed.confidence}"`);
+    return parsed;
+  } catch (err: any) {
+    console.warn(`[identify-debug] GPT call failed: ${err.message}`);
+    return null;
+  }
+}
+
+/** Reconcile Claude + GPT results. Returns the best identification. */
+function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentification | null): CardIdentification {
+  if (!gpt) {
+    console.log("[identify-debug] GPT unavailable, using Claude only");
+    return claude;
+  }
+
+  const codeAgree = claude.set_code && gpt.set_code && claude.set_code.toLowerCase() === gpt.set_code.toLowerCase();
+  const numberAgree = claude.detected_number === gpt.detected_number;
+  const yearAgree = claude.copyright_year === gpt.copyright_year;
+
+  console.log(`[identify-debug] claude=${claude.detected_name}/${claude.set_code}/${claude.detected_number}/${claude.copyright_year} gpt=${gpt.detected_name}/${gpt.set_code}/${gpt.detected_number}/${gpt.copyright_year} agreement: code=${codeAgree} number=${numberAgree} year=${yearAgree}`);
+
+  // Both agree on key fields → high confidence, use Claude
+  if (codeAgree && numberAgree) {
+    return { ...claude, confidence: "high", reasoning: `${claude.reasoning || ""} [GPT agrees on set_code + number]` };
+  }
+
+  // Disagree on set_code → use whichever has higher confidence
+  if (claude.confidence === "high" && gpt.confidence !== "high") return claude;
+  if (gpt.confidence === "high" && claude.confidence !== "high") {
+    // Use GPT's data with Claude as fallback for missing fields
+    return {
+      ...claude,
+      detected_set: gpt.detected_set || claude.detected_set,
+      set_code: gpt.set_code || claude.set_code,
+      copyright_year: gpt.copyright_year || claude.copyright_year,
+      confidence: "medium" as const,
+      reasoning: `GPT confident (${gpt.reasoning?.slice(0, 60)}), Claude uncertain`,
+    };
+  }
+
+  // Both disagree → medium confidence, use Claude, flag for review
+  return { ...claude, confidence: "medium" as const, reasoning: `${claude.reasoning || ""} [GPT disagrees: set_code=${gpt.set_code}, year=${gpt.copyright_year}]` };
+}
+
 // ── Card identification from raw buffer (for direct image uploads) ─────────
 
 export async function identifyCardFromBuffer(
   buffer: Buffer,
-  _mimeType: string // ignored — we re-encode to JPEG via resizeForClaude
+  _mimeType: string
 ): Promise<CardIdentification> {
   await rateLimit();
   const { buffer: resized, mediaType } = await resizeForClaude(buffer);
   const base64 = resized.toString("base64");
-  const text = await callClaude(
-    [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
-    1024,
-    "claude-haiku-4-5-20251001"
-  );
+
+  // Run Claude + GPT in parallel
+  const [claudeText, gptResult] = await Promise.all([
+    callClaude(
+      [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
+      1024,
+      "claude-haiku-4-5-20251001"
+    ),
+    identifyWithGpt(base64),
+  ]);
+
+  let claudeResult: CardIdentification;
   try {
-    const parsed = normalizeCardNumber(parseJson<CardIdentification>(text));
-    console.log(`[identify-debug] raw Claude response: name="${parsed.detected_name}" set="${parsed.detected_set}" number="${parsed.detected_number}" year="${parsed.detected_year}" set_code="${parsed.set_code}" copyright_year="${parsed.copyright_year}" confidence="${parsed.confidence}" reasoning="${parsed.reasoning?.slice(0, 100)}"`);
-    return parsed;
+    claudeResult = normalizeCardNumber(parseJson<CardIdentification>(claudeText));
+    console.log(`[identify-debug] raw Claude response: name="${claudeResult.detected_name}" set="${claudeResult.detected_set}" number="${claudeResult.detected_number}" year="${claudeResult.detected_year}" set_code="${claudeResult.set_code}" copyright_year="${claudeResult.copyright_year}" confidence="${claudeResult.confidence}"`);
   } catch {
-    throw new Error(`Card identification returned invalid JSON: ${text.slice(0, 200)}`);
+    throw new Error(`Card identification returned invalid JSON: ${claudeText.slice(0, 200)}`);
   }
+
+  // Reconcile the two opinions
+  return reconcileIdentifications(claudeResult, gptResult);
 }
 
 // ── Card identification ────────────────────────────────────────────────────
