@@ -4514,6 +4514,54 @@ export async function registerRoutes(
     }
   });
 
+  // DELETE /api/admin/certificates/:id/images/:side — remove front or back image
+  app.delete("/api/admin/certificates/:id/images/:side", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const side = req.params.side as "front" | "back";
+      if (side !== "front" && side !== "back") return res.status(400).json({ error: "Side must be 'front' or 'back'" });
+
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+
+      // Collect all R2 keys for this side to delete
+      const keysToDelete: string[] = [];
+      const colsToClear: string[] = [];
+
+      if (side === "front") {
+        for (const col of ["frontImagePath", "gradingFrontOriginal", "gradingFrontCropped", "gradingFrontGreyscale", "gradingFrontHighcontrast", "gradingFrontEdgeenhanced", "gradingFrontInverted"]) {
+          if (c[col]) keysToDelete.push(c[col]);
+        }
+        colsToClear.push("front_image_path", "grading_front_original", "grading_front_cropped", "grading_front_greyscale", "grading_front_highcontrast", "grading_front_edgeenhanced", "grading_front_inverted");
+      } else {
+        for (const col of ["backImagePath", "gradingBackOriginal", "gradingBackCropped", "gradingBackGreyscale", "gradingBackHighcontrast", "gradingBackEdgeenhanced", "gradingBackInverted"]) {
+          if (c[col]) keysToDelete.push(c[col]);
+        }
+        colsToClear.push("back_image_path", "grading_back_original", "grading_back_cropped", "grading_back_greyscale", "grading_back_highcontrast", "grading_back_edgeenhanced", "grading_back_inverted");
+      }
+
+      // Delete from R2
+      for (const key of keysToDelete) {
+        try { await deleteFromR2(key); } catch { /* ignore missing keys */ }
+      }
+
+      // Clear DB columns
+      const setClauses = colsToClear.map(col => `${col} = NULL`).join(", ");
+      await db.execute(sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`));
+
+      console.log(`[image-delete] cert ${certIdStr} removed ${side} (${keysToDelete.length} R2 keys)`);
+
+      const updated = await storage.getCertificate(id);
+      res.json({ ok: true, cert: updated ? { ...updated, certId: normalizeCertId(updated.certId) } : null });
+    } catch (err: any) {
+      console.error("[image-delete] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/certificates/:id/images", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);

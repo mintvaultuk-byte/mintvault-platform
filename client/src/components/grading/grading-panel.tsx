@@ -438,6 +438,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
               innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
             } : null}
+            certId={certId}
+            onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
           />
           <div className="bg-[#0D0D0D] border border-[#222222] rounded-lg p-3 space-y-2">
             <p className="text-[#D4AF37]/70 text-[10px] uppercase tracking-widest font-bold">Defects</p>

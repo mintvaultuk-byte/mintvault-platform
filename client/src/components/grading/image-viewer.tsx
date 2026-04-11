@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2 } from "lucide-react";
 import DefectHeatmap from "./defect-heatmap";
 import { DefectForm } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
@@ -43,6 +43,8 @@ interface Props {
   referenceImageUrl?: string | null;
   centeringFront?: CenteringOverlayData | null;
   centeringBack?: CenteringOverlayData | null;
+  certId?: number;
+  onImageDeleted?: () => void;
 }
 
 const SIDES: Side[] = ["front", "back"];
@@ -84,7 +86,7 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack }: Props) {
+export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted }: Props) {
   const [side, setSide] = useState<Side>("front");
   const [variant, setVariant] = useState<Variant>("original");
   const [showReference, setShowReference] = useState(false);
@@ -207,16 +209,35 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
         <div className="flex gap-2 overflow-x-auto pb-1">
           {SIDES.map(s => {
             const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
+            const hasImage = hasAny(urls, s);
             return (
-              <button key={s} type="button"
-                onClick={() => { setSide(s); setShowReference(false); zoomReset(); }}
-                disabled={!hasAny(urls, s)}
-                className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
-                  side === s && !showReference
-                    ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                    : hasAny(urls, s) ? "border-[#333333] text-[#888888] hover:border-[#555555]" : "border-[#222222] text-[#333333] cursor-not-allowed"
-                }`}
-              >{s}{count > 0 ? ` (${count})` : ""}</button>
+              <div key={s} className="flex items-center gap-0.5">
+                <button type="button"
+                  onClick={() => { setSide(s); setShowReference(false); zoomReset(); }}
+                  disabled={!hasImage}
+                  className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                    side === s && !showReference
+                      ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                      : hasImage ? "border-[#333333] text-[#888888] hover:border-[#555555]" : "border-[#222222] text-[#333333] cursor-not-allowed"
+                  }`}
+                >{s}{count > 0 ? ` (${count})` : ""}</button>
+                {hasImage && certId && !fullscreen && (
+                  <button type="button" title={`Delete ${s} image`}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
+                      try {
+                        const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, { method: "DELETE", credentials: "include" });
+                        if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+                        onImageDeleted?.();
+                      } catch {}
+                    }}
+                    className="flex-shrink-0 rounded-r border border-l-0 border-[#333333] text-[#555555] hover:text-red-400 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )}
+              </div>
             );
           })}
           {!fullscreen && referenceImageUrl && (
