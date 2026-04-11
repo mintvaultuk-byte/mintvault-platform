@@ -651,7 +651,22 @@ export async function registerRoutes(
       const serviceType = req.query.serviceType as string | undefined;
       const tiers = await storage.getServiceTiers(serviceType);
       const pricingData = tiers.map(serviceTierToPricingTier);
-      res.json(pricingData);
+
+      // Enrich with capacity status
+      const capacityRows = await db.execute(sql`SELECT tier_id, status, paused_until, paused_message FROM tier_capacity`);
+      const capacityMap = new Map((capacityRows.rows as any[]).map(r => [r.tier_id, r]));
+
+      const enriched = pricingData.map((tier: any) => {
+        const cap = capacityMap.get(tier.tierId) || capacityMap.get(tier.id);
+        return {
+          ...tier,
+          capacityStatus: cap?.status || "open",
+          capacityPausedUntil: cap?.paused_until || null,
+          capacityMessage: cap?.paused_message || null,
+        };
+      });
+
+      res.json(enriched);
     } catch (error: any) {
       console.error("Error fetching service tiers:", error.message);
       res.status(500).json({ error: "Failed to fetch service tiers" });
@@ -671,6 +686,15 @@ export async function registerRoutes(
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
       if (!type || !VALID_SERVICE_TYPES.includes(type)) {
         return res.status(400).json({ error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}` });
+      }
+
+      // Check tier capacity — block paused tiers
+      if (tier) {
+        const capRow = await db.execute(sql`SELECT status, paused_message FROM tier_capacity WHERE tier_id = ${tier} LIMIT 1`);
+        const cap = capRow.rows[0] as any;
+        if (cap?.status === "paused") {
+          return res.status(403).json({ error: cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.` });
+        }
       }
 
       if (type === "crossover" && !crossoverCompany) {
@@ -6348,6 +6372,102 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[auth] delete-account error:", err.message);
       return res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
+  // ── Tier capacity management ──────────────────────────────────────────────
+
+  // GET all tier capacities (admin)
+  app.get("/api/admin/capacity", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT tc.*,
+          (SELECT COUNT(*) FROM submissions s
+           WHERE s.service_tier = tc.tier_id
+             AND s.status IN ('new', 'received', 'in_grading')
+             AND s.deleted_at IS NULL
+          ) AS current_queue_count
+        FROM tier_capacity tc
+        ORDER BY tc.tier_id
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT update a single tier's capacity (admin)
+  app.put("/api/admin/capacity/:tierId", requireAdmin, async (req, res) => {
+    try {
+      const { tierId } = req.params;
+      const { status, paused_until, paused_message, max_concurrent } = req.body;
+
+      if (status && !["open", "paused", "waitlist"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be open, paused, or waitlist." });
+      }
+
+      await db.execute(sql`
+        UPDATE tier_capacity SET
+          status = COALESCE(${status || null}, status),
+          paused_until = ${paused_until || null},
+          paused_message = ${paused_message || null},
+          max_concurrent = COALESCE(${max_concurrent ? Number(max_concurrent) : null}, max_concurrent),
+          paused_at = ${status === "paused" || status === "waitlist" ? sql`NOW()` : sql`paused_at`},
+          paused_by = ${status === "paused" || status === "waitlist" ? (req.session as any)?.adminEmail || "admin" : sql`paused_by`},
+          updated_at = NOW()
+        WHERE tier_id = ${tierId}
+      `);
+
+      console.log(`[capacity] tier ${tierId} → ${status || "updated"} by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST pause ALL tiers (emergency)
+  app.post("/api/admin/capacity/pause-all", requireAdmin, async (req, res) => {
+    try {
+      const message = req.body.message || "Submissions temporarily paused";
+      await db.execute(sql`
+        UPDATE tier_capacity SET
+          status = 'paused',
+          paused_message = ${message},
+          paused_at = NOW(),
+          paused_by = ${(req.session as any)?.adminEmail || "admin"},
+          updated_at = NOW()
+      `);
+      console.log(`[capacity] ALL TIERS PAUSED by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST resume ALL tiers
+  app.post("/api/admin/capacity/resume-all", requireAdmin, async (req, res) => {
+    try {
+      await db.execute(sql`
+        UPDATE tier_capacity SET status = 'open', paused_until = NULL, paused_message = NULL, updated_at = NOW()
+      `);
+      console.log(`[capacity] ALL TIERS RESUMED by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET public tier capacity status (for pricing page + submit flow)
+  app.get("/api/tier-capacity", async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT tier_id, status, paused_until, paused_message
+        FROM tier_capacity
+        ORDER BY tier_id
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

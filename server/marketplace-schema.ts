@@ -312,5 +312,40 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_seller ON marketplace_dac7_quarterly(seller_user_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_year ON marketplace_dac7_quarterly(year)`);
 
+  // ── Tier capacity management (extend existing table) ──────────────────────
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS tier_id TEXT`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open'`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS paused_message TEXT`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS max_concurrent INTEGER NOT NULL DEFAULT 50`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE tier_capacity ADD COLUMN IF NOT EXISTS paused_by TEXT`);
+
+  // Backfill tier_id from tier_slug if it exists
+  await db.execute(sql`UPDATE tier_capacity SET tier_id = tier_slug WHERE tier_id IS NULL AND tier_slug IS NOT NULL`);
+  // Create unique index on tier_id if not exists
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tier_capacity_tier_id ON tier_capacity(tier_id) WHERE tier_id IS NOT NULL`);
+
+  // Make legacy columns nullable
+  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active DROP NOT NULL`); } catch {}
+  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open DROP NOT NULL`); } catch {}
+  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active SET DEFAULT 0`); } catch {}
+  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open SET DEFAULT false`); } catch {}
+
+  // Seed defaults for any missing tiers
+  for (const t of [
+    { id: "standard", max: 30 }, { id: "priority", max: 20 }, { id: "express", max: 15 },
+    { id: "gold", max: 10 }, { id: "gold-elite", max: 5 }, { id: "reholder", max: 20 },
+    { id: "crossover", max: 15 }, { id: "authentication", max: 15 },
+  ]) {
+    const exists = await db.execute(sql`SELECT 1 FROM tier_capacity WHERE tier_id = ${t.id} LIMIT 1`);
+    if (exists.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO tier_capacity (tier_id, tier_slug, status, max_concurrent, max_active, force_open, updated_at)
+        VALUES (${t.id}, ${t.id}, 'open', ${t.max}, 0, false, NOW())
+      `);
+    }
+  }
+
   console.log("[marketplace-schema] migration complete");
 }
