@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Save, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer from "./image-viewer";
 import DefectAnnotation, { type Defect } from "./defect-annotation";
+import { calculateSubgradesFromDefects } from "@/lib/defect-subgrade-impact";
 import CenteringInput from "./centering-input";
 import CornerGrading, { calcCornerSubgrade, type CornerValues } from "./corner-grading";
 import EdgeGrading, { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
@@ -234,12 +235,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       hasTear: analysis.defects?.some(d => d.type === "tear"),
     }));
 
-    // Convert AI defects to Defect format and merge with any existing human defects
+    // Convert AI defects to Defect format and merge with any existing manual defects
     if (analysis.defects?.length > 0) {
-      const humanDefects = defects.filter((d: any) => !d._aiSource);
-      const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map(d => d.id)) : 0;
+      const manualDefects = defects.filter(d => d.source !== "ai");
+      const maxManualId = manualDefects.length > 0 ? Math.max(...manualDefects.map(d => d.id)) : 0;
       const aiDefects: Defect[] = analysis.defects.map((ad, i) => ({
-        id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
+        id: maxManualId + 1000 + i,
         type: ad.type?.replace(/_/g, " ") || "Unknown",
         severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
         description: ad.description || "",
@@ -247,9 +248,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         image_side: ad.location === "back" ? "back" : "front",
         x_percent: ad.position_x_percent ?? 50,
         y_percent: ad.position_y_percent ?? 50,
-        _aiSource: true, // flag so image-viewer can render as red ring
-      } as Defect & { _aiSource: boolean }));
-      setDefects([...humanDefects, ...aiDefects]);
+        source: "ai" as const,
+      }));
+      setDefects([...manualDefects, ...aiDefects]);
     }
 
     // Populate grade explanation
@@ -291,6 +292,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
   const label   = getGradeLabel(overall);
   const isBlack = checkBlackLabel(sub, overall);
+
+  // Defect-based subgrade suggestions
+  const defectSuggestions = useMemo(() => calculateSubgradesFromDefects(defects), [defects]);
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
@@ -418,6 +422,22 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <AiPanel
             certId={certId}
             onAnalysisComplete={handleAiComplete}
+            onDefectsDetected={(aiDefects) => {
+              const manualDefects = defects.filter(d => d.source !== "ai");
+              const maxManualId = manualDefects.length > 0 ? Math.max(...manualDefects.map(d => d.id)) : 0;
+              const converted: Defect[] = aiDefects.map((ad, i) => ({
+                id: maxManualId + 1000 + i,
+                type: ad.type?.replace(/_/g, " ") || "Unknown",
+                severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
+                description: ad.description || "",
+                location: ad.location || "front",
+                image_side: ad.location === "back" ? "back" : "front",
+                x_percent: ad.position_x_percent ?? 50,
+                y_percent: ad.position_y_percent ?? 50,
+                source: "ai" as const,
+              }));
+              setDefects([...manualDefects, ...converted]);
+            }}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
           />
         </div>
@@ -431,7 +451,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <ImageViewer
             urls={urls}
             defects={defects}
-            onDefectAdded={d => setDefects(prev => [...prev, d])}
+            onDefectAdded={d => setDefects(prev => [...prev, { ...d, source: "manual" as const }])}
+            onDefectDeleted={id => setDefects(prev => prev.filter(d => d.id !== id))}
             highlightId={highlightDefect}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
             centeringFront={frontLR ? {
@@ -487,6 +508,49 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               })}
             </div>
           )}
+
+          {/* Defect-based subgrade suggestions */}
+          {defects.length > 0 && !isNonNumeric && (() => {
+            const s = defectSuggestions;
+            const hasDiff = s.centering !== centering || s.corners !== cornersGrade || s.edges !== edgesGrade || s.surface !== surfaceGrade;
+            return (
+              <div className="bg-[#0D0D0D] border border-[#222222] rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[#888888] text-[10px] uppercase tracking-widest font-bold">Defect Impact ({defects.length} defect{defects.length !== 1 ? "s" : ""})</p>
+                  {hasDiff && (
+                    <button type="button"
+                      onClick={() => {
+                        setCenteringOverride(s.centering);
+                        setCornersOverride(s.corners);
+                        setEdgesOverride(s.edges);
+                        setSurfaceOverride(s.surface);
+                      }}
+                      className="text-[9px] text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-widest transition-colors"
+                    >
+                      Apply Suggestions
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([
+                    { label: "C", current: centering, suggested: s.centering },
+                    { label: "Co", current: cornersGrade, suggested: s.corners },
+                    { label: "E", current: edgesGrade, suggested: s.edges },
+                    { label: "S", current: surfaceGrade, suggested: s.surface },
+                  ] as const).map(({ label, current, suggested }) => {
+                    const diff = suggested !== current;
+                    return (
+                      <div key={label} className={`text-center p-1.5 rounded border ${diff ? "border-amber-700/40 bg-amber-900/10" : "border-[#222222]"}`}>
+                        <p className="text-[9px] text-[#555555] font-bold uppercase">{label}</p>
+                        <p className={`text-sm font-black ${diff ? "text-amber-400" : "text-[#555555]"}`}>{suggested}</p>
+                        {diff && <p className="text-[8px] text-[#555555]">now: {current}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Grade summary — always visible at top */}
           {!isNonNumeric && (

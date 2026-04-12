@@ -10,6 +10,7 @@ export interface Defect {
   image_side: string;
   x_percent: number;
   y_percent: number;
+  source?: "ai" | "manual";
 }
 
 interface Props {
