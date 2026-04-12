@@ -170,8 +170,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // AI analysis state
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisResult | null>(null);
   const [aiIdentification, setAiIdentification] = useState<AiIdentification | null>(null);
-  // Track which subgrades were set by AI (key) vs manually changed
+  // Track original AI values for override audit
   const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>({});
+  const [aiOriginalCentering, setAiOriginalCentering] = useState<{ frontLR?: string; frontTB?: string; backLR?: string; backTB?: string }>({});
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
     setAiAnalysis(analysis);
@@ -189,6 +190,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     setSurfaceOverride(s);
 
     setAiSources({ centering: c, corners: co, edges: e, surface: s });
+
+    // Capture original AI centering for audit trail
+    setAiOriginalCentering({
+      frontLR: analysis.centering.front_left_right || undefined,
+      frontTB: analysis.centering.front_top_bottom || undefined,
+      backLR: analysis.centering.back_left_right || undefined,
+      backTB: analysis.centering.back_top_bottom || undefined,
+    });
 
     // Populate centering ratios
     if (analysis.centering.front_left_right) setFrontLR(analysis.centering.front_left_right);
@@ -299,6 +308,51 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
 
+  function detectOverrides(): Array<{ field_path: string; ai_value: unknown; override_value: unknown }> {
+    const overrides: Array<{ field_path: string; ai_value: unknown; override_value: unknown }> = [];
+    // Subgrade overrides
+    if (aiSources.centering !== undefined && centering !== aiSources.centering) {
+      overrides.push({ field_path: "subgrades.centering", ai_value: aiSources.centering, override_value: centering });
+    }
+    if (aiSources.corners !== undefined && cornersGrade !== aiSources.corners) {
+      overrides.push({ field_path: "subgrades.corners", ai_value: aiSources.corners, override_value: cornersGrade });
+    }
+    if (aiSources.edges !== undefined && edgesGrade !== aiSources.edges) {
+      overrides.push({ field_path: "subgrades.edges", ai_value: aiSources.edges, override_value: edgesGrade });
+    }
+    if (aiSources.surface !== undefined && surfaceGrade !== aiSources.surface) {
+      overrides.push({ field_path: "subgrades.surface", ai_value: aiSources.surface, override_value: surfaceGrade });
+    }
+    // Overall grade override
+    if (aiAnalysis && overallOverride !== null) {
+      overrides.push({ field_path: "overall_grade", ai_value: aiAnalysis.overall_grade, override_value: overallOverride });
+    }
+    // Centering overrides
+    if (aiOriginalCentering.frontLR && frontLR !== aiOriginalCentering.frontLR) {
+      overrides.push({ field_path: "centering.front_lr", ai_value: aiOriginalCentering.frontLR, override_value: frontLR });
+    }
+    if (aiOriginalCentering.frontTB && frontTB !== aiOriginalCentering.frontTB) {
+      overrides.push({ field_path: "centering.front_tb", ai_value: aiOriginalCentering.frontTB, override_value: frontTB });
+    }
+    if (aiOriginalCentering.backLR && backLR !== aiOriginalCentering.backLR) {
+      overrides.push({ field_path: "centering.back_lr", ai_value: aiOriginalCentering.backLR, override_value: backLR });
+    }
+    if (aiOriginalCentering.backTB && backTB !== aiOriginalCentering.backTB) {
+      overrides.push({ field_path: "centering.back_tb", ai_value: aiOriginalCentering.backTB, override_value: backTB });
+    }
+    // Defect changes: count manual additions and AI deletions
+    const aiDefectCount = defects.filter(d => d.source === "ai").length;
+    const manualDefectCount = defects.filter(d => d.source === "manual").length;
+    const originalAiDefectCount = aiAnalysis?.defects?.length ?? 0;
+    if (originalAiDefectCount > 0 && aiDefectCount < originalAiDefectCount) {
+      overrides.push({ field_path: "defects.ai_deleted", ai_value: originalAiDefectCount, override_value: aiDefectCount });
+    }
+    if (manualDefectCount > 0) {
+      overrides.push({ field_path: "defects.manual_added", ai_value: 0, override_value: manualDefectCount });
+    }
+    return overrides;
+  }
+
   function buildPayload() {
     return {
       centering_front_lr: frontLR, centering_front_tb: frontTB,
@@ -316,6 +370,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   async function saveDraft() {
     setSaving(true);
     try {
+      // Log AI overrides (non-blocking — never prevents save)
+      const overrides = detectOverrides();
+      if (overrides.length > 0) {
+        fetch(`/api/admin/certificates/${certId}/override-audit/batch`, {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ overrides }),
+        }).catch(e => console.warn("[audit] override log failed:", e));
+      }
+
       const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",

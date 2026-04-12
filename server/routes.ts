@@ -36,20 +36,39 @@ import {
 } from "./email";
 import { requireAuth } from "./middleware/auth";
 import { registerShowroomRoutes } from "./showroom";
-import { registerVaultClubRoutes } from "./vault-club";
+import { registerVaultClubRoutes, consumeCredit, countCreditsRemaining } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
 
-/** Resilient JSON extraction: handles Claude prose preambles, markdown fences */
+/** Resilient JSON extraction: handles Claude prose preambles, markdown fences, truncation */
 function extractJson<T = any>(raw: string, label: string): T {
   const cleaned = raw.replace(/```json|```/g, "").trim();
+  // Attempt 1: direct parse
   try { return JSON.parse(cleaned); } catch {}
-  // Try to extract JSON object from prose
+  // Attempt 2: extract outermost JSON object from prose
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (match) {
-    try { return JSON.parse(match[0]); } catch {}
+    try { return JSON.parse(match[0]); } catch (e2: any) {
+      console.error(`[${label}] regex-extracted JSON failed to parse:`, e2.message);
+      console.error(`[${label}] extracted (first 500):`, match[0].slice(0, 500));
+    }
   }
-  console.error(`[${label}] could not extract JSON from response (first 300 chars): ${raw.slice(0, 300)}`);
+  // Attempt 3: truncated JSON — try to close it
+  const braceMatch = cleaned.match(/\{[\s\S]*/);
+  if (braceMatch) {
+    const partial = braceMatch[0];
+    // Count open vs close braces to auto-close
+    const opens = (partial.match(/\{/g) || []).length;
+    const closes = (partial.match(/\}/g) || []).length;
+    if (opens > closes) {
+      const repaired = partial + "}".repeat(opens - closes);
+      try { return JSON.parse(repaired); } catch (e3: any) {
+        console.error(`[${label}] truncation repair failed:`, e3.message);
+      }
+    }
+  }
+  console.error(`[${label}] could not extract JSON. Length: ${raw.length}, first 500: ${raw.slice(0, 500)}`);
+  console.error(`[${label}] last 200: ${raw.slice(-200)}`);
   throw new Error(`AI returned invalid response for ${label}`);
 }
 
@@ -171,10 +190,10 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   let frontUrl: string | null = null;
   let backUrl: string | null = null;
   if (c.frontImagePath) {
-    try { frontUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch { frontUrl = null; }
+    try { frontUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (front):", c.frontImagePath, e); frontUrl = null; }
   }
   if (c.backImagePath) {
-    try { backUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch { backUrl = null; }
+    try { backUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (back):", c.backImagePath, e); backUrl = null; }
   }
 
   return {
@@ -213,23 +232,106 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   };
 }
 
-async function seedGoldTiers() {
-  const tiers = [
-    { serviceType: "grading",        tierId: "gold",           name: "GOLD",             pricePerCard: 8500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",  maxValueGbp: 2500, sortOrder: 4 },
-    { serviceType: "grading",        tierId: "gold-elite",     name: "GOLD ELITE",       pricePerCard: 12500, turnaroundDays: 3,  turnaroundLabel: "2-3 working days", maxValueGbp: 5000, sortOrder: 5 },
-    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",         pricePerCard: 800,   turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",        pricePerCard: 1500,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",   pricePerCard: 1000,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
+async function migrateServiceTiersV213() {
+  // ── Phase 1: Add new columns — each in its own try/catch so one failure doesn't block others ──
+  for (const stmt of [
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS display_name TEXT`,
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS tagline TEXT`,
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS most_popular BOOLEAN NOT NULL DEFAULT FALSE`,
+  ]) {
+    try { await db.execute(stmt); }
+    catch (e: any) { console.error("[v213-migrate] ALTER service_tiers failed:", e.message); }
+  }
+
+  // ── Phase 2: Seed rows that don't yet exist (ON CONFLICT DO NOTHING) ──────
+  // These only insert if the tier_id doesn't already exist in the table.
+  // On a branched DB with existing data, every INSERT will be skipped — that's expected.
+  const seeds = [
+    { serviceType: "grading",        tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
+    { serviceType: "grading",        tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
+    { serviceType: "grading",        tierId: "express",        name: "EXPRESS",            pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
+    { serviceType: "grading",        tierId: "gold",           name: "BLACK LABEL REVIEW", pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
+    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",           pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",          pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
+    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",     pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
   ];
-  for (const t of tiers) {
+  for (const t of seeds) {
     try {
       await db.execute(sql`
         INSERT INTO service_tiers (service_type, tier_id, name, price_per_card, turnaround_days, turnaround_label, max_value_gbp, is_active, sort_order)
         VALUES (${t.serviceType}, ${t.tierId}, ${t.name}, ${t.pricePerCard}, ${t.turnaroundDays}, ${t.turnaroundLabel}, ${t.maxValueGbp}, true, ${t.sortOrder})
         ON CONFLICT DO NOTHING
       `);
-    } catch {}
+    } catch (e: any) { console.error(`[v213-migrate] seed ${t.tierId} failed:`, e.message); }
   }
+
+  // ── Phase 3a: UPDATE core columns that definitely exist (name, price, turnaround, etc.) ──
+  // These columns have existed since the table was created — no dependency on Phase 1 ALTERs.
+  // Rollback reference (old prices): standard=1200, priority=1500, express=2000, gold=8500, gold-elite=12500
+  // Ancillary old prices: reholder=800, crossover=1500, authentication=1000
+  const coreUpdates = [
+    { tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
+    { tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
+    { tierId: "express",        name: "EXPRESS",             pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
+    { tierId: "gold",           name: "BLACK LABEL REVIEW",  pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
+    { tierId: "reholder",       name: "REHOLDER",            pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { tierId: "crossover",      name: "CROSSOVER",           pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
+    { tierId: "authentication", name: "AUTHENTICATION",      pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+  ];
+  for (const u of coreUpdates) {
+    try {
+      const result = await db.execute(sql`
+        UPDATE service_tiers SET
+          name = ${u.name},
+          price_per_card = ${u.pricePerCard},
+          turnaround_days = ${u.turnaroundDays},
+          turnaround_label = ${u.turnaroundLabel},
+          max_value_gbp = ${u.maxValueGbp},
+          sort_order = ${u.sortOrder},
+          updated_at = NOW()
+        WHERE tier_id = ${u.tierId}
+      `);
+      console.log(`[v213-migrate] core UPDATE ${u.tierId}: ${result.rowCount} row(s)`);
+    } catch (e: any) { console.error(`[v213-migrate] core UPDATE ${u.tierId} failed:`, e.message); }
+  }
+
+  // ── Phase 3b: UPDATE new columns (display_name, tagline, most_popular) ──
+  // These depend on Phase 1 ALTERs succeeding. If the columns don't exist, each UPDATE
+  // will fail and log the error — but Phase 3a prices are already applied.
+  const metaUpdates = [
+    { tierId: "standard",       displayName: "Vault Queue",        tagline: "For patient collectors. Full Vault treatment, longer queue.",         mostPopular: false },
+    { tierId: "priority",       displayName: "Standard",           tagline: "Our most popular tier. Professional grading, solid turnaround.",     mostPopular: true },
+    { tierId: "express",        displayName: "Express",            tagline: "Fast-tracked grading for time-sensitive submissions.",               mostPopular: false },
+    { tierId: "gold",           displayName: "Black Label Review", tagline: "Premium service for high-value and investment-grade cards.",         mostPopular: false },
+    { tierId: "reholder",       displayName: "Reholder",           tagline: "New MintVault slab with updated NFC and certificate.",              mostPopular: false },
+    { tierId: "crossover",      displayName: "Crossover",          tagline: "Re-grade a card from PSA, BGS, CGC, or another company.",           mostPopular: false },
+    { tierId: "authentication", displayName: "Authentication",     tagline: "Verify authenticity and check for alterations.",                    mostPopular: false },
+  ];
+  for (const u of metaUpdates) {
+    try {
+      await db.execute(sql`
+        UPDATE service_tiers SET
+          display_name = ${u.displayName},
+          tagline = ${u.tagline},
+          most_popular = ${u.mostPopular}
+        WHERE tier_id = ${u.tierId}
+      `);
+    } catch (e: any) { console.error(`[v213-migrate] meta UPDATE ${u.tierId} failed:`, e.message); }
+  }
+
+  // ── Phase 4: Deactivate gold-elite (no longer offered) ─────────────────────
+  try {
+    const r = await db.execute(sql`UPDATE service_tiers SET is_active = false WHERE tier_id = 'gold-elite'`);
+    console.log(`[v213-migrate] deactivate gold-elite: ${r.rowCount} row(s)`);
+  } catch (e: any) { console.error("[v213-migrate] deactivate gold-elite failed:", e.message); }
+
+  // ── Phase 5: Add credit_type column to reholder_credits ────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE reholder_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'reholder'`);
+    console.log("[v213-migrate] reholder_credits.credit_type column ensured");
+  } catch (e: any) { console.error("[v213-migrate] ALTER reholder_credits failed:", e.message); }
+
+  console.log("[startup] migrateServiceTiersV213 complete");
 }
 
 async function addRevealWrapColumn() {
@@ -325,10 +427,11 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
   const forceOpen: boolean = cap.force_open ?? false;
 
   // Count active submissions for this tier
+  const statusList = `{${ACTIVE_STATUSES.join(",")}}`;
   const countRows = await db.execute(sql`
     SELECT COUNT(*) AS cnt FROM submissions
     WHERE service_tier = ${tierSlug}
-      AND status = ANY(${ACTIVE_STATUSES}::text[])
+      AND status = ANY(${statusList}::text[])
   `);
   const active = parseInt((countRows.rows[0] as any)?.cnt ?? "0", 10);
   const full = !forceOpen && active >= maxActive;
@@ -366,6 +469,30 @@ async function seedTierCapacityTable() {
   } catch {}
 }
 
+async function createAiOverrideAuditTable() {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_override_audit (
+        id SERIAL PRIMARY KEY,
+        cert_id INTEGER,
+        field_path TEXT NOT NULL,
+        ai_value JSONB,
+        override_value JSONB,
+        override_reason TEXT,
+        overridden_by TEXT NOT NULL,
+        overridden_at TIMESTAMPTZ DEFAULT NOW(),
+        session_id TEXT
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_cert ON ai_override_audit(cert_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_field ON ai_override_audit(field_path)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_time ON ai_override_audit(overridden_at DESC)`);
+    console.log("[v221-migrate] ai_override_audit table ensured");
+  } catch (e: any) {
+    console.error("[v221-migrate] ai_override_audit failed:", e.message);
+  }
+}
+
 async function createEbayPriceCacheTable() {
   try {
     await db.execute(sql`
@@ -391,12 +518,13 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Seed gold grading tiers, estimate_credits table, admin credits, and run column migrations on startup
-  seedGoldTiers().catch(() => {});
+  // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
+  migrateServiceTiersV213().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});
   addRevealWrapColumn().catch(() => {});
   createAiGradeCorrectionsTable().catch(() => {});
+  createAiOverrideAuditTable().catch(() => {});
   createEbayPriceCacheTable().catch(() => {});
   seedTierCapacityTable().catch(() => {});
   migrateAccountSchema()
@@ -681,6 +809,7 @@ export async function registerRoutes(
         crossoverCompany, crossoverOriginalGrade, crossoverCertNumber,
         reholderCompany, reholderReason, reholderCondition,
         authReason, authConcerns, revealWrap,
+        applyCredit, creditType: requestedCreditType,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
@@ -813,7 +942,29 @@ export async function registerRoutes(
         discountType = "bulk";
       }
       const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
-      const total = discountedSubtotal + totals.shipping + totals.totalInsuranceFee;
+
+      // ── Credit application (Vault Club Silver/Gold) ────────────────────────
+      let creditApplied = false;
+      let creditAmountPence = 0;
+      let creditTypeApplied: string | null = null;
+      if (applyCredit && req.session?.userId) {
+        const ct = requestedCreditType === "reholder" ? "reholder" : "standard_grade";
+        const hasCredit = await countCreditsRemaining((req.session as any).userId, ct);
+        if (hasCredit > 0) {
+          // Credit covers the grading/reholder fee for 1 card (not insurance, not shipping)
+          creditAmountPence = tierData.pricePerCard;
+          creditApplied = true;
+          creditTypeApplied = ct;
+        }
+      }
+
+      // Vault Club Silver/Gold: waive return postage
+      let shippingFinal = totals.shipping;
+      if (req.session?.userId && vaultClubTierApplied && (vaultClubTierApplied === "silver" || vaultClubTierApplied === "gold")) {
+        shippingFinal = 0;
+      }
+
+      const total = Math.max(0, discountedSubtotal - creditAmountPence + shippingFinal + totals.totalInsuranceFee);
 
       const declaredValuePerCard = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
@@ -843,7 +994,7 @@ export async function registerRoutes(
         phone: phone || null,
         shippingAddress,
         turnaroundDays,
-        shippingCost: totals.shipping,
+        shippingCost: shippingFinal,
         shippingInsuranceTier: totals.shippingLabel,
         gradingCost: discountedSubtotal,
         pricePerCardAtPurchase: tierData.pricePerCard,
@@ -887,6 +1038,8 @@ export async function registerRoutes(
           shippingInsurance: totals.shippingLabel,
           insuranceFee: String(totals.totalInsuranceFee),
           highValue: String(highValueFlag),
+          ...(creditApplied ? { creditApplied: "true", creditType: creditTypeApplied || "", creditAmountPence: String(creditAmountPence) } : {}),
+          ...(shippingFinal === 0 ? { freeShipping: "vault_club" } : {}),
           ...(type === "crossover" && crossoverCompany ? {
             crossoverCompany: crossoverCompany,
             crossoverOriginalGrade: crossoverOriginalGrade || "",
@@ -949,6 +1102,11 @@ export async function registerRoutes(
           percent: effectiveDiscountPercent,
           amount_pence: effectiveDiscountAmount,
         } : null,
+        credit: creditApplied ? {
+          type: creditTypeApplied,
+          amount_pence: creditAmountPence,
+        } : null,
+        freeShipping: shippingFinal === 0,
       });
     } catch (error: any) {
       console.error("Error creating payment intent:", error.message);
@@ -976,6 +1134,19 @@ export async function registerRoutes(
         }
         await storage.markSubmissionAsPaid(Number(submission.id));
         storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
+
+        // Consume Vault Club credit if one was applied at checkout
+        const piMeta = paymentIntent.metadata || {};
+        if (piMeta.creditApplied === "true" && piMeta.creditType) {
+          if (submission.email) {
+            const creditUser = await storage.getUserByEmail(submission.email);
+            if (creditUser) {
+              await consumeCredit(creditUser.id, piMeta.creditType, Number(submission.id)).catch((e: any) =>
+                console.error("[checkout] credit consume error:", e.message)
+              );
+            }
+          }
+        }
 
         if (submission.email) {
           let user = await storage.getUserByEmail(submission.email);
@@ -1532,7 +1703,7 @@ export async function registerRoutes(
       // Signed image URLs — grading variants
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
       }
 
       const [frontUrl, backUrl, fGrey, fHC, fEdge, fInv, bGrey, bHC, bEdge, bInv, angledUrl, closeupUrl] = await Promise.all([
@@ -1850,7 +2021,7 @@ export async function registerRoutes(
 
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
       }
 
       const [frontUrl, backUrl] = await Promise.all([
@@ -2917,10 +3088,10 @@ export async function registerRoutes(
         let frontImageUrl: string | null = null;
         let backImageUrl: string | null = null;
         if (c.frontImagePath) {
-          try { frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch {}
+          try { frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin front):", c.frontImagePath, e); }
         }
         if (c.backImagePath) {
-          try { backImageUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch {}
+          try { backImageUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin back):", c.backImagePath, e); }
         }
         return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
       }));
@@ -4789,6 +4960,78 @@ export async function registerRoutes(
     }
   });
 
+  // ── AI Override Audit ─────────────────────────────────────────────────────
+
+  // POST single override audit entry
+  app.post("/api/admin/certificates/:id/override-audit", requireAdmin, async (req, res) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const { field_path, ai_value, override_value, override_reason } = req.body;
+      if (!field_path) return res.status(400).json({ error: "field_path is required" });
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      const result = await db.execute(sql`
+        INSERT INTO ai_override_audit (cert_id, field_path, ai_value, override_value, override_reason, overridden_by)
+        VALUES (${certId}, ${field_path}, ${JSON.stringify(ai_value ?? null)}::jsonb, ${JSON.stringify(override_value ?? null)}::jsonb, ${override_reason || null}, ${adminEmail})
+        RETURNING id
+      `);
+      res.json({ ok: true, id: (result.rows[0] as any)?.id });
+    } catch (err: any) {
+      console.error("[override-audit] insert error:", err.message);
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST batch override audit entries
+  app.post("/api/admin/certificates/:id/override-audit/batch", requireAdmin, async (req, res) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const { overrides } = req.body;
+      if (!Array.isArray(overrides) || overrides.length === 0) return res.json({ ok: true, inserted: 0 });
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      let inserted = 0;
+      for (const o of overrides) {
+        if (!o.field_path) continue;
+        try {
+          await db.execute(sql`
+            INSERT INTO ai_override_audit (cert_id, field_path, ai_value, override_value, override_reason, overridden_by)
+            VALUES (${certId}, ${o.field_path}, ${JSON.stringify(o.ai_value ?? null)}::jsonb, ${JSON.stringify(o.override_value ?? null)}::jsonb, ${o.reason || null}, ${adminEmail})
+          `);
+          inserted++;
+        } catch {}
+      }
+      console.log(`[override-audit] cert=${certId} logged ${inserted}/${overrides.length} overrides by ${adminEmail}`);
+      res.json({ ok: true, inserted });
+    } catch (err: any) {
+      console.error("[override-audit] batch error:", err.message);
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET audit log entries
+  app.get("/api/admin/override-audit", requireAdmin, async (req, res) => {
+    try {
+      const certId = req.query.cert_id ? parseInt(String(req.query.cert_id), 10) : null;
+      const fieldPrefix = req.query.field_prefix as string | undefined;
+      const limit = Math.min(200, parseInt(String(req.query.limit || "50"), 10));
+
+      let query;
+      if (certId) {
+        query = fieldPrefix
+          ? sql`SELECT * FROM ai_override_audit WHERE cert_id = ${certId} AND field_path LIKE ${fieldPrefix + "%"} ORDER BY overridden_at DESC LIMIT ${limit}`
+          : sql`SELECT * FROM ai_override_audit WHERE cert_id = ${certId} ORDER BY overridden_at DESC LIMIT ${limit}`;
+      } else {
+        query = fieldPrefix
+          ? sql`SELECT * FROM ai_override_audit WHERE field_path LIKE ${fieldPrefix + "%"} ORDER BY overridden_at DESC LIMIT ${limit}`
+          : sql`SELECT * FROM ai_override_audit ORDER BY overridden_at DESC LIMIT ${limit}`;
+      }
+      const result = await db.execute(query);
+      res.json(result.rows);
+    } catch (err: any) {
+      console.error("[override-audit] query error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Build 1: Card database lookup ──────────────────────────────────────────
   app.get("/api/admin/card-lookup", requireAdmin, async (req, res) => {
     try {
@@ -5277,32 +5520,41 @@ export async function registerRoutes(
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
-      console.log(`[detect-defects] raw response (200 chars): ${text.slice(0, 200)}`);
-      const defectResult = extractJson(text, "detect-defects");
+      console.log(`[detect-defects] raw length: ${text.length}`);
+      console.log(`[detect-defects] first 500: ${text.slice(0, 500)}`);
+      console.log(`[detect-defects] last 200: ${text.slice(-200)}`);
+      let parsed: any;
+      try {
+        parsed = extractJson(text, "detect-defects");
+      } catch (parseErr: any) {
+        console.error(`[detect-defects] JSON extraction failed, returning empty:`, parseErr.message);
+        return res.json({ defects: [] });
+      }
+
+      // Unwrap: Claude returns {defects: [...], surface_front_grade, ...} — extract the array
+      const defectArray: any[] = Array.isArray(parsed.defects) ? parsed.defects : Array.isArray(parsed) ? parsed : [];
 
       // Filter out defects that are in the background (outside card boundary)
-      const rawCount = defectResult.defects?.length || 0;
-      if (defectResult.defects) {
-        defectResult.defects = defectResult.defects.filter((d: any) => {
-          const x = d.position_x_percent ?? d.x_percent ?? 50;
-          const y = d.position_y_percent ?? d.y_percent ?? 50;
-          if (x < 3 || x > 97 || y < 3 || y > 97) {
-            console.log(`[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`);
-            return false;
-          }
-          return true;
-        });
-      }
+      const rawCount = defectArray.length;
+      const filtered = defectArray.filter((d: any) => {
+        const x = d.position_x_percent ?? d.x_percent ?? 50;
+        const y = d.position_y_percent ?? d.y_percent ?? 50;
+        if (x < 3 || x > 97 || y < 3 || y > 97) {
+          console.log(`[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`);
+          return false;
+        }
+        return true;
+      });
 
       await db.execute(sql`
         UPDATE certificates SET
-          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{defects_detected}', ${JSON.stringify(defectResult)}::jsonb),
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{defects_detected}', ${JSON.stringify({ defects: filtered })}::jsonb),
           updated_at = NOW()
         WHERE id = ${id}
       `);
 
-      console.log(`[detect-defects] cert=${id} defects=${defectResult.defects?.length || 0} (${rawCount - (defectResult.defects?.length || 0)} filtered out)`);
-      res.json({ defects: defectResult });
+      console.log(`[detect-defects] cert=${id} defects=${filtered.length} (${rawCount - filtered.length} filtered out)`);
+      res.json({ defects: filtered });
     } catch (err: any) {
       console.error("[detect-defects] error:", err.message);
       res.status(500).json({ error: err.message });
