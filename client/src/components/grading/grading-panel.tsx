@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Save, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -18,6 +18,7 @@ import ManualCentering, { type CenteringResult } from "./manual-centering";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade } from "./grade-logic";
+import { calculateSubgradesFromDefects } from "@/lib/defect-subgrade-impact";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -292,6 +293,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const label   = getGradeLabel(overall);
   const isBlack = checkBlackLabel(sub, overall);
 
+  // Defect-based subgrade suggestions (try/catch — never crash render)
+  const defectSuggestions = useMemo(() => {
+    try { return calculateSubgradesFromDefects(defects); }
+    catch { return null; }
+  }, [defects]);
+
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
 
@@ -432,6 +439,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             urls={urls}
             defects={defects}
             onDefectAdded={d => setDefects(prev => [...prev, d])}
+            onDefectDeleted={id => setDefects(prev => prev.filter(d => d.id !== id))}
             highlightId={highlightDefect}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
             centeringFront={frontLR ? {
@@ -507,6 +515,35 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 else if (key === "surface") setSurfaceOverride(val);
               }}
             />
+          )}
+
+          {/* Defect impact suggestions — only when defects exist */}
+          {defectSuggestions && defects.length > 0 && !isNonNumeric && (
+            <div className="p-3 rounded-lg border border-[#D4AF37]/30 bg-[#111111]">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] uppercase tracking-widest text-[#D4AF37]/70 font-bold">Defect Impact ({defects.length})</p>
+                {(defectSuggestions.centering !== centering || defectSuggestions.corners !== cornersGrade || defectSuggestions.edges !== edgesGrade || defectSuggestions.surface !== surfaceGrade) && (
+                  <button type="button"
+                    onClick={() => { setCenteringOverride(defectSuggestions.centering); setCornersOverride(defectSuggestions.corners); setEdgesOverride(defectSuggestions.edges); setSurfaceOverride(defectSuggestions.surface); }}
+                    className="text-[9px] text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-widest transition-colors"
+                  >Apply</button>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {([
+                  { label: "CENT", val: defectSuggestions.centering, cur: centering },
+                  { label: "CORN", val: defectSuggestions.corners, cur: cornersGrade },
+                  { label: "EDGE", val: defectSuggestions.edges, cur: edgesGrade },
+                  { label: "SURF", val: defectSuggestions.surface, cur: surfaceGrade },
+                ]).map(({ label, val, cur }) => (
+                  <div key={label} className={`rounded p-1.5 ${val !== cur ? "bg-amber-900/20 border border-amber-700/30" : "bg-[#0A0A0A]"}`}>
+                    <p className="text-[9px] text-[#555555] font-bold">{label}</p>
+                    <p className={`text-sm font-black ${val < 10 ? "text-[#D4AF37]" : "text-[#555555]"}`}>{val}</p>
+                    {val !== cur && <p className="text-[8px] text-[#555555]">now: {cur}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {isNonNumeric && (
