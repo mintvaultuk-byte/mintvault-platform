@@ -20,6 +20,7 @@ import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
+import AdminCapacity from "@/pages/admin-capacity";
 
 interface DbInfo {
   env: string;
@@ -55,7 +56,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -235,6 +236,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "submissions" && <AdminSubmissions />}
       {activeTab === "intake" && <AdminIntake />}
       {activeTab === "pricing" && <AdminPricing />}
+      {activeTab === "capacity" && <AdminCapacity />}
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}
       {activeTab === "grading" && (() => {
@@ -300,8 +302,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -377,6 +379,17 @@ function AdminHeader({
                 data-testid="tab-pricing"
               >
                 <DollarSign size={12} /> Pricing
+              </button>
+              <button
+                onClick={() => onTabChange("capacity")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "capacity"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-capacity"
+              >
+                <Database size={12} /> Capacity
               </button>
               <button
                 onClick={() => onTabChange("printing")}
@@ -669,7 +682,7 @@ function DashboardView({
   stats?: DashboardStats;
   onNewCert: () => void;
   onGoToCerts: (filter?: CertsFilter) => void;
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing") => void;
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing") => void;
 }) {
   const [certSearch, setCertSearch] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
