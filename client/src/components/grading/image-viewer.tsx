@@ -39,7 +39,6 @@ interface Props {
   urls: ImageUrls;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
-  onDefectDeleted?: (id: number) => void;
   highlightId: number | null;
   referenceImageUrl?: string | null;
   centeringFront?: CenteringOverlayData | null;
@@ -87,7 +86,7 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, onDefectDeleted, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted }: Props) {
+export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted }: Props) {
   const [side, setSide] = useState<Side>("front");
   const [variant, setVariant] = useState<Variant>("original");
   const [showReference, setShowReference] = useState(false);
@@ -99,7 +98,6 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectDele
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
     type: "Scratch", severity: "minor" as "minor" | "moderate" | "significant",
@@ -346,44 +344,22 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectDele
               <DefectHeatmap defects={sideDefects} width={containerRef.current?.clientWidth || 300} height={containerRef.current?.clientHeight || 420} />
             )}
 
-            {/* Defect ring markers — clickable for deletion */}
+            {/* Defect ring markers */}
             {showDefects && (() => {
               let humanIdx = 0;
               return sideDefects.map(d => {
-                const isAi = d.source === "ai" || !!(d as any)._aiSource || !!(d as any).detected_in;
+                const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
                 if (!isAi) humanIdx++;
                 const isHL = highlightId === d.id;
                 const col = isAi ? "#DC2626" : "#D4AF37";
                 const badge = isAi ? "AI" : String(humanIdx);
-                const showDeletePopup = deleteConfirm === d.id;
                 return (
-                  <div key={d.id} className={`absolute ${markMode ? "pointer-events-none" : "cursor-pointer"} ${isHL ? "defect-ring-pulse" : ""}`}
-                    style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32, zIndex: showDeletePopup ? 30 : 10 }}
-                    onClick={!markMode ? (e) => { e.stopPropagation(); setDeleteConfirm(showDeletePopup ? null : d.id); } : undefined}
-                  >
+                  <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
+                    style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
                     <div className="w-full h-full rounded-full transition-all"
                       style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }} />
                     <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
                       style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{badge}</span>
-                    {/* Delete confirmation popup */}
-                    {showDeletePopup && onDefectDeleted && (
-                      <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-[#111111] border border-[#333333] rounded-lg p-2 shadow-xl whitespace-nowrap z-30"
-                        onClick={e => e.stopPropagation()}>
-                        <p className="text-[#CCCCCC] text-[10px] mb-1.5">{d.type} ({d.severity})</p>
-                        <div className="flex gap-1">
-                          <button type="button"
-                            onClick={() => { onDefectDeleted(d.id); setDeleteConfirm(null); }}
-                            className="px-2 py-0.5 bg-red-600/20 text-red-400 text-[9px] font-bold rounded border border-red-600/40 hover:bg-red-600/30">
-                            Delete
-                          </button>
-                          <button type="button"
-                            onClick={() => setDeleteConfirm(null)}
-                            className="px-2 py-0.5 text-[#888888] text-[9px] rounded border border-[#333333] hover:bg-[#222222]">
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               });

@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Star, Info, ChevronDown, ChevronRight, Check, X as XIcon } from "lucide-react";
+import { Star, Info } from "lucide-react";
 import type { SubGrades } from "./grade-logic";
-import { getGradeLabel } from "./grade-logic";
 
 interface Props {
   overall: number;
@@ -117,91 +116,18 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         ))}
       </div>
 
-      {/* Calculation details — step-by-step reasoning */}
-      <button type="button" onClick={() => setShowCalc(!showCalc)} className="flex items-center gap-1 text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37] transition-colors">
-        {showCalc ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        {showCalc ? "Hide" : "Why this grade?"}
+      {/* Calculation details */}
+      <button type="button" onClick={() => setShowCalc(!showCalc)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">
+        {showCalc ? "Hide" : "Show"} calculation details
       </button>
       {showCalc && (
-        <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-3 space-y-3">
-          {/* Step 1: Weighted formula */}
-          <div>
-            <p className="text-[#D4AF37]/60 text-[9px] font-bold uppercase tracking-widest mb-1">Step 1 — Weighted Average</p>
-            <div className="text-[10px] font-mono text-[#666666] space-y-0.5">
-              <p>({sub.centering}×10%) + ({sub.corners}×25%) + ({sub.edges}×25%) + ({sub.surface}×40%)</p>
-              <p className="text-[#888888]">= {weighted.toFixed(2)} → floored to <span className="text-[#CCCCCC] font-bold">{rounded}</span></p>
-            </div>
-          </div>
-
-          {/* Step 2: Lowest subgrade cap */}
-          <div>
-            <p className="text-[#D4AF37]/60 text-[9px] font-bold uppercase tracking-widest mb-1">Step 2 — Lowest Subgrade Cap</p>
-            <div className="text-[10px] font-mono text-[#666666] space-y-0.5">
-              <p>Lowest subgrade: <span className="text-[#CCCCCC]">{lowest}</span> ({
-                sub.centering === lowest ? "centering" :
-                sub.corners === lowest ? "corners" :
-                sub.edges === lowest ? "edges" : "surface"
-              })</p>
-              <p>Max allowed: lowest + 1 = <span className="text-[#CCCCCC]">{lowest + 1}</span></p>
-              {capped < rounded
-                ? <p className="text-amber-400">→ Capped from {rounded} to <span className="font-bold">{capped}</span></p>
-                : <p className="text-[#555555]">→ No cap needed ({rounded} ≤ {lowest + 1})</p>
-              }
-            </div>
-          </div>
-
-          {/* Step 3: Condition caps (only if crease/tear present) */}
-          {(hasCrease || hasTear) && (
-            <div>
-              <p className="text-[#D4AF37]/60 text-[9px] font-bold uppercase tracking-widest mb-1">Step 3 — Condition Caps</p>
-              <div className="text-[10px] font-mono space-y-0.5">
-                {hasCrease && (
-                  <p className={capped > 5 ? "text-red-400" : "text-[#666666]"}>
-                    {capped > 5 ? <XIcon size={9} className="inline mr-1" /> : <Check size={9} className="inline mr-1 text-green-400" />}
-                    Crease detected → max 5 {capped > 5 ? <span className="font-bold">— grade reduced from {capped} to {Math.min(capped, 5)}</span> : "(already ≤ 5)"}
-                  </p>
-                )}
-                {hasTear && (
-                  <p className={Math.min(capped, hasCrease ? 5 : 99) > 3 ? "text-red-400" : "text-[#666666]"}>
-                    {Math.min(capped, hasCrease ? 5 : 99) > 3 ? <XIcon size={9} className="inline mr-1" /> : <Check size={9} className="inline mr-1 text-green-400" />}
-                    Tear detected → max 3 {Math.min(capped, hasCrease ? 5 : 99) > 3 ? <span className="font-bold">— grade reduced to {Math.min(capped, tearCap, creaseCap)}</span> : "(already ≤ 3)"}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Step 4: Black Label eligibility */}
-          <div>
-            <p className="text-[#D4AF37]/60 text-[9px] font-bold uppercase tracking-widest mb-1">Black Label Check</p>
-            <div className="text-[10px] font-mono">
-              {isBlack ? (
-                <p className="text-[#D4AF37]"><Check size={9} className="inline mr-1" /> BLACK LABEL — all four subgrades are 10</p>
-              ) : overall >= 10 ? (
-                <p className="text-[#666666]"><XIcon size={9} className="inline mr-1 text-red-400" /> Not eligible — {
-                  sub.centering < 10 ? `centering is ${sub.centering}` :
-                  sub.corners < 10 ? `corners is ${sub.corners}` :
-                  sub.edges < 10 ? `edges is ${sub.edges}` :
-                  `surface is ${sub.surface}`
-                } (need all 10)</p>
-              ) : (
-                <p className="text-[#555555]"><XIcon size={9} className="inline mr-1" /> N/A — overall grade below 10</p>
-              )}
-            </div>
-          </div>
-
-          {/* Step 5: Final result */}
-          <div className="border-t border-[#222222] pt-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[#888888] text-[10px] font-mono">
-                Final: <span className="text-[#CCCCCC] font-bold text-xs">{display}</span>
-                {" "}<span className="text-[#D4AF37]">{display > 0 ? getGradeLabel(display) : ""}</span>
-              </p>
-              {manualOverride !== null && (
-                <span className="text-[9px] text-amber-400 font-mono">manual override (formula: {overall})</span>
-              )}
-            </div>
-          </div>
+        <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-3 text-[10px] text-[#666666] font-mono space-y-1">
+          <p>Weighted: ({sub.centering}×10%) + ({sub.corners}×25%) + ({sub.edges}×25%) + ({sub.surface}×40%) = {weighted.toFixed(2)}</p>
+          <p>→ Floored to whole number: {rounded}</p>
+          <p>→ Lowest subgrade ({lowest}) + 1.0 = max {lowest + 1.0} — result: {capped}</p>
+          {hasCrease && <p className="text-red-400">→ Crease cap applied: max 5.0 — result: {Math.min(capped, creaseCap)}</p>}
+          {hasTear   && <p className="text-red-400">→ Tear cap applied: max 3.0 — result: {Math.min(capped, tearCap)}</p>}
+          <p className="text-[#888888]">Final: {overall}</p>
         </div>
       )}
 

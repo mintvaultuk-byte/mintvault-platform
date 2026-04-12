@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Save, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer from "./image-viewer";
 import DefectAnnotation, { type Defect } from "./defect-annotation";
-import { calculateSubgradesFromDefects } from "@/lib/defect-subgrade-impact";
 import CenteringInput from "./centering-input";
 import CornerGrading, { calcCornerSubgrade, type CornerValues } from "./corner-grading";
 import EdgeGrading, { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
@@ -170,9 +169,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // AI analysis state
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisResult | null>(null);
   const [aiIdentification, setAiIdentification] = useState<AiIdentification | null>(null);
-  // Track original AI values for override audit
+  // Track which subgrades were set by AI (key) vs manually changed
   const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>({});
-  const [aiOriginalCentering, setAiOriginalCentering] = useState<{ frontLR?: string; frontTB?: string; backLR?: string; backTB?: string }>({});
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
     setAiAnalysis(analysis);
@@ -190,14 +188,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     setSurfaceOverride(s);
 
     setAiSources({ centering: c, corners: co, edges: e, surface: s });
-
-    // Capture original AI centering for audit trail
-    setAiOriginalCentering({
-      frontLR: analysis.centering.front_left_right || undefined,
-      frontTB: analysis.centering.front_top_bottom || undefined,
-      backLR: analysis.centering.back_left_right || undefined,
-      backTB: analysis.centering.back_top_bottom || undefined,
-    });
 
     // Populate centering ratios
     if (analysis.centering.front_left_right) setFrontLR(analysis.centering.front_left_right);
@@ -244,12 +234,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       hasTear: analysis.defects?.some(d => d.type === "tear"),
     }));
 
-    // Convert AI defects to Defect format and merge with any existing manual defects
+    // Convert AI defects to Defect format and merge with any existing human defects
     if (analysis.defects?.length > 0) {
-      const manualDefects = defects.filter(d => d.source !== "ai");
-      const maxManualId = manualDefects.length > 0 ? Math.max(...manualDefects.map(d => d.id)) : 0;
+      const humanDefects = defects.filter((d: any) => !d._aiSource);
+      const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map(d => d.id)) : 0;
       const aiDefects: Defect[] = analysis.defects.map((ad, i) => ({
-        id: maxManualId + 1000 + i,
+        id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
         type: ad.type?.replace(/_/g, " ") || "Unknown",
         severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
         description: ad.description || "",
@@ -257,9 +247,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         image_side: ad.location === "back" ? "back" : "front",
         x_percent: ad.position_x_percent ?? 50,
         y_percent: ad.position_y_percent ?? 50,
-        source: "ai" as const,
-      }));
-      setDefects([...manualDefects, ...aiDefects]);
+        _aiSource: true, // flag so image-viewer can render as red ring
+      } as Defect & { _aiSource: boolean }));
+      setDefects([...humanDefects, ...aiDefects]);
     }
 
     // Populate grade explanation
@@ -302,56 +292,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const label   = getGradeLabel(overall);
   const isBlack = checkBlackLabel(sub, overall);
 
-  // Defect-based subgrade suggestions
-  const defectSuggestions = useMemo(() => calculateSubgradesFromDefects(defects), [defects]);
-
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
-
-  function detectOverrides(): Array<{ field_path: string; ai_value: unknown; override_value: unknown }> {
-    const overrides: Array<{ field_path: string; ai_value: unknown; override_value: unknown }> = [];
-    // Subgrade overrides
-    if (aiSources.centering !== undefined && centering !== aiSources.centering) {
-      overrides.push({ field_path: "subgrades.centering", ai_value: aiSources.centering, override_value: centering });
-    }
-    if (aiSources.corners !== undefined && cornersGrade !== aiSources.corners) {
-      overrides.push({ field_path: "subgrades.corners", ai_value: aiSources.corners, override_value: cornersGrade });
-    }
-    if (aiSources.edges !== undefined && edgesGrade !== aiSources.edges) {
-      overrides.push({ field_path: "subgrades.edges", ai_value: aiSources.edges, override_value: edgesGrade });
-    }
-    if (aiSources.surface !== undefined && surfaceGrade !== aiSources.surface) {
-      overrides.push({ field_path: "subgrades.surface", ai_value: aiSources.surface, override_value: surfaceGrade });
-    }
-    // Overall grade override
-    if (aiAnalysis && overallOverride !== null) {
-      overrides.push({ field_path: "overall_grade", ai_value: aiAnalysis.overall_grade, override_value: overallOverride });
-    }
-    // Centering overrides
-    if (aiOriginalCentering.frontLR && frontLR !== aiOriginalCentering.frontLR) {
-      overrides.push({ field_path: "centering.front_lr", ai_value: aiOriginalCentering.frontLR, override_value: frontLR });
-    }
-    if (aiOriginalCentering.frontTB && frontTB !== aiOriginalCentering.frontTB) {
-      overrides.push({ field_path: "centering.front_tb", ai_value: aiOriginalCentering.frontTB, override_value: frontTB });
-    }
-    if (aiOriginalCentering.backLR && backLR !== aiOriginalCentering.backLR) {
-      overrides.push({ field_path: "centering.back_lr", ai_value: aiOriginalCentering.backLR, override_value: backLR });
-    }
-    if (aiOriginalCentering.backTB && backTB !== aiOriginalCentering.backTB) {
-      overrides.push({ field_path: "centering.back_tb", ai_value: aiOriginalCentering.backTB, override_value: backTB });
-    }
-    // Defect changes: count manual additions and AI deletions
-    const aiDefectCount = defects.filter(d => d.source === "ai").length;
-    const manualDefectCount = defects.filter(d => d.source === "manual").length;
-    const originalAiDefectCount = aiAnalysis?.defects?.length ?? 0;
-    if (originalAiDefectCount > 0 && aiDefectCount < originalAiDefectCount) {
-      overrides.push({ field_path: "defects.ai_deleted", ai_value: originalAiDefectCount, override_value: aiDefectCount });
-    }
-    if (manualDefectCount > 0) {
-      overrides.push({ field_path: "defects.manual_added", ai_value: 0, override_value: manualDefectCount });
-    }
-    return overrides;
-  }
 
   function buildPayload() {
     return {
@@ -370,16 +312,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   async function saveDraft() {
     setSaving(true);
     try {
-      // Log AI overrides (non-blocking — never prevents save)
-      const overrides = detectOverrides();
-      if (overrides.length > 0) {
-        fetch(`/api/admin/certificates/${certId}/override-audit/batch`, {
-          method: "POST", credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ overrides }),
-        }).catch(e => console.warn("[audit] override log failed:", e));
-      }
-
       const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
@@ -486,22 +418,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <AiPanel
             certId={certId}
             onAnalysisComplete={handleAiComplete}
-            onDefectsDetected={(aiDefects) => {
-              const manualDefects = defects.filter(d => d.source !== "ai");
-              const maxManualId = manualDefects.length > 0 ? Math.max(...manualDefects.map(d => d.id)) : 0;
-              const converted: Defect[] = aiDefects.map((ad, i) => ({
-                id: maxManualId + 1000 + i,
-                type: ad.type?.replace(/_/g, " ") || "Unknown",
-                severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
-                description: ad.description || "",
-                location: ad.location || "front",
-                image_side: ad.location === "back" ? "back" : "front",
-                x_percent: ad.position_x_percent ?? 50,
-                y_percent: ad.position_y_percent ?? 50,
-                source: "ai" as const,
-              }));
-              setDefects([...manualDefects, ...converted]);
-            }}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
           />
         </div>
@@ -515,8 +431,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <ImageViewer
             urls={urls}
             defects={defects}
-            onDefectAdded={d => setDefects(prev => [...prev, { ...d, source: "manual" as const }])}
-            onDefectDeleted={id => setDefects(prev => prev.filter(d => d.id !== id))}
+            onDefectAdded={d => setDefects(prev => [...prev, d])}
             highlightId={highlightDefect}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
             centeringFront={frontLR ? {
@@ -572,49 +487,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               })}
             </div>
           )}
-
-          {/* Defect-based subgrade suggestions */}
-          {defects.length > 0 && !isNonNumeric && (() => {
-            const s = defectSuggestions;
-            const hasDiff = s.centering !== centering || s.corners !== cornersGrade || s.edges !== edgesGrade || s.surface !== surfaceGrade;
-            return (
-              <div className="bg-[#0D0D0D] border border-[#222222] rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[#888888] text-[10px] uppercase tracking-widest font-bold">Defect Impact ({defects.length} defect{defects.length !== 1 ? "s" : ""})</p>
-                  {hasDiff && (
-                    <button type="button"
-                      onClick={() => {
-                        setCenteringOverride(s.centering);
-                        setCornersOverride(s.corners);
-                        setEdgesOverride(s.edges);
-                        setSurfaceOverride(s.surface);
-                      }}
-                      className="text-[9px] text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-widest transition-colors"
-                    >
-                      Apply Suggestions
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {([
-                    { label: "C", current: centering, suggested: s.centering },
-                    { label: "Co", current: cornersGrade, suggested: s.corners },
-                    { label: "E", current: edgesGrade, suggested: s.edges },
-                    { label: "S", current: surfaceGrade, suggested: s.surface },
-                  ] as const).map(({ label, current, suggested }) => {
-                    const diff = suggested !== current;
-                    return (
-                      <div key={label} className={`text-center p-1.5 rounded border ${diff ? "border-amber-700/40 bg-amber-900/10" : "border-[#222222]"}`}>
-                        <p className="text-[9px] text-[#555555] font-bold uppercase">{label}</p>
-                        <p className={`text-sm font-black ${diff ? "text-amber-400" : "text-[#555555]"}`}>{suggested}</p>
-                        {diff && <p className="text-[8px] text-[#555555]">now: {current}</p>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })()}
 
           {/* Grade summary — always visible at top */}
           {!isNonNumeric && (

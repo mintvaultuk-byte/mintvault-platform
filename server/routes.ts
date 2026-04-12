@@ -36,7 +36,32 @@ import {
 } from "./email";
 import { requireAuth } from "./middleware/auth";
 import { registerShowroomRoutes } from "./showroom";
-import { registerVaultClubRoutes, consumeCredit, countCreditsRemaining } from "./vault-club";
+import { registerVaultClubRoutes } from "./vault-club";
+
+/** Count unused, unexpired credits of a given type */
+async function countCreditsRemaining(userId: string, creditType: string = "reholder"): Promise<number> {
+  const rows = await db.execute(sql`
+    SELECT COUNT(*) AS cnt FROM reholder_credits
+    WHERE user_id = ${userId} AND credit_type = ${creditType}
+      AND used_at IS NULL AND expires_at > NOW()
+  `);
+  return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
+}
+
+/** Consume a single credit of the given type. Returns true if consumed. */
+async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    UPDATE reholder_credits
+    SET used_at = NOW(), used_for_submission_id = ${submissionId}
+    WHERE id = (
+      SELECT id FROM reholder_credits
+      WHERE user_id = ${userId} AND credit_type = ${creditType}
+        AND used_at IS NULL AND expires_at > NOW()
+      ORDER BY expires_at ASC LIMIT 1
+    ) RETURNING id
+  `);
+  return result.rows.length > 0;
+}
 import { registerSellerRoutes } from "./marketplace-seller";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
 
