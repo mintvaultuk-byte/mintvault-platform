@@ -4710,6 +4710,90 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/certificates/:id/recrop — manual crop override
+  app.post("/api/admin/certificates/:id/recrop", requireAdmin, async (req, res) => {
+    try {
+      const { generateVariants: gv } = await import("./image-processing");
+      const sharpMod = await import("sharp");
+      const sharpFn = sharpMod.default;
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { side, left_pct, top_pct, width_pct, height_pct } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (typeof left_pct !== "number" || typeof top_pct !== "number" || typeof width_pct !== "number" || typeof height_pct !== "number") {
+        return res.status(400).json({ error: "Crop box coordinates required (left_pct, top_pct, width_pct, height_pct)" });
+      }
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+
+      // Fetch RAW original (never the already-cropped version)
+      const origKey = side === "front"
+        ? (c.gradingFrontOriginal || c.frontImagePath)
+        : (c.gradingBackOriginal || c.backImagePath);
+      if (!origKey) return res.status(400).json({ error: `No original ${side} image found` });
+
+      let origBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(origKey, 300);
+        const resp = await fetch(url);
+        origBuf = Buffer.from(await resp.arrayBuffer());
+      } catch (err: any) {
+        return res.status(500).json({ error: `Failed to fetch original: ${err.message}` });
+      }
+
+      const meta = await sharpFn(origBuf).metadata();
+      if (!meta.width || !meta.height) return res.status(500).json({ error: "Cannot read image dimensions" });
+
+      // Convert percentage box to pixel coordinates
+      const left = Math.max(0, Math.round(meta.width * left_pct / 100));
+      const top = Math.max(0, Math.round(meta.height * top_pct / 100));
+      const w = Math.min(meta.width - left, Math.round(meta.width * width_pct / 100));
+      const h = Math.min(meta.height - top, Math.round(meta.height * height_pct / 100));
+
+      if (w < 50 || h < 50) return res.status(400).json({ error: "Crop box too small" });
+
+      console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
+
+      const cropped = await sharpFn(origBuf)
+        .extract({ left, top, width: w, height: h })
+        .jpeg({ quality: 95 })
+        .toBuffer();
+
+      // Upload cropped image
+      const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
+      await uploadToR2(cropKey, cropped, "image/jpeg");
+
+      const displayKey = r2KeyForImage(certIdStr, side, "jpg");
+      await uploadToR2(displayKey, cropped, "image/jpeg");
+
+      if (side === "front") {
+        await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+      } else {
+        await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+      }
+
+      // Regenerate variants sequentially
+      const variants = await gv(cropped);
+      for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
+        const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
+        await uploadToR2(vKey, vBuf, "image/jpeg");
+        if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+        if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
+        if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
+        if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+      }
+
+      console.log(`[recrop] ${certIdStr} ${side}: manual crop applied, ${w}x${h}px, variants regenerated`);
+      res.json({ success: true, side, width: w, height: h });
+    } catch (err: any) {
+      console.error("[recrop] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // DELETE /api/admin/certificates/:id/images/:side — remove front or back image
   app.delete("/api/admin/certificates/:id/images/:side", requireAdmin, async (req, res) => {
     try {
