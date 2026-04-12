@@ -49,30 +49,108 @@ export interface QualityResult {
   checks: QualityCheck[];
 }
 
-// ── Background-subtraction card detection (works on ALL card colours) ──────
-// Assumes scanner uses a BLACK background mat. Any non-black pixel = card.
-const BLACK_THRESHOLD = 30; // R,G,B all below this = scanner background
+// ── Adaptive background-subtraction card detection ──────────────────────────
+// Samples corners of the image to determine background colour, then uses
+// luminance distance to separate card from background. More robust than
+// fixed black threshold for holographic/silver/pale-bordered cards.
 
-/** Check if a pixel is scanner background (black) */
-function isBackground(r: number, g: number, b: number): boolean {
-  return r < BLACK_THRESHOLD && g < BLACK_THRESHOLD && b < BLACK_THRESHOLD;
+const FALLBACK_BLACK_THRESHOLD = 30;
+
+/** Luminance of an RGB pixel (BT.601 weights) */
+function luma(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** Sample average RGB from a corner block of the image */
+function sampleCorner(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  startX: number, startY: number, size: number
+): { r: number; g: number; b: number; luma: number } {
+  let sumR = 0, sumG = 0, sumB = 0, count = 0;
+  const endX = Math.min(startX + size, w);
+  const endY = Math.min(startY + size, h);
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const idx = (y * w + x) * ch;
+      sumR += pixels[idx]; sumG += pixels[idx + 1]; sumB += pixels[idx + 2];
+      count++;
+    }
+  }
+  if (count === 0) return { r: 0, g: 0, b: 0, luma: 0 };
+  const avgR = sumR / count, avgG = sumG / count, avgB = sumB / count;
+  return { r: avgR, g: avgG, b: avgB, luma: luma(avgR, avgG, avgB) };
 }
 
 /**
- * Detect card boundary by finding all non-black pixels.
- * Returns bounding box or null if detection fails.
+ * Compute adaptive background colour by sampling all 4 corners.
+ * Returns the average + a luminance threshold for "is background" checks.
+ */
+function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: number) {
+  const sz = Math.max(20, Math.round(Math.min(w, h) * 0.04)); // ~4% of shorter dimension
+  const corners = [
+    sampleCorner(pixels, w, h, ch, 0, 0, sz),           // top-left
+    sampleCorner(pixels, w, h, ch, w - sz, 0, sz),      // top-right
+    sampleCorner(pixels, w, h, ch, 0, h - sz, sz),      // bottom-left
+    sampleCorner(pixels, w, h, ch, w - sz, h - sz, sz), // bottom-right
+  ];
+  const avgLuma = corners.reduce((s, c) => s + c.luma, 0) / corners.length;
+  const avgR = corners.reduce((s, c) => s + c.r, 0) / corners.length;
+  const avgG = corners.reduce((s, c) => s + c.g, 0) / corners.length;
+  const avgB = corners.reduce((s, c) => s + c.b, 0) / corners.length;
+
+  // Threshold: pixel is "card" if its luminance is > bgLuma + margin
+  // For dark backgrounds, margin is at least 25; for brighter, scale up
+  const margin = Math.max(25, avgLuma * 0.6 + 15);
+
+  return { avgR, avgG, avgB, avgLuma, threshold: avgLuma + margin };
+}
+
+/** Check if a pixel is background using adaptive threshold */
+function isBackgroundAdaptive(r: number, g: number, b: number, bgThreshold: number): boolean {
+  return luma(r, g, b) < bgThreshold;
+}
+
+/** Legacy fallback: fixed black threshold */
+function isBackground(r: number, g: number, b: number): boolean {
+  return r < FALLBACK_BLACK_THRESHOLD && g < FALLBACK_BLACK_THRESHOLD && b < FALLBACK_BLACK_THRESHOLD;
+}
+
+/**
+ * Detect card boundary using adaptive background detection.
+ * Samples corners to learn background colour, then finds bounding box of all non-background pixels.
+ * Falls back to fixed black threshold if adaptive detection fails.
  */
 export function detectCardBoundary(
   pixels: Uint8Array, w: number, h: number, ch: number
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  const bg = computeBackgroundProfile(pixels, w, h, ch);
+  console.log(`[card-detect] bg profile: luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} rgb=(${bg.avgR.toFixed(0)},${bg.avgG.toFixed(0)},${bg.avgB.toFixed(0)})`);
+
+  // Try adaptive detection first
+  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isBackgroundAdaptive(r, g, b, bg.threshold));
+  if (adaptive) {
+    console.log(`[card-detect] adaptive detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
+    return adaptive;
+  }
+
+  // Fallback to fixed black threshold
+  console.log("[card-detect] adaptive failed, falling back to fixed black threshold");
+  return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+}
+
+/** Core boundary detection with a pluggable background test */
+function detectBoundaryWithTest(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  isBg: (r: number, g: number, b: number) => boolean
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
   let minX = w, maxX = 0, minY = h, maxY = 0;
-  let nonBlackCount = 0;
+  let fgCount = 0;
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const idx = (y * w + x) * ch;
-      if (!isBackground(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
-        nonBlackCount++;
+      if (!isBg(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+        fgCount++;
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -82,7 +160,7 @@ export function detectCardBoundary(
   }
 
   const totalPixels = w * h;
-  const nonBlackPct = (nonBlackCount / totalPixels) * 100;
+  const nonBlackPct = (fgCount / totalPixels) * 100;
 
   // Sanity: card should be 20-95% of image
   if (nonBlackPct < 20 || nonBlackPct > 95 || maxX <= minX || maxY <= minY) {
@@ -117,20 +195,24 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
     const h = info.height;
     const ch = info.channels;
 
-    // Scan top 30% of image: for each row, find leftmost+rightmost non-black pixel
+    // Use adaptive background detection for deskew edge scanning
+    const bg = computeBackgroundProfile(pixels, w, h, ch);
+    const isBg = (r: number, g: number, b: number) => isBackgroundAdaptive(r, g, b, bg.threshold);
+
+    // Scan top 30% of image: for each row, find leftmost+rightmost non-background pixel
     const topEdgePoints: { x: number; y: number }[] = [];
     for (let row = 0; row < Math.round(h * 0.3); row++) {
-      let rowLeft = -1, rowRight = -1, nonBlackInRow = 0;
+      let rowLeft = -1, rowRight = -1, fgInRow = 0;
       for (let col = 0; col < w; col++) {
         const idx = (row * w + col) * ch;
-        if (!isBackground(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
-          nonBlackInRow++;
+        if (!isBg(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+          fgInRow++;
           if (rowLeft === -1) rowLeft = col;
           rowRight = col;
         }
       }
-      // Row must have >30% non-black pixels to count as card content
-      if (nonBlackInRow > w * 0.3 && rowLeft >= 0) {
+      // Row must have >30% foreground pixels to count as card content
+      if (fgInRow > w * 0.3 && rowLeft >= 0) {
         topEdgePoints.push({ x: rowLeft, y: row });
         topEdgePoints.push({ x: rowRight, y: row });
         if (topEdgePoints.length > 60) break;
