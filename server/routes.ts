@@ -4760,7 +4760,7 @@ export async function registerRoutes(
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const { side, left_pct, top_pct, width_pct, height_pct } = req.body;
+      const { side, left_pct, top_pct, width_pct, height_pct, rotation_deg = 0 } = req.body;
       if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
       if ([left_pct, top_pct, width_pct, height_pct].some((v: any) => typeof v !== "number" || v < 0 || v > 100)) {
         return res.status(400).json({ error: "Invalid crop coordinates" });
@@ -4782,7 +4782,16 @@ export async function registerRoutes(
         return res.status(500).json({ error: `Failed to fetch original: ${err.message}` });
       }
 
-      const meta = await sharpFn(origBuf).metadata();
+      // Apply rotation first if specified, then crop from rotated dimensions
+      let workBuf = origBuf;
+      if (typeof rotation_deg === "number" && Math.abs(rotation_deg) > 0.1) {
+        workBuf = await sharpFn(origBuf)
+          .rotate(rotation_deg, { background: { r: 0, g: 0, b: 0, alpha: 1 } })
+          .toBuffer();
+        console.log(`[recrop] ${certIdStr} ${side}: rotated ${rotation_deg.toFixed(1)}°`);
+      }
+
+      const meta = await sharpFn(workBuf).metadata();
       if (!meta.width || !meta.height) return res.status(500).json({ error: "Cannot read image dimensions" });
 
       const left = Math.max(0, Math.round(meta.width * left_pct / 100));
@@ -4793,7 +4802,7 @@ export async function registerRoutes(
 
       console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
 
-      const cropped = await sharpFn(origBuf)
+      const cropped = await sharpFn(workBuf)
         .extract({ left, top, width: w, height: h })
         .jpeg({ quality: 95 })
         .toBuffer();
@@ -4824,6 +4833,66 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[recrop] error:", err.message);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/detect-card-bounds — auto-detect card edges in raw image
+  app.post("/api/admin/certificates/:id/detect-card-bounds", requireAdmin, async (req, res) => {
+    try {
+      const { detectCardBoundary } = await import("./image-processing");
+      const sharpFn = (await import("sharp")).default;
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { side } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+
+      const c = cert as any;
+      const origKey = side === "front"
+        ? (c.gradingFrontOriginal || c.frontImagePath)
+        : (c.gradingBackOriginal || c.backImagePath);
+      if (!origKey) return res.json({ ok: false, message: "No original image" });
+
+      let origBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(origKey, 300);
+        const resp = await fetch(url);
+        origBuf = Buffer.from(await resp.arrayBuffer());
+      } catch {
+        return res.json({ ok: false, message: "Failed to fetch image" });
+      }
+
+      // Downscale for detection (same as cropToCardBoundary)
+      const meta = await sharpFn(origBuf).metadata();
+      if (!meta.width || !meta.height) return res.json({ ok: false, message: "Cannot read dimensions" });
+
+      const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
+      const workW = Math.round(meta.width * scale);
+      const workH = Math.round(meta.height * scale);
+
+      const { data, info } = await sharpFn(origBuf)
+        .resize(workW, workH, { fit: "fill" })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      const boundary = detectCardBoundary(new Uint8Array(data), info.width, info.height, info.channels);
+      if (!boundary) return res.json({ ok: false, message: "Could not detect card edges" });
+
+      res.json({
+        ok: true,
+        bounds: {
+          left_pct: (boundary.minX / info.width) * 100,
+          top_pct: (boundary.minY / info.height) * 100,
+          width_pct: ((boundary.maxX - boundary.minX) / info.width) * 100,
+          height_pct: ((boundary.maxY - boundary.minY) / info.height) * 100,
+        },
+      });
+    } catch (err: any) {
+      console.error("[detect-card-bounds] error:", err.message);
+      res.json({ ok: false, message: err.message });
     }
   });
 
