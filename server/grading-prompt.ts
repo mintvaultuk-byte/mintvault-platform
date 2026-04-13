@@ -485,7 +485,15 @@ Grade thresholds (front): 10=55/45 or better, 9=60/40, 8=65/35, 7=70/30, 6=80/20
 Grade thresholds (back): 10=75/25 or better, 9=90/10, 7=worse than 90/10
 Final centering subgrade = LOWER of front and back grades. Whole numbers only (1-10).`;
 
-export const DEFECTS_ONLY_PROMPT = `CRITICAL: Return ONLY a valid JSON object. No preamble, no prose, no markdown fences. First character must be {, last must be }.
+export const DEFECTS_ONLY_PROMPT = `CRITICAL OUTPUT FORMAT:
+- First character of your response MUST be {
+- Last character of your response MUST be }
+- NO HTML tags. NO XML tags. NO angle brackets except inside JSON string values.
+- NO markdown code fences (\`\`\`json or \`\`\`)
+- NO prose, preamble, or explanations before or after the JSON
+- NO "I'll analyze" or "Here is the result" text
+- If you cannot analyze the image, return: {"defects": [], "error": "reason"}
+Violations cause system errors. Your entire response is parsed as JSON.
 
 You are examining high-resolution images of a trading card. Your ONLY task is to detect and locate physical defects.
 
