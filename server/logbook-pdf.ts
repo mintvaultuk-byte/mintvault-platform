@@ -1,6 +1,7 @@
 /**
- * MintVault Ownership Logbook — multi-page PDF generator.
- * Uses pdfkit (already installed). Mirrors certificate-document.ts patterns.
+ * MintVault Ownership Logbook — continuous-flow PDF generator.
+ * Single document with thin gold hairline dividers between sections.
+ * Content flows across pages naturally — no forced page breaks.
  */
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
@@ -9,12 +10,11 @@ import { buildLogbookData } from "./logbook-service";
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
-const M = 50; // margin
-const CW = PAGE_W - M * 2; // content width
+const M = 50;
+const CW = PAGE_W - M * 2;
 
 const GOLD = "#D4AF37";
 const GOLD_DARK = "#B8960C";
-const BLACK = "#0A0A0A";
 const CHARCOAL = "#1A1A1A";
 const GRAY = "#888888";
 const MUTED = "#555555";
@@ -22,7 +22,7 @@ const TEXT = "#222222";
 
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 
-function safe(v: any, fallback = "—"): string {
+function safe(v: any, fallback = "\u2014"): string {
   if (v === null || v === undefined || v === "") return fallback;
   return String(v);
 }
@@ -31,63 +31,60 @@ async function generateQR(url: string, size: number): Promise<Buffer> {
   return QRCode.toBuffer(url, { width: size, margin: 1, color: { dark: "#000000", light: "#FFFFFF" }, errorCorrectionLevel: "H" });
 }
 
-function goldLine(doc: PDFKit.PDFDocument, y: number) {
+/** Check if we need a new page — if y is within bottomMargin of page bottom, add page and reset y */
+function ensureSpace(doc: PDFKit.PDFDocument, y: number, needed: number): number {
+  if (y + needed > PAGE_H - 60) {
+    doc.addPage();
+    return M;
+  }
+  return y;
+}
+
+/** Thin gold hairline divider with spacing */
+function divider(doc: PDFKit.PDFDocument, y: number): number {
+  y += 8;
   doc.save().rect(M, y, CW, 0.5).fill(GOLD).restore();
+  return y + 12;
 }
 
-function sectionTitle(doc: PDFKit.PDFDocument, y: number, title: string): number {
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GOLD).text(title.toUpperCase(), M, y, { characterSpacing: 3 });
-  goldLine(doc, y + 14);
-  return y + 22;
+/** Section title — small caps gold with underline */
+function section(doc: PDFKit.PDFDocument, y: number, title: string): number {
+  y = ensureSpace(doc, y, 30);
+  doc.font("Helvetica-Bold").fontSize(7).fillColor(GOLD).text(title.toUpperCase(), M, y, { characterSpacing: 2.5 });
+  return y + 14;
 }
 
-function fieldRow(doc: PDFKit.PDFDocument, y: number, label: string, value: string): number {
-  doc.font("Helvetica").fontSize(7).fillColor(GRAY).text(label, M, y);
-  doc.font("Helvetica-Bold").fontSize(9).fillColor(TEXT).text(value, M + 120, y - 1);
-  return y + 16;
-}
-
-function drawBorder(doc: PDFKit.PDFDocument) {
-  const bw = 4;
-  doc.rect(0, 0, PAGE_W, bw).fill(GOLD);
-  doc.rect(0, PAGE_H - bw, PAGE_W, bw).fill(GOLD);
-  doc.rect(0, 0, bw, PAGE_H).fill(GOLD);
-  doc.rect(PAGE_W - bw, 0, bw, PAGE_H).fill(GOLD);
-}
-
-function pageFooter(doc: PDFKit.PDFDocument, pageNum: number, totalPages: number, certId: string) {
-  doc.font("Helvetica").fontSize(6).fillColor(MUTED)
-    .text(`MintVault Ownership Logbook — ${certId}`, M, PAGE_H - 30, { width: CW / 2, align: "left" })
-    .text(`Page ${pageNum} of ${totalPages}`, M + CW / 2, PAGE_H - 30, { width: CW / 2, align: "right" });
+/** Label:value field row */
+function field(doc: PDFKit.PDFDocument, y: number, label: string, value: string): number {
+  y = ensureSpace(doc, y, 14);
+  doc.font("Helvetica").fontSize(6.5).fillColor(GRAY).text(label, M, y);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(TEXT).text(value, M + 110, y - 0.5);
+  return y + 13;
 }
 
 export async function generateLogbookPdf(certIdInput: string): Promise<Buffer | null> {
   const data = await buildLogbookData(certIdInput);
   if (!data) return null;
 
-  const { certId, card, grades, centering, defects, gradingReport, images, population, provenance, verification } = data;
+  const { certId, card, grades, centering, defects, gradingReport, images, provenance, verification } = data;
+  const ownership = (data as any).ownership;
 
   return new Promise(async (resolve, reject) => {
     try {
-      const qrBuf = await generateQR(verification.verifyUrl + `?sig=${verification.signature}`, 200);
+      const qrBuf = await generateQR(verification.verifyUrl + `?sig=${verification.signature}`, 180);
 
-      // Fetch card images as buffers for embedding
       let frontImgBuf: Buffer | null = null;
       let backImgBuf: Buffer | null = null;
-      if (images.front) {
-        try { const r = await fetch(images.front); frontImgBuf = Buffer.from(await r.arrayBuffer()); } catch {}
-      }
-      if (images.back) {
-        try { const r = await fetch(images.back); backImgBuf = Buffer.from(await r.arrayBuffer()); } catch {}
-      }
+      if (images.front) { try { const r = await fetch(images.front); frontImgBuf = Buffer.from(await r.arrayBuffer()); } catch {} }
+      if (images.back) { try { const r = await fetch(images.back); backImgBuf = Buffer.from(await r.arrayBuffer()); } catch {} }
 
       const doc = new PDFDocument({
         size: "A4",
-        margins: { top: M, bottom: M, left: M, right: M },
+        margins: { top: M, bottom: 40, left: M, right: M },
         info: {
-          Title: `MintVault Ownership Logbook — ${certId}`,
+          Title: `MintVault Logbook \u2014 ${certId}`,
           Author: "MintVault UK",
-          Subject: `${safe(card.name)} — Grade ${safe(grades.overall)}`,
+          Subject: `${safe(card.name)} \u2014 Grade ${safe(grades.overall)}`,
         },
         bufferPages: true,
       });
@@ -97,215 +94,218 @@ export async function generateLogbookPdf(certIdInput: string): Promise<Buffer | 
       doc.on("end", () => resolve(Buffer.concat(chunks)));
       doc.on("error", reject);
 
-      // ── PAGE 1: Cover ──────────────────────────────────────────────────────
-      drawBorder(doc);
-      let y = 60;
-
-      // Logo
-      try { doc.image(LOGO_PATH, (PAGE_W - 100) / 2, y, { width: 100 }); y += 55; } catch { y += 20; }
-
-      doc.font("Helvetica").fontSize(7).fillColor(GOLD).text("OWNERSHIP LOGBOOK", M, y, { width: CW, align: "center", characterSpacing: 6 });
-      y += 25;
-
-      goldLine(doc, y); y += 15;
-
-      // Card name large
-      doc.font("Helvetica-Bold").fontSize(22).fillColor(CHARCOAL)
-        .text(safe(card.name, "Certificate"), M, y, { width: CW, align: "center" });
-      y += 30;
-
-      // Set + number
-      doc.font("Helvetica").fontSize(10).fillColor(GRAY)
-        .text(`${safe(card.set)} ${card.number ? `#${card.number}` : ""}`, M, y, { width: CW, align: "center" });
-      y += 20;
-
-      // Grade badge
       const gradeStr = String(grades.overall);
       const gradeLabel = grades.gradeLabel;
-      doc.font("Helvetica-Bold").fontSize(48).fillColor(GOLD)
-        .text(gradeStr, M, y + 20, { width: CW, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(10).fillColor(GOLD_DARK)
-        .text(gradeLabel, M, y + 75, { width: CW, align: "center", characterSpacing: 3 });
-      if (grades.isBlackLabel) {
-        doc.font("Helvetica-Bold").fontSize(8).fillColor(CHARCOAL)
-          .text("BLACK LABEL", M, y + 92, { width: CW, align: "center", characterSpacing: 4 });
-      }
-      y += 115;
+      let y = M;
 
-      goldLine(doc, y); y += 20;
+      // ── COVER BLOCK ──────────────────────────────────────────────────────────
+      // Outer gold frame on page 1 only
+      const bw = 3;
+      doc.rect(0, 0, PAGE_W, bw).fill(GOLD);
+      doc.rect(0, PAGE_H - bw, PAGE_W, bw).fill(GOLD);
+      doc.rect(0, 0, bw, PAGE_H).fill(GOLD);
+      doc.rect(PAGE_W - bw, 0, bw, PAGE_H).fill(GOLD);
 
-      // Cert ID
-      doc.font("Courier-Bold").fontSize(11).fillColor(TEXT)
-        .text(certId, M, y, { width: CW, align: "center" });
+      // Logo
+      try {
+        doc.image(LOGO_PATH, (PAGE_W - 80) / 2, y, { width: 80 });
+        y += 45;
+      } catch { y += 10; }
+
+      // Wordmark — well below logo
+      doc.font("Helvetica").fontSize(6).fillColor(GOLD).text("OWNERSHIP LOGBOOK", M, y, { width: CW, align: "center", characterSpacing: 5 });
       y += 18;
-      doc.font("Helvetica").fontSize(7).fillColor(GRAY)
-        .text(`Issued ${safe(provenance.issuedAt ? new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : null)}`, M, y, { width: CW, align: "center" });
 
-      // ── PAGE 2: Card Details + Grades ──────────────────────────────────────
-      doc.addPage(); drawBorder(doc);
-      y = 40;
+      // Thin hairline
+      doc.save().rect(M + CW * 0.3, y, CW * 0.4, 0.5).fill(GOLD).restore();
+      y += 14;
 
-      y = sectionTitle(doc, y, "Card Identity");
-      y = fieldRow(doc, y, "Card Name", safe(card.name));
-      y = fieldRow(doc, y, "Game", safe(card.game));
-      y = fieldRow(doc, y, "Set", safe(card.set));
-      y = fieldRow(doc, y, "Card Number", safe(card.number));
-      y = fieldRow(doc, y, "Year", safe(card.year));
-      y = fieldRow(doc, y, "Variant", safe(card.variant));
-      y = fieldRow(doc, y, "Rarity", safe(card.rarity));
-      y = fieldRow(doc, y, "Language", safe(card.language));
-      if (card.designations.length > 0) {
-        y = fieldRow(doc, y, "Designations", card.designations.join(", "));
+      // Card name
+      doc.font("Helvetica-Bold").fontSize(18).fillColor(CHARCOAL)
+        .text(safe(card.name, "Certificate"), M, y, { width: CW, align: "center" });
+      y += 24;
+
+      // Set + number subtitle
+      doc.font("Helvetica").fontSize(9).fillColor(GRAY)
+        .text(`${safe(card.set)} ${card.number ? `#${card.number}` : ""} ${card.year ? `(${card.year})` : ""}`.trim(), M, y, { width: CW, align: "center" });
+      y += 18;
+
+      // Grade
+      doc.font("Helvetica-Bold").fontSize(36).fillColor(GOLD)
+        .text(gradeStr, M, y, { width: CW, align: "center" });
+      y += 42;
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(GOLD_DARK)
+        .text(gradeLabel, M, y, { width: CW, align: "center", characterSpacing: 2 });
+      y += 12;
+      if (grades.isBlackLabel) {
+        doc.font("Helvetica-Bold").fontSize(7).fillColor(CHARCOAL)
+          .text("BLACK LABEL", M, y, { width: CW, align: "center", characterSpacing: 3 });
+        y += 12;
       }
-      y += 10;
 
-      y = sectionTitle(doc, y, "Grade Analysis");
-      // Overall
-      doc.font("Helvetica-Bold").fontSize(28).fillColor(GOLD)
-        .text(gradeStr, M, y, { width: 80, align: "center" });
-      doc.font("Helvetica-Bold").fontSize(9).fillColor(GOLD_DARK)
-        .text(gradeLabel, M, y + 35, { width: 80, align: "center" });
+      // Cert ID + date
+      y += 6;
+      doc.font("Courier-Bold").fontSize(9).fillColor(TEXT)
+        .text(certId, M, y, { width: CW, align: "center" });
+      y += 14;
+      if (provenance.issuedAt) {
+        doc.font("Helvetica").fontSize(6.5).fillColor(GRAY)
+          .text(`Issued ${new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`, M, y, { width: CW, align: "center" });
+        y += 10;
+      }
 
-      // Subgrades table
-      const subX = M + 100;
-      const subW = (CW - 100) / 4;
+      // ── CARD IDENTITY ──────────────────────────────────────────────────────────
+      y = divider(doc, y);
+      y = section(doc, y, "Card Identity");
+      y = field(doc, y, "Card Name", safe(card.name));
+      y = field(doc, y, "Game", safe(card.game));
+      y = field(doc, y, "Set", safe(card.set));
+      y = field(doc, y, "Card Number", safe(card.number));
+      y = field(doc, y, "Year", safe(card.year));
+      if (card.variant) y = field(doc, y, "Variant", card.variant);
+      y = field(doc, y, "Rarity", safe(card.rarity));
+      y = field(doc, y, "Language", safe(card.language));
+      if (card.designations.length > 0) y = field(doc, y, "Designations", card.designations.join(", "));
+
+      // ── GRADE ANALYSIS ─────────────────────────────────────────────────────────
+      y = divider(doc, y);
+      y = section(doc, y, "Grade Analysis");
+      y = ensureSpace(doc, y, 45);
+
+      // Overall + subgrades in a row
+      doc.font("Helvetica-Bold").fontSize(22).fillColor(GOLD).text(gradeStr, M, y, { width: 60, align: "center" });
+      doc.font("Helvetica").fontSize(6).fillColor(GOLD_DARK).text(gradeLabel, M, y + 26, { width: 60, align: "center" });
+
+      const subX = M + 80;
+      const subW = (CW - 80) / 4;
       const subLabels = ["Centering", "Corners", "Edges", "Surface"];
       const subValues = [grades.centering, grades.corners, grades.edges, grades.surface];
       for (let i = 0; i < 4; i++) {
         const sx = subX + i * subW;
-        doc.font("Helvetica").fontSize(6).fillColor(GRAY).text(subLabels[i].toUpperCase(), sx, y, { width: subW, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(18).fillColor(TEXT).text(safe(subValues[i]), sx, y + 10, { width: subW, align: "center" });
+        doc.font("Helvetica").fontSize(5.5).fillColor(GRAY).text(subLabels[i].toUpperCase(), sx, y, { width: subW, align: "center" });
+        doc.font("Helvetica-Bold").fontSize(14).fillColor(TEXT).text(safe(subValues[i]), sx, y + 8, { width: subW, align: "center" });
       }
-      y += 55;
+      y += 38;
 
       // Centering ratios
       if (centering.frontLR || centering.backLR) {
-        y = sectionTitle(doc, y, "Centering Measurement");
-        if (centering.frontLR) y = fieldRow(doc, y, "Front L/R", centering.frontLR);
-        if (centering.frontTB) y = fieldRow(doc, y, "Front T/B", centering.frontTB);
-        if (centering.backLR) y = fieldRow(doc, y, "Back L/R", centering.backLR);
-        if (centering.backTB) y = fieldRow(doc, y, "Back T/B", centering.backTB);
-        y += 10;
+        y = ensureSpace(doc, y, 50);
+        doc.font("Helvetica").fontSize(6).fillColor(MUTED).text("CENTERING", M, y, { characterSpacing: 1 }); y += 10;
+        if (centering.frontLR) y = field(doc, y, "Front L/R", centering.frontLR);
+        if (centering.frontTB) y = field(doc, y, "Front T/B", centering.frontTB);
+        if (centering.backLR) y = field(doc, y, "Back L/R", centering.backLR);
+        if (centering.backTB) y = field(doc, y, "Back T/B", centering.backTB);
       }
 
-      // Grading commentary
-      if (gradingReport.overall || gradingReport.centering || gradingReport.corners || gradingReport.edges || gradingReport.surface) {
-        y = sectionTitle(doc, y, "Grader Notes");
-        if (gradingReport.centering) { doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(`Centering: ${gradingReport.centering}`, M, y, { width: CW }); y += 12; }
-        if (gradingReport.corners) { doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(`Corners: ${gradingReport.corners}`, M, y, { width: CW }); y += 12; }
-        if (gradingReport.edges) { doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(`Edges: ${gradingReport.edges}`, M, y, { width: CW }); y += 12; }
-        if (gradingReport.surface) { doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(`Surface: ${gradingReport.surface}`, M, y, { width: CW }); y += 12; }
-        if (gradingReport.overall) { doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(`Overall: ${gradingReport.overall}`, M, y, { width: CW }); y += 12; }
-      }
-
-      // ── PAGE 3: Defects + Authentication ───────────────────────────────────
-      doc.addPage(); drawBorder(doc);
-      y = 40;
-
-      y = sectionTitle(doc, y, "Condition Report");
-      if (defects.length === 0) {
-        doc.font("Helvetica").fontSize(8).fillColor(GRAY).text("No defects detected.", M, y);
-        y += 16;
-      } else {
-        doc.font("Helvetica").fontSize(7).fillColor(GRAY)
-          .text(`${defects.length} defect${defects.length !== 1 ? "s" : ""} detected:`, M, y);
-        y += 14;
-        for (const d of defects) {
-          doc.font("Helvetica-Bold").fontSize(7).fillColor(TEXT).text(`${d.type}`, M + 10, y);
-          doc.font("Helvetica").fontSize(7).fillColor(GRAY).text(`${d.location} — ${d.severity}`, M + 120, y);
-          if (d.description) { y += 10; doc.font("Helvetica").fontSize(6.5).fillColor(MUTED).text(d.description, M + 20, y, { width: CW - 30 }); }
-          y += 12;
-          if (y > PAGE_H - 100) { doc.addPage(); drawBorder(doc); y = 40; }
+      // Grader notes
+      const hasNotes = gradingReport.overall || gradingReport.centering || gradingReport.corners || gradingReport.edges || gradingReport.surface;
+      if (hasNotes) {
+        y += 4;
+        doc.font("Helvetica").fontSize(6).fillColor(MUTED).text("GRADER NOTES", M, y, { characterSpacing: 1 }); y += 10;
+        for (const [k, v] of [["Centering", gradingReport.centering], ["Corners", gradingReport.corners], ["Edges", gradingReport.edges], ["Surface", gradingReport.surface], ["Overall", gradingReport.overall]] as const) {
+          if (v) {
+            y = ensureSpace(doc, y, 12);
+            doc.font("Helvetica").fontSize(6.5).fillColor(TEXT).text(`${k}: ${v}`, M, y, { width: CW }); y += 11;
+          }
         }
       }
-      y += 10;
 
-      y = sectionTitle(doc, y, "Authentication");
-      y = fieldRow(doc, y, "Status", data.authentication.status === "genuine" ? "Genuine" : data.authentication.status === "authentic_altered" ? "Authentic Altered" : "Not Original");
+      // ── AUTHENTICATION ─────────────────────────────────────────────────────────
+      y = divider(doc, y);
+      y = section(doc, y, "Authentication");
+      const authLabel = data.authentication.status === "genuine" ? "Genuine" : data.authentication.status === "authentic_altered" ? "Authentic Altered" : "Not Original";
+      y = field(doc, y, "Status", authLabel);
       if (data.authentication.notes) {
-        doc.font("Helvetica").fontSize(7).fillColor(TEXT).text(data.authentication.notes, M, y, { width: CW });
-        y += 20;
+        y = ensureSpace(doc, y, 14);
+        doc.font("Helvetica").fontSize(6.5).fillColor(TEXT).text(data.authentication.notes, M, y, { width: CW }); y += 14;
       }
 
-      // ── PAGE 4: Images ─────────────────────────────────────────────────────
-      if (frontImgBuf || backImgBuf) {
-        doc.addPage(); drawBorder(doc);
-        y = 40;
-        y = sectionTitle(doc, y, "Card Images");
-
-        const imgMaxW = (CW - 20) / 2;
-        const imgMaxH = PAGE_H - 140;
-
-        if (frontImgBuf && backImgBuf) {
-          try { doc.image(frontImgBuf, M, y, { width: imgMaxW, height: imgMaxH, fit: [imgMaxW, imgMaxH] }); } catch {}
-          try { doc.image(backImgBuf, M + imgMaxW + 20, y, { width: imgMaxW, height: imgMaxH, fit: [imgMaxW, imgMaxH] }); } catch {}
-        } else if (frontImgBuf) {
-          const singleW = CW * 0.6;
-          try { doc.image(frontImgBuf, (PAGE_W - singleW) / 2, y, { width: singleW, height: imgMaxH, fit: [singleW, imgMaxH] }); } catch {}
-        } else if (backImgBuf) {
-          const singleW = CW * 0.6;
-          try { doc.image(backImgBuf, (PAGE_W - singleW) / 2, y, { width: singleW, height: imgMaxH, fit: [singleW, imgMaxH] }); } catch {}
+      // ── CONDITION ──────────────────────────────────────────────────────────────
+      y = divider(doc, y);
+      y = section(doc, y, "Condition Report");
+      if (defects.length === 0) {
+        doc.font("Helvetica").fontSize(7).fillColor(GRAY).text("No defects recorded.", M, y); y += 12;
+      } else {
+        doc.font("Helvetica").fontSize(6.5).fillColor(GRAY).text(`${defects.length} defect${defects.length !== 1 ? "s" : ""} detected:`, M, y); y += 11;
+        for (const d of defects) {
+          y = ensureSpace(doc, y, 14);
+          doc.font("Helvetica-Bold").fontSize(6.5).fillColor(TEXT).text(d.type, M + 5, y);
+          doc.font("Helvetica").fontSize(6.5).fillColor(GRAY).text(`${d.location} \u2014 ${d.severity}`, M + 100, y);
+          y += 11;
         }
       }
 
-      // ── Ownership History page ─────────────────────────────────────────────
-      const ownership = (data as any).ownership;
+      // ── CARD IMAGES ────────────────────────────────────────────────────────────
+      if (frontImgBuf || backImgBuf) {
+        y = divider(doc, y);
+        y = section(doc, y, "Card Images");
+        // Images need space — check if we should start a new page
+        y = ensureSpace(doc, y, 250);
+        const imgH = 220;
+        const imgW = (CW - 15) / 2;
+        if (frontImgBuf && backImgBuf) {
+          try { doc.image(frontImgBuf, M, y, { fit: [imgW, imgH] }); } catch {}
+          try { doc.image(backImgBuf, M + imgW + 15, y, { fit: [imgW, imgH] }); } catch {}
+        } else {
+          const buf = frontImgBuf || backImgBuf;
+          if (buf) try { doc.image(buf, M + CW * 0.15, y, { fit: [CW * 0.7, imgH] }); } catch {}
+        }
+        y += imgH + 5;
+      }
+
+      // ── OWNERSHIP HISTORY ──────────────────────────────────────────────────────
       if (ownership?.chain?.length > 0) {
-        doc.addPage(); drawBorder(doc);
-        y = 40;
-        y = sectionTitle(doc, y, "Ownership History");
-        doc.font("Helvetica").fontSize(8).fillColor(GRAY)
+        y = divider(doc, y);
+        y = section(doc, y, "Ownership History");
+        doc.font("Helvetica").fontSize(6.5).fillColor(GRAY)
           .text(`${ownership.previousOwnersCount} previous owner${ownership.previousOwnersCount !== 1 ? "s" : ""}`, M, y);
-        y += 16;
+        y += 11;
         for (const owner of ownership.chain as any[]) {
+          y = ensureSpace(doc, y, 12);
           const marker = owner.isCurrent ? "\u25CF" : "\u25CB";
           const name = owner.displayName ? ` \u2014 ${owner.displayName}` : "";
           const dateStr = new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
           const endStr = owner.releasedAt
-            ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
+            ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays}d)`
             : " (Current)";
-          doc.font("Helvetica").fontSize(8).fillColor(owner.isCurrent ? GOLD : TEXT)
+          doc.font("Helvetica").fontSize(7).fillColor(owner.isCurrent ? GOLD : TEXT)
             .text(`${marker} Owner ${owner.ownerNumber}${name} \u2014 ${dateStr}${endStr}`, M + 5, y, { width: CW - 10 });
-          y += 14;
-          if (y > PAGE_H - 80) { doc.addPage(); drawBorder(doc); y = 40; }
+          y += 12;
         }
-        y += 10;
       }
 
-      // ── FINAL PAGE: Verification ───────────────────────────────────────────
-      doc.addPage(); drawBorder(doc);
-      y = 40;
+      // ── VERIFICATION ───────────────────────────────────────────────────────────
+      y = divider(doc, y);
+      y = section(doc, y, "Verification");
+      y = ensureSpace(doc, y, 130);
 
-      y = sectionTitle(doc, y, "Verification & Integrity");
+      doc.font("Helvetica").fontSize(6).fillColor(GRAY)
+        .text("This logbook is cryptographically signed. Verify at the URL or scan the QR code.", M, y, { width: CW });
+      y += 12;
 
-      doc.font("Helvetica").fontSize(7).fillColor(GRAY).text("This logbook is cryptographically signed. The hash below can be verified at the URL or by scanning the QR code.", M, y, { width: CW });
-      y += 20;
+      // QR + signature side by side
+      try { doc.image(qrBuf, M, y, { width: 70 }); } catch {}
 
-      // QR code
-      try { doc.image(qrBuf, (PAGE_W - 100) / 2, y, { width: 100 }); } catch {}
-      y += 115;
+      const sigX = M + 85;
+      doc.font("Helvetica").fontSize(5.5).fillColor(MUTED).text("SIGNATURE", sigX, y);
+      doc.font("Courier").fontSize(5.5).fillColor(TEXT).text(verification.signature || "\u2014", sigX, y + 9, { width: CW - 90 });
+      doc.font("Helvetica").fontSize(5.5).fillColor(MUTED).text("VERIFY", sigX, y + 22);
+      doc.font("Courier").fontSize(5.5).fillColor(GOLD_DARK).text(verification.verifyUrl, sigX, y + 31, { width: CW - 90 });
+      y += 75;
 
-      doc.font("Helvetica").fontSize(6).fillColor(MUTED).text("SIGNATURE HASH", M, y, { width: CW, align: "center" });
-      y += 10;
-      doc.font("Courier").fontSize(7).fillColor(TEXT).text(verification.signature || "—", M, y, { width: CW, align: "center" });
-      y += 18;
-      doc.font("Helvetica").fontSize(6).fillColor(MUTED).text("VERIFICATION URL", M, y, { width: CW, align: "center" });
-      y += 10;
-      doc.font("Courier").fontSize(6).fillColor(GOLD_DARK).text(verification.verifyUrl, M, y, { width: CW, align: "center" });
-      y += 25;
-
-      goldLine(doc, y); y += 15;
-
-      doc.font("Helvetica").fontSize(6).fillColor(GRAY).text(
-        "This Ownership Logbook is an official record issued by MintVault Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data at time of issuance. Any modification to the underlying data will invalidate the signature. This document does not constitute a guarantee of future value.",
-        M, y, { width: CW, align: "center", lineGap: 2 }
+      y = ensureSpace(doc, y, 40);
+      doc.font("Helvetica").fontSize(5).fillColor(GRAY).text(
+        "This Ownership Logbook is an official record issued by MintVault Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification invalidates the signature. This document does not constitute a guarantee of future value.",
+        M, y, { width: CW, align: "center", lineGap: 1.5 }
       );
 
-      // Add page footers to all pages
+      // Page footers
       const totalPages = doc.bufferedPageRange().count;
       for (let i = 0; i < totalPages; i++) {
         doc.switchToPage(i);
-        pageFooter(doc, i + 1, totalPages, certId);
+        doc.font("Helvetica").fontSize(5.5).fillColor(MUTED)
+          .text(`MintVault Logbook \u2014 ${certId}`, M, PAGE_H - 25, { width: CW / 2, align: "left" })
+          .text(`${i + 1} / ${totalPages}`, M + CW / 2, PAGE_H - 25, { width: CW / 2, align: "right" });
       }
 
       doc.end();
