@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from "react";
-import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect, lazy, Suspense } from "react";
+import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2, Crop } from "lucide-react";
+
+const ManualCrop = lazy(() => import("./manual-crop"));
 import DefectHeatmap from "./defect-heatmap";
 import { DefectForm } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
@@ -98,6 +100,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkMode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
     type: "Scratch", severity: "minor" as "minor" | "moderate" | "significant",
@@ -496,6 +499,13 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           <Maximize2 size={11} />
           Mark Defects
         </button>
+        {certId && (side === "front" || side === "back") && urls[`${side}_original` as keyof ImageUrls] && (
+          <button type="button" onClick={() => setManualCropSide(side as "front" | "back")}
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#333333] text-[#888888] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+            <Crop size={11} />
+            Manual Crop
+          </button>
+        )}
         <button type="button" onClick={() => setShowDefects(!showDefects)}
           className="flex items-center gap-1.5 text-[10px] text-[#888888] hover:text-[#CCCCCC] border border-[#333333] px-3 py-1.5 rounded transition-all">
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
@@ -508,6 +518,19 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </button>
         )}
       </div>
+
+      {/* Manual Crop modal (lazy-loaded — won't crash if module fails) */}
+      {manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
+        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#D4AF37] text-sm">Loading crop tool...</div>}>
+          <ManualCrop
+            side={manualCropSide}
+            certId={certId}
+            rawImageUrl={urls[`${manualCropSide}_original` as keyof ImageUrls] as string}
+            onDone={() => { setManualCropSide(null); onImageDeleted?.(); }}
+            onCancel={() => setManualCropSide(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
