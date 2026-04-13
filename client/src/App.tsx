@@ -171,14 +171,15 @@ function Router() {
         </Route>
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
+        <Route path="/cert/:id/report" component={GradingReportPage} />
+        <Route path="/cert/:id" component={LogbookPage} />
+        <Route path="/vault/:certId" component={LogbookPage} />
         <Route path="/" component={HomePage} />
         <Route>
           <Layout>
             <Switch>
               <Route path="/pricing" component={PricingPage} />
               <Route path="/cert" component={CertLookupPage} />
-              <Route path="/cert/:id/report" component={GradingReportPage} />
-              <Route path="/cert/:id" component={CertDetailPage} />
               <Route path="/why-mintvault" component={WhyMintVaultPage} />
               <Route path="/labels" component={LabelsPage} />
               <Route path="/reports" component={ReportsPage} />
@@ -215,7 +216,6 @@ function Router() {
               <Route path="/grading-glossary" component={GradingGlossaryPage} />
               <Route path="/tools/estimate" component={PreGradeEstimatePage} />
               <Route path="/how-it-works" component={HowItWorksPage} />
-              <Route path="/vault/:certId" component={LogbookPage} />
               <Route path="/about/our-story" component={OurStoryPage} />
               <Route path="/about/the-mintvault-slab" component={TheMintVaultSlabPage} />
               <Route path="/grading/eligible-cards" component={EligibleCardsPage} />

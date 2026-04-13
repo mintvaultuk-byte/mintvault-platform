@@ -22,7 +22,7 @@ export default function NfcRedirectPage() {
         }
         const data = await res.json();
         setStatus("redirecting");
-        setTimeout(() => setLocation(data.redirectTo || `/vault/${certId.toUpperCase()}`), 800);
+        setTimeout(() => setLocation(data.redirectTo || `/cert/${certId.toUpperCase()}`), 800);
       } catch {
         setError("Failed to verify NFC tag.");
         setStatus("error");

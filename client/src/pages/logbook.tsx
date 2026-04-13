@@ -16,6 +16,7 @@ interface LogbookData {
   population: any;
   provenance: { issuedAt: string | null; gradedAt: string | null; ownershipStatus: string; nfcEnabled: boolean; nfcScanCount: number; stolenStatus: string | null };
   verification: { signature: string | null; signedAt: string; verifyUrl: string };
+  ownership: { previousOwnersCount: number; currentOwnerNumber: number; chain: Array<{ ownerNumber: number; displayName: string | null; claimedAt: string; releasedAt: string | null; durationDays: number | null; isCurrent: boolean; claimMethod: string }> };
 }
 
 function safe(v: any, fallback = "\u2014"): string {
@@ -59,8 +60,8 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export default function LogbookPage() {
-  const params = useParams<{ certId: string }>();
-  const certId = params.certId || "";
+  const params = useParams<{ certId?: string; id?: string }>();
+  const certId = params.certId || params.id || "";
   const [showDefects, setShowDefects] = useState(false);
 
   const { data, isLoading, error } = useQuery<LogbookData>({
@@ -254,12 +255,41 @@ export default function LogbookPage() {
             <div className="space-y-0">
               {provenance.issuedAt && <Field label="Certificate Issued" value={new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
               {provenance.gradedAt && <Field label="Grade Approved" value={new Date(provenance.gradedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
-              <Field label="Ownership Status" value={provenance.ownershipStatus === "claimed" ? "Claimed" : "Unclaimed"} />
               <Field label="NFC Enabled" value={provenance.nfcEnabled ? "Yes" : "No"} />
               {provenance.nfcScanCount > 0 && <Field label="NFC Scans" value={String(provenance.nfcScanCount)} />}
               {provenance.stolenStatus && <Field label="Stolen Flag" value="REPORTED STOLEN" />}
             </div>
           </Section>
+
+          {/* Ownership Chain */}
+          {data.ownership && data.ownership.chain.length > 0 && (
+            <Section title="Ownership History">
+              <p className="text-sm text-[#888888] mb-4">
+                {data.ownership.previousOwnersCount > 0
+                  ? `${data.ownership.previousOwnersCount} previous owner${data.ownership.previousOwnersCount !== 1 ? "s" : ""}`
+                  : "Original owner"}
+              </p>
+              <div className="space-y-3">
+                {data.ownership.chain.map(owner => (
+                  <div key={owner.ownerNumber} className="flex items-start gap-3">
+                    <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#555555]"}`} />
+                    <div>
+                      <p className="text-sm text-[#E8E4DC]">
+                        Owner {owner.ownerNumber}
+                        {owner.displayName && <span className="text-[#888888]"> — {owner.displayName}</span>}
+                      </p>
+                      <p className="text-xs text-[#555555]">
+                        {new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        {owner.releasedAt
+                          ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
+                          : " (Current)"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           <GoldDivider />
 
@@ -268,7 +298,7 @@ export default function LogbookPage() {
             <p className="text-[10px] uppercase tracking-[0.2em] text-[#555555] mb-3">Digital Signature</p>
             <p className="font-mono text-xs text-[#888888] break-all mb-6">{verification.signature || "\u2014"}</p>
 
-            <a href={`/logbook/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
+            <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
               className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
               <Download className="w-4 h-4" /> Download Logbook PDF
             </a>

@@ -248,6 +248,30 @@ export async function generateLogbookPdf(certIdInput: string): Promise<Buffer | 
         }
       }
 
+      // ── Ownership History page ─────────────────────────────────────────────
+      const ownership = (data as any).ownership;
+      if (ownership?.chain?.length > 0) {
+        doc.addPage(); drawBorder(doc);
+        y = 40;
+        y = sectionTitle(doc, y, "Ownership History");
+        doc.font("Helvetica").fontSize(8).fillColor(GRAY)
+          .text(`${ownership.previousOwnersCount} previous owner${ownership.previousOwnersCount !== 1 ? "s" : ""}`, M, y);
+        y += 16;
+        for (const owner of ownership.chain as any[]) {
+          const marker = owner.isCurrent ? "\u25CF" : "\u25CB";
+          const name = owner.displayName ? ` \u2014 ${owner.displayName}` : "";
+          const dateStr = new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+          const endStr = owner.releasedAt
+            ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
+            : " (Current)";
+          doc.font("Helvetica").fontSize(8).fillColor(owner.isCurrent ? GOLD : TEXT)
+            .text(`${marker} Owner ${owner.ownerNumber}${name} \u2014 ${dateStr}${endStr}`, M + 5, y, { width: CW - 10 });
+          y += 14;
+          if (y > PAGE_H - 80) { doc.addPage(); drawBorder(doc); y = 40; }
+        }
+        y += 10;
+      }
+
       // ── FINAL PAGE: Verification ───────────────────────────────────────────
       doc.addPage(); drawBorder(doc);
       y = 40;

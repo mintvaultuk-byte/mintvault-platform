@@ -381,6 +381,57 @@ async function migrateServiceTiersV213() {
   } catch (e: any) { console.error("[v213-migrate] ALTER reholder_credits failed:", e.message); }
 
   console.log("[startup] migrateServiceTiersV213 complete");
+
+  // ── Phase 7: Ownership schema additions (v229) ─────────────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_deadline TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_at TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_reason TEXT`);
+    await db.execute(sql`ALTER TABLE ownership_history ADD COLUMN IF NOT EXISTS public_name BOOLEAN DEFAULT false`);
+    console.log("[v229-migrate] ownership schema additions ensured");
+  } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
+
+  // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
+  try {
+    // Find graded certs with no ownership_history row
+    const unowned = await db.execute(sql`
+      SELECT c.certificate_number, c.issued_at, c.submission_item_id
+      FROM certificates c
+      WHERE c.grade_approved_at IS NOT NULL
+        AND c.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM ownership_history oh WHERE oh.cert_id = c.certificate_number
+        )
+      LIMIT 200
+    `);
+    let backfilled = 0;
+    for (const row of unowned.rows as any[]) {
+      try {
+        let email: string | null = null;
+        let name: string | null = null;
+        if (row.submission_item_id) {
+          const sub = await db.execute(sql`
+            SELECT s.customer_email, s.customer_first_name, s.customer_last_name
+            FROM submission_items si
+            JOIN submissions s ON s.id = si.submission_id
+            WHERE si.id = ${row.submission_item_id}
+            LIMIT 1
+          `);
+          const sr = sub.rows[0] as any;
+          if (sr) {
+            email = sr.customer_email || null;
+            name = [sr.customer_first_name, sr.customer_last_name].filter(Boolean).join(" ") || null;
+          }
+        }
+        await db.execute(sql`
+          INSERT INTO ownership_history (cert_id, from_user_id, to_user_id, to_email, event_type, notes, created_at)
+          VALUES (${row.certificate_number}, NULL, '', ${email}, 'auto_submission', ${name ? `Original submitter: ${name}` : 'Auto-assigned from submission'}, ${row.issued_at || new Date().toISOString()})
+        `);
+        backfilled++;
+      } catch {}
+    }
+    if (backfilled > 0) console.log(`[v229-migrate] backfilled owner 1 for ${backfilled} certs`);
+  } catch (e: any) { console.error("[v229-migrate] backfill failed:", e.message); }
 }
 
 async function addRevealWrapColumn() {
@@ -2126,6 +2177,11 @@ export async function registerRoutes(
       console.error("[logbook-pdf] error:", err.message);
       if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
     }
+  });
+
+  // Alias: /cert/:certId.pdf → redirects to /logbook/:certId.pdf
+  app.get("/cert/:certId.pdf", (req, res) => {
+    res.redirect(301, `/logbook/${req.params.certId}.pdf`);
   });
 
   app.post("/api/admin/logbook/:certId/regenerate", requireAdmin, async (req, res) => {
@@ -3879,7 +3935,7 @@ export async function registerRoutes(
         gradeOverall: cert.gradeOverall,
         status: cert.status,
         nfcEnabled: !!cert.nfcUid,
-        redirectTo: `/vault/${normalizeCertId(cert.certId)}`,
+        redirectTo: `/cert/${normalizeCertId(cert.certId)}`,
       });
     } catch (err: any) {
       console.error("NFC scan error:", err.message);
