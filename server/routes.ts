@@ -2069,7 +2069,80 @@ export async function registerRoutes(
     }
   });
 
-  // ── Vault Report endpoint ──────────────────────────────────────────────────
+  // ── Logbook endpoints ──────────────────────────────────────────────────────
+
+  app.get("/api/logbook/:certId", async (req, res) => {
+    try {
+      const { buildLogbookData } = await import("./logbook-service");
+      const data = await buildLogbookData(req.params.certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+      res.json(data);
+    } catch (err: any) {
+      console.error("[logbook] error:", err.message);
+      res.status(500).json({ error: "Failed to load logbook" });
+    }
+  });
+
+  app.get("/api/logbook/:certId/verify", async (req, res) => {
+    try {
+      const sig = (req.query.sig || req.query.signature) as string | undefined;
+      if (!sig) return res.status(400).json({ error: "signature query parameter required" });
+      const { verifyLogbookSignature } = await import("./logbook-service");
+      const result = await verifyLogbookSignature(req.params.certId, sig);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: "Verification failed" });
+    }
+  });
+
+  app.get("/logbook/:certId.pdf", async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const certId = req.params.certId;
+
+      // Check R2 cache first
+      const cacheKey = `logbooks/${certId}.pdf`;
+      try {
+        const cachedUrl = await getR2SignedUrl(cacheKey, 300);
+        const cached = await fetch(cachedUrl);
+        if (cached.ok) {
+          const buf = Buffer.from(await cached.arrayBuffer());
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+          return res.send(buf);
+        }
+      } catch {} // cache miss — generate
+
+      const pdf = await generateLogbookPdf(certId);
+      if (!pdf) return res.status(404).json({ error: "Certificate not found" });
+
+      // Cache to R2
+      try { await uploadToR2(cacheKey, pdf, "application/pdf"); } catch {}
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+      res.send(pdf);
+    } catch (err: any) {
+      console.error("[logbook-pdf] error:", err.message);
+      if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+    }
+  });
+
+  app.post("/api/admin/logbook/:certId/regenerate", requireAdmin, async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const certId = String(req.params.certId);
+      const pdf = await generateLogbookPdf(certId);
+      if (!pdf) return res.status(404).json({ error: "Certificate not found" });
+      const cacheKey = `logbooks/${certId}.pdf`;
+      await uploadToR2(cacheKey, pdf, "application/pdf");
+      res.json({ ok: true, key: cacheKey });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Vault Report endpoint (kept for backward compat) ──────────────────────
   app.get("/api/vault/:certId", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     try {
@@ -3806,7 +3879,7 @@ export async function registerRoutes(
         gradeOverall: cert.gradeOverall,
         status: cert.status,
         nfcEnabled: !!cert.nfcUid,
-        redirectTo: `/cert/${cert.certId}`,
+        redirectTo: `/vault/${normalizeCertId(cert.certId)}`,
       });
     } catch (err: any) {
       console.error("NFC scan error:", err.message);

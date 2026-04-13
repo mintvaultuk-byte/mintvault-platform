@@ -142,6 +142,7 @@ import MobileUploadPage from "@/pages/mobile-upload";
 import PreGradeEstimatePage from "@/pages/tools/estimate";
 import HowItWorksPage from "@/pages/how-it-works";
 import VaultReportPage from "@/pages/vault-report";
+import LogbookPage from "@/pages/logbook";
 import OurStoryPage from "@/pages/about/our-story";
 import TheMintVaultSlabPage from "@/pages/about/the-mintvault-slab";
 import EligibleCardsPage from "@/pages/grading/eligible-cards";
@@ -214,7 +215,7 @@ function Router() {
               <Route path="/grading-glossary" component={GradingGlossaryPage} />
               <Route path="/tools/estimate" component={PreGradeEstimatePage} />
               <Route path="/how-it-works" component={HowItWorksPage} />
-              <Route path="/vault/:certId" component={VaultReportPage} />
+              <Route path="/vault/:certId" component={LogbookPage} />
               <Route path="/about/our-story" component={OurStoryPage} />
               <Route path="/about/the-mintvault-slab" component={TheMintVaultSlabPage} />
               <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
