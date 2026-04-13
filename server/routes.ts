@@ -350,7 +350,31 @@ async function migrateServiceTiersV213() {
     console.log(`[v213-migrate] deactivate gold-elite: ${r.rowCount} row(s)`);
   } catch (e: any) { console.error("[v213-migrate] deactivate gold-elite failed:", e.message); }
 
-  // ── Phase 5: Add credit_type column to reholder_credits ────────────────────
+  // ── Phase 5: Create value_protection_tiers table ────────────────────────────
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS value_protection_tiers (
+        id SERIAL PRIMARY KEY,
+        min_value_pence INTEGER NOT NULL,
+        max_value_pence INTEGER,
+        fee_pence INTEGER NOT NULL,
+        requires_photos BOOLEAN DEFAULT false,
+        display_name TEXT NOT NULL
+      )
+    `);
+    const existing = await db.execute(sql`SELECT COUNT(*) AS cnt FROM value_protection_tiers`);
+    if (parseInt((existing.rows[0] as any)?.cnt ?? "0", 10) === 0) {
+      await db.execute(sql`
+        INSERT INTO value_protection_tiers (min_value_pence, max_value_pence, fee_pence, requires_photos, display_name) VALUES
+        (25000, 99900, 1000, false, '£250 – £999'),
+        (100000, 249900, 2500, false, '£1,000 – £2,499'),
+        (250000, NULL, 5000, true, '£2,500+')
+      `);
+      console.log("[v213-migrate] value_protection_tiers seeded with 3 rows");
+    }
+  } catch (e: any) { console.error("[v213-migrate] value_protection_tiers failed:", e.message); }
+
+  // ── Phase 6: Add credit_type column to reholder_credits ────────────────────
   try {
     await db.execute(sql`ALTER TABLE reholder_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'reholder'`);
     console.log("[v213-migrate] reholder_credits.credit_type column ensured");
@@ -823,6 +847,22 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching service tiers:", error.message);
       res.status(500).json({ error: "Failed to fetch service tiers" });
+    }
+  });
+
+  app.get("/api/value-protection-tiers", async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT id, min_value_pence, max_value_pence, fee_pence,
+               requires_photos, display_name
+        FROM value_protection_tiers
+        ORDER BY min_value_pence ASC
+      `);
+      res.json(result.rows || []);
+    } catch (e: any) {
+      // Table may not exist yet — return empty array
+      console.error("[value-protection-tiers] error:", e.message);
+      res.json([]);
     }
   });
 
