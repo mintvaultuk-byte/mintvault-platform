@@ -586,6 +586,8 @@ export class DatabaseStorage implements IStorage {
         certId,
         integrityHash: hash,
         ...(refNum ? { referenceNumber: refNum } : {}),
+        logbookVersion: 1,
+        logbookLastIssuedAt: new Date(),
       } as any).returning();
       return cert;
     } catch (error: any) {

@@ -2229,16 +2229,7 @@ export async function registerRoutes(
         return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
       }
 
-      // Increment logbook version + set issued timestamp (V5C reissue tracking)
-      try {
-        await db.execute(sql`
-          UPDATE certificates SET
-            logbook_version = COALESCE(logbook_version, 0) + 1,
-            logbook_last_issued_at = NOW()
-          WHERE certificate_number = ${(data as any).rawCertId || certId}
-        `);
-      } catch (vErr: any) { console.warn(`[logbook-owner-pdf] version increment failed for ${certId}:`, vErr.message); }
-
+      // Version stays at current value on download — only increments on explicit reissue
       const pdf = await generateLogbookPdf(certId, { includeReferenceNumber: true });
       if (!pdf) return res.status(500).json({ error: "PDF generation failed" });
 
@@ -2252,6 +2243,66 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error(`[logbook-owner-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
       if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
+    }
+  });
+
+  // Reissue logbook — generates new reference number, increments version (V5C replacement)
+  app.post("/api/logbook/:certId/reissue", async (req, res) => {
+    try {
+      const { buildLogbookData } = await import("./logbook-service");
+      const { generateReferenceNumber } = await import("./reference-number");
+      const certId = String(req.params.certId);
+
+      const data = await buildLogbookData(certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+
+      // Same dual-path owner auth as owner PDF
+      const certOwnerStatus = (data as any).provenance?.ownershipStatus;
+      const certOwnerUserId = (data as any).currentOwnerUserId;
+      const certOwnerEmail = (data as any).ownerEmail;
+      const isOwner =
+        certOwnerStatus === "claimed" &&
+        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
+        (
+          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
+           (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
+           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
+        );
+      if (!isOwner) return res.status(403).json({ error: "Only the current registered keeper can reissue the logbook" });
+
+      const { confirm, reason } = req.body || {};
+      if (confirm !== true || !reason || typeof reason !== "string" || reason.trim().length < 5) {
+        return res.status(400).json({ error: "Body must include {confirm: true, reason: string (min 5 chars)}" });
+      }
+
+      const rawCertId = (data as any).rawCertId || certId;
+      const oldVersion = (data as any).logbookVersion || 1;
+      const newVersion = oldVersion + 1;
+      const newRefNum = generateReferenceNumber();
+      const actorEmail = (req.session as any)?.customerEmail || (req.session as any)?.userId || "unknown";
+
+      // Single transaction: new ref number + increment version + audit log
+      await db.execute(sql`
+        UPDATE certificates SET
+          reference_number = ${newRefNum},
+          logbook_version = ${newVersion},
+          logbook_last_issued_at = NOW(),
+          updated_at = NOW()
+        WHERE certificate_number = ${rawCertId}
+      `);
+
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('certificate', ${rawCertId}, 'logbook_reissue', ${actorEmail},
+          ${JSON.stringify({ oldVersion, newVersion, reason: reason.trim() })}::jsonb, NOW())
+      `);
+
+      console.log(`[logbook-reissue] ${certId}: v${oldVersion} -> v${newVersion}, referenceNumberPresent=true, reason="${reason.trim().slice(0, 50)}"`);
+      res.json({ newVersion, issuedAt: new Date().toISOString() });
+    } catch (err: any) {
+      console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
+      res.status(500).json({ error: "Reissue failed" });
     }
   });
 
