@@ -246,6 +246,9 @@ export const certificates = pgTable("certificates", {
   stolenReportedAt: timestamp("stolen_reported_at"),
   // Document Reference Number — plaintext, shown only on Owner Copy PDF
   referenceNumber: text("reference_number").unique(),
+  // Logbook version — increments on each owner PDF generation for V5C-style reissue tracking
+  logbookVersion: integer("logbook_version").notNull().default(1),
+  logbookLastIssuedAt: timestamp("logbook_last_issued_at"),
 });
 
 export const certificateImages = pgTable("certificate_images", {

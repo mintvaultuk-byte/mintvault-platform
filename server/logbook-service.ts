@@ -73,6 +73,8 @@ export async function buildLogbookData(certIdInput: string) {
     referenceNumber: c.referenceNumber || c.reference_number || null,
     currentOwnerUserId: c.currentOwnerUserId || c.current_owner_user_id || null,
     ownerEmail: c.ownerEmail || c.owner_email || null,
+    logbookVersion: c.logbookVersion || c.logbook_version || 1,
+    logbookLastIssuedAt: c.logbookLastIssuedAt || c.logbook_last_issued_at || null,
 
     card: {
       name: c.cardName || null,

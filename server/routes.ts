@@ -390,7 +390,9 @@ async function migrateServiceTiersV213() {
     await db.execute(sql`ALTER TABLE ownership_history ADD COLUMN IF NOT EXISTS public_name BOOLEAN DEFAULT false`);
     await db.execute(sql`ALTER TABLE submission_items ADD COLUMN IF NOT EXISTS declared_new BOOLEAN DEFAULT false`);
     await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS reference_number TEXT UNIQUE`);
-    console.log("[v229-migrate] ownership + reference_number schema ensured");
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_version INTEGER NOT NULL DEFAULT 1`);
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_last_issued_at TIMESTAMPTZ`);
+    console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
   } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
 
   // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
@@ -2219,6 +2221,16 @@ export async function registerRoutes(
       if (!isOwner) {
         return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
       }
+
+      // Increment logbook version + set issued timestamp (V5C reissue tracking)
+      try {
+        await db.execute(sql`
+          UPDATE certificates SET
+            logbook_version = COALESCE(logbook_version, 0) + 1,
+            logbook_last_issued_at = NOW()
+          WHERE certificate_number = ${(data as any).rawCertId || certId}
+        `);
+      } catch (vErr: any) { console.warn(`[logbook-owner-pdf] version increment failed for ${certId}:`, vErr.message); }
 
       const pdf = await generateLogbookPdf(certId, { includeReferenceNumber: true });
       if (!pdf) return res.status(500).json({ error: "PDF generation failed" });

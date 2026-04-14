@@ -86,7 +86,10 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       doc.font("Helvetica-Bold").fontSize(6.5).fillColor(GOLD_DARK).text(gradeLabel, M, y, { width: CW, align: "center", characterSpacing: 2 }); y += 9;
       if (grades.isBlackLabel) { doc.font("Helvetica-Bold").fontSize(5.5).fillColor(CHARCOAL).text("BLACK LABEL", M, y, { width: CW, align: "center", characterSpacing: 3 }); y += 8; }
       doc.font("Courier-Bold").fontSize(7.5).fillColor(TEXT).text(certId, M, y, { width: CW, align: "center" }); y += 9;
-      if (provenance.issuedAt) { doc.font("Helvetica").fontSize(5).fillColor(GRAY).text(`Issued ${new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`, M, y, { width: CW, align: "center" }); y += 7; }
+      const version = (data as any).logbookVersion || 1;
+      const issuedDate = provenance.issuedAt ? new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : null;
+      const versionLine = `Logbook v${version}${issuedDate ? ` \u00B7 Issued ${issuedDate}` : ""}`;
+      doc.font("Helvetica").fontSize(5).fillColor(GRAY).text(versionLine, M, y, { width: CW, align: "center" }); y += 7;
 
       // ── CARD IDENTITY ──────────────────────────────────────────────────────
       if (canFit(70, "Card Identity")) {
@@ -186,13 +189,24 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         bodyText("Report loss, theft, or unauthorised transfer immediately to support@mintvaultuk.com. Disputes must be raised within 14 days of a transfer being initiated.");
       }
 
-      // ── OWNER-ONLY: REFERENCE NUMBER ───────────────────────────────────────
+      // ── OWNER-ONLY: REFERENCE NUMBER + WATERMARK ─────────────────────────
       if (opts.includeReferenceNumber) {
         const refNum = (data as any).referenceNumber;
-        if (refNum && canFit(45, "Document Reference Number")) {
+        if (refNum && canFit(50, "Document Reference Number")) {
           hr(); heading("Document Reference Number");
+          const refSectionY = y;
           doc.font("Courier-Bold").fontSize(14).fillColor(GOLD).text(refNum, M, y, { width: CW, align: "center" }); y += 20;
           bodyText("Keep this number secret. It is required to transfer ownership of this certificate. Treat it like a V5C document \u2014 anyone with this number and the Certificate ID can initiate a transfer. If you believe it has been compromised, report to support@mintvaultuk.com immediately.", MUTED, 4.5);
+
+          // Forensic watermark: diagonal text across the reference number area
+          const ownerEmailForWatermark = (data as any).ownerEmail || "owner";
+          const wmText = `${ownerEmailForWatermark} \u00B7 v${version} \u00B7 ${new Date().toISOString().slice(0, 16)}`;
+          doc.save();
+          doc.opacity(0.08);
+          doc.translate(PAGE_W / 2, refSectionY + 15);
+          doc.rotate(-25);
+          doc.font("Helvetica-Bold").fontSize(9).fillColor(CHARCOAL).text(wmText, -CW / 2, 0, { width: CW, align: "center" });
+          doc.restore();
         }
       }
 
