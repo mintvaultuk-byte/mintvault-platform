@@ -2149,25 +2149,28 @@ export async function registerRoutes(
   app.get("/logbook/:certId.pdf", async (req, res) => {
     try {
       const { generateLogbookPdf } = await import("./logbook-pdf");
-      const certId = req.params.certId;
-
-      // Check R2 cache first
+      const certId = String(req.params.certId);
+      const forceRegenerate = req.query.regenerate === "true";
       const cacheKey = `logbooks/${certId}.pdf`;
-      try {
-        const cachedUrl = await getR2SignedUrl(cacheKey, 300);
-        const cached = await fetch(cachedUrl);
-        if (cached.ok) {
-          const buf = Buffer.from(await cached.arrayBuffer());
-          res.setHeader("Content-Type", "application/pdf");
-          res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
-          return res.send(buf);
-        }
-      } catch {} // cache miss — generate
+
+      // Serve from R2 cache unless ?regenerate=true
+      if (!forceRegenerate) {
+        try {
+          const cachedUrl = await getR2SignedUrl(cacheKey, 300);
+          const cached = await fetch(cachedUrl);
+          if (cached.ok) {
+            const buf = Buffer.from(await cached.arrayBuffer());
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+            return res.send(buf);
+          }
+        } catch {} // cache miss
+      }
 
       const pdf = await generateLogbookPdf(certId);
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
 
-      // Cache to R2
+      // Cache to R2 (overwrites if regenerating)
       try { await uploadToR2(cacheKey, pdf, "application/pdf"); } catch {}
 
       res.setHeader("Content-Type", "application/pdf");
@@ -2179,9 +2182,10 @@ export async function registerRoutes(
     }
   });
 
-  // Alias: /cert/:certId.pdf → redirects to /logbook/:certId.pdf
+  // Alias: /cert/:certId.pdf → passes through to /logbook/ with query params
   app.get("/cert/:certId.pdf", (req, res) => {
-    res.redirect(301, `/logbook/${req.params.certId}.pdf`);
+    const qs = req.query.regenerate === "true" ? "?regenerate=true" : "";
+    res.redirect(301, `/logbook/${req.params.certId}.pdf${qs}`);
   });
 
   app.post("/api/admin/logbook/:certId/regenerate", requireAdmin, async (req, res) => {
