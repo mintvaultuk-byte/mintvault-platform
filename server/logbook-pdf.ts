@@ -222,6 +222,12 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         y += 48;
       }
 
+      // ── BUYER BEWARE (V5C parity) ──────────────────────────────────────────
+      if (canFit(35, "Buyer Beware")) {
+        hr(); heading("Buyer Beware");
+        bodyText("Before purchasing or accepting transfer of this certificate: (1) Verify the cryptographic signature via the QR code or verify URL. (2) Confirm the Logbook Version and Issue Date match what the seller shows you \u2014 an older version may indicate a lost or compromised Owner Copy has been reissued. (3) The seller must initiate the transfer \u2014 do not pay until you have received a transfer email from MintVault. (4) Report suspected fraud to support@mintvaultuk.com.", TEXT, 5);
+      }
+
       // ── DISCLAIMER ─────────────────────────────────────────────────────────
       if (canFit(20, "Disclaimer")) {
         doc.font("Helvetica-Oblique").fontSize(4).fillColor(GRAY).text(
