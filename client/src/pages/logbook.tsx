@@ -1,11 +1,13 @@
 import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Shield, Download, ExternalLink, Check, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
 
 interface LogbookData {
   certId: string;
+  currentOwnerUserId?: string | null;
+  ownerEmail?: string | null;
   card: { name: string | null; set: string | null; number: string | null; year: string | null; game: string | null; variant: string | null; language: string; rarity: string | null; collection: string | null; designations: string[] };
   grades: { overall: number | string; gradeLabel: string; centering: number | null; corners: number | null; edges: number | null; surface: number | null; isBlackLabel: boolean; isNonNumeric: boolean; gradeType: string; labelType: string };
   centering: { frontLR: string | null; frontTB: string | null; backLR: string | null; backTB: string | null };
@@ -73,6 +75,19 @@ export default function LogbookPage() {
     },
     enabled: !!certId,
   });
+
+  // Check if current user is the owner (for Owner Copy button)
+  const { data: me } = useQuery<{ email?: string } | null>({
+    queryKey: ["/api/customer/me"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/customer/me", { credentials: "include" });
+        if (!res.ok) return null;
+        return res.json();
+      } catch { return null; }
+    },
+  });
+  const isOwner = !!(me?.email && data?.ownerEmail && me.email.toLowerCase() === data.ownerEmail.toLowerCase());
 
   if (isLoading) return (
     <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center">
@@ -298,10 +313,18 @@ export default function LogbookPage() {
             <p className="text-[10px] uppercase tracking-[0.2em] text-[#555555] mb-3">Digital Signature</p>
             <p className="font-mono text-xs text-[#888888] break-all mb-6">{verification.signature || "\u2014"}</p>
 
-            <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
-              <Download className="w-4 h-4" /> Download Logbook PDF
-            </a>
+            <div className="flex flex-col items-center gap-3">
+              <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
+                <Download className="w-4 h-4" /> Download Logbook PDF
+              </a>
+              {isOwner && (
+                <a href={`/logbook/${data.certId}/owner.pdf`} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors">
+                  <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
+                </a>
+              )}
+            </div>
 
             <p className="text-[#333333] text-[10px] mt-8 max-w-md mx-auto leading-relaxed">
               This Ownership Logbook is an official record issued by MintVault Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification to the underlying data will invalidate the signature.
