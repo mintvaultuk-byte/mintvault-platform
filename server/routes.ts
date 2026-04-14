@@ -2225,6 +2225,10 @@ export async function registerRoutes(
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="MintVault-OwnerCopy-${certId}.pdf"`);
+      res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      console.log(`[logbook-owner-pdf] served owner copy for ${certId}, referenceNumberPresent=${!!(data as any).referenceNumber}`);
       res.send(pdf);
     } catch (err: any) {
       console.error("[logbook-owner-pdf] error:", err.message);
