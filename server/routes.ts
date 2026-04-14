@@ -2192,8 +2192,8 @@ export async function registerRoutes(
       res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
-      console.error("[logbook-pdf] error:", err.message);
-      if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+      console.error(`[logbook-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
+      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
     }
   });
 
@@ -2250,8 +2250,8 @@ export async function registerRoutes(
       console.log(`[logbook-owner-pdf] served owner copy for ${certId}, referenceNumberPresent=${!!(data as any).referenceNumber}`);
       res.send(pdf);
     } catch (err: any) {
-      console.error("[logbook-owner-pdf] error:", err.message);
-      if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+      console.error(`[logbook-owner-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
+      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
     }
   });
 
