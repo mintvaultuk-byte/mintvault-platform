@@ -574,10 +574,18 @@ export class DatabaseStorage implements IStorage {
     });
 
     try {
+      // Generate reference number for new certs
+      let refNum: string | undefined;
+      try {
+        const { generateReferenceNumber } = await import("./reference-number");
+        refNum = generateReferenceNumber();
+      } catch {}
+
       const [cert] = await db.insert(certificates).values({
         ...data,
         certId,
         integrityHash: hash,
+        ...(refNum ? { referenceNumber: refNum } : {}),
       } as any).returning();
       return cert;
     } catch (error: any) {

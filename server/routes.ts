@@ -631,6 +631,10 @@ export async function registerRoutes(
   seedTierCapacityTable().catch(() => {});
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
+    .then(async () => {
+      const { backfillReferenceNumbers } = await import("./reference-number");
+      await backfillReferenceNumbers();
+    })
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
 
   // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
@@ -3305,10 +3309,12 @@ export async function registerRoutes(
   // ── Create a new cert immediately with a real MV### number ─────────────────
   app.post("/api/admin/certificates/new", requireAdmin, async (_req, res) => {
     try {
+      const { generateReferenceNumber } = await import("./reference-number");
       const certNumber = await storage.getNextCertId();
+      const refNum = generateReferenceNumber();
       const result = await db.execute(sql`
-        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at)
-        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW())
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number)
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum})
         RETURNING *
       `);
       const row = result.rows[0] as any;
