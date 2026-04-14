@@ -2188,6 +2188,43 @@ export async function registerRoutes(
     }
   });
 
+  // Owner-only PDF with Document Reference Number
+  app.get("/logbook/:certId/owner.pdf", async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const { buildLogbookData } = await import("./logbook-service");
+      const certId = String(req.params.certId);
+
+      // Load cert data to check ownership
+      const data = await buildLogbookData(certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+
+      // Dual-path owner auth: session userId OR customerEmail
+      const sessionUserId = (req.session as any)?.userId;
+      const sessionEmail = (req.session as any)?.customerEmail;
+      const certOwnerUserId = (data as any).currentOwnerUserId;
+      const certOwnerEmail = (data as any).ownerEmail;
+
+      const isOwner =
+        (sessionUserId && certOwnerUserId && sessionUserId === certOwnerUserId) ||
+        (sessionEmail && certOwnerEmail && sessionEmail.toLowerCase() === certOwnerEmail.toLowerCase());
+
+      if (!isOwner) {
+        return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
+      }
+
+      const pdf = await generateLogbookPdf(certId, { includeReferenceNumber: true });
+      if (!pdf) return res.status(500).json({ error: "PDF generation failed" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="MintVault-OwnerCopy-${certId}.pdf"`);
+      res.send(pdf);
+    } catch (err: any) {
+      console.error("[logbook-owner-pdf] error:", err.message);
+      if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+    }
+  });
+
   // Alias: /cert/:certId.pdf → passes through to /logbook/ with query params
   app.get("/cert/:certId.pdf", (req, res) => {
     const qs = req.query.regenerate === "true" ? "?regenerate=true" : "";
