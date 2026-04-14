@@ -70,6 +70,9 @@ export async function buildLogbookData(certIdInput: string) {
   return {
     certId,
     rawCertId: cert.certId,
+    referenceNumber: c.referenceNumber || c.reference_number || null,
+    currentOwnerUserId: c.currentOwnerUserId || c.current_owner_user_id || null,
+    ownerEmail: c.ownerEmail || c.owner_email || null,
 
     card: {
       name: c.cardName || null,

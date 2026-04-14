@@ -2173,7 +2173,7 @@ export async function registerRoutes(
         } catch {} // cache miss
       }
 
-      const pdf = await generateLogbookPdf(certId);
+      const pdf = await generateLogbookPdf(certId, {});
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
 
       // Cache to R2 (overwrites if regenerating)
@@ -2198,7 +2198,7 @@ export async function registerRoutes(
     try {
       const { generateLogbookPdf } = await import("./logbook-pdf");
       const certId = String(req.params.certId);
-      const pdf = await generateLogbookPdf(certId);
+      const pdf = await generateLogbookPdf(certId, {});
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
       const cacheKey = `logbooks/${certId}.pdf`;
       await uploadToR2(cacheKey, pdf, "application/pdf");
