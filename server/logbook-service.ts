@@ -162,6 +162,13 @@ export async function buildLogbookData(certIdInput: string) {
   };
 }
 
+/** Strip owner-sensitive fields for the public JSON endpoint */
+export function toPublicPayload(data: any) {
+  if (!data) return data;
+  const { referenceNumber, currentOwnerUserId, ownerEmail, logbookVersion, logbookLastIssuedAt, ...pub } = data;
+  return pub;
+}
+
 export async function verifyLogbookSignature(certIdInput: string, providedSignature: string): Promise<{ valid: boolean; certId: string }> {
   let cert = await storage.getCertificateByCertId(certIdInput);
   if (!cert) {

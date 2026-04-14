@@ -2139,10 +2139,10 @@ export async function registerRoutes(
 
   app.get("/api/logbook/:certId", async (req, res) => {
     try {
-      const { buildLogbookData } = await import("./logbook-service");
+      const { buildLogbookData, toPublicPayload } = await import("./logbook-service");
       const data = await buildLogbookData(req.params.certId);
       if (!data) return res.status(404).json({ error: "Certificate not found" });
-      res.json(data);
+      res.json(toPublicPayload(data));
     } catch (err: any) {
       console.error("[logbook] error:", err.message);
       res.status(500).json({ error: "Failed to load logbook" });
