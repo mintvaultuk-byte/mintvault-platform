@@ -2195,19 +2195,26 @@ export async function registerRoutes(
       const { buildLogbookData } = await import("./logbook-service");
       const certId = String(req.params.certId);
 
-      // Load cert data to check ownership
       const data = await buildLogbookData(certId);
       if (!data) return res.status(404).json({ error: "Certificate not found" });
 
-      // Dual-path owner auth: session userId OR customerEmail
-      const sessionUserId = (req.session as any)?.userId;
-      const sessionEmail = (req.session as any)?.customerEmail;
+      // Hardened dual-path owner auth:
+      // 1. Cert must be claimed — unclaimed certs never expose owner copy
+      // 2. ownerEmail must exist (non-null, non-empty)
+      // 3. Either session.userId matches cert owner OR session.customerEmail matches cert ownerEmail
+      const certOwnerStatus = (data as any).provenance?.ownershipStatus;
       const certOwnerUserId = (data as any).currentOwnerUserId;
       const certOwnerEmail = (data as any).ownerEmail;
 
       const isOwner =
-        (sessionUserId && certOwnerUserId && sessionUserId === certOwnerUserId) ||
-        (sessionEmail && certOwnerEmail && sessionEmail.toLowerCase() === certOwnerEmail.toLowerCase());
+        certOwnerStatus === "claimed" &&
+        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
+        (
+          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
+           (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
+           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
+        );
 
       if (!isOwner) {
         return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
@@ -2217,7 +2224,7 @@ export async function registerRoutes(
       if (!pdf) return res.status(500).json({ error: "PDF generation failed" });
 
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `inline; filename="MintVault-OwnerCopy-${certId}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="MintVault-OwnerCopy-${certId}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
       console.error("[logbook-owner-pdf] error:", err.message);
