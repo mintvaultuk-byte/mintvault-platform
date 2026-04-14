@@ -633,11 +633,18 @@ export async function registerRoutes(
   seedTierCapacityTable().catch(() => {});
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
-    .then(async () => {
-      const { backfillReferenceNumbers } = await import("./reference-number");
-      await backfillReferenceNumbers();
-    })
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
+
+  // Reference number backfill — async, fire-and-forget, never blocks boot
+  if (process.env.SKIP_BACKFILL !== "true") {
+    import("./reference-number").then(({ backfillReferenceNumbers }) =>
+      backfillReferenceNumbers()
+        .then(() => console.log("[startup] reference number backfill complete"))
+        .catch(err => console.error("[startup] reference number backfill failed — will retry on next boot:", err.message))
+    ).catch(() => {});
+  } else {
+    console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
+  }
 
   // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
   // These fire for direct URL access (e.g. scanning an old QR code with a legacy URL format)
