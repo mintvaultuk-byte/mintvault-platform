@@ -388,7 +388,9 @@ async function migrateServiceTiersV213() {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_at TIMESTAMPTZ`);
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_reason TEXT`);
     await db.execute(sql`ALTER TABLE ownership_history ADD COLUMN IF NOT EXISTS public_name BOOLEAN DEFAULT false`);
-    console.log("[v229-migrate] ownership schema additions ensured");
+    await db.execute(sql`ALTER TABLE submission_items ADD COLUMN IF NOT EXISTS declared_new BOOLEAN DEFAULT false`);
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS reference_number TEXT UNIQUE`);
+    console.log("[v229-migrate] ownership + reference_number schema ensured");
   } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
 
   // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────

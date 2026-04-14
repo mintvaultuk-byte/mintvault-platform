@@ -122,6 +122,7 @@ export const submissionItems = pgTable("submission_items", {
   cardNumber: text("card_number"),
   year: text("year"),
   declaredValue: integer("declared_value").default(0),
+  declaredNew: boolean("declared_new").default(false),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -243,6 +244,8 @@ export const certificates = pgTable("certificates", {
   // Stolen card flag — set to "stolen" when a verified report exists; null otherwise
   stolenStatus: text("stolen_status"),            // null | "reported_stolen"
   stolenReportedAt: timestamp("stolen_reported_at"),
+  // Document Reference Number — plaintext, shown only on Owner Copy PDF
+  referenceNumber: text("reference_number").unique(),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -398,6 +401,7 @@ export const ownershipHistory = pgTable("ownership_history", {
   toEmail:     text("to_email"),
   eventType:   text("event_type").notNull(),
   notes:       text("notes"),
+  publicName:  boolean("public_name").default(false),
   createdAt:   timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -436,6 +440,10 @@ export const transferVerifications = pgTable("transfer_verifications", {
   // Completion
   usedAt:               timestamp("used_at"),
   createdAt:            timestamp("created_at").notNull().defaultNow(),
+  // Dispute window (v229)
+  disputeDeadline:      timestamp("dispute_deadline"),
+  disputedAt:           timestamp("disputed_at"),
+  disputeReason:        text("dispute_reason"),
 });
 
 export type TransferVerification = typeof transferVerifications.$inferSelect;
