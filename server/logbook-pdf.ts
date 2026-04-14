@@ -125,18 +125,18 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         }
       }
 
-      // ── CARD IMAGES (budget: 125pt) ────────────────────────────────────────
-      if ((fBuf || bBuf) && fits(125, "Card Images")) {
+      // ── CARD IMAGES (budget: 165pt) ────────────────────────────────────────
+      if ((fBuf || bBuf) && fits(165, "Card Images")) {
         hr(); hd("Card Images");
-        const imgH = 110; const imgW = Math.min((CW - 10) / 2, 180);
+        const imgBoxH = 150; const imgBoxW = (CW - 10) / 2;
         if (fBuf && bBuf) {
-          try { doc.image(fBuf, M, y, { width: imgW, height: imgH }); } catch {}
-          try { doc.image(bBuf, M + imgW + 10, y, { width: imgW, height: imgH }); } catch {}
+          try { doc.image(fBuf, M, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+          try { doc.image(bBuf, M + imgBoxW + 10, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
         } else {
           const buf = fBuf || bBuf;
-          if (buf) try { doc.image(buf, M + CW * 0.2, y, { width: Math.min(CW * 0.6, 200), height: imgH }); } catch {}
+          if (buf) try { doc.image(buf, M + CW * 0.2, y, { fit: [CW * 0.6, imgBoxH], align: "center", valign: "center" }); } catch {}
         }
-        y += imgH + 2;
+        y += imgBoxH + 5;
       }
 
       // ── OWNERSHIP (budget: ~20pt) ──────────────────────────────────────────
