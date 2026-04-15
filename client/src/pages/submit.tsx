@@ -8,6 +8,7 @@ import { pricingTiers, submissionTypes, calculateOrderTotals, getInsuranceTier, 
 import type { PricingTier } from "@shared/schema";
 import { ArrowLeft, ArrowRight, Check, Shield, CreditCard, AlertTriangle, Info, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { Link } from "wouter";
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import SeoHead from "@/components/seo-head";
 
 interface CardItem {
@@ -1021,6 +1022,7 @@ function Step5Payment({ state, tier, onSuccess }: {
   const [error, setError] = useState("");
   const [liabilityAccepted, setLiabilityAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const flags = useFeatureFlags();
 
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
 
@@ -1043,6 +1045,7 @@ function Step5Payment({ state, tier, onSuccess }: {
         cardItems: state.cardItems.length > 0 ? state.cardItems : undefined,
         liabilityAccepted: liabilityAccepted,
         termsAccepted: termsAccepted,
+        termsVersion: flags.legalPagesLive ? "v1.0-draft-pre-solicitor" : undefined,
         shippingAddress: {
           line1: state.addressLine1,
           line2: state.addressLine2,
@@ -1149,22 +1152,56 @@ function Step5Payment({ state, tier, onSuccess }: {
           </label>
         </div>
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-          <input
-            type="checkbox"
-            id="liability-accept"
-            checked={liabilityAccepted}
-            onChange={(e) => setLiabilityAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
-            data-testid="checkbox-liability"
-          />
-          <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
-            I confirm I have read and agree to the{" "}
-            <Link href="/terms-and-conditions">
-              <span className="text-[#D4AF37] underline">Liability & Shipping Policy</span>
-            </Link>. I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
-          </label>
-        </div>
+        {/* Terms acceptance — flag-gated: new combined flow vs legacy */}
+        {flags.legalPagesLive ? (
+          <>
+            {/* Key points panel */}
+            <div className="border border-[#D4AF37]/20 rounded-lg p-4 bg-[#FFFDF5] space-y-2">
+              <p className="text-[#1A1A1A] text-sm font-semibold mb-2">Before you continue</p>
+              <p className="text-[#666666] text-xs leading-relaxed">A few important points about MintVault grading:</p>
+              <ul className="text-[#666666] text-xs leading-relaxed space-y-1.5 list-disc pl-4">
+                <li>Grading is a professional opinion, not a guaranteed outcome.</li>
+                <li>Declared Value must be honest and accurate. Under-declaring limits your cover.</li>
+                <li>Our liability for loss or damage is capped by your Declared Value and selected Value Protection tier.</li>
+                <li>You have 14 days from delivery to inspect and report any issues.</li>
+                <li>We may refuse to grade, return raw, or retain for investigation if a Card appears altered, counterfeit, or subject to a dispute.</li>
+              </ul>
+            </div>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="legal-accept" checked={termsAccepted && liabilityAccepted}
+                onChange={(e) => { setTermsAccepted(e.target.checked); setLiabilityAccepted(e.target.checked); }}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-legal-combined" />
+              <label htmlFor="legal-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I have read and accept the{" "}
+                <a href="/legal/website-terms" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Website Terms</a>,{" "}
+                <a href="/legal/submission-agreement" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Submission Agreement</a>, and{" "}
+                <a href="/legal/guarantee" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Guarantee &amp; Correction Policy</a>.
+              </label>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="liability-accept" checked={liabilityAccepted}
+                onChange={(e) => setLiabilityAccepted(e.target.checked)}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-liability" />
+              <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I confirm I have read and agree to the{" "}
+                <Link href="/terms-and-conditions"><span className="text-[#D4AF37] underline">Liability & Shipping Policy</span></Link>.
+                I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
+              </label>
+            </div>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="terms-accept" checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-terms" />
+              <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I confirm I have read and agree to the MintVault UK Ltd{" "}
+                <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
+              </label>
+            </div>
+          </>
+        )}
 
         <div>
           <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
@@ -1187,21 +1224,6 @@ function Step5Payment({ state, tier, onSuccess }: {
         {error && (
           <p className="text-red-400 text-sm" data-testid="text-payment-error">{error}</p>
         )}
-
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-          <input
-            type="checkbox"
-            id="terms-accept"
-            checked={termsAccepted}
-            onChange={(e) => setTermsAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
-            data-testid="checkbox-terms"
-          />
-          <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
-            I confirm I have read and agree to the MintVault UK Ltd{" "}
-            <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
-          </label>
-        </div>
 
         <button
           type="submit"
