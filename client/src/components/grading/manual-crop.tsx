@@ -127,10 +127,18 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   }, [drag]);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onCancel(); }
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "Escape") onCancel();
+      else if (e.key === "Enter") handleApply();
+      else if (e.key === "r" || e.key === "R") { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }
+      else if (e.key === "a" || e.key === "A") handleAutoDetect();
+      else if (e.key === "0") setRotation(0);
+    }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quad, rotation]);
 
   async function handleApply() {
     setSaving(true);
@@ -253,40 +261,45 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333] gap-3">
-        <div className="flex items-center gap-3">
-          <span className="text-[#888888] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
-          {Math.abs(derivedAngle) > 0.3 && (
-            <span className="text-[#D4AF37]/60 text-xs font-mono">skew: {derivedAngle.toFixed(1)}\u00B0</span>
-          )}
+      {/* Controls below image — always visible, no scrolling */}
+      <div className="flex-shrink-0 px-4 py-3 border-t border-[#333333] space-y-3">
+        {/* Row 1: Quick actions */}
+        <div className="flex items-center gap-2">
           <button type="button" onClick={handleAutoDetect} disabled={detecting}
-            className="flex items-center gap-1.5 text-[#D4AF37] hover:text-[#B8960C] text-xs border border-[#D4AF37]/30 px-3 py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
+            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-3 py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
             {detecting ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
-            {detecting ? "Detecting..." : "Auto-Detect"}
+            {detecting ? "Detecting..." : "Auto-Detect"} <span className="text-[#555555] text-[9px]">A</span>
           </button>
           <button type="button" onClick={() => { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }}
-            className="flex items-center gap-1 text-[#888888] hover:text-white text-xs"><RotateCcw size={12} /> Reset</button>
+            className="flex items-center gap-1 text-[#888888] text-xs border border-[#333333] px-3 py-1.5 rounded-lg hover:bg-[#1A1A1A] transition-colors">
+            <RotateCcw size={12} /> Reset <span className="text-[#555555] text-[9px]">R</span>
+          </button>
+          <div className="flex-1" />
+          <span className="text-[#888888] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
+          {Math.abs(derivedAngle) > 0.3 && <span className="text-[#D4AF37]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>}
         </div>
 
-        {/* Rotation slider */}
-        <div className="flex items-center gap-2 text-xs text-[#D4AF37]">
+        {/* Row 2: Rotation slider */}
+        <div className="flex items-center gap-2 text-xs">
           <span className="text-[#888888]">Rotate</span>
           <input type="range" min="-15" max="15" step="0.5" value={rotation}
             onChange={(e) => setRotation(Number(e.target.value))}
-            className="w-28 accent-[#D4AF37]" />
-          <span className="font-mono w-12 text-right">{rotation.toFixed(1)}\u00B0</span>
+            className="flex-1 max-w-[200px] accent-[#D4AF37]" />
+          <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
           {Math.abs(rotation) > 0.1 && (
-            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#888888] hover:text-[#D4AF37] underline">Zero</button>
+            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#888888] hover:text-[#D4AF37] underline">Zero <span className="text-[#555555]">0</span></button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">Cancel</button>
+        {/* Row 3: Cancel + Apply */}
+        <div className="flex items-center justify-between">
+          <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">
+            Cancel <span className="text-[#555555] text-[9px]">Esc</span>
+          </button>
           <button type="button" onClick={handleApply} disabled={saving}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
+            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Crop size={13} />}
-            {saving ? "Cropping..." : "Apply Crop"}
+            {saving ? "Cropping..." : "Apply Crop"} <span className="text-[#1A1400]/50 text-[9px] normal-case">\u21B5</span>
           </button>
         </div>
       </div>
