@@ -250,7 +250,13 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           )}
         </div>
         <div className="flex gap-1 overflow-x-auto">
-          {VARIANTS.map(v => (
+          {VARIANTS.filter(v => {
+            // Original is always available (falls back to cropped or original)
+            if (v.key === "original") return true;
+            // Other variants only show if their URL exists for this side
+            const key = `${side}_${v.key}` as keyof ImageUrls;
+            return urls[key] != null;
+          }).map(v => (
             <button key={v.key} type="button" onClick={() => setVariant(v.key)}
               className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#888888]"}`}
             >{v.label}</button>

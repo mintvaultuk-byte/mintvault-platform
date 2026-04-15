@@ -117,7 +117,7 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
   function renderRect(rect: Rect, prefix: "outer" | "inner", color: string, dashed: boolean) {
     const w = rect.right - rect.left;
     const h = rect.bottom - rect.top;
-    const handleSize = 1.2; // percentage
+    const handleSize = 0.8; // percentage
     const handles = [
       { id: `${prefix}-tl`, x: rect.left, y: rect.top },
       { id: `${prefix}-tr`, x: rect.right, y: rect.top },
@@ -133,8 +133,8 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
       <>
         {/* Rectangle border */}
         <rect x={rect.left} y={rect.top} width={w} height={h}
-          fill="none" stroke={color} strokeWidth="0.4"
-          strokeDasharray={dashed ? "1.5,1" : "none"} opacity="0.9" />
+          fill="none" stroke={color} strokeWidth="0.15"
+          strokeDasharray={dashed ? "0.6,0.4" : "none"} opacity="0.9" />
         {/* Invisible body drag area */}
         <rect x={rect.left} y={rect.top} width={w} height={h}
           fill="transparent" cursor="move"
@@ -142,7 +142,7 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
         {/* Corner + edge handles */}
         {handles.map(h => (
           <circle key={h.id} cx={h.x} cy={h.y} r={handleSize}
-            fill={color} stroke="white" strokeWidth="0.2"
+            fill={color} stroke="white" strokeWidth="0.1"
             cursor="pointer" opacity="0.9"
             onMouseDown={(e) => startDrag(e as any, h.id as DragTarget)} />
         ))}
