@@ -10,24 +10,90 @@ interface Props {
   onCancel: () => void;
 }
 
-interface Box { left: number; top: number; right: number; bottom: number; }
+interface Point { x: number; y: number; }
+interface CropQuad { tl: Point; tr: Point; br: Point; bl: Point; }
 
-// Minimum crop box size in percent
-const MIN_SIZE = 3;
+const CORNER_KEYS: (keyof CropQuad)[] = ["tl", "tr", "br", "bl"];
+const DEFAULT_QUAD: CropQuad = {
+  tl: { x: 5, y: 5 },
+  tr: { x: 95, y: 5 },
+  br: { x: 95, y: 95 },
+  bl: { x: 5, y: 95 },
+};
+
+function clamp(v: number, min = 0, max = 100) { return Math.max(min, Math.min(max, v)); }
+
+/** Compute bounding box of quad for backend crop */
+function quadBounds(q: CropQuad) {
+  const xs = [q.tl.x, q.tr.x, q.br.x, q.bl.x];
+  const ys = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const right = Math.max(...xs);
+  const bottom = Math.max(...ys);
+  return { left_pct: left, top_pct: top, width_pct: right - left, height_pct: bottom - top };
+}
+
+/** Compute rotation angle from the top edge of the quad (TL → TR) */
+function quadRotation(q: CropQuad): number {
+  const dx = q.tr.x - q.tl.x;
+  const dy = q.tr.y - q.tl.y;
+  return Math.atan2(dy, dx) * (180 / Math.PI);
+}
+
+/** SVG polygon points string */
+function polyPoints(q: CropQuad): string {
+  return `${q.tl.x},${q.tl.y} ${q.tr.x},${q.tr.y} ${q.br.x},${q.br.y} ${q.bl.x},${q.bl.y}`;
+}
+
+/** Check if a point is inside the quad (ray casting) */
+function pointInQuad(px: number, py: number, q: CropQuad): boolean {
+  const pts = [q.tl, q.tr, q.br, q.bl];
+  let inside = false;
+  for (let i = 0, j = 3; i < 4; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y;
+    const xj = pts[j].x, yj = pts[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+const CORNER_LABELS: Record<keyof CropQuad, string> = { tl: "TL", tr: "TR", br: "BR", bl: "BL" };
 
 export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel }: Props) {
-  const [box, setBox] = useState<Box>({ left: 5, top: 5, right: 95, bottom: 95 });
+  const [quad, setQuad] = useState<CropQuad>({ ...DEFAULT_QUAD });
   const [rotation, setRotation] = useState(0);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [drag, setDrag] = useState<null | { handle: string; startX: number; startY: number; startBox: Box }>(null);
+  const [drag, setDrag] = useState<null | { type: "corner" | "body"; corner?: keyof CropQuad; startMouse: Point; startQuad: CropQuad }>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  function startDrag(handle: string, e: React.MouseEvent) {
+  function toPct(e: MouseEvent | React.MouseEvent): Point | null {
+    const el = containerRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: clamp(((e.clientX - r.left) / r.width) * 100),
+      y: clamp(((e.clientY - r.top) / r.height) * 100),
+    };
+  }
+
+  function startCornerDrag(corner: keyof CropQuad, e: React.MouseEvent) {
     e.stopPropagation();
     e.preventDefault();
-    setDrag({ handle, startX: e.clientX, startY: e.clientY, startBox: { ...box } });
+    setDrag({ type: "corner", corner, startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+  }
+
+  function startBodyDrag(e: React.MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    // Only start body drag if click is inside the quad
+    const pt = toPct(e);
+    if (!pt || !pointInQuad(pt.x, pt.y, quad)) return;
+    setDrag({ type: "body", startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
   }
 
   useEffect(() => {
@@ -35,50 +101,24 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     function onMove(e: MouseEvent) {
       const cw = containerRef.current?.clientWidth || 1;
       const ch = containerRef.current?.clientHeight || 1;
-      const dx = ((e.clientX - drag!.startX) / cw) * 100;
-      const dy = ((e.clientY - drag!.startY) / ch) * 100;
-      const s = drag!.startBox;
-      const h = drag!.handle;
+      const dx = ((e.clientX - drag!.startMouse.x) / cw) * 100;
+      const dy = ((e.clientY - drag!.startMouse.y) / ch) * 100;
+      const sq = drag!.startQuad;
 
-      if (h === "body") {
-        // Move entire box without resizing
-        const w = s.right - s.left;
-        const ht = s.bottom - s.top;
-        const newLeft = Math.max(0, Math.min(100 - w, s.left + dx));
-        const newTop = Math.max(0, Math.min(100 - ht, s.top + dy));
-        setBox({ left: newLeft, top: newTop, right: newLeft + w, bottom: newTop + ht });
-        return;
+      if (drag!.type === "corner" && drag!.corner) {
+        // Move only this corner
+        const c = drag!.corner;
+        const newQuad = { ...sq, tl: { ...sq.tl }, tr: { ...sq.tr }, br: { ...sq.br }, bl: { ...sq.bl } };
+        newQuad[c] = { x: clamp(sq[c].x + dx), y: clamp(sq[c].y + dy) };
+        setQuad(newQuad);
+      } else {
+        // Move all corners together
+        const newQuad: CropQuad = { tl: { x: 0, y: 0 }, tr: { x: 0, y: 0 }, br: { x: 0, y: 0 }, bl: { x: 0, y: 0 } };
+        for (const k of CORNER_KEYS) {
+          newQuad[k] = { x: clamp(sq[k].x + dx), y: clamp(sq[k].y + dy) };
+        }
+        setQuad(newQuad);
       }
-
-      // Start from the original start box for all calculations
-      let newLeft = s.left;
-      let newTop = s.top;
-      let newRight = s.right;
-      let newBottom = s.bottom;
-
-      // Apply dx to left or right edge based on handle
-      if (h.includes("w")) newLeft = s.left + dx;
-      if (h.includes("e")) newRight = s.right + dx;
-      if (h.includes("n")) newTop = s.top + dy;
-      if (h.includes("s")) newBottom = s.bottom + dy;
-
-      // Clamp to image bounds [0, 100]
-      newLeft = Math.max(0, newLeft);
-      newTop = Math.max(0, newTop);
-      newRight = Math.min(100, newRight);
-      newBottom = Math.min(100, newBottom);
-
-      // Enforce minimum size — don't let edges cross
-      if (newRight - newLeft < MIN_SIZE) {
-        if (h.includes("w")) newLeft = newRight - MIN_SIZE;
-        else newRight = newLeft + MIN_SIZE;
-      }
-      if (newBottom - newTop < MIN_SIZE) {
-        if (h.includes("n")) newTop = newBottom - MIN_SIZE;
-        else newBottom = newTop + MIN_SIZE;
-      }
-
-      setBox({ left: newLeft, top: newTop, right: newRight, bottom: newBottom });
     }
     function onUp() { setDrag(null); }
     window.addEventListener("mousemove", onMove);
@@ -95,21 +135,28 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   async function handleApply() {
     setSaving(true);
     try {
+      // Compute bounding box + rotation from quad for the backend
+      const bounds = quadBounds(quad);
+      const autoRotation = rotation || quadRotation(quad);
+      // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
+      const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : (Math.abs(autoRotation) > 0.3 ? autoRotation : 0);
+
       const r = await fetch(`/api/admin/certificates/${certId}/recrop`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           side,
-          left_pct: box.left,
-          top_pct: box.top,
-          width_pct: box.right - box.left,
-          height_pct: box.bottom - box.top,
-          rotation_deg: rotation,
+          left_pct: bounds.left_pct,
+          top_pct: bounds.top_pct,
+          width_pct: bounds.width_pct,
+          height_pct: bounds.height_pct,
+          rotation_deg: effectiveRotation,
+          quad: { tl: quad.tl, tr: quad.tr, br: quad.br, bl: quad.bl },
         }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Recrop failed");
-      toast({ title: `${side} image cropped${Math.abs(rotation) > 0.1 ? ` and rotated ${rotation.toFixed(1)}\u00B0` : ""}, variants regenerated` });
+      toast({ title: `${side} image cropped${Math.abs(effectiveRotation) > 0.1 ? ` and rotated ${effectiveRotation.toFixed(1)}\u00B0` : ""}, variants regenerated` });
       onDone();
     } catch (e: any) {
       toast({ title: "Crop failed", description: e.message, variant: "destructive" });
@@ -128,8 +175,14 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       });
       const j = await r.json();
       if (j.ok && j.bounds) {
-        setBox({ left: j.bounds.left_pct, top: j.bounds.top_pct, right: j.bounds.left_pct + j.bounds.width_pct, bottom: j.bounds.top_pct + j.bounds.height_pct });
-        toast({ title: "Card detected \u2014 crop box fitted to edges" });
+        const { left_pct: l, top_pct: t, width_pct: w, height_pct: h } = j.bounds;
+        setQuad({
+          tl: { x: l, y: t },
+          tr: { x: l + w, y: t },
+          br: { x: l + w, y: t + h },
+          bl: { x: l, y: t + h },
+        });
+        toast({ title: "Card detected \u2014 quad fitted to edges" });
       } else {
         toast({ title: "Auto-detect failed", description: j.message || "Drag corners manually", variant: "destructive" });
       }
@@ -140,22 +193,8 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     }
   }
 
-  const cropW = box.right - box.left;
-  const cropH = box.bottom - box.top;
-
-  // Corner handles: 14px gold squares. Edge handles: 10px gold circles.
-  const handles: Array<{ id: string; isCorner: boolean; css: React.CSSProperties }> = [
-    // Corners
-    { id: "nw", isCorner: true, css: { left: -7, top: -7, cursor: "nwse-resize" } },
-    { id: "ne", isCorner: true, css: { right: -7, top: -7, cursor: "nesw-resize" } },
-    { id: "se", isCorner: true, css: { right: -7, bottom: -7, cursor: "nwse-resize" } },
-    { id: "sw", isCorner: true, css: { left: -7, bottom: -7, cursor: "nesw-resize" } },
-    // Edges
-    { id: "n", isCorner: false, css: { left: "50%", top: -5, marginLeft: -5, cursor: "ns-resize" } },
-    { id: "s", isCorner: false, css: { left: "50%", bottom: -5, marginLeft: -5, cursor: "ns-resize" } },
-    { id: "w", isCorner: false, css: { left: -5, top: "50%", marginTop: -5, cursor: "ew-resize" } },
-    { id: "e", isCorner: false, css: { right: -5, top: "50%", marginTop: -5, cursor: "ew-resize" } },
-  ];
+  const bounds = quadBounds(quad);
+  const derivedAngle = quadRotation(quad);
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col select-none">
@@ -163,9 +202,9 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
         <div>
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-            <Crop size={14} /> Manual Crop \u2014 {side}
+            <Crop size={14} /> Perspective Crop \u2014 {side}
           </p>
-          <p className="text-[#888888] text-[10px]">Drag corners to resize freely. Edge handles resize one axis. Drag inside to move. Esc to cancel.</p>
+          <p className="text-[#888888] text-[10px]">Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.</p>
         </div>
         <button type="button" onClick={onCancel} className="text-[#888888] hover:text-white p-1"><X size={20} /></button>
       </div>
@@ -174,44 +213,41 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">
         <div className="relative" style={{ maxHeight: "80vh", maxWidth: "90vw" }}>
           <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
-            <div ref={containerRef} className="relative rounded-lg bg-[#0A0A0A] overflow-hidden">
+            <div ref={containerRef} className="relative rounded-lg bg-[#0A0A0A] overflow-hidden"
+              onMouseDown={startBodyDrag}>
               <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[75vh] w-auto" draggable={false} />
 
-              {/* Dim overlay outside crop */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {/* SVG overlay — dim outside quad, quad edges, corner handles */}
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ pointerEvents: "none" }}>
+                {/* Dim mask — dark everywhere except inside the quad */}
                 <defs>
-                  <mask id="cropMask">
+                  <mask id="quadMask">
                     <rect width="100" height="100" fill="white" />
-                    <rect x={box.left} y={box.top} width={cropW} height={cropH} fill="black" />
+                    <polygon points={polyPoints(quad)} fill="black" />
                   </mask>
                 </defs>
-                <rect width="100" height="100" fill="black" fillOpacity="0.6" mask="url(#cropMask)" />
+                <rect width="100" height="100" fill="black" fillOpacity="0.55" mask="url(#quadMask)" />
+
+                {/* Quad edges */}
+                <polygon points={polyPoints(quad)} fill="none" stroke="#D4AF37" strokeWidth="0.4" opacity="0.9" />
               </svg>
 
-              {/* Crop box — body drag area */}
-              <div
-                className="absolute border-2 border-[#D4AF37] cursor-move"
-                style={{ left: `${box.left}%`, top: `${box.top}%`, width: `${cropW}%`, height: `${cropH}%` }}
-                onMouseDown={(e) => startDrag("body", e)}
-              >
-                {/* Thirds guidelines */}
-                <div className="absolute inset-0 pointer-events-none">
-                  <div className="absolute left-1/3 top-0 bottom-0 w-px bg-[#D4AF37]/20" />
-                  <div className="absolute left-2/3 top-0 bottom-0 w-px bg-[#D4AF37]/20" />
-                  <div className="absolute top-1/3 left-0 right-0 h-px bg-[#D4AF37]/20" />
-                  <div className="absolute top-2/3 left-0 right-0 h-px bg-[#D4AF37]/20" />
+              {/* Corner handles — positioned absolutely on the image using percentage coordinates */}
+              {CORNER_KEYS.map(k => (
+                <div
+                  key={k}
+                  className="absolute w-[16px] h-[16px] bg-[#D4AF37] border-2 border-white rounded-sm shadow-lg cursor-grab active:cursor-grabbing hover:scale-125 transition-transform z-20"
+                  style={{
+                    left: `${quad[k].x}%`,
+                    top: `${quad[k].y}%`,
+                    transform: "translate(-50%, -50%)",
+                    pointerEvents: "auto",
+                  }}
+                  onMouseDown={(e) => startCornerDrag(k, e)}
+                >
+                  <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none">{CORNER_LABELS[k]}</span>
                 </div>
-
-                {/* Handles — corners are larger squares, edges are smaller circles */}
-                {handles.map(({ id, isCorner, css }) => (
-                  <div
-                    key={id}
-                    className={`absolute bg-[#D4AF37] border-2 border-white shadow-md hover:scale-125 transition-transform z-10 ${isCorner ? "w-[14px] h-[14px] rounded-sm" : "w-[10px] h-[10px] rounded-full"}`}
-                    style={css}
-                    onMouseDown={(e) => startDrag(id, e)}
-                  />
-                ))}
-              </div>
+              ))}
             </div>
           </div>
         </div>
@@ -220,13 +256,16 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       {/* Bottom bar */}
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333] gap-3">
         <div className="flex items-center gap-3">
-          <span className="text-[#888888] text-xs font-mono">{Math.round(cropW)}% x {Math.round(cropH)}%</span>
+          <span className="text-[#888888] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
+          {Math.abs(derivedAngle) > 0.3 && (
+            <span className="text-[#D4AF37]/60 text-xs font-mono">skew: {derivedAngle.toFixed(1)}\u00B0</span>
+          )}
           <button type="button" onClick={handleAutoDetect} disabled={detecting}
             className="flex items-center gap-1.5 text-[#D4AF37] hover:text-[#B8960C] text-xs border border-[#D4AF37]/30 px-3 py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
             {detecting ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
             {detecting ? "Detecting..." : "Auto-Detect"}
           </button>
-          <button type="button" onClick={() => { setBox({ left: 5, top: 5, right: 95, bottom: 95 }); setRotation(0); }}
+          <button type="button" onClick={() => { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }}
             className="flex items-center gap-1 text-[#888888] hover:text-white text-xs"><RotateCcw size={12} /> Reset</button>
         </div>
 
