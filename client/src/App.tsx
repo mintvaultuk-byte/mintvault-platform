@@ -5,6 +5,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
+import { FeatureFlagsContext, useFeatureFlagsQuery } from "@/hooks/use-feature-flags";
+import LegalPage from "@/pages/legal-page";
 
 /* ─── Gold press burst — fires on every button/link press ───────────────────
  * Uses a global pointerdown listener so it covers all buttons automatically.
@@ -216,6 +218,7 @@ function Router() {
               <Route path="/grading-glossary" component={GradingGlossaryPage} />
               <Route path="/tools/estimate" component={PreGradeEstimatePage} />
               <Route path="/how-it-works" component={HowItWorksPage} />
+              <Route path="/legal/:slug" component={LegalPage} />
               <Route path="/about/our-story" component={OurStoryPage} />
               <Route path="/about/the-mintvault-slab" component={TheMintVaultSlabPage} />
               <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
@@ -241,14 +244,25 @@ function Router() {
   );
 }
 
+function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
+  const { data } = useFeatureFlagsQuery();
+  return (
+    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false }}>
+      {children}
+    </FeatureFlagsContext.Provider>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <GoldBurstEffect />
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <FeatureFlagsProvider>
+        <TooltipProvider>
+          <GoldBurstEffect />
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </FeatureFlagsProvider>
     </QueryClientProvider>
   );
 }
