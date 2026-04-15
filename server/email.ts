@@ -127,6 +127,76 @@ ${data.labelToken ? `
   }
 }
 
+/** V2 order confirmation — includes legal page links, inspection window, and terms acceptance record. Used when LEGAL_PAGES_LIVE=true. */
+export async function sendSubmissionConfirmationV2(data: {
+  email: string; firstName: string; submissionId: string; cardCount: number;
+  tier: string; total: number; serviceType?: string; labelToken?: string;
+  termsVersion?: string; termsAcceptedAt?: string;
+}) {
+  const resend = getResend();
+  if (!resend) return;
+
+  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || (data.serviceType?.toUpperCase() || "");
+  const body = `
+<p>Hi ${data.firstName},</p>
+<p>Thank you for your submission. Your order has been confirmed and payment received.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Service</td><td style="padding:8px 0;color:#fff;">${serviceLabel}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Tier</td><td style="padding:8px 0;color:#fff;">${data.tier.toUpperCase()}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Total Paid</td><td style="padding:8px 0;color:#fff;">&pound;${(data.total / 100).toFixed(2)}</td></tr>
+</table>
+
+<div style="border:1px solid rgba(212,175,55,0.3);border-radius:8px;padding:16px;margin:20px 0;background:rgba(212,175,55,0.05);">
+<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">14-Day Inspection Window</h4>
+<p style="color:#ccc;font-size:12px;margin:0;">Please inspect your returned Card on arrival and report any issues to support@mintvaultuk.com within 14 days of delivery.</p>
+</div>
+
+<div style="border:1px solid #333;border-radius:8px;padding:16px;margin:20px 0;">
+<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">About Grading</h4>
+<p style="color:#999;font-size:12px;margin:0 0 8px 0;">Grading is a professional opinion, not a guaranteed outcome. Grades may change on re-examination or differ from other grading companies.</p>
+<p style="color:#999;font-size:12px;margin:0;">Your Declared Value and selected Value Protection tier determine the liability cap for loss or damage. Under-declaring limits cover.</p>
+</div>
+
+<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
+<ol style="margin:0;padding-left:20px;color:#ccc;">
+<li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders.</li>
+<li style="margin-bottom:8px;">Include your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
+<li style="margin-bottom:8px;">Post via tracked and insured delivery.</li>
+</ol>
+${data.labelToken ? `
+<p style="margin-top:24px;">
+<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+</p>` : ""}
+
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #333;">
+<p style="color:#666;font-size:11px;margin:0 0 4px 0;">Legal Documents:</p>
+<p style="color:#999;font-size:11px;margin:0;">
+<a href="https://mintvaultuk.com/legal/website-terms" style="color:#D4AF37;">Website Terms</a> ·
+<a href="https://mintvaultuk.com/legal/submission-agreement" style="color:#D4AF37;">Submission Agreement</a> ·
+<a href="https://mintvaultuk.com/legal/guarantee" style="color:#D4AF37;">Guarantee Policy</a> ·
+<a href="https://mintvaultuk.com/legal/privacy-policy" style="color:#D4AF37;">Privacy Policy</a> ·
+<a href="https://mintvaultuk.com/legal/shipping-requirements" style="color:#D4AF37;">Shipping Requirements</a>
+</p>
+${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">You accepted the Submission Agreement (version ${data.termsVersion}) on ${data.termsAcceptedAt || "submission"} UTC.</p>` : ""}
+</div>`;
+
+  try {
+    await resend.emails.send({
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `MintVault — Submission Confirmed (${data.submissionId})`,
+      html: baseHtml("Submission Confirmed", body),
+    });
+    console.log(`[email] Submission confirmation v2 sent to ${data.email}`);
+  } catch (err: any) {
+    console.error(`[email] Failed to send v2 confirmation to ${data.email}:`, err.message);
+  }
+}
+
 export async function sendCardsReceived(data: {
   email: string;
   firstName: string;

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
-import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier } from "@shared/schema";
+import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -16,7 +16,7 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, r2KeyForImage, r2KeyForLabel 
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
 import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, type ImageKeys } from "./ai-grading-service";
@@ -1385,7 +1385,9 @@ export async function registerRoutes(
 
         const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
 
-        sendSubmissionConfirmation({
+        const { FEATURE_FLAGS: FF2 } = await import("./config/feature-flags");
+        const { TERMS_VERSION: TV2 } = await import("./config/legal");
+        const emailData = {
           email: submission.email || "",
           firstName: submission.firstName || "Customer",
           submissionId: submission.submissionId,
@@ -1393,11 +1395,22 @@ export async function registerRoutes(
           tier: submission.serviceTier || "standard",
           total: paymentIntent.amount || 0,
           serviceType: submission.serviceType || undefined,
-          crossoverCompany: submission.crossover_company || undefined,
-          crossoverOriginalGrade: submission.crossover_original_grade || undefined,
-          crossoverCertNumber: submission.crossover_cert_number || undefined,
           labelToken: packingSlipToken,
-        }).catch(() => {});
+        };
+        if (FF2.LEGAL_PAGES_LIVE) {
+          sendSubmissionConfirmationV2({
+            ...emailData,
+            termsVersion: TV2,
+            termsAcceptedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } else {
+          sendSubmissionConfirmation({
+            ...emailData,
+            crossoverCompany: submission.crossover_company || undefined,
+            crossoverOriginalGrade: submission.crossover_original_grade || undefined,
+            crossoverCertNumber: submission.crossover_cert_number || undefined,
+          }).catch(() => {});
+        }
 
         return res.json({
           success: true,
