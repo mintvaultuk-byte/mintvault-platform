@@ -1066,12 +1066,26 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Declared value is required and must be greater than 0" });
       }
 
-      const { liabilityAccepted, termsAccepted } = req.body;
-      if (!liabilityAccepted) {
-        return res.status(400).json({ error: "You must accept the Liability & Shipping Policy before proceeding." });
-      }
-      if (!termsAccepted) {
-        return res.status(400).json({ error: "Terms & Conditions must be accepted." });
+      const { liabilityAccepted, termsAccepted, termsVersion: clientTermsVersion } = req.body;
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      const { TERMS_VERSION } = await import("./config/legal");
+
+      if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
+        // New combined terms flow — single checkbox sets both
+        if (!termsAccepted) {
+          return res.status(400).json({ error: "Terms acceptance required" });
+        }
+        if (clientTermsVersion && clientTermsVersion !== TERMS_VERSION) {
+          return res.status(400).json({ error: `Terms version mismatch. Expected ${TERMS_VERSION}, got ${clientTermsVersion}` });
+        }
+      } else {
+        // Legacy flow — separate checkboxes
+        if (!liabilityAccepted) {
+          return res.status(400).json({ error: "You must accept the Liability & Shipping Policy before proceeding." });
+        }
+        if (!termsAccepted) {
+          return res.status(400).json({ error: "Terms & Conditions must be accepted." });
+        }
       }
 
       if (Array.isArray(cardItems) && cardItems.length > 0) {
@@ -1193,7 +1207,7 @@ export async function registerRoutes(
         liabilityAcceptedIp: clientIp,
         termsAccepted: true,
         termsAcceptedAt: new Date(),
-        termsVersion: "Feb-2026",
+        termsVersion: FEATURE_FLAGS.LEGAL_PAGES_LIVE ? TERMS_VERSION : "Feb-2026",
         highValueFlag,
         requiresManualApproval,
         crossoverCompany: crossoverCompany || null,
@@ -1206,6 +1220,25 @@ export async function registerRoutes(
         authConcerns: authConcerns || null,
         revealWrap: revealWrap === true,
       });
+
+      // Audit log for terms acceptance
+      if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
+        try {
+          const { truncateIp } = await import("./utils/truncate-ip");
+          await db.insert(auditLog).values({
+            entityType: "submission",
+            entityId: String(submission.id),
+            action: "terms_accepted",
+            adminUser: null,
+            details: {
+              termsVersion: TERMS_VERSION,
+              acceptedAt: new Date().toISOString(),
+              userAgent: req.headers["user-agent"]?.slice(0, 200),
+              ip: truncateIp(req.ip),
+            },
+          });
+        } catch {}
+      }
 
       const stripe = await getUncachableStripeClient();
 
