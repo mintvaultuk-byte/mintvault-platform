@@ -646,6 +646,63 @@ export async function registerRoutes(
     console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
   }
 
+  // ── Public flags endpoint ──────────────────────────────────────────────────
+  app.get("/api/config/public-flags", (_req, res) => {
+    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    res.json({ legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE });
+  });
+
+  // ── Legal page API routes ─────────────────────────────────────────────────
+  app.get("/api/legal/:slug", (req, res) => {
+    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
+
+    const { LEGAL_SLUGS } = require("./config/legal");
+    const slug = req.params.slug;
+    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const content = fs.readFileSync(filePath, "utf-8");
+
+      // Extract frontmatter title
+      const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
+      const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const body = content.replace(/^---[\s\S]*?---\s*/m, "");
+
+      res.json({
+        slug,
+        title: titleMatch?.[1] || slug,
+        version: versionMatch?.[1] || "unknown",
+        content: body,
+      });
+    } catch {
+      res.status(404).json({ error: "Document not found" });
+    }
+  });
+
+  // Admin preview — always available regardless of flag
+  app.get("/api/admin/legal/:slug", requireAdmin, (req, res) => {
+    const { LEGAL_SLUGS } = require("./config/legal");
+    const slug = req.params.slug;
+    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const content = fs.readFileSync(filePath, "utf-8");
+      const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
+      const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const body = content.replace(/^---[\s\S]*?---\s*/m, "");
+      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", content: body });
+    } catch {
+      res.status(404).json({ error: "Document not found" });
+    }
+  });
+
   // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
   // These fire for direct URL access (e.g. scanning an old QR code with a legacy URL format)
   app.get("/cert/:certId/report", (req, res, next) => {
