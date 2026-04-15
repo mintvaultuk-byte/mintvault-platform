@@ -495,25 +495,25 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">
         <button type="button" onClick={enterMarkMode}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#333333] text-[#888888] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
           <Maximize2 size={11} />
           Mark Defects
         </button>
         {certId && (side === "front" || side === "back") && urls[`${side}_original` as keyof ImageUrls] && (
           <button type="button" onClick={() => setManualCropSide(side as "front" | "back")}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#333333] text-[#888888] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
             <Crop size={11} />
             Manual Crop
           </button>
         )}
         <button type="button" onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#888888] hover:text-[#CCCCCC] border border-[#333333] px-3 py-1.5 rounded transition-all">
+          className="flex items-center gap-1.5 text-[10px] text-[#666666] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40">
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
         {(centeringFront || centeringBack) && (
           <button type="button" onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#333333] text-[#888888] hover:border-[#555555]"}`}>
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#666666] hover:border-[#D4AF37]/40"}`}>
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
         )}

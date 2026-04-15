@@ -372,7 +372,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const urls = imageData?.urls || {};
 
   return (
-    <div className="bg-[#0A0A0A] border border-[#D4AF37]/20 rounded-xl p-4 space-y-5">
+    <div className="bg-white border border-[#E8E4DC] rounded-xl p-4 space-y-5">
       <div className="flex items-center justify-between">
         <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Grading Workstation</p>
         <div className="flex items-center gap-3">
@@ -449,8 +449,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             certId={certId}
             onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
           />
-          <div className="bg-[#0D0D0D] border border-[#222222] rounded-lg p-3 space-y-2">
-            <p className="text-[#D4AF37]/70 text-[10px] uppercase tracking-widest font-bold">Defects</p>
+          <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
+            <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
             <DefectAnnotation
               defects={defects}
               onChange={setDefects}
@@ -601,7 +601,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Action buttons */}
-          <div className="flex gap-3 sticky bottom-0 pb-2 pt-1 bg-[#0A0A0A]">
+          <div className="flex gap-3 sticky bottom-0 pb-2 pt-1 bg-white">
             <button
               type="button"
               onClick={saveDraft}
