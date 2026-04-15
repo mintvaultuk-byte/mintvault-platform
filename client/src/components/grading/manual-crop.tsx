@@ -221,13 +221,14 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">
         <div className="relative" style={{ maxHeight: "80vh", maxWidth: "90vw" }}>
           <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
-            <div ref={containerRef} className="relative rounded-lg bg-[#0A0A0A] overflow-hidden"
+            {/* Image + overlay container — NO overflow-hidden so handles aren't clipped */}
+            <div ref={containerRef} className="relative rounded-lg bg-[#0A0A0A]"
               onMouseDown={startBodyDrag}>
               <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[75vh] w-auto" draggable={false} />
 
-              {/* SVG overlay — dim outside quad, quad edges, corner handles */}
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ pointerEvents: "none" }}>
-                {/* Dim mask — dark everywhere except inside the quad */}
+              {/* Layer 1: SVG overlay — dark mask + edge lines — NO pointer events */}
+              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
+                style={{ pointerEvents: "none", zIndex: 10 }}>
                 <defs>
                   <mask id="quadMask">
                     <rect width="100" height="100" fill="white" />
@@ -235,28 +236,44 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                   </mask>
                 </defs>
                 <rect width="100" height="100" fill="black" fillOpacity="0.55" mask="url(#quadMask)" />
-
-                {/* Quad edges */}
                 <polygon points={polyPoints(quad)} fill="none" stroke="#D4AF37" strokeWidth="0.4" opacity="0.9" />
               </svg>
+            </div>
 
-              {/* Corner handles — positioned absolutely on the image using percentage coordinates */}
-              {CORNER_KEYS.map(k => (
+            {/* Layer 2: Corner handles — OUTSIDE the container div, positioned relative to it */}
+            {/* Uses the same parent (rotation wrapper) so coordinates align with the image */}
+            {CORNER_KEYS.map(k => {
+              // Position relative to containerRef bounds
+              const cw = containerRef.current?.clientWidth || 0;
+              const ch = containerRef.current?.clientHeight || 0;
+              return (
                 <div
                   key={k}
-                  className="absolute w-[16px] h-[16px] bg-[#D4AF37] border-2 border-white rounded-sm shadow-lg cursor-grab active:cursor-grabbing hover:scale-125 transition-transform z-20"
                   style={{
+                    position: "absolute",
                     left: `${quad[k].x}%`,
                     top: `${quad[k].y}%`,
-                    transform: "translate(-50%, -50%)",
+                    zIndex: 30,
                     pointerEvents: "auto",
                   }}
-                  onMouseDown={(e) => startCornerDrag(k, e)}
                 >
-                  <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none">{CORNER_LABELS[k]}</span>
+                  {/* Invisible 32px hit area for easy grabbing */}
+                  <div
+                    className="cursor-grab active:cursor-grabbing"
+                    style={{ width: 32, height: 32, transform: "translate(-50%, -50%)", position: "relative" }}
+                    onMouseDown={(e) => startCornerDrag(k, e)}
+                  >
+                    {/* Visible 16px handle centered inside */}
+                    <div className="absolute bg-[#D4AF37] border-2 border-white rounded-sm shadow-lg hover:scale-125 transition-transform"
+                      style={{ inset: 8, pointerEvents: "none" }} />
+                    {/* Label */}
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none select-none">
+                      {CORNER_LABELS[k]}
+                    </span>
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
       </div>
