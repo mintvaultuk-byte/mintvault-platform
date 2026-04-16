@@ -6,7 +6,7 @@ import ImageViewer from "./image-viewer";
 import DefectAnnotation, { type Defect } from "./defect-annotation";
 import CenteringInput from "./centering-input";
 import CornerGrading, { calcCornerSubgrade, CornerSelect, type CornerValues } from "./corner-grading";
-import EdgeGrading, { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
+import EdgeGrading, { calcEdgeSubgrade, EdgeSelect, type EdgeValues } from "./edge-grading";
 import SurfaceGrading, { calcSurfaceSubgrade, type SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
@@ -456,25 +456,66 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               onZoomChange={setViewerZoom}
               onModeChange={setViewerMode}
             />
-            {/* Corner score overlays on card image corners */}
+            {/* Corner + edge score overlays on card image */}
             {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
               const cc = viewerSide === "back"
                 ? { tl: corners.backTL, tr: corners.backTR, bl: corners.backBL, br: corners.backBR }
                 : { tl: corners.frontTL, tr: corners.frontTR, bl: corners.frontBL, br: corners.frontBR };
-              const low = Math.min(cc.tl, cc.tr, cc.bl, cc.br);
-              const isLow = (v: number) => v === low && low < 10;
-              const set = (pos: "tl" | "tr" | "bl" | "br", v: number) => {
+              const cLow = Math.min(cc.tl, cc.tr, cc.bl, cc.br);
+              const isCLow = (v: number) => v === cLow && cLow < 10;
+              const setC = (pos: "tl" | "tr" | "bl" | "br", v: number) => {
                 const key = viewerSide === "back"
                   ? ({ tl: "backTL", tr: "backTR", bl: "backBL", br: "backBR" } as const)[pos]
                   : ({ tl: "frontTL", tr: "frontTR", bl: "frontBL", br: "frontBR" } as const)[pos];
                 setCorners(prev => ({ ...prev, [key]: v }));
               };
+              const ee = viewerSide === "back"
+                ? { top: edges.backTop, bottom: edges.backBottom, left: edges.backLeft, right: edges.backRight }
+                : { top: edges.frontTop, bottom: edges.frontBottom, left: edges.frontLeft, right: edges.frontRight };
+              const eLow = Math.min(ee.top, ee.bottom, ee.left, ee.right);
+              const isELow = (v: number) => v === eLow && eLow < 10;
+              const setE = (pos: "top" | "bottom" | "left" | "right", v: number) => {
+                const key = viewerSide === "back"
+                  ? ({ top: "backTop", bottom: "backBottom", left: "backLeft", right: "backRight" } as const)[pos]
+                  : ({ top: "frontTop", bottom: "frontBottom", left: "frontLeft", right: "frontRight" } as const)[pos];
+                setEdges(prev => ({ ...prev, [key]: v }));
+              };
               return (
                 <>
-                  <div className="absolute top-14 left-2 z-20"><CornerSelect value={cc.tl} onChange={v => set("tl", v)} isLowest={isLow(cc.tl)} /></div>
-                  <div className="absolute top-14 right-2 z-20"><CornerSelect value={cc.tr} onChange={v => set("tr", v)} isLowest={isLow(cc.tr)} /></div>
-                  <div className="absolute bottom-14 left-2 z-20"><CornerSelect value={cc.bl} onChange={v => set("bl", v)} isLowest={isLow(cc.bl)} /></div>
-                  <div className="absolute bottom-14 right-2 z-20"><CornerSelect value={cc.br} onChange={v => set("br", v)} isLowest={isLow(cc.br)} /></div>
+                  {/* Corners */}
+                  <div className="absolute top-14 left-2 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">TL</span>
+                    <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
+                  </div>
+                  <div className="absolute top-14 right-2 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">TR</span>
+                    <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
+                  </div>
+                  <div className="absolute bottom-14 left-2 z-20 flex flex-col items-center gap-0.5">
+                    <CornerSelect value={cc.bl} onChange={v => setC("bl", v)} isLowest={isCLow(cc.bl)} />
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">BL</span>
+                  </div>
+                  <div className="absolute bottom-14 right-2 z-20 flex flex-col items-center gap-0.5">
+                    <CornerSelect value={cc.br} onChange={v => setC("br", v)} isLowest={isCLow(cc.br)} />
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">BR</span>
+                  </div>
+                  {/* Edges */}
+                  <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">T</span>
+                    <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
+                  </div>
+                  <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
+                    <EdgeSelect value={ee.bottom} onChange={v => setE("bottom", v)} isLowest={isELow(ee.bottom)} />
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">B</span>
+                  </div>
+                  <div className="absolute top-1/2 -translate-y-1/2 left-2 z-20 flex items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">L</span>
+                    <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
+                  </div>
+                  <div className="absolute top-1/2 -translate-y-1/2 right-2 z-20 flex items-center gap-0.5">
+                    <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
+                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">R</span>
+                  </div>
                 </>
               );
             })()}

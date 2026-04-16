@@ -35,6 +35,22 @@ function GradeSelect({ value, onChange, isLowest }: { value: number; onChange: (
   );
 }
 
+export function EdgeSelect({ value, onChange, isLowest = false }: { value: number; onChange: (v: number) => void; isLowest?: boolean }) {
+  return (
+    <select
+      value={value}
+      onChange={e => { e.stopPropagation(); onChange(Number(e.target.value)); }}
+      className={`text-[8px] rounded px-1 py-0.5 font-bold border cursor-pointer shadow-sm ${
+        isLowest ? "border-red-500 bg-white/90" : "border-[#D4D0C8] bg-white/90"
+      } backdrop-blur-sm`}
+      style={{ color: gradeColor(value) }}
+      onClick={e => e.stopPropagation()}
+    >
+      {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+    </select>
+  );
+}
+
 export function calcEdgeSubgrade(v: EdgeValues): { grade: number; worstKey: string } {
   const entries: [string, number][] = [
     ["Front Top",    v.frontTop],
