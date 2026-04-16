@@ -431,7 +431,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
-          <div className="relative">
+          <div className="relative px-10 py-6">
             <ImageViewer
               urls={urls}
               defects={defects}
@@ -482,39 +482,39 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               };
               return (
                 <>
-                  {/* Corners */}
-                  <div className="absolute top-14 left-2 z-20 flex flex-col items-center gap-0.5">
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">TL</span>
+                  {/* Corners — positioned in the padding zone outside the card image */}
+                  <div className="absolute top-0 left-0 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-[#555555]">TL</span>
                     <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
                   </div>
-                  <div className="absolute top-14 right-2 z-20 flex flex-col items-center gap-0.5">
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">TR</span>
+                  <div className="absolute top-0 right-0 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-[#555555]">TR</span>
                     <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
                   </div>
-                  <div className="absolute bottom-14 left-2 z-20 flex flex-col items-center gap-0.5">
+                  <div className="absolute bottom-0 left-0 z-20 flex flex-col items-center gap-0.5">
                     <CornerSelect value={cc.bl} onChange={v => setC("bl", v)} isLowest={isCLow(cc.bl)} />
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">BL</span>
+                    <span className="text-[8px] font-bold text-[#555555]">BL</span>
                   </div>
-                  <div className="absolute bottom-14 right-2 z-20 flex flex-col items-center gap-0.5">
+                  <div className="absolute bottom-0 right-0 z-20 flex flex-col items-center gap-0.5">
                     <CornerSelect value={cc.br} onChange={v => setC("br", v)} isLowest={isCLow(cc.br)} />
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">BR</span>
+                    <span className="text-[8px] font-bold text-[#555555]">BR</span>
                   </div>
-                  {/* Edges */}
-                  <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">T</span>
+                  {/* Edges — positioned in the padding zone outside the card image */}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-[#555555]">T</span>
                     <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
                   </div>
-                  <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
+                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-0.5">
                     <EdgeSelect value={ee.bottom} onChange={v => setE("bottom", v)} isLowest={isELow(ee.bottom)} />
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">B</span>
+                    <span className="text-[8px] font-bold text-[#555555]">B</span>
                   </div>
-                  <div className="absolute top-1/2 -translate-y-1/2 left-2 z-20 flex items-center gap-0.5">
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">L</span>
+                  <div className="absolute top-1/2 -translate-y-1/2 left-0 z-20 flex items-center gap-0.5">
+                    <span className="text-[8px] font-bold text-[#555555]">L</span>
                     <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
                   </div>
-                  <div className="absolute top-1/2 -translate-y-1/2 right-2 z-20 flex items-center gap-0.5">
+                  <div className="absolute top-1/2 -translate-y-1/2 right-0 z-20 flex items-center gap-0.5">
                     <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
-                    <span className="text-[8px] font-bold text-white bg-black/50 rounded px-1">R</span>
+                    <span className="text-[8px] font-bold text-[#555555]">R</span>
                   </div>
                 </>
               );
