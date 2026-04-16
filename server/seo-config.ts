@@ -19,13 +19,13 @@ const DEFAULT_IMAGE = `${BASE}/images/collector-lifestyle.webp`;
 const SEO_MAP: Record<string, SeoMeta> = {
   "/": {
     title: "MintVault UK — Professional Trading Card Grading | Verified Ownership",
-    description: "The only UK grading company with verified card ownership. NFC-enabled slabs, online certificate verification, and an ownership registry. Grade your cards from £12.",
+    description: "The only UK grading company with verified card ownership. NFC-enabled slabs, online certificate verification, and an ownership registry. Grade your cards from £19.",
     canonical: BASE,
     ogImage: DEFAULT_IMAGE,
   },
   "/pricing": {
     title: "Pricing | MintVault UK — Card Grading Costs",
-    description: "Transparent card grading pricing for UK collectors. Five tiers from £12 to £50 per card. Fully insured return shipping included. No hidden fees.",
+    description: "Transparent card grading pricing for UK collectors. Three tiers from £19 to £45 per card. Fully insured return shipping included. No hidden fees.",
     canonical: `${BASE}/pricing`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -103,13 +103,13 @@ const SEO_MAP: Record<string, SeoMeta> = {
   // SEO pages
   "/pokemon-card-grading-uk": {
     title: "Pokemon Card Grading UK | Professional Grading Service | MintVault",
-    description: "Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault from £12 per card.",
+    description: "Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault from £19 per card.",
     canonical: `${BASE}/pokemon-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
   "/trading-card-grading-uk": {
     title: "Trading Card Grading UK | Professional TCG Grading | MintVault",
-    description: "Professional trading card grading in the UK. All major TCGs accepted. Tamper-evident slabs, insured return shipping, fast turnaround from £12.",
+    description: "Professional trading card grading in the UK. All major TCGs accepted. Tamper-evident slabs, insured return shipping, fast turnaround from £19.",
     canonical: `${BASE}/trading-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -138,13 +138,13 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/yugioh-card-grading-uk": {
     title: "Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault",
-    description: "Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £12 per card.",
+    description: "Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £19 per card.",
     canonical: `${BASE}/yugioh-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
   "/one-piece-card-grading-uk": {
     title: "One Piece Card Grading UK | Professional TCG Grading | MintVault",
-    description: "Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £12.",
+    description: "Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £19.",
     canonical: `${BASE}/one-piece-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -156,7 +156,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/mtg-card-grading-uk": {
     title: "MTG Card Grading UK | Magic: The Gathering Grading | MintVault",
-    description: "Professional Magic: The Gathering card grading in the UK. Grade your rarest MTG cards with MintVault — NFC-enabled slabs, verified ownership, from £12.",
+    description: "Professional Magic: The Gathering card grading in the UK. Grade your rarest MTG cards with MintVault — NFC-enabled slabs, verified ownership, from £19.",
     canonical: `${BASE}/mtg-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -168,13 +168,13 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/card-grading-cost-uk": {
     title: "How Much Does Card Grading Cost UK | Grading Prices Explained",
-    description: "Find out how much card grading costs in the UK. MintVault's pricing explained — from £12 per card with bulk discounts. Full breakdown with no hidden fees.",
+    description: "Find out how much card grading costs in the UK. MintVault's pricing explained — from £19 per card with bulk discounts. Full breakdown with no hidden fees.",
     canonical: `${BASE}/card-grading-cost-uk`,
     ogImage: DEFAULT_IMAGE,
   },
   "/card-grading-near-me": {
     title: "Card Grading Near Me | UK Card Grading Service | MintVault",
-    description: "Looking for card grading near you in the UK? MintVault is a UK-based professional grading service — no international shipping, fast turnaround, from £12.",
+    description: "Looking for card grading near you in the UK? MintVault is a UK-based professional grading service — no international shipping, fast turnaround, from £19.",
     canonical: `${BASE}/card-grading-near-me`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -183,7 +183,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
 /** Default meta for unknown routes (404, cert detail pages, etc.) */
 const DEFAULT_META: SeoMeta = {
   title: "MintVault UK — Professional Trading Card Grading",
-  description: "Professional UK trading card grading. Tamper-evident slabs, NFC verification, verified ownership registry, and insured return shipping. From £12 per card.",
+  description: "Professional UK trading card grading. Tamper-evident slabs, NFC verification, verified ownership registry, and insured return shipping. From £19 per card.",
   canonical: BASE,
   ogImage: DEFAULT_IMAGE,
 };
