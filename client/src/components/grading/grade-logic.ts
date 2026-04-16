@@ -12,7 +12,7 @@ export interface SubGrades {
 
 export function calculateOverallGrade(sub: SubGrades, hasCrease: boolean, hasTear: boolean): number {
   const weighted = (sub.centering * 0.10) + (sub.corners * 0.25) + (sub.edges * 0.25) + (sub.surface * 0.40);
-  let grade = Math.floor(weighted);
+  let grade = Math.round(weighted);
   const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
   grade = Math.min(grade, lowest + 1.0);
   if (hasCrease) grade = Math.min(grade, 5);

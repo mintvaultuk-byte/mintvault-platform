@@ -43,7 +43,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
   const display = manualOverride ?? overall;
 
   const weighted = (sub.centering * 0.10) + (sub.corners * 0.25) + (sub.edges * 0.25) + (sub.surface * 0.40);
-  const rounded = Math.floor(weighted);
+  const rounded = Math.round(weighted);
   const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
   const capped = Math.min(rounded, lowest + 1.0);
   const creaseCap = hasCrease ? 5.0 : 99;
@@ -123,7 +123,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
       {showCalc && (
         <div className="bg-white border border-[#E8E4DC] rounded-lg p-3 text-[10px] text-[#333333] font-mono space-y-1">
           <p>Weighted: ({sub.centering}×10%) + ({sub.corners}×25%) + ({sub.edges}×25%) + ({sub.surface}×40%) = {weighted.toFixed(2)}</p>
-          <p>→ Floored to whole number: {rounded}</p>
+          <p>→ Rounded to whole number: {rounded}</p>
           <p>→ Lowest subgrade ({lowest}) + 1.0 = max {lowest + 1.0} — result: {capped}</p>
           {hasCrease && <p className="text-red-600">→ Crease cap applied: max 5.0 — result: {Math.min(capped, creaseCap)}</p>}
           {hasTear   && <p className="text-red-600">→ Tear cap applied: max 3.0 — result: {Math.min(capped, tearCap)}</p>}

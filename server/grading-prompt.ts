@@ -15,7 +15,7 @@ IMAGE ORDER:
 - Image 7 (if provided): Angled view for holo/foil surface inspection
 - Image 8 (if provided): Close-up of specific area
 
-Evaluate the card across four categories. Assign subgrades as whole numbers only: 1, 2, 3, 4, 5, 6, 7, 8, 9, or 10. NEVER return decimal grades (8.5, 7.5, etc). When your weighted calculation yields a decimal, always round DOWN (floor): 8.0–8.9→8, 9.0–9.9→9. This applies to overall_grade AND all subgrades. The grade_strength_score (0-99) captures within-tier granularity instead.
+Evaluate the card across four categories. Assign subgrades as whole numbers only: 1, 2, 3, 4, 5, 6, 7, 8, 9, or 10. NEVER return decimal grades (8.5, 7.5, etc). When your weighted calculation yields a decimal, round to the nearest whole number (standard rounding: 0.5 rounds up). This applies to overall_grade AND all subgrades. The grade_strength_score (0-99) captures within-tier granularity instead.
 
 IMPORTANT: Use ALL provided images. The greyscale and high-contrast variants reveal defects that may be invisible in the colour original. Surface scratches especially show up in greyscale. Corner whitening shows up in high-contrast. Edge chips show up in edge-enhanced views. Do not rely solely on the colour image.
 
