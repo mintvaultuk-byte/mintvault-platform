@@ -226,6 +226,9 @@ export class WebhookHandlers {
     // Grant reholder credits for silver/gold
     const source = `${tier}_quarterly`;
     await grantReholderCredits(userId, tier, source).catch(() => {});
+    await db.execute(sql`
+      UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
+    `);
 
     await insertVaultClubEvent({
       userId, stripeEventId: eventId,
@@ -367,17 +370,18 @@ export class WebhookHandlers {
         WHERE id = ${userId}
       `);
 
-      // Grant quarterly reholders if we've crossed a quarter boundary
+      // Grant quarterly member credits if we've crossed a quarter boundary
+      // Uses dedicated column (not ai_credits_last_refilled_at) — read BEFORE any update
       const now = new Date();
-      const lastRefillRows = await db.execute(sql`
-        SELECT ai_credits_last_refilled_at FROM users WHERE id = ${userId} LIMIT 1
-      `);
-      const lastRefill = (lastRefillRows.rows[0] as any)?.ai_credits_last_refilled_at;
-      const prevQuarter = lastRefill ? quarterKey(new Date(lastRefill)) : null;
+      const lastGranted = user.member_credits_last_granted_at as string | null;
+      const prevQuarter = lastGranted ? quarterKey(new Date(lastGranted)) : null;
       const currentQuarter = quarterKey(now);
-      if (prevQuarter && prevQuarter !== currentQuarter) {
+      if (!prevQuarter || prevQuarter !== currentQuarter) {
         const source = `${tier}_quarterly`;
         await grantReholderCredits(userId, tier, source).catch(() => {});
+        await db.execute(sql`
+          UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
+        `);
       }
     } else {
       // First invoice — just ensure status is active

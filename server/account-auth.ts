@@ -185,8 +185,20 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT,
       ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT,
       ADD COLUMN IF NOT EXISTS ai_credits_user_balance INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS ai_credits_last_refilled_at TIMESTAMP
+      ADD COLUMN IF NOT EXISTS ai_credits_last_refilled_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS member_credits_last_granted_at TIMESTAMPTZ
   `);
+
+  // Backfill member_credits_last_granted_at for users who already have reholder credits
+  try {
+    await db.execute(sql`
+      UPDATE users SET member_credits_last_granted_at = NOW() - INTERVAL '92 days'
+      WHERE member_credits_last_granted_at IS NULL
+        AND id IN (SELECT DISTINCT user_id FROM reholder_credits)
+    `);
+  } catch (e: any) {
+    console.log("[auth-schema] member_credits_last_granted_at backfill skipped:", e.message);
+  }
 
   // Vault Club events audit table
   await db.execute(sql`

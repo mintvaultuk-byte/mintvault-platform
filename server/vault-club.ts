@@ -298,7 +298,8 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
   const rows = await db.execute(sql`
     SELECT id, email, display_name, vault_club_tier, vault_club_status,
            ai_credits_user_balance, username, showroom_active,
-           vault_club_billing_interval, ai_credits_last_refilled_at
+           vault_club_billing_interval, ai_credits_last_refilled_at,
+           member_credits_last_granted_at
     FROM users WHERE stripe_customer_id = ${customerId} LIMIT 1
   `);
   return (rows.rows[0] as Record<string, unknown>) || null;
