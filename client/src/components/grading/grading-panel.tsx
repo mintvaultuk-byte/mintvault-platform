@@ -46,7 +46,7 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
       className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
         status === "done" ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50" :
         status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5" :
-        "border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+        "border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
       }`}
     >
       {status === "loading" ? <><Loader2 size={11} className="animate-spin" /> Reprocessing…</> :
@@ -379,7 +379,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <button
             type="button"
             onClick={() => setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; })}
-            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#888888] border border-[#D4D0C8] hover:text-[#666666]"}`}
+            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
             title="Toggle quick-grade mode (Q)"
           >
             <Zap size={10} />
@@ -520,11 +520,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           {/* Centering — manual measurement buttons */}
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setManualCenteringSide("front")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Front)
             </button>
             <button type="button" onClick={() => setManualCenteringSide("back")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Back)
             </button>
             {centeringMethod && (
@@ -660,7 +660,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             <p className="text-[#CCCCCC] text-sm">
               Confirm grade of <strong className="text-white">{finalGradeOverall} — {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}</strong> for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
-            <p className="text-[#888888] text-xs">This grade will be published and the Digital Grading Report will be generated.</p>
+            <p className="text-[#555555] text-xs">This grade will be published and the Digital Grading Report will be generated.</p>
             {isBlack && (
               <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
                 <span className="text-lg">★</span>
@@ -668,7 +668,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               </div>
             )}
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowConfirm(false)} className="border border-[#333333] text-[#888888] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]">Cancel</button>
+              <button type="button" onClick={() => setShowConfirm(false)} className="border border-[#333333] text-[#555555] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]">Cancel</button>
               <button
                 type="button"
                 onClick={() => approveGrade(false)}

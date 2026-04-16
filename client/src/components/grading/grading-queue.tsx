@@ -127,17 +127,17 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
         </div>
         {sessionActive && (
           <div className="flex items-center gap-3 text-xs">
-            <span className="flex items-center gap-1 text-[#666666]">
+            <span className="flex items-center gap-1 text-[#333333]">
               <Clock size={11} />
               Session: <span className="text-[#D4AF37] font-mono font-bold">{formatTime(sessionSeconds)}</span>
             </span>
             {currentCertId && (
-              <span className="flex items-center gap-1 text-[#666666]">
+              <span className="flex items-center gap-1 text-[#333333]">
                 Card: <span className="text-[#1A1A1A] font-mono font-bold">{formatTime(cardSeconds)}</span>
               </span>
             )}
             {currentIdx >= 0 && (
-              <span className="text-[#888888]">Card {currentIdx + 1} of {queue.length + gradedCards.length}</span>
+              <span className="text-[#555555]">Card {currentIdx + 1} of {queue.length + gradedCards.length}</span>
             )}
           </div>
         )}
@@ -157,15 +157,15 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
       ) : (
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => goToCard(currentIdx - 1)} disabled={currentIdx <= 0}
-            className="border border-[#E8E4DC] text-[#666666] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
+            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
             <ChevronLeft size={14} />
           </button>
           <button type="button" onClick={() => goToCard(currentIdx + 1)} disabled={currentIdx >= queue.length - 1}
-            className="border border-[#E8E4DC] text-[#666666] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
+            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
             <ChevronRight size={14} />
           </button>
           <button type="button" onClick={() => { setSessionActive(false); setShowSummary(true); }}
-            className="text-[#888888] text-xs hover:text-[#1A1A1A] ml-2 transition-colors">End Session</button>
+            className="text-[#555555] text-xs hover:text-[#1A1A1A] ml-2 transition-colors">End Session</button>
         </div>
       )}
 
@@ -193,17 +193,17 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#AAAAAA] text-[9px] font-mono">{item.certId}</span>
+                    <span className="text-[#888888] text-[9px] font-mono">{item.certId}</span>
                     {item.id === currentCertId && <span className="text-[#D4AF37] text-[9px] font-bold">● Current</span>}
                   </div>
-                  <p className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#666666]"}`}>{item.cardName || "Unnamed"}</p>
-                  <p className="text-[#888888] text-[10px]">{item.cardSet} · {item.cardGame}</p>
+                  <p className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#333333]"}`}>{item.cardName || "Unnamed"}</p>
+                  <p className="text-[#555555] text-[10px]">{item.cardSet} · {item.cardGame}</p>
                 </div>
                 <div className="flex-shrink-0 text-right">
                   <div className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.hasImages ? "text-emerald-600 bg-emerald-50" : "text-[#999999] bg-[#F5F5F3]"}`}>
                     {item.hasImages ? "Images ✓" : "No images"}
                   </div>
-                  <p className="text-[#AAAAAA] text-[9px] mt-0.5">{new Date(item.createdAt).toLocaleDateString("en-GB")}</p>
+                  <p className="text-[#888888] text-[9px] mt-0.5">{new Date(item.createdAt).toLocaleDateString("en-GB")}</p>
                 </div>
               </div>
             </button>
@@ -214,9 +214,9 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
       {/* Graded this session */}
       {gradedCards.length > 0 && (
         <div className="border-t border-[#E8E4DC] pt-3 space-y-1">
-          <p className="text-[#888888] text-[10px] uppercase tracking-widest">Graded this session</p>
+          <p className="text-[#555555] text-[10px] uppercase tracking-widest">Graded this session</p>
           {gradedCards.map((g) => (
-            <div key={g.certId} className="flex items-center justify-between text-xs text-[#666666] py-0.5">
+            <div key={g.certId} className="flex items-center justify-between text-xs text-[#333333] py-0.5">
               <span className="truncate">{g.cardName}</span>
               <span className={`font-bold ml-2 ${g.isBlackLabel ? "text-[#D4AF37]" : "text-[#1A1A1A]"}`}>{g.grade}{g.isBlackLabel ? " ★" : ""}</span>
             </div>

@@ -221,7 +221,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                   className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                     side === s && !showReference
                       ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                      : hasImage ? "border-[#D4D0C8] text-[#666666] hover:border-[#D4AF37]/40" : "border-[#E8E4DC] text-[#AAAAAA] cursor-not-allowed"
+                      : hasImage ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40" : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
                   }`}
                 >{s}{count > 0 ? ` (${count})` : ""}</button>
                 {hasImage && certId && !fullscreen && (
@@ -235,7 +235,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                         onImageDeleted?.();
                       } catch {}
                     }}
-                    className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#888888] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                    className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
                   >
                     <Trash2 size={10} />
                   </button>
@@ -245,7 +245,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           })}
           {!fullscreen && referenceImageUrl && (
             <button type="button" onClick={() => setShowReference(v => !v)}
-              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#666666] hover:border-[#D4AF37]/40"}`}
+              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"}`}
             >Reference</button>
           )}
         </div>
@@ -258,7 +258,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             return urls[key] != null;
           }).map(v => (
             <button key={v.key} type="button" onClick={() => setVariant(v.key)}
-              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#888888] border-transparent hover:text-[#666666]"}`}
+              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#333333]"}`}
             >{v.label}</button>
           ))}
         </div>
@@ -388,7 +388,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-[#AAAAAA] text-xs">No image</p>
+            <p className="text-[#888888] text-xs">No image</p>
           </div>
         )}
 
@@ -405,7 +405,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </button>
           {zoom > 1 && (
             <button type="button" onClick={(e) => { e.stopPropagation(); zoomReset(); }}
-              className="w-7 h-7 flex items-center justify-center text-[#888888] hover:text-white transition-colors rounded-full">
+              className="w-7 h-7 flex items-center justify-center text-[#555555] hover:text-white transition-colors rounded-full">
               <RotateCcw size={12} />
             </button>
           )}
@@ -424,7 +424,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
             <div className="flex-1">{renderTabs()}</div>
             <button type="button" onClick={exitMarkMode}
-              className="ml-4 text-[#888888] hover:text-white transition-colors p-1">
+              className="ml-4 text-[#555555] hover:text-white transition-colors p-1">
               <X size={20} />
             </button>
           </div>
@@ -452,7 +452,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
 
           {/* Bottom toolbar */}
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
-            <p className="text-[#888888] text-xs">
+            <p className="text-[#555555] text-xs">
               {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
               <span className="text-[#555555] ml-3">Click on the card to mark a defect · F/B to switch sides · Esc to exit</span>
             </p>
@@ -479,15 +479,15 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       {showReference && referenceImageUrl && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <p className="text-[#888888] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
+            <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
             <div className="rounded-lg bg-[#0A0A0A] border border-[#222222] overflow-hidden" style={{ aspectRatio: "5/7" }}>
               {urls.front_cropped || urls.front_original
                 ? <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
-                : <div className="w-full h-full flex items-center justify-center"><p className="text-[#AAAAAA] text-xs">No scan</p></div>}
+                : <div className="w-full h-full flex items-center justify-center"><p className="text-[#888888] text-xs">No scan</p></div>}
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-[#888888] text-[9px] uppercase tracking-widest text-center">Reference Image</p>
+            <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Reference Image</p>
             <div className="rounded-lg bg-[#0A0A0A] border border-[#D4AF37]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
               <img src={referenceImageUrl} alt="reference" className="w-full h-full object-contain" />
             </div>
@@ -513,13 +513,13 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </button>
         )}
         <button type="button" onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#666666] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40">
+          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40">
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
         {(centeringFront || centeringBack) && (
           <button type="button" onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#666666] hover:border-[#D4AF37]/40"}`}>
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#D4AF37]/40"}`}>
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
         )}
@@ -574,13 +574,13 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
       {uploading ? (
         <>
           <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
-          <p className="text-[#888888] text-xs">Uploading {side}…</p>
+          <p className="text-[#555555] text-xs">Uploading {side}…</p>
         </>
       ) : (
         <>
-          <Upload size={24} className="text-[#888888]" />
-          <p className="text-[#666666] text-xs font-bold">Drop new {side} image here</p>
-          <p className="text-[#888888] text-[10px]">or click to browse</p>
+          <Upload size={24} className="text-[#555555]" />
+          <p className="text-[#333333] text-xs font-bold">Drop new {side} image here</p>
+          <p className="text-[#555555] text-[10px]">or click to browse</p>
         </>
       )}
     </div>

@@ -164,7 +164,7 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
           status === "done" ? "border-emerald-200 bg-emerald-50 text-emerald-600" :
           status === "error" ? "border-red-300 bg-red-50 text-red-600" :
           status === "loading" ? "border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]" :
-          "border-[#D4D0C8] text-[#666666] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
+          "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
         }`}>
         <span className="flex items-center gap-2">
           {status === "loading" ? <Loader2 size={13} className="animate-spin" /> :
@@ -173,7 +173,7 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
            <Bot size={13} />}
           {status === "loading" ? `Running ${label}…` : status === "done" ? `${label} ✓` : status === "error" ? `${label} — retry` : label}
         </span>
-        <span className="text-[9px] text-[#888888] font-normal normal-case">{cost}</span>
+        <span className="text-[9px] text-[#555555] font-normal normal-case">{cost}</span>
       </button>
       {status === "error" && err && <p className="text-red-600 text-[10px] px-1">{err}</p>}
     </div>
@@ -330,7 +330,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
           type="button"
           onClick={runAnalysis}
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
+          className="w-full flex items-center justify-center gap-2 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
         >
           {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
           {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze (Full)" : "Analyze with AI (Full)"}
@@ -349,7 +349,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
       {/* Loading progress */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#666666] text-xs">
+        <div className="flex items-center gap-2 text-[#333333] text-xs">
           <Loader2 size={12} className="animate-spin flex-shrink-0" />
           <span>{STEP_LABELS[step]} (this takes 10–30 seconds)</span>
         </div>
@@ -394,8 +394,8 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
                 )}
                 <div className="space-y-0.5 min-w-0">
                   <p className="text-[#1A1A1A] text-sm font-bold truncate">{identification.officialName}</p>
-                  <p className="text-[#666666] text-xs">{identification.officialSet}{identification.officialNumber ? ` · ${identification.officialNumber}` : ""}</p>
-                  <p className="text-[#888888] text-[10px]">{identification.detected_game.toUpperCase()} · {identification.detected_language} · {identification.detected_rarity}</p>
+                  <p className="text-[#333333] text-xs">{identification.officialSet}{identification.officialNumber ? ` · ${identification.officialNumber}` : ""}</p>
+                  <p className="text-[#555555] text-[10px]">{identification.detected_game.toUpperCase()} · {identification.detected_language} · {identification.detected_rarity}</p>
                   {identification.is_holo && <span className="text-[9px] text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">HOLO</span>}
                 </div>
               </div>
@@ -425,7 +425,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               { label: "Overall",    value: result.overall_grade,      conf: result.confidence.overall },
             ].map(({ label, value, conf }) => (
               <div key={label} className="bg-[#F7F7F5] rounded-lg p-2 text-center">
-                <p className="text-[#888888] text-[8px] uppercase tracking-widest">{label}</p>
+                <p className="text-[#555555] text-[8px] uppercase tracking-widest">{label}</p>
                 <p className="text-[#D4AF37] text-lg font-black">{value}</p>
                 <ConfidenceBadge level={conf} />
               </div>
@@ -450,13 +450,13 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               <button
                 type="button"
                 onClick={() => setShowConfidenceNotes(v => !v)}
-                className="flex items-center gap-1 text-[#888888] hover:text-[#666666] text-[10px] transition-colors"
+                className="flex items-center gap-1 text-[#555555] hover:text-[#333333] text-[10px] transition-colors"
               >
                 {showConfidenceNotes ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                 Confidence notes
               </button>
               {showConfidenceNotes && (
-                <p className="text-[#666666] text-xs mt-1 leading-relaxed">{result.confidence_notes}</p>
+                <p className="text-[#333333] text-xs mt-1 leading-relaxed">{result.confidence_notes}</p>
               )}
             </div>
           )}
@@ -465,16 +465,16 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-1">
             <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">Centering</p>
             <div className="grid grid-cols-2 gap-x-4 text-xs">
-              <span className="text-[#888888]">Front L/R</span>
-              <span className="text-[#3A3A3A]">{result.centering.front_left_right}</span>
-              <span className="text-[#888888]">Front T/B</span>
-              <span className="text-[#3A3A3A]">{result.centering.front_top_bottom}</span>
-              <span className="text-[#888888]">Back L/R</span>
-              <span className="text-[#3A3A3A]">{result.centering.back_left_right}</span>
-              <span className="text-[#888888]">Back T/B</span>
-              <span className="text-[#3A3A3A]">{result.centering.back_top_bottom}</span>
+              <span className="text-[#555555]">Front L/R</span>
+              <span className="text-[#1A1A1A]">{result.centering.front_left_right}</span>
+              <span className="text-[#555555]">Front T/B</span>
+              <span className="text-[#1A1A1A]">{result.centering.front_top_bottom}</span>
+              <span className="text-[#555555]">Back L/R</span>
+              <span className="text-[#1A1A1A]">{result.centering.back_left_right}</span>
+              <span className="text-[#555555]">Back T/B</span>
+              <span className="text-[#1A1A1A]">{result.centering.back_top_bottom}</span>
             </div>
-            {result.centering.notes && <p className="text-[#888888] text-[10px] mt-1">{result.centering.notes}</p>}
+            {result.centering.notes && <p className="text-[#555555] text-[10px] mt-1">{result.centering.notes}</p>}
           </div>
 
           {/* Defects */}
@@ -489,13 +489,13 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
                     <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${
                       d.severity === "major"    ? "bg-red-50 text-red-600 border border-red-200" :
                       d.severity === "moderate" ? "bg-orange-50 text-orange-600 border border-orange-200" :
-                                                  "bg-[#F0EEE8] text-[#888888] border border-[#D4D0C8]"
+                                                  "bg-[#F0EEE8] text-[#555555] border border-[#D4D0C8]"
                     }`}>{d.severity}</span>
                     <div className="min-w-0">
-                      <p className="text-[#3A3A3A] text-xs font-medium capitalize">{d.type.replace(/_/g, " ")} — {d.location}</p>
-                      <p className="text-[#888888] text-[10px] leading-snug">{d.description}</p>
+                      <p className="text-[#1A1A1A] text-xs font-medium capitalize">{d.type.replace(/_/g, " ")} — {d.location}</p>
+                      <p className="text-[#555555] text-[10px] leading-snug">{d.description}</p>
                       {d.detected_in !== "original" && (
-                        <p className="text-[#AAAAAA] text-[9px]">detected in: {d.detected_in}</p>
+                        <p className="text-[#888888] text-[9px]">detected in: {d.detected_in}</p>
                       )}
                     </div>
                   </div>
@@ -508,16 +508,16 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
           {result.grade_explanation && (
             <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3">
               <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest mb-1.5">AI Grade Explanation</p>
-              <p className="text-[#666666] text-xs leading-relaxed">{result.grade_explanation}</p>
+              <p className="text-[#333333] text-xs leading-relaxed">{result.grade_explanation}</p>
             </div>
           )}
 
           {/* Recommendations */}
           {result.recommendations?.length > 0 && (
             <div className="space-y-1">
-              <p className="text-[#888888] text-[10px] font-bold uppercase tracking-widest">Recommendations</p>
+              <p className="text-[#555555] text-[10px] font-bold uppercase tracking-widest">Recommendations</p>
               {result.recommendations.map((r, i) => (
-                <p key={i} className="text-[#888888] text-xs">· {r}</p>
+                <p key={i} className="text-[#555555] text-xs">· {r}</p>
               ))}
             </div>
           )}
@@ -528,13 +528,13 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               <button
                 type="button"
                 onClick={() => setShowAuthNotes(v => !v)}
-                className="flex items-center gap-1 text-[#AAAAAA] hover:text-[#888888] text-[10px] transition-colors"
+                className="flex items-center gap-1 text-[#888888] hover:text-[#555555] text-[10px] transition-colors"
               >
                 {showAuthNotes ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                 Authentication notes
               </button>
               {showAuthNotes && (
-                <p className="text-[#888888] text-xs mt-1 leading-relaxed">{result.authentication_notes}</p>
+                <p className="text-[#555555] text-xs mt-1 leading-relaxed">{result.authentication_notes}</p>
               )}
             </div>
           )}

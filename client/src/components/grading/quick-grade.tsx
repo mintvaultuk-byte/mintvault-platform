@@ -73,7 +73,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
           <Zap size={14} className="text-[#D4AF37]" />
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Quick Grade</p>
         </div>
-        <p className="text-[#888888] text-[10px]">1-0 keys to set · Tab to move</p>
+        <p className="text-[#555555] text-[10px]">1-0 keys to set · Tab to move</p>
       </div>
 
       {/* Grade display */}
@@ -86,7 +86,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
       <div className="flex gap-2">
         {FIELDS.map(f => (
           <div key={f.key} className="flex-1">
-            <p className="text-[#888888] text-[10px] font-semibold uppercase tracking-wider text-center mb-1">{f.label}</p>
+            <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider text-center mb-1">{f.label}</p>
             <button
               type="button"
               onClick={() => onFocusField(focusField === f.key ? null : f.key)}
@@ -103,7 +103,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
               <select
                 value={subgrades[f.key]}
                 onChange={e => onChange({ ...subgrades, [f.key]: parseFloat(e.target.value) })}
-                className="w-full mt-1 bg-[#F7F7F5] border border-[#D4AF37]/40 text-[#3A3A3A] text-xs rounded px-1 py-1"
+                className="w-full mt-1 bg-[#F7F7F5] border border-[#D4AF37]/40 text-[#1A1A1A] text-xs rounded px-1 py-1"
                 autoFocus
               >
                 {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -129,7 +129,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
           Approve Grade
         </button>
       </div>
-      <p className="text-[#AAAAAA] text-[9px] text-center">Cmd+Enter to approve · Cmd+S to save</p>
+      <p className="text-[#888888] text-[9px] text-center">Cmd+Enter to approve · Cmd+S to save</p>
     </div>
   );
 }

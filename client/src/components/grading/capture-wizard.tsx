@@ -55,8 +55,8 @@ function DropZone({ side, file, uploading, processed, onFile }: {
       {uploading ? (
         <>
           <Loader2 className="text-[#D4AF37] animate-spin" size={28} />
-          <p className="text-[#3A3A3A] text-sm">Uploading & processing…</p>
-          <p className="text-[#888888] text-[10px]">Auto-cropping and generating analysis views</p>
+          <p className="text-[#1A1A1A] text-sm">Uploading & processing…</p>
+          <p className="text-[#555555] text-[10px]">Auto-cropping and generating analysis views</p>
         </>
       ) : processed && file ? (
         <>
@@ -66,13 +66,13 @@ function DropZone({ side, file, uploading, processed, onFile }: {
           <p className="text-emerald-600 text-xs font-bold flex items-center gap-1">
             <CheckCircle2 size={12} /> PROCESSED
           </p>
-          <p className="text-[#888888] text-[10px]">Click to replace</p>
+          <p className="text-[#555555] text-[10px]">Click to replace</p>
         </>
       ) : (
         <>
-          <Upload size={28} className="text-[#888888]" />
-          <p className="text-[#3A3A3A] text-sm font-bold">Drop {side} image here</p>
-          <p className="text-[#888888] text-[10px]">or click to browse · JPEG / PNG / WebP</p>
+          <Upload size={28} className="text-[#555555]" />
+          <p className="text-[#1A1A1A] text-sm font-bold">Drop {side} image here</p>
+          <p className="text-[#555555] text-[10px]">or click to browse · JPEG / PNG / WebP</p>
         </>
       )}
     </div>
@@ -132,7 +132,7 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
         <Camera size={16} className="text-[#D4AF37]" />
         <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Image Capture</p>
       </div>
-      <p className="text-[#666666] text-xs mb-5">
+      <p className="text-[#333333] text-xs mb-5">
         Drag front and back scans here, or click to browse. Images are auto-cropped and processed for AI analysis.
       </p>
 
@@ -167,7 +167,7 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
       )}
 
       {processed.front && !files.back && (
-        <p className="mt-4 text-[#666666] text-xs text-center">Front image processed. Upload back image to continue, or scroll down to analyze front only.</p>
+        <p className="mt-4 text-[#333333] text-xs text-center">Front image processed. Upload back image to continue, or scroll down to analyze front only.</p>
       )}
     </div>
   );

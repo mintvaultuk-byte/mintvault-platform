@@ -271,7 +271,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                 </div>
               ) : (
                 <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
-                  <p className="text-[#888888] text-sm">Select a certificate from the queue to begin grading</p>
+                  <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
                 </div>
               )}
             </div>
@@ -994,7 +994,7 @@ function RecentCertRow({
             ? "bg-green-50 text-green-600"
             : cert.status === "voided"
             ? "bg-red-50 text-red-600"
-            : "bg-gray-500/20 text-[#666666]"
+            : "bg-gray-500/20 text-[#333333]"
         }`}>{cert.status}</span>
         <span className="text-[#999999] text-xs hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
@@ -1202,7 +1202,7 @@ function CertsView({
                   ? f === "voided"
                     ? "bg-red-50 text-red-600 border-red-200"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-${f}`}
             >
@@ -1216,7 +1216,7 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 gradeTypeFilter === gt
                   ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-gradetype-${gt}`}
             >
@@ -1233,9 +1233,9 @@ function CertsView({
                   ? o === "claimed"
                     ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                     : o === "unclaimed"
-                    ? "bg-gray-700 text-[#666666] border-gray-600"
+                    ? "bg-gray-700 text-[#333333] border-gray-600"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-ownership-${o}`}
             >
@@ -1366,7 +1366,7 @@ function CertRow({
                   ? "bg-green-50 text-green-600"
                   : cert.status === "voided"
                   ? "bg-red-50 text-red-600"
-                  : "bg-gray-500/20 text-[#666666]"
+                  : "bg-gray-500/20 text-[#333333]"
               }`}>
                 {cert.status === "active" || cert.status === "published" ? <Eye size={10} className="inline mr-0.5" /> : <EyeOff size={10} className="inline mr-0.5" />}
                 {cert.status}
@@ -1495,15 +1495,15 @@ function VoidConfirmationModal({
           <AlertTriangle className="text-red-400 shrink-0" size={24} />
           <h3 className="text-red-400 font-bold tracking-wider text-sm uppercase">Void Certificate</h3>
         </div>
-        <p className="text-[#666666] text-sm mb-2">
+        <p className="text-[#333333] text-sm mb-2">
           You are about to void certificate <span className="text-[#1A1A1A] font-mono font-bold">{cert.certId}</span>.
         </p>
-        <p className="text-[#666666] text-xs mb-4">
+        <p className="text-[#333333] text-xs mb-4">
           This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public lookup page. The certificate ID will be preserved.
         </p>
 
         <div className="mb-3">
-          <label className="text-[#666666] text-xs block mb-1">Reason (optional)</label>
+          <label className="text-[#333333] text-xs block mb-1">Reason (optional)</label>
           <input
             type="text"
             value={reason}
@@ -1515,7 +1515,7 @@ function VoidConfirmationModal({
         </div>
 
         <div className="mb-5">
-          <label className="text-[#666666] text-xs block mb-1">
+          <label className="text-[#333333] text-xs block mb-1">
             Type <span className="text-red-400 font-bold">VOID</span> to confirm
           </label>
           <input
@@ -1531,7 +1531,7 @@ function VoidConfirmationModal({
         <div className="flex items-center gap-3 justify-end">
           <button
             onClick={onCancel}
-            className="text-[#666666] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
+            className="text-[#333333] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
             data-testid="button-void-cancel"
           >
             Cancel
