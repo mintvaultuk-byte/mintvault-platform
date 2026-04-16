@@ -42,7 +42,7 @@ const TIERS = [
     popular: false,
     colour: "#CD7F32",
     features: [
-      "10% off all grading submissions",
+      "5% off all grading submissions",
       "30 AI Pre-Grade credits per month",
       "Bronze Verified badge",
       "Showroom activated",
@@ -62,7 +62,7 @@ const TIERS = [
     popular: true,
     colour: "#C0C0C0",
     features: [
-      "20% off all grading submissions",
+      "10% off all grading submissions",
       "100 AI Pre-Grade credits per month",
       "Silver Verified badge",
       "All 8 Showroom themes",
@@ -85,7 +85,7 @@ const TIERS = [
     popular: false,
     colour: "#D4AF37",
     features: [
-      "30% off all grading submissions",
+      "20% off all grading submissions",
       "400 AI Pre-Grade credits per month",
       "Gold Vault badge with checkmark",
       "Featured Collector rotation",
@@ -101,7 +101,7 @@ const TIERS = [
 ];
 
 const COMPARISON_ROWS = [
-  { feature: "Grading discount",           bronze: "10%",    silver: "20%",    gold: "30%" },
+  { feature: "Grading discount",           bronze: "5%",     silver: "10%",    gold: "20%" },
   { feature: "AI Pre-Grade credits/month", bronze: "30",     silver: "100",    gold: "400" },
   { feature: "Showroom activated",         bronze: true,     silver: true,     gold: true },
   { feature: "Showroom themes",            bronze: "3",      silver: "8",      gold: "8" },
@@ -451,7 +451,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
         <div className="bg-white border border-[#E8E4DC] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Award size={14} className="text-[#D4AF37]" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Member Credits</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Reholder Credits</span>
           </div>
           <p className="text-xl font-black text-[#1A1A1A]">{me.member_credits_remaining}</p>
           <p className="text-xs text-[#AAAAAA]">quarterly</p>
@@ -544,7 +544,7 @@ function MarketingView() {
     <div className="bg-[#FAFAF8]">
       <SeoHead
         title="Vault Club | MintVault UK"
-        description="Join Vault Club — exclusive perks for serious collectors. Up to 30% off grading, monthly AI Pre-Grade credits, your own Showroom, and verified tier badges."
+        description="Join Vault Club — exclusive perks for serious collectors. Up to 20% off grading, monthly AI Pre-Grade credits, your own Showroom, and verified tier badges."
         canonical="https://mintvaultuk.com/club"
       />
 
@@ -590,7 +590,7 @@ function MarketingView() {
         {/* Why section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
           {[
-            { icon: <TrendingDown size={24} className="text-[#D4AF37]" />, title: "Save Money", body: "Up to 30% off every grading submission. The discount pays for your membership in just a few cards." },
+            { icon: <TrendingDown size={24} className="text-[#D4AF37]" />, title: "Save Money", body: "Up to 20% off every grading submission. The discount pays for your membership in just a few cards." },
             { icon: <Shield size={24} className="text-[#D4AF37]" />, title: "Stand Out", body: "A verified badge on your Showroom and certificates tells other collectors you're a serious member of the registry." },
             { icon: <Zap size={24} className="text-[#D4AF37]" />, title: "Get Priority", body: "Skip-queue access, monthly AI Pre-Grade credits, and members-only design on your Vault reports." },
           ].map((item) => (
