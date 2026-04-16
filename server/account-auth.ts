@@ -215,7 +215,16 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
-  // Member credits table (renamed from reholder_credits)
+  // ── v230 rename: reholder_credits → member_credits ────────────────────────
+  // RENAME runs first — before CREATE TABLE — so CREATE doesn't block the rename
+  try {
+    await db.execute(sql`ALTER TABLE IF EXISTS reholder_credits RENAME TO member_credits`);
+    console.log("[v230-migrate] renamed reholder_credits → member_credits");
+  } catch (e: any) {
+    if (e.code !== "42P07" && e.code !== "42P01") console.error("[v230-migrate] rename failed:", e.message);
+  }
+
+  // Create table for fresh installs (no-op if rename already created it)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS member_credits (
       id                    SERIAL PRIMARY KEY,
@@ -228,19 +237,13 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
-  // ── v230 rename: reholder_credits → member_credits ────────────────────────
-  try {
-    await db.execute(sql`ALTER TABLE IF EXISTS reholder_credits RENAME TO member_credits`);
-    console.log("[v230-migrate] renamed reholder_credits → member_credits");
-  } catch (e: any) {
-    // 42P07 = table already exists (rename already ran), 42P01 = table doesn't exist (fresh install)
-    if (e.code !== "42P07" && e.code !== "42P01") console.error("[v230-migrate] rename failed:", e.message);
-  }
+  // Compat view so any lingering references to old name still resolve
   try {
     await db.execute(sql`DROP VIEW IF EXISTS reholder_credits`);
     await db.execute(sql`CREATE OR REPLACE VIEW reholder_credits AS SELECT * FROM member_credits`);
     console.log("[v230-migrate] compat view reholder_credits → member_credits created");
   } catch (e: any) {
+    // If reholder_credits still exists as a base table (shouldn't after rename), skip
     console.log("[v230-migrate] compat view skipped:", e.message);
   }
   try {
