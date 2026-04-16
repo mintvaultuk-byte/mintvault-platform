@@ -504,7 +504,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     <span className="text-[8px] font-bold text-[#555555]">T</span>
                     <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
                   </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, left: "50%", transform: "translateX(-50%)" }}>
+                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 64, left: "50%", transform: "translateX(-50%)" }}>
                     <EdgeSelect value={ee.bottom} onChange={v => setE("bottom", v)} isLowest={isELow(ee.bottom)} />
                     <span className="text-[8px] font-bold text-[#555555]">B</span>
                   </div>
