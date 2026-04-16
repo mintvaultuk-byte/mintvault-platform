@@ -447,9 +447,32 @@ export const transferVerifications = pgTable("transfer_verifications", {
   disputeDeadline:      timestamp("dispute_deadline"),
   disputedAt:           timestamp("disputed_at"),
   disputeReason:        text("dispute_reason"),
+  // ── v2 transfer flow columns ──────────────────────────────────────────────
+  flowVersion:              varchar("flow_version", { length: 4 }).notNull().default("v1"),
+  status:                   varchar("transfer_status", { length: 30 }).notNull().default("pending_owner"),
+  referenceNumberProvided:  text("reference_number_provided"),
+  outgoingKeeperUserId:     varchar("outgoing_keeper_user_id"),
+  incomingKeeperUserId:     varchar("incoming_keeper_user_id"),
+  incomingConfirmDeadline:  timestamp("incoming_confirm_deadline"),
+  disputedBy:               varchar("disputed_by", { length: 10 }),
+  finalisedAt:              timestamp("finalised_at"),
+  cancelledAt:              timestamp("cancelled_at"),
+  cancellationReason:       text("cancellation_reason"),
 });
 
 export type TransferVerification = typeof transferVerifications.$inferSelect;
+
+// v2 transfer statuses — DVLA-style flow
+export const TRANSFER_V2_STATUSES = [
+  "pending_owner",        // Outgoing keeper has initiated, awaiting their email confirmation
+  "pending_incoming",     // Outgoing confirmed, awaiting incoming keeper confirmation + ref number
+  "pending_dispute",      // Both confirmed, in 14-day dispute window
+  "completed",            // Dispute window passed or skipped, transfer finalised
+  "disputed",             // One party raised a dispute during the window
+  "cancelled",            // Cancelled by outgoing keeper or expired
+  "expired",              // Token expired without action
+] as const;
+export type TransferV2Status = typeof TRANSFER_V2_STATUSES[number];
 
 export const OWNERSHIP_STATUSES = ["unclaimed", "claimed", "transfer_pending"] as const;
 export type OwnershipStatus = typeof OWNERSHIP_STATUSES[number];
@@ -761,12 +784,12 @@ export function calculateOrderTotals(pricePerCard: number, quantity: number, tot
 export const pricingTiers: PricingTier[] = [
   {
     id: "standard",
-    name: "STANDARD",
-    price: "£12 per card",
-    pricePerCard: 1200,
+    name: "VAULT QUEUE",
+    price: "£19 per card",
+    pricePerCard: 1900,
     recommendedCardValue: "Any value",
-    turnaround: "20 working days",
-    turnaroundDays: 20,
+    turnaround: "40 working days",
+    turnaroundDays: 40,
     features: [
       "Professional grade assessment (1–10 scale)",
       "Subgrade breakdown (centering, corners, edges, surface)",
@@ -778,12 +801,12 @@ export const pricingTiers: PricingTier[] = [
   },
   {
     id: "priority",
-    name: "PRIORITY",
-    price: "£15 per card",
-    pricePerCard: 1500,
+    name: "STANDARD",
+    price: "£25 per card",
+    pricePerCard: 2500,
     recommendedCardValue: "Any value",
-    turnaround: "10 working days",
-    turnaroundDays: 10,
+    turnaround: "15 working days",
+    turnaroundDays: 15,
     features: [
       "Professional grade assessment (1–10 scale)",
       "Subgrade breakdown (centering, corners, edges, surface)",
@@ -796,8 +819,8 @@ export const pricingTiers: PricingTier[] = [
   {
     id: "express",
     name: "EXPRESS",
-    price: "£20 per card",
-    pricePerCard: 2000,
+    price: "£45 per card",
+    pricePerCard: 4500,
     recommendedCardValue: "Any value",
     turnaround: "5 working days",
     turnaroundDays: 5,
@@ -808,41 +831,6 @@ export const pricingTiers: PricingTier[] = [
       "Unique online-verifiable certificate",
       "Claim code for ownership registration",
       "Insured Royal Mail return shipping",
-    ],
-  },
-  {
-    id: "gold",
-    name: "GOLD",
-    price: "£85 per card",
-    pricePerCard: 8500,
-    recommendedCardValue: "£500+",
-    turnaround: "5 working days",
-    turnaroundDays: 5,
-    features: [
-      "Professional grade assessment (1–10 scale)",
-      "White glove card care",
-      "Priority handling throughout",
-      "Detailed grading breakdown",
-      "Up to £2,500 per card insurance",
-      "GEM MINT 10 receives exclusive Black Label",
-    ],
-  },
-  {
-    id: "gold-elite",
-    name: "GOLD ELITE",
-    price: "£125 per card",
-    pricePerCard: 12500,
-    recommendedCardValue: "£1,000+",
-    turnaround: "2-3 working days",
-    turnaroundDays: 3,
-    features: [
-      "Professional grade assessment (1–10 scale)",
-      "White glove card care",
-      "Priority handling throughout",
-      "Detailed grading breakdown",
-      "Direct communication with head grader",
-      "Up to £5,000 per card insurance",
-      "GEM MINT 10 receives exclusive Black Label",
     ],
   },
 ];
