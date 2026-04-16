@@ -198,7 +198,7 @@ export default function HomePage() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
               {[
-                { icon: <ShoppingCart size={20} className="text-[#B8960C]" />, step: "01", title: "Choose a tier", desc: "Pick your grading speed — Standard from £12/card." },
+                { icon: <ShoppingCart size={20} className="text-[#B8960C]" />, step: "01", title: "Choose a tier", desc: "Pick your grading speed — Grading from £19/card." },
                 { icon: <Package size={20} className="text-[#B8960C]" />, step: "02", title: "Post your cards", desc: "Send to our Rochester facility via insured post." },
                 { icon: <Scan size={20} className="text-[#B8960C]" />, step: "03", title: "We grade them", desc: "6400 DPI scans, AI analysis, expert assessment." },
                 { icon: <Truck size={20} className="text-[#B8960C]" />, step: "04", title: "Delivered back", desc: "VaultLock™ NFC slab + insured tracked Royal Mail return." },
@@ -384,7 +384,7 @@ export default function HomePage() {
               >
                 <div className="text-[#3c2f00]">
                   <h3 className="text-2xl font-black mb-2 tracking-tight">Fast UK Turnaround</h3>
-                  <p className="font-medium opacity-80 text-sm">20-day Standard. 10-day Priority. 5-day Express. No international shipping delays.</p>
+                  <p className="font-medium opacity-80 text-sm">5 to 40 working days depending on tier. No international shipping delays.</p>
                 </div>
                 <Zap size={56} className="text-[#3c2f00]/20 flex-shrink-0" />
               </div>
@@ -523,7 +523,7 @@ export default function HomePage() {
               Simple, Transparent Pricing
             </h2>
             <p className="text-[#666666] mb-8 max-w-xl mx-auto">
-              From £12 per card. All tiers include grading, labelling, encapsulation, and fully insured Royal Mail return. Bulk discounts from 10 cards.
+              From £19 per card. All tiers include grading, labelling, encapsulation, and fully insured Royal Mail return. Bulk discounts from 10 cards.
             </p>
             <div className="flex gap-4 justify-center">
               <Link href="/pricing">
@@ -593,7 +593,7 @@ export default function HomePage() {
                     ["Insured Return Shipping (Royal Mail)", "✓", "✓", "✗"],
                     ["Insurance Included",              "✓", "~", "✗"],
                     ["No Value Upcharges",              "✓", "✗", "✗"],
-                    ["20-Day Standard Turnaround",      "✓", "~", "✗"],
+                    ["15-Day Standard Turnaround",      "✓", "~", "✗"],
                     ["No Import / Customs Risk",        "✓", "✓", "✗"],
                     ["Verified Ownership Registry",     "✓", "✗", "✗"],
                   ].map(([feature, mv, uk, intl], i) => (
@@ -639,11 +639,11 @@ export default function HomePage() {
               {[
                 {
                   q: "How long does grading take?",
-                  a: "Standard is 20 working days, Priority is 10 working days, and Express is 5 working days — all from the date we receive your cards. You'll receive email updates at each stage — received, graded, and dispatched.",
+                  a: "Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days — all from the date we receive your cards. You'll receive email updates at each stage — received, graded, and dispatched.",
                 },
                 {
                   q: "What does the pricing include?",
-                  a: "All tiers include grading, label production, slab encapsulation, and fully insured Royal Mail Special Delivery return shipping. There are no hidden fees. Basic starts at £12 per card.",
+                  a: "All tiers include grading, label production, slab encapsulation, and fully insured Royal Mail Special Delivery return shipping. There are no hidden fees. Grading starts at £19 per card.",
                 },
                 {
                   q: "How does VaultLock™ verification work?",

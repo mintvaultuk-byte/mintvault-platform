@@ -25,7 +25,7 @@ const faqs = [
   },
   {
     question: "How long does card grading take by post?",
-    answer: "MintVault offers three service tiers. Standard is 20 working days, Priority is 10 working days, and Express is 5 working days — measured from when your cards arrive at our facility. You'll receive confirmation when your cards are received and when grading is complete.",
+    answer: "MintVault offers three service tiers. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days — measured from when your cards arrive at our facility. You'll receive confirmation when your cards are received and when grading is complete.",
   },
   {
     question: "Can I track my card grading submission?",
@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "Card Grading Near Me — UK Postal Service",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "UK card grading by post — no local drop-off required. MintVault accepts cards from anywhere in the UK. Professional grading from £12 per card.",
+    description: "UK card grading by post — no local drop-off required. MintVault accepts cards from anywhere in the UK. Professional grading from £19 per card.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },
@@ -52,7 +52,7 @@ export default function CardGradingNearMe() {
     <div className="px-4 py-10">
       <SeoHead
         title="Card Grading Near Me | UK Card Grading by Post | MintVault"
-        description="Looking for card grading near you in the UK? MintVault accepts postal submissions from anywhere in the UK. Professional grading from £12 — no drop-off needed."
+        description="Looking for card grading near you in the UK? MintVault accepts postal submissions from anywhere in the UK. Professional grading from £19 — no drop-off needed."
         canonical="https://mintvaultuk.com/card-grading-near-me"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -119,9 +119,9 @@ export default function CardGradingNearMe() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

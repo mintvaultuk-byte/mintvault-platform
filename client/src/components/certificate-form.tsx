@@ -1191,15 +1191,10 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   data-testid="select-service-tier"
                 >
                   <option value="" className="bg-white">Standard (default)</option>
-                  <option value="standard" className="bg-white">Standard — £12</option>
-                  <option value="priority" className="bg-white">Priority — £15</option>
-                  <option value="express" className="bg-white">Express — £20</option>
-                  <option value="gold" className="bg-white">Gold — £85 (Black Label if grade 10)</option>
-                  <option value="gold-elite" className="bg-white">Gold Elite — £125 (Black Label if grade 10)</option>
+                  <option value="vault-queue" className="bg-white">Vault Queue — £19</option>
+                  <option value="standard" className="bg-white">Standard — £25</option>
+                  <option value="express" className="bg-white">Express — £45</option>
                 </select>
-                {(form.serviceTier === "gold" || form.serviceTier === "gold-elite") && form.gradeOverall === "10" && (
-                  <p className="text-[#D4AF37] text-xs mt-1.5">⭐ This card will receive a Black Label.</p>
-                )}
               </div>
             </>
           )}

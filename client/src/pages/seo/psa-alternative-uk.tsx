@@ -29,7 +29,7 @@ const faqs = [
   },
   {
     question: "What turnaround times does MintVault offer compared to PSA?",
-    answer: "MintVault offers three service tiers with turnaround from 5 to 20 working days. Because there is no international shipping involved, total time from sending your cards to receiving them back is significantly reduced compared to using an overseas service. PSA turnaround times have historically varied considerably depending on demand.",
+    answer: "MintVault offers three service tiers with turnaround from 5 to 40 working days. Because there is no international shipping involved, total time from sending your cards to receiving them back is significantly reduced compared to using an overseas service. PSA turnaround times have historically varied considerably depending on demand.",
   },
 ];
 
@@ -58,7 +58,7 @@ export default function PsaAlternativeUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="PSA Alternative UK | UK Card Grading Service | MintVault"
-        description="Looking for a PSA alternative in the UK? MintVault offers professional card grading without international shipping, customs fees, or long wait times. Grade locally from £12/card."
+        description="Looking for a PSA alternative in the UK? MintVault offers professional card grading without international shipping, customs fees, or long wait times. Grade locally from £19/card."
         canonical="https://mintvaultuk.com/psa-alternative-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -97,7 +97,7 @@ export default function PsaAlternativeUk() {
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Turnaround Time</h3>
             <p>
-              The total time from posting your cards to receiving them back includes the grading service's processing time plus shipping time in both directions. For US services, this can mean adding 2 to 4 weeks of transit time on top of the stated turnaround. MintVault's turnaround times range from 5 to 20 working days, and because shipping is domestic, the total elapsed time is much more predictable.
+              The total time from posting your cards to receiving them back includes the grading service's processing time plus shipping time in both directions. For US services, this can mean adding 2 to 4 weeks of transit time on top of the stated turnaround. MintVault's turnaround times range from 5 to 40 working days, and because shipping is domestic, the total elapsed time is much more predictable.
             </p>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Brand Recognition and Verification</h3>
@@ -119,7 +119,7 @@ export default function PsaAlternativeUk() {
               { icon: <Shield size={20} />, title: "Cards Stay in the UK", desc: "No international transit risk. Your cards are handled domestically from start to finish." },
               { icon: <Globe size={20} />, title: "No Customs or Duties", desc: "Avoid import VAT, customs duty, and broker handling fees that apply to international returns." },
               { icon: <Clock size={20} />, title: "Faster Total Turnaround", desc: "Domestic shipping is faster and more predictable. No weeks of transit time added to the process." },
-              { icon: <Award size={20} />, title: "Competitive Pricing", desc: "Grading from £12 per card with no hidden international costs. Bulk discounts available for larger orders." },
+              { icon: <Award size={20} />, title: "Competitive Pricing", desc: "Grading from £19 per card with no hidden international costs. Bulk discounts available for larger orders." },
               { icon: <CheckCircle size={20} />, title: "Online Verification", desc: "Every MintVault certificate can be verified online, providing proof of grade and authenticity." },
               { icon: <Globe size={20} />, title: "UK Customer Support", desc: "Reach our team directly without time zone complications. Get answers about your submission quickly." },
             ].map((item, i) => (
@@ -143,8 +143,8 @@ export default function PsaAlternativeUk() {
             <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
               <li>Your cards stay in the UK — no international transit risk for irreplaceable items</li>
               <li>Zero customs paperwork, zero import charges, zero VAT surprises</li>
-              <li>Predictable turnaround: 5 to 20 working days, with no international shipping delays added</li>
-              <li>Transparent pricing from £12 per card — what you see is what you pay</li>
+              <li>Predictable turnaround: 5 to 40 working days, with no international shipping delays added</li>
+              <li>Transparent pricing from £19 per card — what you see is what you pay</li>
               <li>UK-based support team available in your time zone</li>
               <li>Bulk discounts up to 15% make large submissions significantly more affordable than shipping overseas</li>
             </ul>
@@ -197,7 +197,7 @@ export default function PsaAlternativeUk() {
 
         <CtaSection
           title="Grade Your Cards in the UK"
-          subtitle="No customs, no international shipping risks. Professional grading from £12 per card with insured returns."
+          subtitle="No customs, no international shipping risks. Professional grading from £19 per card with insured returns."
         />
       </div>
     </div>

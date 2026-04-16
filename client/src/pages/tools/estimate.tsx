@@ -468,7 +468,7 @@ export default function PreGradeEstimatePage() {
 
             <div className="bg-gradient-to-br from-[#1A1400] to-[#2A2000] rounded-2xl p-6 text-center space-y-4">
               <p className="text-[#D4AF37] font-bold text-lg">Ready to get an official grade?</p>
-              <p className="text-[#CCCCCC] text-sm">Professional grading from £12/card — includes NFC slab, ownership registry, and full Digital Grading Report.</p>
+              <p className="text-[#CCCCCC] text-sm">Professional grading from £19/card — includes NFC slab, ownership registry, and full Digital Grading Report.</p>
               <Link href="/submit">
                 <button className="gold-shimmer flex items-center justify-center gap-2 text-sm font-bold px-8 py-3 rounded-xl mx-auto">
                   Submit Your Cards <ArrowRight size={14} />

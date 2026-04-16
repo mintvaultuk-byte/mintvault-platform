@@ -151,9 +151,9 @@ function getEstimatedReturnDate(turnaroundDays: number): string {
 }
 
 const OTHER_SERVICES_INFO = [
-  { id: "reholder", name: "Reholder", price: "£8 / card", turnaround: "20 working days", desc: "New slab + VaultLock NFC chip for an existing graded card" },
-  { id: "crossover", name: "Crossover", price: "£15 / card", turnaround: "20 working days", desc: "Grade a card from another company (PSA, BGS, etc.)" },
-  { id: "authentication", name: "Authentication", price: "£10 / card", turnaround: "20 working days", desc: "Verify authenticity — no grade assigned" },
+  { id: "reholder", name: "Reholder", price: "£15 / card", turnaround: "15 working days", desc: "New slab + VaultLock NFC chip for an existing graded card" },
+  { id: "crossover", name: "Crossover", price: "£35 / card", turnaround: "15 working days", desc: "Grade a card from another company (PSA, BGS, etc.)" },
+  { id: "authentication", name: "Authentication", price: "£15 / card", turnaround: "15 working days", desc: "Verify authenticity — no grade assigned" },
 ];
 
 function Step1Tier({ state, setState, tiers, capacity }: {

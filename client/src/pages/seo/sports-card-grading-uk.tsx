@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does sports card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £12 per card. Three service tiers: Standard (20 working days, £12), Priority (10 working days, £15), Express (5 working days, £20). Bulk discounts apply for 10 or more cards. All prices include insured return shipping.",
+    answer: "MintVault UK grading starts from £19 per card. Three service tiers: Vault Queue (40 working days, £19), Standard (15 working days, £25), Express (5 working days, £45). Bulk discounts apply for 10 or more cards. All prices include insured return shipping.",
   },
   {
     question: "How are sports cards graded by MintVault?",
@@ -92,9 +92,9 @@ export default function SportsCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

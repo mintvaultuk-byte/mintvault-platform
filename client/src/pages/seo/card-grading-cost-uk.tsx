@@ -13,7 +13,7 @@ const breadcrumbs = [
 const faqs = [
   {
     question: "How much does card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £12 per card for the Standard tier (20 working day turnaround). Priority is £15 (10 working days) and Express is £20 (5 working days). All prices include fully insured return shipping.",
+    answer: "MintVault UK grading starts from £19 per card for the Vault Queue tier (40 working day turnaround). Standard is £25 (15 working days) and Express is £45 (5 working days). All prices include fully insured return shipping.",
   },
   {
     question: "Are there bulk discounts for card grading?",
@@ -29,7 +29,7 @@ const faqs = [
   },
   {
     question: "What is the minimum value card worth grading?",
-    answer: "As a general rule, a card should have a raw market value at least 3–4× the grading cost to make financial sense. At £12 Standard tier, cards worth £40+ in near-mint condition are typically good candidates. High-grade results can multiply value significantly beyond this threshold.",
+    answer: "As a general rule, a card should have a raw market value at least 3–4× the grading cost to make financial sense. At £19 Vault Queue tier, cards worth £60+ in near-mint condition are typically good candidates. High-grade results can multiply value significantly beyond this threshold.",
   },
 ];
 
@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "Card Grading Cost UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "Transparent card grading pricing in the UK. MintVault UK grading from £12 per card, all-inclusive with insured return shipping.",
+    description: "Transparent card grading pricing in the UK. MintVault UK grading from £19 per card, all-inclusive with insured return shipping.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },
@@ -52,7 +52,7 @@ export default function CardGradingCostUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Card Grading Cost UK | How Much Does Card Grading Cost? | MintVault"
-        description="How much does card grading cost in the UK? MintVault offers transparent all-inclusive pricing from £12 per card with insured return shipping."
+        description="How much does card grading cost in the UK? MintVault offers transparent all-inclusive pricing from £19 per card with insured return shipping."
         canonical="https://mintvaultuk.com/card-grading-cost-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -77,9 +77,9 @@ export default function CardGradingCostUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Grading Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card", desc: "Best for bulk collections and standard submissions." },
-              { tier: "Priority", days: "10 working days", price: "£15/card", desc: "Faster turnaround for time-sensitive submissions." },
-              { tier: "Express", days: "5 working days", price: "£20/card", desc: "Priority processing for urgent or high-value cards." },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card", desc: "Best for bulk collections and standard submissions." },
+              { tier: "Standard", days: "15 working days", price: "£25/card", desc: "Faster turnaround for time-sensitive submissions." },
+              { tier: "Express", days: "5 working days", price: "£45/card", desc: "Priority processing for urgent or high-value cards." },
             ].map((t) => (
               <div key={t.tier} className="border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <div className="flex items-center justify-between mb-1">
@@ -137,14 +137,14 @@ export default function CardGradingCostUk() {
             ))}
           </div>
           <p className="text-[#444444] text-sm leading-relaxed">
-            The same 10 cards with MintVault Standard tier: <strong className="text-[#1A1A1A]">£150 all-inclusive</strong>. No customs. No import VAT. No surprises.
+            The same 10 cards with MintVault Vault Queue tier: <strong className="text-[#1A1A1A]">£190 all-inclusive</strong>. No customs. No import VAT. No surprises.
           </p>
         </section>
 
         <FaqSection faqs={faqs} title="Card Grading Cost — FAQs" />
 
         <div className="mt-10">
-          <CtaSection title="Transparent Pricing, No Hidden Fees" subtitle="Grade your cards with MintVault — all-inclusive UK pricing from £12 per card." />
+          <CtaSection title="Transparent Pricing, No Hidden Fees" subtitle="Grade your cards with MintVault — all-inclusive UK pricing from £19 per card." />
         </div>
 
         <section className="mt-10">

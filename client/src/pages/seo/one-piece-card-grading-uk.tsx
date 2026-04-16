@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does One Piece card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £12 per card (Standard, 20 working days). Priority is £15 (10 working days) and Express is £20 (5 working days). Bulk discounts are available for submissions of 10 or more cards.",
+    answer: "MintVault UK grading starts from £19 per card (Vault Queue, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts are available for submissions of 10 or more cards.",
   },
   {
     question: "How are One Piece cards returned after grading?",
@@ -52,7 +52,7 @@ export default function OnePieceCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="One Piece Card Grading UK | Professional TCG Grading | MintVault"
-        description="Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £12."
+        description="Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £19."
         canonical="https://mintvaultuk.com/one-piece-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -77,9 +77,9 @@ export default function OnePieceCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

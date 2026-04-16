@@ -30,7 +30,7 @@ const steps = [
     num: "01",
     icon: ShoppingCart,
     title: "Choose Your Service",
-    body: "Select your grading speed and coverage tier. Standard from £12/card with a 20 working day turnaround. All tiers include the same precision slab, NFC verification, and Digital Grading Report.",
+    body: "Select your grading speed and coverage tier. Vault Queue from £19/card with turnaround from 5 to 40 working days. All tiers include the same precision slab, NFC verification, and Digital Grading Report.",
     cta: { label: "View Pricing →", href: "/pricing" },
     note: null,
   },
@@ -128,7 +128,7 @@ export default function HowItWorksPage() {
     <>
       <SeoHead
         title="How It Works — Professional Card Grading in 5 Steps | MintVault UK"
-        description="Submit your trading cards for professional grading in 5 easy steps. UK-based service from £12/card with NFC-verified slabs, AI-assisted grading, and insured return shipping."
+        description="Submit your trading cards for professional grading in 5 easy steps. UK-based service from £19/card with NFC-verified slabs, AI-assisted grading, and insured return shipping."
         canonical="/how-it-works"
       />
 

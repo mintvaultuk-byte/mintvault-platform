@@ -62,7 +62,7 @@ export default function TcgGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="TCG Grading UK | Professional Trading Card Game Grading | MintVault"
-        description="Professional TCG grading in the UK for Pokemon, Yu-Gi-Oh!, Magic: The Gathering and all major trading card games. For collectors, investors, and resellers. From £12/card."
+        description="Professional TCG grading in the UK for Pokemon, Yu-Gi-Oh!, Magic: The Gathering and all major trading card games. For collectors, investors, and resellers. From £19/card."
         canonical="https://mintvaultuk.com/tcg-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -150,9 +150,9 @@ export default function TcgGradingUk() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Shield size={20} />, title: "Domestic Service", desc: "Your cards stay within the UK. No international shipping risks, no customs paperwork, no import duties." },
-              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "Service tiers from 5 to 20 working days. Domestic shipping means shorter total elapsed time." },
+              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "Service tiers from 5 to 40 working days. Domestic shipping means shorter total elapsed time." },
               { icon: <Award size={20} />, title: "Professional Grading", desc: "Trained UK-based graders assess centering, corners, edges, and surface quality on a 1-10 scale." },
-              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Grading from £12 per card with bulk discounts up to 15%. No hidden international shipping or customs costs." },
+              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Grading from £19 per card with bulk discounts up to 15%. No hidden international shipping or customs costs." },
               { icon: <Users size={20} />, title: "UK Customer Support", desc: "Contact our team directly in your time zone for questions about your submission." },
               { icon: <Shield size={20} />, title: "Insured Returns", desc: "All graded cards are returned via fully insured tracked delivery based on your declared card value." },
             ].map((item, i) => (

@@ -34,7 +34,7 @@ const faqs = [
   },
   {
     question: "What is the minimum value a card should have before grading is worthwhile?",
-    answer: "As a general guideline, the raw market value of the card should be at least 3 to 5 times the grading cost for grading to make financial sense. However, many collectors grade cards for protection and personal enjoyment regardless of monetary value. Our grading starts from £12 per card.",
+    answer: "As a general guideline, the raw market value of the card should be at least 3 to 5 times the grading cost for grading to make financial sense. However, many collectors grade cards for protection and personal enjoyment regardless of monetary value. Our grading starts from £19 per card.",
   },
 ];
 

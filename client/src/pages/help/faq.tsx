@@ -10,8 +10,8 @@ const FAQ_DATA: FAQGroup[] = [
     category: "Submission",
     items: [
       { q: "How do I submit cards for grading?", a: "Choose your service tier on our Pricing page, then click Submit Cards. You'll receive a submission reference number. Place each card in a penny sleeve and semi-rigid card saver, pack securely, and post to MintVault UK, Rochester, Kent, including your order number inside." },
-      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Standard is 20 working days, Express is 10 working days, and Premium is 5 working days. Black Label review adds additional assessment time." },
-      { q: "How much does grading cost?", a: "Standard grading starts from £12 per card. Express starts from £20 per card. Premium starts from £35 per card. Full pricing including bulk discounts is on our Pricing page." },
+      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days." },
+      { q: "How much does grading cost?", a: "Vault Queue grading starts from £19 per card. Standard starts from £25 per card. Express starts from £45 per card. Full pricing including bulk discounts is on our Pricing page." },
       { q: "What payment methods do you accept?", a: "We accept all major credit and debit cards via Stripe. Payment is taken at the time of submission. We do not currently accept bank transfer or PayPal." },
       { q: "Can I track my submission?", a: "Yes. Visit the Track Submission page and enter your submission reference number to see the current status of your order." },
     ],
