@@ -700,9 +700,18 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   );
 }
 
-function Step3Review({ state, setState, tier }: { state: WizardState; setState: (s: WizardState) => void; tier: PricingTier | undefined }) {
+function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { state: WizardState; setState: (s: WizardState) => void; tier: PricingTier | undefined; vcPercent?: number; vcTier?: string | null }) {
   const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
+
+  const bulkPercent = totals.discountPercent;
+  const effectivePercent = Math.max(vcPercent, bulkPercent);
+  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
+  const vcWins = vcPercent > bulkPercent && vcPercent > 0;
+  const discountLabel = vcWins
+    ? `${vcTier ? vcTier.charAt(0).toUpperCase() + vcTier.slice(1) : ""} Vault Club discount (${vcPercent}%)`
+    : `Bulk discount (${bulkPercent}%)`;
+  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   return (
     <div>
@@ -775,13 +784,16 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
 
           <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
             <SummaryRow label="Service Fees" value={`£${(totals.subtotal / 100).toFixed(2)}`} testId="text-summary-subtotal" />
-            {totals.discountPercent > 0 && (
+            {effectivePercent > 0 && (
               <div className="flex justify-between items-center">
-                <span className="text-[#D4AF37]/80 text-sm">Bulk discount ({totals.discountPercent}%)</span>
+                <span className="text-[#D4AF37]/80 text-sm">{discountLabel}</span>
                 <span className="text-[#D4AF37] font-medium text-sm" data-testid="text-summary-discount">
-                  -£{(totals.discountAmount / 100).toFixed(2)}
+                  -£{(effectiveAmount / 100).toFixed(2)}
                 </span>
               </div>
+            )}
+            {vcWins && (
+              <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>
             )}
             <div className="flex justify-between items-start">
               <div className="flex-1">
@@ -828,7 +840,7 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
             <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]/20">
               <span className="text-[#D4AF37] font-bold uppercase tracking-wider">Total</span>
               <span className="text-[#1A1A1A] font-bold text-xl" data-testid="text-summary-total">
-                £{(totals.total / 100).toFixed(2)}
+                £{(effectiveTotal / 100).toFixed(2)}
               </span>
             </div>
           </div>
@@ -1012,10 +1024,12 @@ function SummaryRow({ label, value, testId }: { label: string; value: string; te
   );
 }
 
-function Step5Payment({ state, tier, onSuccess }: {
+function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: {
   state: WizardState;
   tier: PricingTier | undefined;
   onSuccess: (submissionId: string, packingSlipToken?: string) => void;
+  vcPercent?: number;
+  vcTier?: string | null;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -1025,6 +1039,10 @@ function Step5Payment({ state, tier, onSuccess }: {
   const flags = useFeatureFlags();
 
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
+  const bulkPercent = totals.discountPercent;
+  const effectivePercent = Math.max(vcPercent, bulkPercent);
+  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
+  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   const createPaymentMutation = useMutation({
     mutationFn: async () => {
@@ -1232,7 +1250,7 @@ function Step5Payment({ state, tier, onSuccess }: {
           data-testid="button-pay"
         >
           <CreditCard size={18} />
-          {isPending ? "Processing..." : `Pay £${(totals.total / 100).toFixed(2)} Securely`}
+          {isPending ? "Processing..." : `Pay £${(effectiveTotal / 100).toFixed(2)} Securely`}
         </button>
       </form>
     </div>
@@ -1303,6 +1321,19 @@ function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
 function SubmitWizardInner() {
   const [step, setStep] = useState(1);
   const [, navigate] = useLocation();
+
+  const { data: vaultClubDiscount } = useQuery<{ discount_percent: number; tier: string | null }>({
+    queryKey: ["/api/vault-club/check-discount"],
+    queryFn: async () => {
+      const res = await fetch("/api/vault-club/check-discount", { credentials: "include" });
+      if (!res.ok) return { discount_percent: 0, tier: null };
+      return res.json();
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
+  const vcPercent = vaultClubDiscount?.discount_percent ?? 0;
+  const vcTier = vaultClubDiscount?.tier ?? null;
 
   const searchParams = new URLSearchParams(window.location.search);
   const urlType = searchParams.get("type") || searchParams.get("service") || "";
@@ -1455,9 +1486,9 @@ function SubmitWizardInner() {
 
       {step === 1 && <Step1Tier state={state} setState={setState} tiers={activeTiers} capacity={capacityData} />}
       {step === 2 && <Step2Cards state={state} setState={setState} />}
-      {step === 3 && <Step3Review state={state} setState={setState} tier={selectedTier} />}
+      {step === 3 && <Step3Review state={state} setState={setState} tier={selectedTier} vcPercent={vcPercent} vcTier={vcTier} />}
       {step === 4 && <Step4Shipping state={state} setState={setState} />}
-      {step === 5 && <Step5Payment state={state} tier={selectedTier} onSuccess={handleSuccess} />}
+      {step === 5 && <Step5Payment state={state} tier={selectedTier} onSuccess={handleSuccess} vcPercent={vcPercent} vcTier={vcTier} />}
 
       <div className="flex justify-between mt-8 max-w-md mx-auto">
         {step > 1 && step < 5 && (
