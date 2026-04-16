@@ -23,7 +23,7 @@ interface VaultClubMe {
   ai_credits_balance: number;
   ai_credits_monthly: number;
   next_refill_at: string | null;
-  reholder_credits_remaining: number;
+  member_credits_remaining: number;
   stripe_customer_id: string | null;
   username: string | null;
 }
@@ -451,9 +451,9 @@ function MemberView({ me }: { me: VaultClubMe }) {
         <div className="bg-white border border-[#E8E4DC] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Award size={14} className="text-[#D4AF37]" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Reholder Credits</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Member Credits</span>
           </div>
-          <p className="text-xl font-black text-[#1A1A1A]">{me.reholder_credits_remaining}</p>
+          <p className="text-xl font-black text-[#1A1A1A]">{me.member_credits_remaining}</p>
           <p className="text-xs text-[#AAAAAA]">quarterly</p>
         </div>
 

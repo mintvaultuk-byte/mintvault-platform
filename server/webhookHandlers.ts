@@ -5,7 +5,7 @@ import { sendSubmissionConfirmation } from './email';
 import { db } from './db';
 import { sql } from 'drizzle-orm';
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, quarterKey } from './vault-club-tiers';
-import { findUserByStripeCustomerId, insertVaultClubEvent, grantReholderCredits } from './vault-club';
+import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } from './vault-club';
 import { writeAuthAudit } from './account-auth';
 import { auditLog } from '@shared/schema';
 import {
@@ -225,7 +225,7 @@ export class WebhookHandlers {
 
     // Grant reholder credits for silver/gold
     const source = `${tier}_quarterly`;
-    await grantReholderCredits(userId, tier, source).catch(() => {});
+    await grantMemberCredits(userId, tier, source).catch(() => {});
     await db.execute(sql`
       UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
     `);
@@ -378,7 +378,7 @@ export class WebhookHandlers {
       const currentQuarter = quarterKey(now);
       if (!prevQuarter || prevQuarter !== currentQuarter) {
         const source = `${tier}_quarterly`;
-        await grantReholderCredits(userId, tier, source).catch(() => {});
+        await grantMemberCredits(userId, tier, source).catch(() => {});
         await db.execute(sql`
           UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
         `);

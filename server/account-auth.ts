@@ -189,12 +189,12 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS member_credits_last_granted_at TIMESTAMPTZ
   `);
 
-  // Backfill member_credits_last_granted_at for users who already have reholder credits
+  // Backfill member_credits_last_granted_at for users who already have member credits
   try {
     await db.execute(sql`
       UPDATE users SET member_credits_last_granted_at = NOW() - INTERVAL '92 days'
       WHERE member_credits_last_granted_at IS NULL
-        AND id IN (SELECT DISTINCT user_id FROM reholder_credits)
+        AND id IN (SELECT DISTINCT user_id FROM member_credits)
     `);
   } catch (e: any) {
     console.log("[auth-schema] member_credits_last_granted_at backfill skipped:", e.message);
@@ -215,9 +215,9 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
-  // Reholder credits table
+  // Member credits table (renamed from reholder_credits)
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS reholder_credits (
+    CREATE TABLE IF NOT EXISTS member_credits (
       id                    SERIAL PRIMARY KEY,
       user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       granted_at            TIMESTAMP DEFAULT NOW(),
@@ -227,6 +227,39 @@ export async function migrateAccountSchema(): Promise<void> {
       source                TEXT NOT NULL
     )
   `);
+
+  // ── v230 rename: reholder_credits → member_credits ────────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE IF EXISTS reholder_credits RENAME TO member_credits`);
+    console.log("[v230-migrate] renamed reholder_credits → member_credits");
+  } catch (e: any) {
+    // 42P07 = table already exists (rename already ran), 42P01 = table doesn't exist (fresh install)
+    if (e.code !== "42P07" && e.code !== "42P01") console.error("[v230-migrate] rename failed:", e.message);
+  }
+  try {
+    await db.execute(sql`DROP VIEW IF EXISTS reholder_credits`);
+    await db.execute(sql`CREATE OR REPLACE VIEW reholder_credits AS SELECT * FROM member_credits`);
+    console.log("[v230-migrate] compat view reholder_credits → member_credits created");
+  } catch (e: any) {
+    console.log("[v230-migrate] compat view skipped:", e.message);
+  }
+  try {
+    await db.execute(sql`ALTER TABLE member_credits ALTER COLUMN credit_type SET DEFAULT 'member'`);
+    await db.execute(sql`UPDATE member_credits SET credit_type = 'member' WHERE credit_type = 'reholder'`);
+  } catch (e: any) {
+    // credit_type column may not exist yet on fresh installs — Phase 6 migration adds it
+  }
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+      VALUES ('schema', 'member_credits', 'table_renamed',
+              '{"from": "reholder_credits", "to": "member_credits", "compat_view_active": true, "compat_view_drop_after": "2026-04-23"}'::jsonb,
+              NOW())
+      ON CONFLICT DO NOTHING
+    `);
+  } catch (e: any) {
+    // Non-critical
+  }
 
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)

@@ -36,9 +36,9 @@ async function getUserVaultClub(userId: string): Promise<Record<string, unknown>
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
-async function countReholderCreditsRemaining(userId: string): Promise<number> {
+async function countMemberCreditsRemaining(userId: string): Promise<number> {
   const rows = await db.execute(sql`
-    SELECT COUNT(*) AS cnt FROM reholder_credits
+    SELECT COUNT(*) AS cnt FROM member_credits
     WHERE user_id = ${userId} AND used_at IS NULL AND expires_at > NOW()
   `);
   return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
@@ -58,7 +58,7 @@ export function registerVaultClubRoutes(app: Express): void {
       const tier = user.vault_club_tier as VaultClubTier | null;
       const status = user.vault_club_status as string | null;
       const perks = tier ? VAULT_CLUB_TIERS[tier] : null;
-      const reholderCredits = tier ? await countReholderCreditsRemaining(userId) : 0;
+      const memberCredits = tier ? await countMemberCreditsRemaining(userId) : 0;
 
       return res.json({
         tier,
@@ -72,7 +72,7 @@ export function registerVaultClubRoutes(app: Express): void {
         ai_credits_balance: user.ai_credits_user_balance ?? 0,
         ai_credits_monthly: tier ? VAULT_CLUB_TIERS[tier].ai_credits_monthly : 0,
         next_refill_at: user.vault_club_renews_at || null,
-        reholder_credits_remaining: reholderCredits,
+        member_credits_remaining: memberCredits,
         stripe_customer_id: user.stripe_customer_id || null,
         username: user.username || null,
       });
@@ -305,14 +305,14 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
-/** Grant initial reholder credits for the given tier at signup/renewal */
-export async function grantReholderCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
+/** Grant quarterly member credits for the given tier at signup/renewal */
+export async function grantMemberCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
   const qty = VAULT_CLUB_TIERS[tier].quarterly_reholders;
   if (qty <= 0) return;
   const expiresAt = endOfCurrentQuarter();
   // Check if we already granted credits for this quarter+source
   const existing = await db.execute(sql`
-    SELECT id FROM reholder_credits
+    SELECT id FROM member_credits
     WHERE user_id = ${userId} AND source = ${source}
       AND granted_at >= (NOW() - INTERVAL '92 days')
     LIMIT 1
@@ -320,7 +320,7 @@ export async function grantReholderCredits(userId: string, tier: VaultClubTier, 
   if (existing.rows.length > 0) return; // already granted
   for (let i = 0; i < qty; i++) {
     await db.execute(sql`
-      INSERT INTO reholder_credits (user_id, expires_at, source)
+      INSERT INTO member_credits (user_id, expires_at, source)
       VALUES (${userId}, ${expiresAt.toISOString()}, ${source})
     `);
   }

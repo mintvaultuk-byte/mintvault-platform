@@ -16,7 +16,7 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, r2KeyForImage, r2KeyForLabel 
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
 import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, type ImageKeys } from "./ai-grading-service";
@@ -39,9 +39,9 @@ import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 
 /** Count unused, unexpired credits of a given type */
-async function countCreditsRemaining(userId: string, creditType: string = "reholder"): Promise<number> {
+async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
   const rows = await db.execute(sql`
-    SELECT COUNT(*) AS cnt FROM reholder_credits
+    SELECT COUNT(*) AS cnt FROM member_credits
     WHERE user_id = ${userId} AND credit_type = ${creditType}
       AND used_at IS NULL AND expires_at > NOW()
   `);
@@ -51,10 +51,10 @@ async function countCreditsRemaining(userId: string, creditType: string = "rehol
 /** Consume a single credit of the given type. Returns true if consumed. */
 async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
   const result = await db.execute(sql`
-    UPDATE reholder_credits
+    UPDATE member_credits
     SET used_at = NOW(), used_for_submission_id = ${submissionId}
     WHERE id = (
-      SELECT id FROM reholder_credits
+      SELECT id FROM member_credits
       WHERE user_id = ${userId} AND credit_type = ${creditType}
         AND used_at IS NULL AND expires_at > NOW()
       ORDER BY expires_at ASC LIMIT 1
@@ -374,16 +374,19 @@ async function migrateServiceTiersV213() {
     }
   } catch (e: any) { console.error("[v213-migrate] value_protection_tiers failed:", e.message); }
 
-  // ── Phase 6: Add credit_type column to reholder_credits ────────────────────
+  // ── Phase 6: Add credit_type column to member_credits (formerly reholder_credits) ──
   try {
-    await db.execute(sql`ALTER TABLE reholder_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'reholder'`);
-    console.log("[v213-migrate] reholder_credits.credit_type column ensured");
-  } catch (e: any) { console.error("[v213-migrate] ALTER reholder_credits failed:", e.message); }
+    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'member'`);
+    console.log("[v213-migrate] member_credits.credit_type column ensured");
+  } catch (e: any) { console.error("[v213-migrate] ALTER member_credits failed:", e.message); }
 
   console.log("[startup] migrateServiceTiersV213 complete");
 
   // ── Phase 7: Ownership schema additions (v229) ─────────────────────────────
   try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_name TEXT`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_token_hash TEXT`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_expires_at TIMESTAMPTZ`);
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_deadline TIMESTAMPTZ`);
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_at TIMESTAMPTZ`);
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_reason TEXT`);
@@ -394,6 +397,43 @@ async function migrateServiceTiersV213() {
     await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_last_issued_at TIMESTAMPTZ`);
     console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
   } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
+
+  // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
+  } catch (e: any) { console.error("[transfer-v2] flow_version:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(30) NOT NULL DEFAULT 'pending_owner'`);
+  } catch (e: any) { console.error("[transfer-v2] transfer_status:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS reference_number_provided TEXT`);
+  } catch (e: any) { console.error("[transfer-v2] reference_number_provided:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS outgoing_keeper_user_id VARCHAR`);
+  } catch (e: any) { console.error("[transfer-v2] outgoing_keeper_user_id:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_keeper_user_id VARCHAR`);
+  } catch (e: any) { console.error("[transfer-v2] incoming_keeper_user_id:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_confirm_deadline TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] incoming_confirm_deadline:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_by VARCHAR(10)`);
+  } catch (e: any) { console.error("[transfer-v2] disputed_by:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] finalised_at:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] cancelled_at:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`);
+  } catch (e: any) { console.error("[transfer-v2] cancellation_reason:", e.message); }
+  // Index for cron jobs: find v2 transfers in dispute window that need finalising
+  try {
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_transfer_v2_status ON transfer_verifications (transfer_status) WHERE flow_version = 'v2'`);
+  } catch (e: any) { console.error("[transfer-v2] index:", e.message); }
+  console.log("[transfer-v2] schema migration complete");
 
   // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
   try {
@@ -4399,6 +4439,345 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[transfer] Error completing transfer:", err);
       return res.redirect("/transfer?error=server_error");
+    }
+  });
+
+  // ── V2 TRANSFER FLOW (DVLA-style: ref number + 14-day dispute window) ────
+  // Rate limiter: max 5 attempts per IP per 15 minutes (shared concept, separate instance)
+  const transferV2RateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many transfer attempts. Please wait 15 minutes before trying again." },
+  });
+
+  // Stricter rate limit for ref number verification — 3 attempts per hour per IP
+  const refNumberRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many verification attempts. Please wait before trying again." },
+  });
+
+  // Step 1: outgoing keeper initiates transfer
+  app.post("/api/v2/transfers/initiate", transferV2RateLimit, async (req, res) => {
+    try {
+      const { certId, fromEmail, toEmail, newOwnerName } = req.body;
+      if (!certId || !fromEmail || !toEmail) {
+        return res.status(400).json({ error: "Certificate number, your email, and new keeper email are all required." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(fromEmail) || !emailRegex.test(toEmail)) {
+        return res.status(400).json({ error: "Please provide valid email addresses." });
+      }
+
+      if (fromEmail.toLowerCase().trim() === toEmail.toLowerCase().trim()) {
+        return res.status(400).json({ error: "The current and new keeper email addresses must be different." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const cert = await storage.getCertificateByCertId(normalizedId);
+      if (!cert) {
+        return res.status(404).json({ error: "Certificate not found." });
+      }
+      if (cert.ownershipStatus === "transfer_pending") {
+        return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
+      }
+      if (cert.ownershipStatus !== "claimed") {
+        return res.status(400).json({ error: "This certificate does not have a registered keeper. Please use Register Ownership first." });
+      }
+
+      // Verify fromEmail matches the current owner
+      if (!cert.currentOwnerUserId) {
+        return res.status(400).json({ error: "This certificate does not have a verified keeper on record." });
+      }
+      const owner = await storage.getUser(cert.currentOwnerUserId);
+      if (!owner || (owner.email ?? "").toLowerCase() !== fromEmail.toLowerCase().trim()) {
+        return res.status(400).json({ error: "The email address does not match the registered keeper." });
+      }
+
+      // Check reference number exists (required for v2)
+      const certRefNumber = (cert as any).referenceNumber as string | null;
+      if (!certRefNumber) {
+        return res.status(400).json({ error: "This certificate does not have a Document Reference Number yet. Please contact support." });
+      }
+
+      // Check for existing active v2 transfer
+      const existing = await storage.getTransferV2ByCertId(normalizedId);
+      if (existing) {
+        return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
+      }
+
+      const ownerToken = await storage.createTransferV2({
+        certId: normalizedId,
+        fromEmail: fromEmail.trim(),
+        toEmail: toEmail.trim(),
+        newOwnerName: newOwnerName?.trim() || undefined,
+        outgoingKeeperUserId: cert.currentOwnerUserId,
+        referenceNumber: certRefNumber,
+      });
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const confirmUrl = `${baseUrl}/api/v2/transfers/outgoing-confirm?token=${ownerToken}`;
+
+      await sendTransferV2OutgoingConfirmation({
+        fromEmail: fromEmail.trim(),
+        toEmail: toEmail.trim(),
+        certId: normalizedId,
+        confirmUrl,
+      });
+
+      await storage.writeAuditLog("transfer", normalizedId, "transfer_v2.initiated", null, {
+        fromEmail: fromEmail.trim().toLowerCase(), toEmail: toEmail.trim().toLowerCase(),
+      });
+
+      return res.json({ success: true, message: "Transfer initiated. Check your inbox for the confirmation link." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error initiating:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Step 2: outgoing keeper clicks email link → generates incoming keeper token
+  app.get("/api/v2/transfers/outgoing-confirm", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token&v=2");
+
+      const result = await storage.confirmOutgoingKeeperV2(token);
+      if (!result.success || !result.newOwnerToken) {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2`);
+      }
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const incomingConfirmUrl = `${baseUrl}/transfer/accept?token=${result.newOwnerToken}&v=2`;
+
+      await sendTransferV2IncomingConfirmation({
+        toEmail: result.toEmail || "",
+        fromEmail: result.fromEmail || "",
+        certId: result.certId || "",
+        confirmUrl: incomingConfirmUrl,
+      });
+
+      return res.redirect(`/transfer?step=outgoing_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+    } catch (err: any) {
+      console.error("[transfer-v2] Error outgoing confirm:", err);
+      return res.redirect("/transfer?error=server_error&v=2");
+    }
+  });
+
+  // Step 3: incoming keeper submits ref number + token → enters dispute window
+  app.post("/api/v2/transfers/incoming-confirm", transferV2RateLimit, refNumberRateLimit, async (req, res) => {
+    try {
+      const { token, referenceNumber } = req.body;
+      if (!token || !referenceNumber) {
+        return res.status(400).json({ error: "Token and Document Reference Number are required." });
+      }
+
+      if (typeof referenceNumber !== "string" || referenceNumber.replace(/-/g, "").length < 8) {
+        return res.status(400).json({ error: "Please enter a valid Document Reference Number (format: XXXX-XXXX-XXXX)." });
+      }
+
+      const result = await storage.confirmIncomingKeeperV2(token, referenceNumber);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Send dispute-window emails to both parties
+      try {
+        // Look up the transfer to get details
+        const cert = await storage.getCertificateByCertId(result.certId!);
+        if (cert) {
+          const ownerUser = cert.currentOwnerUserId ? await storage.getUser(cert.currentOwnerUserId) : null;
+          const transfer = await storage.getTransferV2ByCertId(result.certId!);
+          const disputeDeadline = transfer?.disputeDeadline || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+          if (ownerUser?.email) {
+            await sendTransferV2DisputeWindowStarted({
+              email: ownerUser.email,
+              certId: result.certId!,
+              role: "outgoing",
+              disputeDeadline,
+            });
+          }
+          await sendTransferV2DisputeWindowStarted({
+            email: result.toEmail!,
+            certId: result.certId!,
+            role: "incoming",
+            disputeDeadline,
+          });
+        }
+      } catch (emailErr: any) {
+        console.error("[transfer-v2] Dispute window emails failed (non-fatal):", emailErr.message);
+      }
+
+      await storage.writeAuditLog("transfer", result.certId!, "transfer_v2.incoming_confirmed", null, {
+        toEmail: result.toEmail, referenceNumberPresent: true,
+      });
+
+      return res.json({ success: true, message: "Transfer verified. A 14-day dispute window is now active." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error incoming confirm:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Status check for a v2 transfer
+  app.get("/api/v2/transfers/status/:certId", async (req, res) => {
+    try {
+      const normalizedId = normalizeCertId(String(req.params.certId));
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found for this certificate." });
+      }
+
+      return res.json({
+        certId: transfer.certId,
+        status: transfer.status,
+        flowVersion: transfer.flowVersion,
+        fromEmail: transfer.fromEmail.replace(/(.{2}).*(@.*)/, "$1***$2"), // mask email
+        toEmail: transfer.toEmail.replace(/(.{2}).*(@.*)/, "$1***$2"),
+        ownerConfirmed: !!transfer.ownerConfirmedAt,
+        incomingConfirmed: transfer.status === "pending_dispute" || transfer.status === "completed",
+        disputeDeadline: transfer.disputeDeadline,
+        finalisedAt: transfer.finalisedAt,
+        createdAt: transfer.createdAt,
+      });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error fetching status:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // Dispute a v2 transfer during the 14-day window
+  app.post("/api/v2/transfers/dispute", async (req, res) => {
+    try {
+      const { certId, email, reason } = req.body;
+      if (!certId || !email || !reason) {
+        return res.status(400).json({ error: "Certificate ID, your email, and a reason are required." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found." });
+      }
+
+      // Determine role
+      const normEmail = email.toLowerCase().trim();
+      let role: "outgoing" | "incoming";
+      if (normEmail === transfer.fromEmail.toLowerCase()) {
+        role = "outgoing";
+      } else if (normEmail === transfer.toEmail.toLowerCase()) {
+        role = "incoming";
+      } else {
+        return res.status(403).json({ error: "You are not a party to this transfer." });
+      }
+
+      const result = await storage.disputeTransferV2(transfer.id, role, reason);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Audit
+      await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.disputed", null, {
+        certId: normalizedId, disputedBy: role, reason: reason.trim().slice(0, 200),
+      });
+
+      // Notify the other party
+      try {
+        const otherEmail = role === "outgoing" ? transfer.toEmail : transfer.fromEmail;
+        await sendTransferV2Disputed({ email: otherEmail, certId: normalizedId, disputedBy: role });
+      } catch {}
+
+      return res.json({ success: true, message: "Dispute raised. The transfer has been paused and MintVault will review." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error disputing:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // Cancel a v2 transfer (outgoing keeper only, before completion)
+  app.post("/api/v2/transfers/cancel", async (req, res) => {
+    try {
+      const { certId, email } = req.body;
+      if (!certId || !email) {
+        return res.status(400).json({ error: "Certificate ID and your email are required." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found." });
+      }
+
+      // Only the outgoing keeper can cancel
+      if (email.toLowerCase().trim() !== transfer.fromEmail.toLowerCase()) {
+        return res.status(403).json({ error: "Only the current registered keeper can cancel a transfer." });
+      }
+
+      const result = await storage.cancelTransferV2(transfer.id, "Cancelled by outgoing keeper");
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.cancelled", null, {
+        certId: normalizedId, cancelledBy: "outgoing",
+      });
+
+      // Notify both parties
+      try {
+        await sendTransferV2Cancelled({ email: transfer.fromEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
+        await sendTransferV2Cancelled({ email: transfer.toEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
+      } catch {}
+
+      return res.json({ success: true, message: "Transfer cancelled. Your keepership record is unchanged." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error cancelling:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // ── ADMIN TRANSFERS LIST ───────────────────────────────────────────────
+  app.get("/api/admin/transfers", requireAdmin, async (_req, res) => {
+    try {
+      // Fetch all transfers (both v1 and v2), most recent first
+      const result = await db.execute(sql`
+        SELECT id, cert_id, from_email, to_email, flow_version,
+               transfer_status, owner_confirmed_at, dispute_deadline,
+               disputed_at, dispute_reason, disputed_by,
+               finalised_at, cancelled_at, cancellation_reason,
+               used_at, created_at
+        FROM transfer_verifications
+        ORDER BY created_at DESC
+        LIMIT 200
+      `);
+
+      const rows = (result.rows as any[]).map(r => ({
+        id: r.id,
+        certId: r.cert_id,
+        fromEmail: r.from_email,
+        toEmail: r.to_email,
+        flowVersion: r.flow_version || "v1",
+        status: r.transfer_status || (r.used_at ? "completed" : "pending_owner"),
+        ownerConfirmedAt: r.owner_confirmed_at,
+        disputeDeadline: r.dispute_deadline,
+        disputedAt: r.disputed_at,
+        disputeReason: r.dispute_reason,
+        disputedBy: r.disputed_by,
+        finalisedAt: r.finalised_at,
+        cancelledAt: r.cancelled_at,
+        cancellationReason: r.cancellation_reason,
+        createdAt: r.created_at,
+      }));
+
+      return res.json(rows);
+    } catch (err: any) {
+      console.error("[admin] Error listing transfers:", err);
+      return res.status(500).json({ error: "Failed to load transfers" });
     }
   });
 
