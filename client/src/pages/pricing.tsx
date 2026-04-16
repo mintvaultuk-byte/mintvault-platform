@@ -1,10 +1,9 @@
-import { useState } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import type { PricingTier } from "@shared/schema";
 import {
   Check, Clock, Shield, ShieldCheck, Camera, Sparkles, Lock,
-  FileText, Award, Star, Crown, Package, Truck, AlertCircle,
+  FileText, Award, Star, Package, Truck, AlertCircle,
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import FaqSection, { faqSchema } from "@/components/faq-section";
@@ -15,18 +14,19 @@ const SITE = "https://mintvaultuk.com";
 const pricingSchema = {
   "@context": "https://schema.org",
   "@type": "WebPage",
-  "name": "MintVault UK Pricing — Card Grading from £12",
+  "name": "MintVault UK Pricing — Card Grading from £19",
   "url": `${SITE}/pricing`,
-  "description": "Simple, transparent card grading pricing. Three speeds, one label type. Standard £12, Priority £15, Express £20. UK-based service with insured return shipping.",
+  "description": "Simple, transparent card grading pricing. Three speeds, one label type. Vault Queue £19, Standard £25, Express £45. UK-based service with insured return shipping.",
   "mainEntity": {
     "@type": "OfferCatalog",
     "name": "Card Grading Services",
     "itemListElement": [
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Standard Grading" }, "price": "12.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Priority Grading" }, "price": "15.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Express Grading" }, "price": "20.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Gold Grading" }, "price": "85.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Gold Elite Grading" }, "price": "125.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Vault Queue Grading" }, "price": "19.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Standard Grading" }, "price": "25.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Express Grading" }, "price": "45.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Reholder" }, "price": "15.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Crossover" }, "price": "35.00", "priceCurrency": "GBP" },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Authentication" }, "price": "15.00", "priceCurrency": "GBP" },
     ],
   },
 };
@@ -38,7 +38,7 @@ const pricingFaqs = [
   },
   {
     question: "How much does card grading cost in the UK?",
-    answer: "MintVault grading starts from £12 per card (Standard tier, 20 working days). Priority is £15 per card (10 working days) and Express is £20 per card (5 working days). Bulk discounts apply automatically for larger submissions — 5% off for 10+ cards, 10% off for 25+ cards, 15% off for 50+ cards.",
+    answer: "MintVault grading starts from £19 per card (Vault Queue, 40 working days). Standard is £25 per card (15 working days) and Express is £45 per card (5 working days). Bulk discounts apply automatically for larger submissions — 5% off for 10+ cards, 10% off for 25+ cards, 15% off for 50+ cards.",
   },
   {
     question: "Do you offer bulk discounts?",
@@ -50,23 +50,19 @@ const pricingFaqs = [
   },
   {
     question: "What is the turnaround time for grading?",
-    answer: "Standard is 20 working days, Priority is 10 working days, and Express is 5 working days. These are working-day estimates from the date we receive your cards. You'll receive an estimated return date at checkout.",
-  },
-  {
-    question: "What is Gold Grading and who is it for?",
-    answer: "Gold Grading is our premium service for high-value cards. It includes white glove card care, priority handling, enhanced grading breakdowns, and higher insurance coverage (up to £2,500 for Gold, £5,000 for Gold Elite). Any card that achieves a GEM MINT 10 — on any grading tier — receives our exclusive Black Label slab.",
+    answer: "Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. These are working-day estimates from the date we receive your cards. You'll receive an estimated return date at checkout.",
   },
   {
     question: "What is the Black Label?",
-    answer: "The Black Label is awarded to every card that achieves a GEM MINT 10 — on any grading tier, not just Gold. The label features a black background with gold accents. Cards graded 9 and below receive our standard white and gold label.",
+    answer: "The Black Label is a free automatic upgrade awarded to cards that achieve perfect 10 subgrades in centering, corners, edges, and surface. The label features a black background with gold accents. It cannot be purchased — it can only be earned through grading excellence.",
   },
   {
     question: "What's included in a Reholder service?",
-    answer: "Reholdering places your existing graded card into a new MintVault precision slab with a new VaultLock NFC chip and updated certificate. It does not involve re-grading the card. Cost is £8 per card, 20 working days.",
+    answer: "Reholdering places your existing graded card into a new MintVault precision slab with a new VaultLock NFC chip and updated certificate. It does not involve re-grading the card. Cost is £15 per card, 15 working days.",
   },
   {
     question: "What is a Crossover and how much does it cost?",
-    answer: "A Crossover is when you submit a card already graded by another company (PSA, BGS, CGC, etc.) to be assessed and graded by MintVault instead. We remove it from the existing slab, grade it fresh, and return it in a MintVault slab with a new certificate. Cost is £15 per card, 20 working days.",
+    answer: "A Crossover is when you submit a card already graded by another company (PSA, BGS, CGC, etc.) to be assessed and graded by MintVault instead. We remove it from the existing slab, grade it fresh, and return it in a MintVault slab with a new certificate. Cost is £35 per card, 15 working days.",
   },
 ];
 
@@ -80,44 +76,27 @@ const ANCILLARY_SERVICES = [
   {
     id: "reholder",
     name: "Reholder",
-    price: "£8",
-    turnaround: "20 working days",
+    price: "£15",
+    turnaround: "15 working days",
     description: "Place your existing graded card into a new MintVault slab with updated VaultLock NFC and certificate.",
   },
   {
     id: "crossover",
     name: "Crossover",
-    price: "£15",
-    turnaround: "20 working days",
+    price: "£35",
+    turnaround: "15 working days",
     description: "Submit a card graded by another company (PSA, BGS, etc.) and have it graded fresh by MintVault.",
   },
   {
     id: "authentication",
     name: "Authentication",
-    price: "£10",
-    turnaround: "20 working days",
+    price: "£15",
+    turnaround: "15 working days",
     description: "Verify a card's authenticity and determine whether any physical alterations have been made.",
   },
 ];
 
-const GOLD_TIERS = [
-  {
-    id: "gold",
-    name: "GOLD",
-    price: "£85",
-    turnaround: "5 working days",
-    insurance: "£2,500",
-    recommended: false,
-  },
-  {
-    id: "gold-elite",
-    name: "GOLD ELITE",
-    price: "£125",
-    turnaround: "2–3 working days",
-    insurance: "£5,000",
-    recommended: true,
-  },
-];
+// Gold tiers removed — Black Label is now a free auto-upgrade, not a paid tier
 
 // ── Shared sub-components ────────────────────────────────────────────────────
 
@@ -175,7 +154,6 @@ function GradeIcon({ dark = false }: { dark?: boolean }) {
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export default function PricingPage() {
-  const [activeTab, setActiveTab] = useState<"standard" | "gold">("standard");
 
   const { data: apiTiers } = useQuery<PricingTier[]>({
     queryKey: ["/api/service-tiers", "grading"],
@@ -186,11 +164,11 @@ export default function PricingPage() {
     },
   });
 
-  const standardApiTiers = apiTiers?.filter(t => t.id !== "gold" && t.id !== "gold-elite");
-  const tiers: PricingTier[] = standardApiTiers && standardApiTiers.length > 0 ? standardApiTiers : [
-    { id: "standard", name: "STANDARD", price: "£12 per card", pricePerCard: 1200, recommendedCardValue: "Any value", turnaround: "20 working days", turnaroundDays: 20, features: [] },
-    { id: "priority",  name: "PRIORITY",  price: "£15 per card", pricePerCard: 1500, recommendedCardValue: "Any value", turnaround: "10 working days", turnaroundDays: 10, features: [] },
-    { id: "express",  name: "EXPRESS",  price: "£20 per card", pricePerCard: 2000, recommendedCardValue: "Any value", turnaround: "5 working days",  turnaroundDays: 5,  features: [] },
+  const activeTiers = apiTiers?.filter(t => t.id !== "gold" && t.id !== "gold-elite");
+  const tiers: PricingTier[] = activeTiers && activeTiers.length > 0 ? activeTiers : [
+    { id: "standard", name: "VAULT QUEUE", price: "£19 per card", pricePerCard: 1900, recommendedCardValue: "Any value", turnaround: "40 working days", turnaroundDays: 40, features: [] },
+    { id: "priority",  name: "STANDARD",   price: "£25 per card", pricePerCard: 2500, recommendedCardValue: "Any value", turnaround: "15 working days", turnaroundDays: 15, features: [] },
+    { id: "express",  name: "EXPRESS",     price: "£45 per card", pricePerCard: 4500, recommendedCardValue: "Any value", turnaround: "5 working days",  turnaroundDays: 5,  features: [] },
   ];
 
   const tierInsurance = ["£150", "£350", "£750"];
@@ -208,8 +186,8 @@ export default function PricingPage() {
   return (
     <>
       <SeoHead
-        title="Card Grading Pricing UK — From £12 | MintVault"
-        description="Simple, transparent card grading pricing. Standard £12/20 days, Priority £15/10 days, Express £20/5 days. Every tier includes the same precision slab and insured return shipping."
+        title="Card Grading Pricing UK — From £19 | MintVault"
+        description="Simple, transparent card grading pricing. Vault Queue £19/40 days, Standard £25/15 days, Express £45/5 days. Every tier includes the same precision slab and insured return shipping."
         canonical="/pricing"
         schema={[pricingSchema, faqSchema(pricingFaqs)]}
       />
@@ -222,7 +200,7 @@ export default function PricingPage() {
             One label. One price.<br />Pick your speed.
           </h1>
           <p className="text-[#666666] text-base leading-relaxed">
-            Professional UK card grading from £12. Every tier includes the same precision slab, VaultLock NFC verification, and insured return shipping.
+            Professional UK card grading from £19. Every tier includes the same precision slab, VaultLock NFC verification, and insured return shipping.
           </p>
         </div>
       </section>
@@ -231,51 +209,15 @@ export default function PricingPage() {
       <section className="bg-[#FAFAF8] py-14 md:py-20">
         <div className="max-w-5xl mx-auto px-4">
 
-          {/* Pill tabs */}
-          <div className="flex gap-2 justify-center mb-4">
-            <button
-              onClick={() => setActiveTab("standard")}
-              data-testid="tab-standard-grading"
-              className={`px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest transition-all border ${
-                activeTab === "standard"
-                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                  : "border-[#D4AF37]/50 text-[#888888] hover:border-[#D4AF37] hover:text-[#B8960C] bg-transparent"
-              }`}
-            >
-              Standard Grading
-            </button>
-            <button
-              onClick={() => setActiveTab("gold")}
-              data-testid="tab-gold-grading"
-              className={`px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest transition-all border flex items-center gap-1.5 ${
-                activeTab === "gold"
-                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                  : "border-[#D4AF37]/50 text-[#888888] hover:border-[#D4AF37] hover:text-[#B8960C] bg-transparent"
-              }`}
-            >
-              <Star className="h-3.5 w-3.5" />
-              Gold Grading
-            </button>
-          </div>
-
           {/* Subtitle banner */}
           <div className="text-center mb-10">
-            {activeTab === "standard" ? (
-              <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FFFAE8] to-[#FFF4CC] border border-[#D4AF37]/40 rounded-full px-5 py-2 text-xs font-bold uppercase tracking-widest text-[#B8960C]">
-                <Check className="h-3.5 w-3.5" />
-                Standard is recommended for most cards
-              </div>
-            ) : (
-              <div className="inline-flex items-center gap-2 bg-[#1A1A1A] border border-[#D4AF37]/30 rounded-full px-5 py-2 text-xs font-bold uppercase tracking-widest text-[#D4AF37]">
-                <Star className="h-3.5 w-3.5" />
-                For high-value &amp; investment-grade cards
-              </div>
-            )}
+            <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FFFAE8] to-[#FFF4CC] border border-[#D4AF37]/40 rounded-full px-5 py-2 text-xs font-bold uppercase tracking-widest text-[#B8960C]">
+              <Check className="h-3.5 w-3.5" />
+              Standard is recommended for most cards
+            </div>
           </div>
 
-          {/* ── TAB 1: Standard Grading ──────────────────────────────────── */}
-          {activeTab === "standard" && (
-            <>
+          {/* ── Grading tier cards ──────────────────────────────────────── */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
                 {tiers.map((tier, idx) => {
                   const isDark = idx === 2;
@@ -366,75 +308,10 @@ export default function PricingPage() {
                 <ShieldCheck className="h-5 w-5 text-[#D4AF37] shrink-0 mt-0.5" />
                 <p className="text-[#666666] text-xs leading-relaxed">
                   <span className="font-semibold text-[#444444]">Insurance is included at no extra cost</span> with every submission. No declared value upcharges. For cards valued above the tier limit,{" "}
-                  <a href="mailto:mintvaultuk@gmail.com" className="text-[#B8960C] hover:underline">contact us</a> for additional coverage or consider our Gold Grading tiers.
+                  <a href="mailto:mintvaultuk@gmail.com" className="text-[#B8960C] hover:underline">contact us</a> for additional coverage.
                 </p>
               </div>
-            </>
-          )}
 
-          {/* ── TAB 2: Gold Grading ───────────────────────────────────────── */}
-          {activeTab === "gold" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-                {GOLD_TIERS.map((tier) => (
-                  <div
-                    key={tier.id}
-                    className="bg-[#141414] border border-[#D4AF37]/40 rounded-2xl overflow-hidden flex flex-col relative"
-                    data-testid={`card-gold-tier-${tier.id}`}
-                  >
-                    {/* Diagonal RECOMMENDED ribbon */}
-                    {tier.recommended && (
-                      <div className="absolute top-[22px] right-[-34px] rotate-45 w-36 text-center py-1.5 text-[8px] font-bold uppercase tracking-widest text-[#1A1400] z-10"
-                        style={{ background: "linear-gradient(90deg,#D4AF37,#B8960C)" }}>
-                        RECOMMENDED
-                      </div>
-                    )}
-
-                    {/* Card header */}
-                    <div className="px-6 pt-6 pb-5 bg-[#0E0E0E] border-b border-[#242424]">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Crown className="h-4 w-4 text-[#D4AF37]" />
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#D4AF37]">{tier.name}</span>
-                      </div>
-                      <div className="text-4xl font-black text-white mb-1">{tier.price}</div>
-                      <div className="text-[#555555] text-xs mb-1">per card</div>
-                      <div className="text-[#666666] text-xs mt-2">
-                        {tier.id === "gold" ? "High-value collections" : "Investment-grade cards"}
-                      </div>
-                    </div>
-
-                    {/* Card body */}
-                    <div className="px-6 pb-6 flex-1 flex flex-col">
-                      <a href="mailto:mintvaultuk@gmail.com">
-                        <button className="gold-shimmer w-full py-2.5 rounded-lg text-sm font-bold uppercase tracking-wider mt-5 mb-0.5">
-                          Enquire Now
-                        </button>
-                      </a>
-
-                      <SectionDivider label="GRADING" dark />
-                      <FeatureRow icon={<GradeIcon dark />} label="GRADE" value="Standard 1–10 pt." star dark />
-                      <FeatureRow icon={<ShieldCheck className="h-4 w-4" />} label="DIGITAL REPORT" value="Full subgrade breakdown with defect analysis" star dark />
-
-                      <SectionDivider label="SPEED & PROTECTION" dark />
-                      <FeatureRow icon={<Clock className="h-4 w-4" />} label="TIMING" value={`${tier.turnaround} from receipt`} star dark />
-                      <FeatureRow icon={<Shield className="h-4 w-4" />} label="INSURANCE" value={`${tier.insurance} per card · No Value Upcharge`} star dark />
-
-                      <SectionDivider label="REPORTING" dark />
-                      <FeatureRow icon={<FileText className="h-4 w-4" />} label="GRADING REPORT" value="Corners / Edges / Surface / Centering analysis" star dark />
-                      <FeatureRow icon={<Camera className="h-4 w-4" />} label="IMAGING" value="Hi-res card imaging, Front/Back + enhanced" star dark />
-
-                      <SectionDivider label="SERVICE DETAILS" dark />
-                      <FeatureRow icon={<Sparkles className="h-4 w-4" />} label="CARD CARE" value="White glove handling, Fingerprint removal, Protective sleeving" star dark />
-                      <FeatureRow icon={<Lock className="h-4 w-4" />} label="ENCASING" value="VaultGlass UV protection, VaultLock NFC slab" star dark />
-                      <FeatureRow icon={<Shield className="h-4 w-4" />} label="OWNERSHIP" value="Verified ownership registry, VaultLink QR verification" star dark />
-                      <FeatureRow icon={<FileText className="h-4 w-4" />} label="ENHANCED REPORT" value="Enhanced Digital Grading Report with full defect imaging" star dark />
-                      {tier.id === "gold-elite" && (
-                        <FeatureRow icon={<Crown className="h-4 w-4" />} label="PRIORITY HANDLING" value="Direct communication with head grader" star dark />
-                      )}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
 
           {/* ── Black Label — always visible below tier cards ─────────────── */}
           <div className="bg-[#141414] border border-[#D4AF37]/40 rounded-2xl p-6 mb-8 flex items-start gap-5">

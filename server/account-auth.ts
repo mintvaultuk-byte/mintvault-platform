@@ -264,6 +264,28 @@ export async function migrateAccountSchema(): Promise<void> {
     // Non-critical
   }
 
+  // ── v231: Deactivate Black Label Review tier (becomes auto-upgrade) ────────
+  try {
+    const r = await db.execute(sql`
+      UPDATE service_tiers
+      SET is_active = false, updated_at = NOW()
+      WHERE tier_id = 'gold' AND name = 'BLACK LABEL REVIEW' AND is_active = true
+      RETURNING id
+    `);
+    if (r.rows.length > 0) {
+      console.log("[v231-migrate] Black Label tier deactivated (becomes auto-upgrade)");
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('service_tier', 'gold', 'deactivated',
+                '{"reason": "Black Label becomes free automatic upgrade, not paid tier", "effective_from": "2026-04-16"}'::jsonb,
+                NOW())
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  } catch (e: any) {
+    console.log("[v231-migrate] Black Label deactivation skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`
