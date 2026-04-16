@@ -27,9 +27,9 @@ const DEFECT_TYPES = [
 ];
 
 const SEV_COLOR: Record<string, string> = {
-  minor:       "bg-yellow-900/30 text-yellow-400 border-yellow-700/50",
-  moderate:    "bg-orange-900/30 text-orange-400 border-orange-700/50",
-  significant: "bg-red-900/30 text-red-400 border-red-700/50",
+  minor:       "bg-amber-50 text-amber-600 border-amber-200",
+  moderate:    "bg-orange-50 text-orange-600 border-orange-200",
+  significant: "bg-red-50 text-red-600 border-red-200",
 };
 
 interface PendingDefect {
@@ -51,22 +51,22 @@ interface DefectFormProps {
 
 export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormProps) {
   return (
-    <div className="bg-[#111111] border border-[#333333] rounded-lg p-3 space-y-2">
+    <div className="bg-[#F7F7F5] border border-[#D4D0C8] rounded-lg p-3 space-y-2">
       <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">New Defect</p>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Type</label>
+        <label className="text-[#666666] text-[10px] block mb-1">Type</label>
         <select
           value={pending.type}
           onChange={e => onChange({ ...pending, type: e.target.value })}
-          className="w-full bg-[#0A0A0A] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1.5"
+          className="w-full bg-white border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1.5"
         >
           {DEFECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Severity</label>
+        <label className="text-[#666666] text-[10px] block mb-1">Severity</label>
         <div className="flex gap-2">
           {(["minor", "moderate", "significant"] as const).map(s => (
             <button
@@ -74,7 +74,7 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
               type="button"
               onClick={() => onChange({ ...pending, severity: s })}
               className={`flex-1 text-[10px] font-bold uppercase px-2 py-1 rounded border transition-all ${
-                pending.severity === s ? SEV_COLOR[s] : "bg-[#0A0A0A] border-[#333333] text-[#555555] hover:border-[#555555]"
+                pending.severity === s ? SEV_COLOR[s] : "bg-white border-[#D4D0C8] text-[#888888] hover:border-[#D4AF37]/40"
               }`}
             >
               {s}
@@ -84,23 +84,23 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
       </div>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Description</label>
+        <label className="text-[#666666] text-[10px] block mb-1">Description</label>
         <textarea
           value={pending.description}
           onChange={e => onChange({ ...pending, description: e.target.value })}
           placeholder="Optional notes"
           rows={2}
-          className="w-full bg-[#0A0A0A] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1.5 placeholder-[#444444] resize-none"
+          className="w-full bg-white border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1.5 placeholder-[#AAAAAA] resize-none"
         />
       </div>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Location</label>
+        <label className="text-[#666666] text-[10px] block mb-1">Location</label>
         <input
           type="text"
           value={pending.location}
           onChange={e => onChange({ ...pending, location: e.target.value })}
-          className="w-full bg-[#0A0A0A] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1.5"
+          className="w-full bg-white border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1.5"
         />
       </div>
 
@@ -116,7 +116,7 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
         <button
           type="button"
           onClick={onCancel}
-          className="flex-1 bg-[#222222] border border-[#333333] text-[#888888] text-xs px-3 py-1.5 rounded hover:bg-[#2A2A2A]"
+          className="flex-1 bg-[#F0EEE8] border border-[#D4D0C8] text-[#666666] text-xs px-3 py-1.5 rounded hover:bg-[#E8E4DC]"
         >
           Cancel
         </button>
@@ -160,7 +160,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               className={`flex items-start gap-2 rounded-lg px-3 py-2 border cursor-pointer transition-all ${
                 highlightId === d.id
                   ? "border-[#D4AF37]/60 bg-[#D4AF37]/5"
-                  : "border-[#222222] bg-[#0A0A0A] hover:border-[#333333]"
+                  : "border-[#E8E4DC] bg-white hover:border-[#D4D0C8]"
               }`}
               onClick={() => onHighlight(highlightId === d.id ? null : d.id)}
             >
@@ -169,18 +169,18 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[#CCCCCC] text-[10px] font-bold">{d.type}</span>
+                  <span className="text-[#3A3A3A] text-[10px] font-bold">{d.type}</span>
                   <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_COLOR[d.severity]}`}>
                     {d.severity}
                   </span>
-                  <span className="text-[#555555] text-[9px]">{d.location}</span>
+                  <span className="text-[#888888] text-[9px]">{d.location}</span>
                 </div>
                 {d.description && <p className="text-[#666666] text-[10px] mt-0.5 leading-relaxed">{d.description}</p>}
               </div>
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); removeDefect(d.id); }}
-                className="flex-shrink-0 text-[#444444] hover:text-red-400 transition-colors p-0.5"
+                className="flex-shrink-0 text-[#AAAAAA] hover:text-red-600 transition-colors p-0.5"
               >
                 <X size={12} />
               </button>
@@ -190,7 +190,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
       )}
 
       {defects.length === 0 && !showForm && (
-        <p className="text-[#555555] text-xs text-center py-2">No defects marked. Click on the image or use Add Defect.</p>
+        <p className="text-[#888888] text-xs text-center py-2">No defects marked. Click on the image or use Add Defect.</p>
       )}
 
       {/* Add defect form */}

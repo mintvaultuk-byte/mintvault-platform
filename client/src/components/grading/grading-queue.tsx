@@ -196,14 +196,14 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
                     <span className="text-[#AAAAAA] text-[9px] font-mono">{item.certId}</span>
                     {item.id === currentCertId && <span className="text-[#D4AF37] text-[9px] font-bold">● Current</span>}
                   </div>
-                  <p className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#444444]"}`}>{item.cardName || "Unnamed"}</p>
+                  <p className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#666666]"}`}>{item.cardName || "Unnamed"}</p>
                   <p className="text-[#888888] text-[10px]">{item.cardSet} · {item.cardGame}</p>
                 </div>
                 <div className="flex-shrink-0 text-right">
                   <div className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.hasImages ? "text-emerald-600 bg-emerald-50" : "text-[#999999] bg-[#F5F5F3]"}`}>
                     {item.hasImages ? "Images ✓" : "No images"}
                   </div>
-                  <p className="text-[#CCCCCC] text-[9px] mt-0.5">{new Date(item.createdAt).toLocaleDateString("en-GB")}</p>
+                  <p className="text-[#AAAAAA] text-[9px] mt-0.5">{new Date(item.createdAt).toLocaleDateString("en-GB")}</p>
                 </div>
               </div>
             </button>

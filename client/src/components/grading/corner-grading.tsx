@@ -28,7 +28,7 @@ function GradeSelect({ value, onChange, isLowest }: { value: number; onChange: (
     <select
       value={value}
       onChange={e => onChange(parseFloat(e.target.value))}
-      className={`text-[10px] rounded px-1 py-0.5 font-bold border ${isLowest ? "border-red-500" : "border-[#333333]"} bg-[#111111]`}
+      className={`text-[10px] rounded px-1 py-0.5 font-bold border ${isLowest ? "border-red-500" : "border-[#D4D0C8]"} bg-[#F7F7F5]`}
       style={{ color: gradeColor(value) }}
     >
       {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -74,8 +74,8 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
 
       {/* Front */}
       <div>
-        <p className="text-[#555555] text-[10px] uppercase tracking-widest mb-1.5">Front</p>
-        <div className="relative border border-[#222222] rounded-lg p-3 bg-[#0D0D0D]" style={{ aspectRatio: "5/3.5", maxWidth: 220 }}>
+        <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1.5">Front</p>
+        <div className="relative border border-[#E8E4DC] rounded-lg p-3 bg-[#F7F7F5]" style={{ aspectRatio: "5/3.5", maxWidth: 220 }}>
           <div className="absolute top-1.5 left-1.5">
             <GradeSelect value={values.frontTL} onChange={v => update("frontTL", v)} isLowest={isLowest(values.frontTL)} />
           </div>
@@ -83,7 +83,7 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
             <GradeSelect value={values.frontTR} onChange={v => update("frontTR", v)} isLowest={isLowest(values.frontTR)} />
           </div>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[#333333] text-[10px] uppercase tracking-widest">Front</span>
+            <span className="text-[#D4D0C8] text-[10px] uppercase tracking-widest">Front</span>
           </div>
           <div className="absolute bottom-1.5 left-1.5">
             <GradeSelect value={values.frontBL} onChange={v => update("frontBL", v)} isLowest={isLowest(values.frontBL)} />
@@ -96,8 +96,8 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
 
       {/* Back */}
       <div>
-        <p className="text-[#555555] text-[10px] uppercase tracking-widest mb-1.5">Back</p>
-        <div className="relative border border-[#222222] rounded-lg p-3 bg-[#0D0D0D]" style={{ aspectRatio: "5/3.5", maxWidth: 220 }}>
+        <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1.5">Back</p>
+        <div className="relative border border-[#E8E4DC] rounded-lg p-3 bg-[#F7F7F5]" style={{ aspectRatio: "5/3.5", maxWidth: 220 }}>
           <div className="absolute top-1.5 left-1.5">
             <GradeSelect value={values.backTL} onChange={v => update("backTL", v)} isLowest={isLowest(values.backTL)} />
           </div>
@@ -105,7 +105,7 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
             <GradeSelect value={values.backTR} onChange={v => update("backTR", v)} isLowest={isLowest(values.backTR)} />
           </div>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-[#333333] text-[10px] uppercase tracking-widest">Back</span>
+            <span className="text-[#D4D0C8] text-[10px] uppercase tracking-widest">Back</span>
           </div>
           <div className="absolute bottom-1.5 left-1.5">
             <GradeSelect value={values.backBL} onChange={v => update("backBL", v)} isLowest={isLowest(values.backBL)} />
@@ -118,10 +118,10 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
 
       {/* Subgrade */}
       <div>
-        <p className="text-[#888888] text-[10px]">
+        <p className="text-[#666666] text-[10px]">
           Corners: <span className="font-bold text-sm" style={{ color: gradeColor(displayGrade) }}>{displayGrade}</span>
-          {worstKey && <span className="text-[#555555]"> (limited by {worstKey})</span>}
-          {overrideGrade !== null && <span className="text-[#888888]"> (manual)</span>}
+          {worstKey && <span className="text-[#888888]"> (limited by {worstKey})</span>}
+          {overrideGrade !== null && <span className="text-[#666666]"> (manual)</span>}
         </p>
         {!showOverride && (
           <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override</button>
@@ -131,12 +131,12 @@ export default function CornerGrading({ values, subgrade, onChange, overrideGrad
             <select
               value={overrideGrade ?? ""}
               onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-              className="bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1"
+              className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1"
             >
               <option value="">Auto</option>
               {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
-            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#888888]">clear</button>
+            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#888888] text-[10px] hover:text-[#666666]">clear</button>
           </div>
         )}
       </div>

@@ -36,8 +36,8 @@ function DropZone({ side, file, uploading, processed, onFile }: {
         h-56 rounded-xl border-2 border-dashed cursor-pointer
         flex flex-col items-center justify-center gap-2
         transition-all
-        ${isDragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : "border-[#444444] hover:border-[#D4AF37]/50"}
-        ${processed ? "border-emerald-600/50 bg-emerald-950/10" : ""}
+        ${isDragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : "border-[#D4D0C8] hover:border-[#D4AF37]/50"}
+        ${processed ? "border-emerald-600/50 bg-emerald-50" : ""}
         ${uploading ? "cursor-wait opacity-80" : ""}
       `}
     >
@@ -55,24 +55,24 @@ function DropZone({ side, file, uploading, processed, onFile }: {
       {uploading ? (
         <>
           <Loader2 className="text-[#D4AF37] animate-spin" size={28} />
-          <p className="text-[#CCCCCC] text-sm">Uploading & processing…</p>
-          <p className="text-[#555555] text-[10px]">Auto-cropping and generating analysis views</p>
+          <p className="text-[#3A3A3A] text-sm">Uploading & processing…</p>
+          <p className="text-[#888888] text-[10px]">Auto-cropping and generating analysis views</p>
         </>
       ) : processed && file ? (
         <>
-          <div className="w-20 h-28 bg-[#222222] rounded overflow-hidden">
+          <div className="w-20 h-28 bg-[#F0EEE8] rounded overflow-hidden">
             <img src={URL.createObjectURL(file)} alt={side} className="w-full h-full object-contain" />
           </div>
-          <p className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+          <p className="text-emerald-600 text-xs font-bold flex items-center gap-1">
             <CheckCircle2 size={12} /> PROCESSED
           </p>
-          <p className="text-[#555555] text-[10px]">Click to replace</p>
+          <p className="text-[#888888] text-[10px]">Click to replace</p>
         </>
       ) : (
         <>
-          <Upload size={28} className="text-[#555555]" />
-          <p className="text-[#CCCCCC] text-sm font-bold">Drop {side} image here</p>
-          <p className="text-[#555555] text-[10px]">or click to browse · JPEG / PNG / WebP</p>
+          <Upload size={28} className="text-[#888888]" />
+          <p className="text-[#3A3A3A] text-sm font-bold">Drop {side} image here</p>
+          <p className="text-[#888888] text-[10px]">or click to browse · JPEG / PNG / WebP</p>
         </>
       )}
     </div>
@@ -127,12 +127,12 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
   }
 
   return (
-    <div className="bg-[#0A0A0A] border border-[#D4AF37]/20 rounded-xl p-5">
+    <div className="bg-white border border-[#D4AF37]/20 rounded-xl p-5">
       <div className="flex items-center gap-2 mb-2">
         <Camera size={16} className="text-[#D4AF37]" />
         <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Image Capture</p>
       </div>
-      <p className="text-[#888888] text-xs mb-5">
+      <p className="text-[#666666] text-xs mb-5">
         Drag front and back scans here, or click to browse. Images are auto-cropped and processed for AI analysis.
       </p>
 
@@ -160,14 +160,14 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
       </div>
 
       {processed.front && processed.back && (
-        <div className="mt-5 flex items-center gap-2 bg-emerald-950/30 border border-emerald-700/40 rounded-lg px-4 py-3">
-          <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0" />
-          <p className="text-emerald-400 text-sm">Both images uploaded and processed. Scroll down to click <strong>ANALYZE WITH AI</strong>.</p>
+        <div className="mt-5 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+          <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0" />
+          <p className="text-emerald-600 text-sm">Both images uploaded and processed. Scroll down to click <strong>ANALYZE WITH AI</strong>.</p>
         </div>
       )}
 
       {processed.front && !files.back && (
-        <p className="mt-4 text-[#888888] text-xs text-center">Front image processed. Upload back image to continue, or scroll down to analyze front only.</p>
+        <p className="mt-4 text-[#666666] text-xs text-center">Front image processed. Upload back image to continue, or scroll down to analyze front only.</p>
       )}
     </div>
   );

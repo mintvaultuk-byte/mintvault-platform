@@ -7,7 +7,7 @@ import {
   LogOut, Plus, Edit, Download, Search, Eye, EyeOff,
   FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
-  Package, ScanLine, DollarSign, Save, ArrowRight, Copy, Check, Loader2, Brain,
+  Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain,
 } from "lucide-react";
 
 type CertsFilter = {
@@ -21,6 +21,7 @@ import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
 import AdminCapacity from "@/pages/admin-capacity";
+import AdminTransfers from "@/pages/admin-transfers";
 
 interface DbInfo {
   env: string;
@@ -56,7 +57,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -239,6 +240,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "capacity" && <AdminCapacity />}
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}
+      {activeTab === "transfers" && <AdminTransfers />}
       {activeTab === "grading" && (() => {
         const gradingCert = certs.find(c => c.id === selectedGradingCertId) ?? null;
         return (
@@ -268,8 +270,8 @@ export default function AdminDashboard({ onLogout }: Props) {
                   />
                 </div>
               ) : (
-                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-8 text-center">
-                  <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
+                <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
+                  <p className="text-[#888888] text-sm">Select a certificate from the queue to begin grading</p>
                 </div>
               )}
             </div>
@@ -302,8 +304,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -423,6 +425,17 @@ function AdminHeader({
                 data-testid="tab-learning"
               >
                 <Brain size={12} /> AI Learning
+              </button>
+              <button
+                onClick={() => onTabChange("transfers")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "transfers"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-transfers"
+              >
+                <ArrowRightLeft size={12} /> Transfers
               </button>
             </nav>
           </div>
@@ -978,9 +991,9 @@ function RecentCertRow({
         <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
         <span className={`text-xs px-1.5 py-0.5 rounded ${
           cert.status === "active" || cert.status === "published"
-            ? "bg-emerald-500/20 text-emerald-400"
+            ? "bg-green-50 text-green-600"
             : cert.status === "voided"
-            ? "bg-red-500/20 text-red-400"
+            ? "bg-red-50 text-red-600"
             : "bg-gray-500/20 text-[#666666]"
         }`}>{cert.status}</span>
         <span className="text-[#999999] text-xs hidden sm:inline">
@@ -1187,7 +1200,7 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 statusFilter === f
                   ? f === "voided"
-                    ? "bg-red-500/20 text-red-400 border-red-500/40"
+                    ? "bg-red-50 text-red-600 border-red-200"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
               }`}
@@ -1350,9 +1363,9 @@ function CertRow({
               </span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${
                 cert.status === "active" || cert.status === "published"
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? "bg-green-50 text-green-600"
                   : cert.status === "voided"
-                  ? "bg-red-500/20 text-red-400"
+                  ? "bg-red-50 text-red-600"
                   : "bg-gray-500/20 text-[#666666]"
               }`}>
                 {cert.status === "active" || cert.status === "published" ? <Eye size={10} className="inline mr-0.5" /> : <EyeOff size={10} className="inline mr-0.5" />}

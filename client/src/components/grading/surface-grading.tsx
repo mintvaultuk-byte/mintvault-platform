@@ -65,37 +65,37 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
 
       {/* Crease / Tear warning banners */}
       {values.hasCrease && (
-        <div className="flex items-center gap-2 bg-red-950/40 border border-red-700/50 rounded px-3 py-2">
-          <AlertTriangle size={12} className="text-red-400 flex-shrink-0" />
-          <p className="text-red-400 text-xs">Crease detected — maximum overall grade capped at 5.0</p>
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded px-3 py-2">
+          <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
+          <p className="text-red-600 text-xs">Crease detected — maximum overall grade capped at 5.0</p>
         </div>
       )}
       {values.hasTear && (
-        <div className="flex items-center gap-2 bg-red-950/60 border border-red-600/60 rounded px-3 py-2">
-          <AlertTriangle size={12} className="text-red-400 flex-shrink-0" />
-          <p className="text-red-400 text-xs">Tear or missing material — maximum overall grade capped at 3.0</p>
+        <div className="flex items-center gap-2 bg-red-100 border border-red-400 rounded px-3 py-2">
+          <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
+          <p className="text-red-600 text-xs">Tear or missing material — maximum overall grade capped at 3.0</p>
         </div>
       )}
 
       {/* Front / Back dropdowns */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-[#888888] text-[10px] block mb-1">Front Surface</label>
+          <label className="text-[#666666] text-[10px] block mb-1">Front Surface</label>
           <select
             value={values.front}
             onChange={e => update("front", parseFloat(e.target.value))}
-            className="w-full bg-[#111111] border border-[#333333] rounded px-2 py-1.5 text-xs font-bold"
+            className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1.5 text-xs font-bold"
             style={{ color: gradeColor(values.front) }}
           >
             {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div>
-          <label className="text-[#888888] text-[10px] block mb-1">Back Surface</label>
+          <label className="text-[#666666] text-[10px] block mb-1">Back Surface</label>
           <select
             value={values.back}
             onChange={e => update("back", parseFloat(e.target.value))}
-            className="w-full bg-[#111111] border border-[#333333] rounded px-2 py-1.5 text-xs font-bold"
+            className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1.5 text-xs font-bold"
             style={{ color: gradeColor(values.back) }}
           >
             {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -113,12 +113,12 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
               onChange={e => update(issue.key as keyof SurfaceValues, e.target.checked as SurfaceValues[typeof issue.key])}
               className="mt-0.5 accent-[#D4AF37]"
             />
-            <span className={`text-xs group-hover:text-[#CCCCCC] transition-colors ${
+            <span className={`text-xs group-hover:text-[#3A3A3A] transition-colors ${
               issue.warning ? "text-red-300" : "text-[#AAAAAA]"
             }`}>
               {issue.warning && "⚠️ "}
               {issue.label}
-              {issue.warning && <span className="text-red-400 text-[10px] block ml-1">{issue.warning}</span>}
+              {issue.warning && <span className="text-red-600 text-[10px] block ml-1">{issue.warning}</span>}
             </span>
           </label>
         ))}
@@ -126,10 +126,10 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
 
       {/* Subgrade */}
       <div>
-        <p className="text-[#888888] text-[10px]">
+        <p className="text-[#666666] text-[10px]">
           Surface: <span className="font-bold text-sm" style={{ color: gradeColor(displayGrade) }}>{displayGrade}</span>
-          <span className="text-[#555555]"> (lower of front/back)</span>
-          {overrideGrade !== null && <span className="text-[#888888]"> (manual)</span>}
+          <span className="text-[#888888]"> (lower of front/back)</span>
+          {overrideGrade !== null && <span className="text-[#666666]"> (manual)</span>}
         </p>
         {!showOverride && (
           <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override</button>
@@ -139,12 +139,12 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
             <select
               value={overrideGrade ?? ""}
               onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-              className="bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1"
+              className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1"
             >
               <option value="">Auto</option>
               {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
-            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#888888]">clear</button>
+            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#888888] text-[10px] hover:text-[#666666]">clear</button>
           </div>
         )}
       </div>

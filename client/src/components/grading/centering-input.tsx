@@ -56,8 +56,8 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
 
   return (
     <div className="flex flex-col items-center gap-1">
-      <p className="text-[#888888] text-[9px] uppercase tracking-widest">Front centering</p>
-      <div className="relative w-20 h-28 border border-[#444444] rounded bg-[#111111] flex items-center justify-center">
+      <p className="text-[#666666] text-[9px] uppercase tracking-widest">Front centering</p>
+      <div className="relative w-20 h-28 border border-[#D4D0C8] rounded bg-[#F7F7F5] flex items-center justify-center">
         <div
           className="absolute rounded-sm"
           style={{
@@ -69,10 +69,10 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
             opacity: 0.9,
           }}
         />
-        <span className="text-[#555555] text-[8px] absolute top-0.5 left-1/2 -translate-x-1/2">{top}%</span>
-        <span className="text-[#555555] text-[8px] absolute bottom-0.5 left-1/2 -translate-x-1/2">{bottom}%</span>
-        <span className="text-[#555555] text-[8px] absolute left-0.5 top-1/2 -translate-y-1/2" style={{ writingMode: "vertical-rl" }}>{left}%</span>
-        <span className="text-[#555555] text-[8px] absolute right-0.5 top-1/2 -translate-y-1/2" style={{ writingMode: "vertical-rl" }}>{right}%</span>
+        <span className="text-[#888888] text-[8px] absolute top-0.5 left-1/2 -translate-x-1/2">{top}%</span>
+        <span className="text-[#888888] text-[8px] absolute bottom-0.5 left-1/2 -translate-x-1/2">{bottom}%</span>
+        <span className="text-[#888888] text-[8px] absolute left-0.5 top-1/2 -translate-y-1/2" style={{ writingMode: "vertical-rl" }}>{left}%</span>
+        <span className="text-[#888888] text-[8px] absolute right-0.5 top-1/2 -translate-y-1/2" style={{ writingMode: "vertical-rl" }}>{right}%</span>
       </div>
     </div>
   );
@@ -99,14 +99,14 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
       <div className="grid grid-cols-2 gap-2">
         {fields.map(f => (
           <div key={f.key}>
-            <label className="text-[#888888] text-[10px] block mb-1">{f.label}</label>
+            <label className="text-[#666666] text-[10px] block mb-1">{f.label}</label>
             <input
               type="text"
               value={f.value}
               onChange={e => onChange(f.key, e.target.value)}
               placeholder="52/48"
-              className={`w-full bg-[#111111] border rounded px-2 py-1.5 text-xs font-mono text-[#CCCCCC] ${
-                f.value && !validateRatio(f.value) ? "border-red-500" : "border-[#333333]"
+              className={`w-full bg-[#F7F7F5] border rounded px-2 py-1.5 text-xs font-mono text-[#3A3A3A] ${
+                f.value && !validateRatio(f.value) ? "border-red-500" : "border-[#D4D0C8]"
               }`}
             />
           </div>
@@ -137,12 +137,12 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
               <select
                 value={overrideGrade ?? ""}
                 onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-                className="bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1"
+                className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#3A3A3A] text-xs rounded px-2 py-1"
               >
                 <option value="">Auto</option>
                 {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
-              <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#888888]">clear</button>
+              <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#888888] text-[10px] hover:text-[#666666]">clear</button>
             </div>
           )}
         </div>

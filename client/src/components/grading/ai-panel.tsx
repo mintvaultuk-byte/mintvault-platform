@@ -142,9 +142,9 @@ const STEP_LABELS: Record<Step, string> = {
 
 function ConfidenceBadge({ level }: { level: Confidence }) {
   const cls =
-    level === "high"   ? "bg-emerald-950/40 text-emerald-400 border-emerald-800/40" :
-    level === "medium" ? "bg-yellow-950/40 text-yellow-400 border-yellow-800/40" :
-                         "bg-red-950/40 text-red-400 border-red-800/40";
+    level === "high"   ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+    level === "medium" ? "bg-amber-50 text-amber-600 border-amber-200" :
+                         "bg-red-50 text-red-600 border-red-200";
   return (
     <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${cls}`}>
       {level}
@@ -161,10 +161,10 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
     <div className="space-y-1">
       <button type="button" onClick={onClick} disabled={status === "loading"}
         className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-xs font-bold uppercase transition-all ${
-          status === "done" ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-400" :
-          status === "error" ? "border-red-600/40 bg-red-950/20 text-red-400" :
+          status === "done" ? "border-emerald-200 bg-emerald-50 text-emerald-600" :
+          status === "error" ? "border-red-300 bg-red-50 text-red-600" :
           status === "loading" ? "border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]" :
-          "border-[#333333] text-[#888888] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
+          "border-[#D4D0C8] text-[#666666] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
         }`}>
         <span className="flex items-center gap-2">
           {status === "loading" ? <Loader2 size={13} className="animate-spin" /> :
@@ -173,9 +173,9 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
            <Bot size={13} />}
           {status === "loading" ? `Running ${label}…` : status === "done" ? `${label} ✓` : status === "error" ? `${label} — retry` : label}
         </span>
-        <span className="text-[9px] text-[#555555] font-normal normal-case">{cost}</span>
+        <span className="text-[9px] text-[#888888] font-normal normal-case">{cost}</span>
       </button>
-      {status === "error" && err && <p className="text-red-400 text-[10px] px-1">{err}</p>}
+      {status === "error" && err && <p className="text-red-600 text-[10px] px-1">{err}</p>}
     </div>
   );
 }
@@ -304,7 +304,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
   const isLoading = !["idle", "complete", "error"].includes(step);
 
   return (
-    <div className="bg-[#0A0A0A] border border-[#D4AF37]/20 rounded-xl p-4 space-y-4">
+    <div className="bg-white border border-[#D4AF37]/20 rounded-xl p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
         <Bot size={16} className="text-[#D4AF37]" />
@@ -330,7 +330,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
           type="button"
           onClick={runAnalysis}
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
+          className="w-full flex items-center justify-center gap-2 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
         >
           {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
           {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze (Full)" : "Analyze with AI (Full)"}
@@ -339,17 +339,17 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
       {/* Confidence indicator */}
       {step === "complete" && idConfidence && (
         <div className="flex items-center gap-2 text-xs">
-          <span className={`w-2 h-2 rounded-full ${idConfidence === "high" ? "bg-emerald-400" : idConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
-          <span className={idConfidence === "high" ? "text-emerald-400" : idConfidence === "medium" ? "text-yellow-400" : "text-red-400"}>
+          <span className={`w-2 h-2 rounded-full ${idConfidence === "high" ? "bg-emerald-600" : idConfidence === "medium" ? "bg-amber-600" : "bg-red-600"}`} />
+          <span className={idConfidence === "high" ? "text-emerald-600" : idConfidence === "medium" ? "text-amber-600" : "text-red-600"}>
             ID confidence: {idConfidence}{idVerified ? " (TCG API verified)" : ""}
           </span>
-          {idConfidence === "low" && <span className="text-red-400/70">— manual verification recommended</span>}
+          {idConfidence === "low" && <span className="text-red-600/70">— manual verification recommended</span>}
         </div>
       )}
 
       {/* Loading progress */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-[#888888] text-xs">
+        <div className="flex items-center gap-2 text-[#666666] text-xs">
           <Loader2 size={12} className="animate-spin flex-shrink-0" />
           <span>{STEP_LABELS[step]} (this takes 10–30 seconds)</span>
         </div>
@@ -357,9 +357,9 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
       {/* Error */}
       {step === "error" && (
-        <div className="flex items-center gap-2 bg-red-950/30 border border-red-800/40 rounded-lg px-3 py-2.5">
-          <AlertTriangle size={14} className="text-red-400 flex-shrink-0" />
-          <p className="text-red-400 text-xs">{error}</p>
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+          <AlertTriangle size={14} className="text-red-600 flex-shrink-0" />
+          <p className="text-red-600 text-xs">{error}</p>
         </div>
       )}
 
@@ -369,16 +369,16 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
           {/* Card identification */}
           {identification && (
-            <div className="bg-[#111111] border border-[#222222] rounded-lg p-3 space-y-2">
+            <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">Card Identified</p>
                 {identification.verified ? (
-                  <span className="flex items-center gap-1 text-emerald-400 text-[10px]">
+                  <span className="flex items-center gap-1 text-emerald-600 text-[10px]">
                     <CheckCircle2 size={11} />
                     Verified via {identification.dbSource}
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1 text-yellow-400 text-[10px]">
+                  <span className="flex items-center gap-1 text-amber-600 text-[10px]">
                     <AlertTriangle size={11} />
                     Not found in database
                   </span>
@@ -389,13 +389,13 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
                   <img
                     src={identification.referenceImageUrl}
                     alt="Reference"
-                    className="w-16 h-22 object-contain rounded border border-[#333333] flex-shrink-0"
+                    className="w-16 h-22 object-contain rounded border border-[#D4D0C8] flex-shrink-0"
                   />
                 )}
                 <div className="space-y-0.5 min-w-0">
-                  <p className="text-white text-sm font-bold truncate">{identification.officialName}</p>
-                  <p className="text-[#888888] text-xs">{identification.officialSet}{identification.officialNumber ? ` · ${identification.officialNumber}` : ""}</p>
-                  <p className="text-[#555555] text-[10px]">{identification.detected_game.toUpperCase()} · {identification.detected_language} · {identification.detected_rarity}</p>
+                  <p className="text-[#1A1A1A] text-sm font-bold truncate">{identification.officialName}</p>
+                  <p className="text-[#666666] text-xs">{identification.officialSet}{identification.officialNumber ? ` · ${identification.officialNumber}` : ""}</p>
+                  <p className="text-[#888888] text-[10px]">{identification.detected_game.toUpperCase()} · {identification.detected_language} · {identification.detected_rarity}</p>
                   {identification.is_holo && <span className="text-[9px] text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">HOLO</span>}
                 </div>
               </div>
@@ -424,8 +424,8 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               { label: "Surface",    value: result.surface.subgrade,   conf: result.confidence.surface },
               { label: "Overall",    value: result.overall_grade,      conf: result.confidence.overall },
             ].map(({ label, value, conf }) => (
-              <div key={label} className="bg-[#111111] rounded-lg p-2 text-center">
-                <p className="text-[#555555] text-[8px] uppercase tracking-widest">{label}</p>
+              <div key={label} className="bg-[#F7F7F5] rounded-lg p-2 text-center">
+                <p className="text-[#888888] text-[8px] uppercase tracking-widest">{label}</p>
                 <p className="text-[#D4AF37] text-lg font-black">{value}</p>
                 <ConfidenceBadge level={conf} />
               </div>
@@ -434,12 +434,12 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
           {/* Authentication */}
           {(!result.is_authentic || result.is_altered) && (
-            <div className="bg-amber-950/30 border border-amber-700/40 rounded-lg px-3 py-2.5">
-              <p className="text-amber-400 text-xs font-bold">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+              <p className="text-amber-600 text-xs font-bold">
                 {!result.is_authentic ? "⚠ Potential counterfeit detected" : "⚠ Card may be altered"}
               </p>
               {result.authentication_notes && (
-                <p className="text-amber-400/70 text-xs mt-1">{result.authentication_notes}</p>
+                <p className="text-amber-600/70 text-xs mt-1">{result.authentication_notes}</p>
               )}
             </div>
           )}
@@ -450,36 +450,36 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               <button
                 type="button"
                 onClick={() => setShowConfidenceNotes(v => !v)}
-                className="flex items-center gap-1 text-[#555555] hover:text-[#888888] text-[10px] transition-colors"
+                className="flex items-center gap-1 text-[#888888] hover:text-[#666666] text-[10px] transition-colors"
               >
                 {showConfidenceNotes ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                 Confidence notes
               </button>
               {showConfidenceNotes && (
-                <p className="text-[#888888] text-xs mt-1 leading-relaxed">{result.confidence_notes}</p>
+                <p className="text-[#666666] text-xs mt-1 leading-relaxed">{result.confidence_notes}</p>
               )}
             </div>
           )}
 
           {/* Centering detail */}
-          <div className="bg-[#111111] border border-[#222222] rounded-lg p-3 space-y-1">
+          <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-1">
             <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">Centering</p>
             <div className="grid grid-cols-2 gap-x-4 text-xs">
-              <span className="text-[#555555]">Front L/R</span>
-              <span className="text-[#CCCCCC]">{result.centering.front_left_right}</span>
-              <span className="text-[#555555]">Front T/B</span>
-              <span className="text-[#CCCCCC]">{result.centering.front_top_bottom}</span>
-              <span className="text-[#555555]">Back L/R</span>
-              <span className="text-[#CCCCCC]">{result.centering.back_left_right}</span>
-              <span className="text-[#555555]">Back T/B</span>
-              <span className="text-[#CCCCCC]">{result.centering.back_top_bottom}</span>
+              <span className="text-[#888888]">Front L/R</span>
+              <span className="text-[#3A3A3A]">{result.centering.front_left_right}</span>
+              <span className="text-[#888888]">Front T/B</span>
+              <span className="text-[#3A3A3A]">{result.centering.front_top_bottom}</span>
+              <span className="text-[#888888]">Back L/R</span>
+              <span className="text-[#3A3A3A]">{result.centering.back_left_right}</span>
+              <span className="text-[#888888]">Back T/B</span>
+              <span className="text-[#3A3A3A]">{result.centering.back_top_bottom}</span>
             </div>
-            {result.centering.notes && <p className="text-[#555555] text-[10px] mt-1">{result.centering.notes}</p>}
+            {result.centering.notes && <p className="text-[#888888] text-[10px] mt-1">{result.centering.notes}</p>}
           </div>
 
           {/* Defects */}
           {result.defects.length > 0 && (
-            <div className="bg-[#111111] border border-[#222222] rounded-lg p-3 space-y-2">
+            <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
               <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">
                 Defects Detected ({result.defects.length})
               </p>
@@ -487,15 +487,15 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
                 {result.defects.map(d => (
                   <div key={d.id} className="flex items-start gap-2">
                     <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${
-                      d.severity === "major"    ? "bg-red-950/40 text-red-400 border border-red-800/40" :
-                      d.severity === "moderate" ? "bg-orange-950/40 text-orange-400 border border-orange-800/40" :
-                                                  "bg-[#1A1A1A] text-[#555555] border border-[#333333]"
+                      d.severity === "major"    ? "bg-red-50 text-red-600 border border-red-200" :
+                      d.severity === "moderate" ? "bg-orange-50 text-orange-600 border border-orange-200" :
+                                                  "bg-[#F0EEE8] text-[#888888] border border-[#D4D0C8]"
                     }`}>{d.severity}</span>
                     <div className="min-w-0">
-                      <p className="text-[#CCCCCC] text-xs font-medium capitalize">{d.type.replace(/_/g, " ")} — {d.location}</p>
-                      <p className="text-[#555555] text-[10px] leading-snug">{d.description}</p>
+                      <p className="text-[#3A3A3A] text-xs font-medium capitalize">{d.type.replace(/_/g, " ")} — {d.location}</p>
+                      <p className="text-[#888888] text-[10px] leading-snug">{d.description}</p>
                       {d.detected_in !== "original" && (
-                        <p className="text-[#444444] text-[9px]">detected in: {d.detected_in}</p>
+                        <p className="text-[#AAAAAA] text-[9px]">detected in: {d.detected_in}</p>
                       )}
                     </div>
                   </div>
@@ -506,18 +506,18 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
 
           {/* Grade explanation */}
           {result.grade_explanation && (
-            <div className="bg-[#111111] border border-[#222222] rounded-lg p-3">
+            <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3">
               <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest mb-1.5">AI Grade Explanation</p>
-              <p className="text-[#888888] text-xs leading-relaxed">{result.grade_explanation}</p>
+              <p className="text-[#666666] text-xs leading-relaxed">{result.grade_explanation}</p>
             </div>
           )}
 
           {/* Recommendations */}
           {result.recommendations?.length > 0 && (
             <div className="space-y-1">
-              <p className="text-[#555555] text-[10px] font-bold uppercase tracking-widest">Recommendations</p>
+              <p className="text-[#888888] text-[10px] font-bold uppercase tracking-widest">Recommendations</p>
               {result.recommendations.map((r, i) => (
-                <p key={i} className="text-[#555555] text-xs">· {r}</p>
+                <p key={i} className="text-[#888888] text-xs">· {r}</p>
               ))}
             </div>
           )}
@@ -528,13 +528,13 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
               <button
                 type="button"
                 onClick={() => setShowAuthNotes(v => !v)}
-                className="flex items-center gap-1 text-[#444444] hover:text-[#666666] text-[10px] transition-colors"
+                className="flex items-center gap-1 text-[#AAAAAA] hover:text-[#888888] text-[10px] transition-colors"
               >
                 {showAuthNotes ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                 Authentication notes
               </button>
               {showAuthNotes && (
-                <p className="text-[#555555] text-xs mt-1 leading-relaxed">{result.authentication_notes}</p>
+                <p className="text-[#888888] text-xs mt-1 leading-relaxed">{result.authentication_notes}</p>
               )}
             </div>
           )}

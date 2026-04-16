@@ -44,9 +44,9 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
         }
       }}
       className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
-        status === "done" ? "border border-emerald-600/40 text-emerald-400 bg-emerald-950/20" :
+        status === "done" ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50" :
         status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5" :
-        "border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+        "border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
       }`}
     >
       {status === "loading" ? <><Loader2 size={11} className="animate-spin" /> Reprocessing…</> :
@@ -379,14 +379,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <button
             type="button"
             onClick={() => setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; })}
-            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#333333] hover:text-[#888888]"}`}
+            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#888888] border border-[#D4D0C8] hover:text-[#666666]"}`}
             title="Toggle quick-grade mode (Q)"
           >
             <Zap size={10} />
             Quick
           </button>
           {approved && (
-            <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
+            <span className="flex items-center gap-1.5 text-emerald-600 text-xs">
               <CheckCircle2 size={13} />
               Grade approved
             </span>
@@ -451,6 +451,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           />
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
             <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+
             <DefectAnnotation
               defects={defects}
               onChange={setDefects}
@@ -479,8 +480,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     <span>{isManual ? `Manual (AI: ${aiVal})` : `AI ${aiVal}`}</span>
                     <span className="text-[#D4AF37]/50">·</span>
                     <span className={`font-bold ${
-                      aiAnalysis.confidence[key] === "high" ? "text-emerald-400" :
-                      aiAnalysis.confidence[key] === "medium" ? "text-yellow-400" : "text-red-400"
+                      aiAnalysis.confidence[key] === "high" ? "text-emerald-600" :
+                      aiAnalysis.confidence[key] === "medium" ? "text-amber-600" : "text-red-600"
                     }`}>{aiAnalysis.confidence[key]}</span>
                   </div>
                 );
@@ -510,30 +511,30 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           )}
 
           {isNonNumeric && (
-            <div className="rounded-xl p-4 bg-amber-950/30 border border-amber-700/40 text-center">
-              <p className="text-amber-400 text-2xl font-black">{authStatus === "authentic_altered" ? "AA" : "NO"}</p>
-              <p className="text-amber-400 text-xs mt-1">{authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL"}</p>
+            <div className="rounded-xl p-4 bg-amber-50 border border-amber-200 text-center">
+              <p className="text-amber-600 text-2xl font-black">{authStatus === "authentic_altered" ? "AA" : "NO"}</p>
+              <p className="text-amber-600 text-xs mt-1">{authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL"}</p>
             </div>
           )}
 
           {/* Centering — manual measurement buttons */}
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setManualCenteringSide("front")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Front)
             </button>
             <button type="button" onClick={() => setManualCenteringSide("back")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#333333] text-[#888888] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#666666] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Back)
             </button>
             {centeringMethod && (
-              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-950/30 text-emerald-400 border border-emerald-800/40" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}>
+              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}>
                 {centeringMethod}
               </span>
             )}
           </div>
 
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <CenteringInput
               frontLR={frontLR} frontTB={frontTB} backLR={backLR} backTB={backTB}
               subgrade={centeringCalc}
@@ -549,7 +550,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Corners */}
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <CornerGrading
               values={corners}
               subgrade={cornersGrade}
@@ -560,7 +561,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Edges */}
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <EdgeGrading
               values={edges}
               onChange={setEdges}
@@ -570,7 +571,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Surface */}
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <SurfaceGrading
               values={surface}
               onChange={setSurface}
@@ -580,7 +581,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Authentication */}
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <Authentication
               status={authStatus}
               notes={authNotes}
@@ -589,7 +590,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </div>
 
           {/* Notes */}
-          <div className="bg-[#111111] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3">
             <GradingNotes
               privateNotes={privateNotes}
               gradeExplanation={gradeExplanation}
