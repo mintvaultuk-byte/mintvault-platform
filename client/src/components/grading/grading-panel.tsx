@@ -431,7 +431,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
-          <div className="relative" style={{ overflow: "visible", margin: "0 60px" }}>
+          <div className="relative" style={{ overflow: "visible", margin: "0 60px 16px 60px" }}>
             <ImageViewer
               urls={urls}
               defects={defects}
@@ -491,11 +491,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     <span className="text-[8px] font-bold text-[#555555]">TR</span>
                     <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
                   </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 40, left: -56 }}>
+                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, left: -56 }}>
                     <CornerSelect value={cc.bl} onChange={v => setC("bl", v)} isLowest={isCLow(cc.bl)} />
                     <span className="text-[8px] font-bold text-[#555555]">BL</span>
                   </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 40, right: -56 }}>
+                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, right: -56 }}>
                     <CornerSelect value={cc.br} onChange={v => setC("br", v)} isLowest={isCLow(cc.br)} />
                     <span className="text-[8px] font-bold text-[#555555]">BR</span>
                   </div>
@@ -504,7 +504,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     <span className="text-[8px] font-bold text-[#555555]">T</span>
                     <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
                   </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 24, left: "50%", transform: "translateX(-50%)" }}>
+                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, left: "50%", transform: "translateX(-50%)" }}>
                     <EdgeSelect value={ee.bottom} onChange={v => setE("bottom", v)} isLowest={isELow(ee.bottom)} />
                     <span className="text-[8px] font-bold text-[#555555]">B</span>
                   </div>
