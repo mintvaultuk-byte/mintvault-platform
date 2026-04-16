@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import ImageViewer from "./image-viewer";
 import DefectAnnotation, { type Defect } from "./defect-annotation";
 import CenteringInput from "./centering-input";
-import CornerGrading, { calcCornerSubgrade, type CornerValues } from "./corner-grading";
+import CornerGrading, { calcCornerSubgrade, CornerSelect, type CornerValues } from "./corner-grading";
 import EdgeGrading, { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
 import SurfaceGrading, { calcSurfaceSubgrade, type SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
@@ -106,6 +106,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [backLR, setBackLR]   = useState("50/50");
   const [backTB, setBackTB]   = useState("50/50");
   const [corners, setCorners] = useState<CornerValues>(DEFAULT_CORNERS);
+  const [viewerSide, setViewerSide] = useState("front");
+  const [viewerZoom, setViewerZoom] = useState(1);
+  const [viewerMode, setViewerMode] = useState({ fullscreen: false, markMode: false });
   const [edges, setEdges]     = useState<EdgeValues>(DEFAULT_EDGES);
   const [surface, setSurface] = useState<SurfaceValues>(DEFAULT_SURFACE);
   const [defects, setDefects] = useState<Defect[]>([]);
@@ -428,27 +431,54 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
-          <ImageViewer
-            urls={urls}
-            defects={defects}
-            onDefectAdded={d => setDefects(prev => [...prev, d])}
-            highlightId={highlightDefect}
-            referenceImageUrl={aiIdentification?.referenceImageUrl}
-            centeringFront={frontLR ? {
-              ratioLR: frontLR,
-              ratioTB: frontTB,
-              outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
-              innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
-            } : null}
-            centeringBack={backLR ? {
-              ratioLR: backLR,
-              ratioTB: backTB,
-              outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
-              innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
-            } : null}
-            certId={certId}
-            onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
-          />
+          <div className="relative">
+            <ImageViewer
+              urls={urls}
+              defects={defects}
+              onDefectAdded={d => setDefects(prev => [...prev, d])}
+              highlightId={highlightDefect}
+              referenceImageUrl={aiIdentification?.referenceImageUrl}
+              centeringFront={frontLR ? {
+                ratioLR: frontLR,
+                ratioTB: frontTB,
+                outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
+                innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
+              } : null}
+              centeringBack={backLR ? {
+                ratioLR: backLR,
+                ratioTB: backTB,
+                outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
+                innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
+              } : null}
+              certId={certId}
+              onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+              onSideChange={setViewerSide}
+              onZoomChange={setViewerZoom}
+              onModeChange={setViewerMode}
+            />
+            {/* Corner score overlays on card image corners */}
+            {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
+              const cc = viewerSide === "back"
+                ? { tl: corners.backTL, tr: corners.backTR, bl: corners.backBL, br: corners.backBR }
+                : { tl: corners.frontTL, tr: corners.frontTR, bl: corners.frontBL, br: corners.frontBR };
+              const low = Math.min(cc.tl, cc.tr, cc.bl, cc.br);
+              const isLow = (v: number) => v === low && low < 10;
+              const set = (pos: "tl" | "tr" | "bl" | "br", v: number) => {
+                const key = viewerSide === "back"
+                  ? ({ tl: "backTL", tr: "backTR", bl: "backBL", br: "backBR" } as const)[pos]
+                  : ({ tl: "frontTL", tr: "frontTR", bl: "frontBL", br: "frontBR" } as const)[pos];
+                setCorners(prev => ({ ...prev, [key]: v }));
+              };
+              return (
+                <>
+                  <div className="absolute top-14 left-2 z-20"><CornerSelect value={cc.tl} onChange={v => set("tl", v)} isLowest={isLow(cc.tl)} /></div>
+                  <div className="absolute top-14 right-2 z-20"><CornerSelect value={cc.tr} onChange={v => set("tr", v)} isLowest={isLow(cc.tr)} /></div>
+                  <div className="absolute bottom-14 left-2 z-20"><CornerSelect value={cc.bl} onChange={v => set("bl", v)} isLowest={isLow(cc.bl)} /></div>
+                  <div className="absolute bottom-14 right-2 z-20"><CornerSelect value={cc.br} onChange={v => set("br", v)} isLowest={isLow(cc.br)} /></div>
+                </>
+              );
+            })()}
+          </div>
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
             <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
 

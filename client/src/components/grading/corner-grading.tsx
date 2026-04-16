@@ -36,6 +36,22 @@ function GradeSelect({ value, onChange, isLowest }: { value: number; onChange: (
   );
 }
 
+export function CornerSelect({ value, onChange, isLowest = false }: { value: number; onChange: (v: number) => void; isLowest?: boolean }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(Number(e.target.value))}
+      className={`text-[10px] rounded px-1 py-0.5 font-bold border cursor-pointer shadow-sm ${
+        isLowest ? "border-red-500 bg-white/90" : "border-[#D4D0C8] bg-white/90"
+      } backdrop-blur-sm`}
+      style={{ color: gradeColor(value) }}
+      onClick={e => e.stopPropagation()}
+    >
+      {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+    </select>
+  );
+}
+
 export function calcCornerSubgrade(v: CornerValues): { grade: number; worstKey: string } {
   const entries: [string, number][] = [
     ["Front Top-Left",     v.frontTL],

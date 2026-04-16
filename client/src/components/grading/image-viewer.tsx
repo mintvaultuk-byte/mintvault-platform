@@ -47,6 +47,9 @@ interface Props {
   centeringBack?: CenteringOverlayData | null;
   certId?: number;
   onImageDeleted?: () => void;
+  onSideChange?: (side: string) => void;
+  onZoomChange?: (zoom: number) => void;
+  onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
 }
 
 const SIDES: Side[] = ["front", "back"];
@@ -88,18 +91,27 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted }: Props) {
-  const [side, setSide] = useState<Side>("front");
+export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange }: Props) {
+  const [side, setSideRaw] = useState<Side>("front");
   const [variant, setVariant] = useState<Variant>("original");
   const [showReference, setShowReference] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoomRaw] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [showDefects, setShowDefects] = useState(true);
   const [showCentering, setShowCentering] = useState(false);
-  const [markMode, setMarkMode] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [markMode, setMarkModeRaw] = useState(false);
+  const [fullscreen, setFullscreenRaw] = useState(false);
+
+  function setSide(s: Side) { setSideRaw(s); onSideChange?.(s); }
+  function setZoom(z: number | ((prev: number) => number)) {
+    setZoomRaw(prev => { const next = typeof z === "function" ? z(prev) : z; onZoomChange?.(next); return next; });
+  }
+  function setMarkMode(v: boolean) { setMarkModeRaw(v); onModeChange?.({ fullscreen: fullscreen, markMode: v }); }
+  function setFullscreen(v: boolean) { setFullscreenRaw(v); onModeChange?.({ fullscreen: v, markMode: markMode }); }
+
+  useEffect(() => { onSideChange?.("front"); }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
