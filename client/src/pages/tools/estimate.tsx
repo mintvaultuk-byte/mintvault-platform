@@ -15,10 +15,29 @@ interface EstimateResult {
   corners_notes: string;
   edges_notes: string;
   surface_notes: string;
-  potential_issues: string[];
+  potential_issues: (string | { area: string; severity: string; description: string })[];
   recommendation: string;
-  confidence: "high" | "medium" | "low";
+  confidence: string;
   credits_remaining?: number;
+  card_identified?: {
+    name: string | null;
+    set: string | null;
+    year: number | null;
+    rarity: string | null;
+    confidence: "high" | "medium" | "low";
+  };
+  subgrades?: {
+    centering: { score: number; confidence: string; note: string };
+    corners: { score: number; confidence: string; note: string };
+    edges: { score: number; confidence: string; note: string };
+    surface: { score: number; confidence: string; note: string };
+  };
+  overall_grade_estimate?: {
+    low: number;
+    high: number;
+    most_likely: number;
+    label: string;
+  };
 }
 
 const PACKAGES = [
@@ -406,29 +425,89 @@ export default function PreGradeEstimatePage() {
               </p>
             </div>
 
-            {/* Quick breakdown */}
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-2xl p-6 space-y-3">
-              <h2 className="text-[#1A1A1A] font-sans font-bold tracking-tight">Quick Breakdown</h2>
-              {[
-                { label: "Centering", notes: result.centering_notes },
-                { label: "Corners",   notes: result.corners_notes },
-                { label: "Edges",     notes: result.edges_notes },
-                { label: "Surface",   notes: result.surface_notes },
-              ].map(({ label, notes }) => (
-                <div key={label} className="flex gap-3">
-                  <span className="text-[#D4AF37] text-xs font-bold uppercase w-20 flex-shrink-0 pt-0.5">{label}</span>
-                  <p className="text-[#555555] text-sm leading-relaxed">{notes}</p>
+            {/* Card identification */}
+            {result.card_identified && result.card_identified.confidence !== "low" && result.card_identified.name && (
+              <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-wider mb-1">Card Identified</p>
+                    <p className="text-lg font-bold text-[#1A1A1A]">{result.card_identified.name}</p>
+                    <p className="text-sm text-[#555555]">
+                      {[result.card_identified.set, result.card_identified.year, result.card_identified.rarity].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] uppercase text-[#888888]">Confidence</p>
+                    <p className={`text-xs font-bold uppercase ${result.card_identified.confidence === "high" ? "text-green-600" : "text-amber-600"}`}>
+                      {result.card_identified.confidence}
+                    </p>
+                  </div>
                 </div>
-              ))}
+              </div>
+            )}
+
+            {/* Quick breakdown with subgrade scores */}
+            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-2xl p-6 space-y-0">
+              <h2 className="text-[#1A1A1A] font-sans font-bold tracking-tight mb-3">Quick Breakdown</h2>
+              {([
+                { key: "centering" as const, label: "Centering", weight: "10%", fallback: result.centering_notes },
+                { key: "corners" as const,   label: "Corners",   weight: "25%", fallback: result.corners_notes },
+                { key: "edges" as const,     label: "Edges",     weight: "25%", fallback: result.edges_notes },
+                { key: "surface" as const,   label: "Surface",   weight: "40%", fallback: result.surface_notes },
+              ]).map(({ key, label, weight, fallback }) => {
+                const sub = result.subgrades?.[key];
+                return (
+                  <div key={key} className="flex items-start gap-4 py-3 border-b border-[#E8E4DC] last:border-0">
+                    <div className="w-24 flex-shrink-0">
+                      <p className="text-[10px] font-bold text-[#D4AF37] uppercase tracking-wider">{label}</p>
+                      {sub ? (
+                        <div className="flex items-baseline gap-1 mt-0.5">
+                          <span className={`text-2xl font-black ${sub.score >= 9 ? "text-[#D4AF37]" : sub.score >= 7 ? "text-[#1A1A1A]" : "text-red-600"}`}>
+                            {sub.score}
+                          </span>
+                          <span className="text-[9px] text-[#888888]">/10</span>
+                          <span className="text-[8px] text-[#AAAAAA] ml-1">({weight})</span>
+                        </div>
+                      ) : (
+                        <span className="text-[9px] text-[#AAAAAA]">({weight})</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-[#333333] leading-relaxed flex-1 pt-0.5">
+                      {sub?.note || fallback}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Potential issues */}
+            {/* Potential issues with severity */}
             {result.potential_issues?.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-2">
                 <p className="text-amber-800 font-semibold text-sm">Potential Issues Spotted</p>
-                {result.potential_issues.map((issue, i) => (
-                  <p key={i} className="text-amber-700 text-sm">· {issue}</p>
-                ))}
+                {result.potential_issues.map((issue, i) => {
+                  const isStructured = typeof issue === "object" && issue !== null && "severity" in issue;
+                  const severityColor = isStructured
+                    ? (issue as any).severity === "major" ? "bg-red-100 text-red-700 border-red-200"
+                    : (issue as any).severity === "moderate" ? "bg-amber-100 text-amber-700 border-amber-200"
+                    : "bg-[#F0EEE8] text-[#555555] border-[#E8E4DC]"
+                    : "";
+                  return (
+                    <div key={i} className="flex items-start gap-2">
+                      {isStructured && (
+                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border flex-shrink-0 mt-0.5 ${severityColor}`}>
+                          {(issue as any).severity}
+                        </span>
+                      )}
+                      <p className="text-amber-700 text-sm">
+                        {isStructured ? (
+                          <><strong>{(issue as any).area}:</strong> {(issue as any).description}</>
+                        ) : (
+                          `· ${issue}`
+                        )}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
