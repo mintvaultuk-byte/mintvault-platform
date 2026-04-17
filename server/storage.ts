@@ -1654,16 +1654,16 @@ export class DatabaseStorage implements IStorage {
         card_name,
         COUNT(*)::int AS total,
         COUNT(CASE WHEN grade::numeric = 10
-          AND COALESCE(grade_centering::numeric, 0) = 10
-          AND COALESCE(grade_corners::numeric, 0)   = 10
-          AND COALESCE(grade_edges::numeric, 0)     = 10
-          AND COALESCE(grade_surface::numeric, 0)   = 10
+          AND COALESCE(centering_score::numeric, 0) = 10
+          AND COALESCE(corners_score::numeric, 0)   = 10
+          AND COALESCE(edges_score::numeric, 0)     = 10
+          AND COALESCE(surface_score::numeric, 0)   = 10
           THEN 1 END)::int AS gBL,
         COUNT(CASE WHEN grade::numeric = 10 AND NOT (
-          COALESCE(grade_centering::numeric, 0) = 10
-          AND COALESCE(grade_corners::numeric, 0)   = 10
-          AND COALESCE(grade_edges::numeric, 0)     = 10
-          AND COALESCE(grade_surface::numeric, 0)   = 10
+          COALESCE(centering_score::numeric, 0) = 10
+          AND COALESCE(corners_score::numeric, 0)   = 10
+          AND COALESCE(edges_score::numeric, 0)     = 10
+          AND COALESCE(surface_score::numeric, 0)   = 10
         ) THEN 1 END)::int AS g10,
         COUNT(CASE WHEN grade::numeric >= 9 AND grade::numeric < 10 THEN 1 END)::int AS g9,
         COUNT(CASE WHEN grade::numeric >= 8 AND grade::numeric < 9  THEN 1 END)::int AS g8,
