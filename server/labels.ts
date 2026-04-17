@@ -23,11 +23,11 @@ export function applyLabelOverrides(
   };
 }
 
-const PX_W = 827;
-const PX_H = 236;
+const PX_W = 850;   // 72mm × 300 DPI / 25.4
+const PX_H = 260;   // 22mm × 300 DPI / 25.4
 const MM_TO_PT = 2.83465;
-const PDF_W = 70 * MM_TO_PT;
-const PDF_H = 20 * MM_TO_PT;
+const PDF_W = 72 * MM_TO_PT;
+const PDF_H = 22 * MM_TO_PT;
 
 // ── Border geometry ────────────────────────────────────────────────────────
 // Gold frame fills from canvas edge inward FRAME_W pixels — no white gap.
@@ -51,11 +51,11 @@ const FRAME_GRAD_STOPS: [number, string][] = [
 
 // Inner safe edge coordinates (inside gold frame)
 const I_LEFT   = FRAME_W;           // 18
-const I_RIGHT  = PX_W - FRAME_W;    // 809
+const I_RIGHT  = PX_W - FRAME_W;    // 832
 const I_TOP    = FRAME_W;           // 18
-const I_BOTTOM = PX_H - FRAME_W;    // 218
-const I_W      = I_RIGHT - I_LEFT;  // 791
-const I_H      = I_BOTTOM - I_TOP;  // 200
+const I_BOTTOM = PX_H - FRAME_W;    // 242
+const I_W      = I_RIGHT - I_LEFT;  // 814
+const I_H      = I_BOTTOM - I_TOP;  // 224
 
 const LOGO_PATH      = path.join(process.cwd(), "public", "brand", "logo.png");
 const NFC_ICON_PATH  = path.join(process.cwd(), "public", "brand", "nfc-tap-icon.png");
@@ -855,7 +855,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   //   CENTRE — NFC + txt   : NFC_ICON_CX = midpoint of (logo-right … qr-left)
   //   RIGHT  — QR code     : unchanged (150px, flush top-right)
   //
-  // Logo must fit within PX_H=236 canvas. Using I_H-10=196px keeps it inside
+  // Logo must fit within PX_H=260 canvas. Using I_H-10=214px keeps it inside
   // the inner content area (I_TOP=15 to I_BOTTOM=221) with 5px margin each side.
   const LOGO_DRAW    = I_H - 10;                  // 196px — fits within inner area
   const LOGO_LX      = I_LEFT + 4;                // 19px — tight to left gold border
