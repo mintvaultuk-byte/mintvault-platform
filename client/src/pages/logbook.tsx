@@ -26,6 +26,11 @@ function safe(v: any, fallback = "\u2014"): string {
   return String(v);
 }
 
+function titleCase(s: string | null | undefined): string {
+  if (!s) return "\u2014";
+  return s.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
 function GoldDivider() {
   return <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/40 to-transparent my-8" />;
 }
@@ -113,8 +118,8 @@ export default function LogbookPage() {
   return (
     <>
       <SeoHead
-        title={`${safe(card.name)} — Grade ${safe(grades.overall)} | MintVault Logbook`}
-        description={`Official MintVault Ownership Logbook for ${safe(card.name)} (${safe(card.set)}). Grade: ${safe(grades.overall)} ${grades.gradeLabel}. Certificate ${data.certId}.`}
+        title={`${titleCase(card.name)} — Grade ${safe(grades.overall)} | MintVault Logbook`}
+        description={`Official MintVault Ownership Logbook for ${titleCase(card.name)} (${safe(card.set)}). Grade: ${safe(grades.overall)} ${grades.gradeLabel}. Certificate ${data.certId}.`}
         canonical={`/vault/${data.certId}`}
       />
 
@@ -134,8 +139,10 @@ export default function LogbookPage() {
 
             {/* Grade badge */}
             <div className="inline-block mb-4">
-              <div className={`text-6xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-400" : "text-[#E8E4DC]"}`}>
-                {safe(grades.overall)}
+              <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 mb-2" style={{ boxShadow: "0 0 24px rgba(212,175,55,0.15)" }}>
+                <span className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-400" : "text-[#E8E4DC]"}`}>
+                  {safe(grades.overall)}
+                </span>
               </div>
               <div className={`text-sm uppercase tracking-[0.2em] font-bold mt-1 ${grades.isBlackLabel ? "text-[#D4AF37]" : "text-[#888888]"}`}>
                 {grades.gradeLabel}
@@ -145,7 +152,7 @@ export default function LogbookPage() {
               )}
             </div>
 
-            <h1 className="text-3xl md:text-4xl font-black text-[#E8E4DC] mt-4 mb-2">{safe(card.name)}</h1>
+            <h1 className="text-3xl md:text-4xl font-black text-[#E8E4DC] mt-4 mb-2">{titleCase(card.name)}</h1>
             <p className="text-[#888888] text-sm">{safe(card.set)} {card.number ? `#${card.number}` : ""} {card.year ? `(${card.year})` : ""}</p>
 
             <GoldDivider />
@@ -176,7 +183,7 @@ export default function LogbookPage() {
           <Section title="Card Identity">
             <div className="space-y-0">
               <Field label="Game" value={safe(card.game)} />
-              <Field label="Card Name" value={safe(card.name)} />
+              <Field label="Card Name" value={titleCase(card.name)} />
               <Field label="Set" value={safe(card.set)} />
               <Field label="Card Number" value={safe(card.number)} />
               <Field label="Year" value={safe(card.year)} />
@@ -187,14 +194,16 @@ export default function LogbookPage() {
             </div>
           </Section>
 
-          {/* Grade Breakdown */}
+          {/* Grade Breakdown — only show if at least one subgrade exists */}
+          {(grades.centering != null || grades.corners != null || grades.edges != null || grades.surface != null) && (
           <Section title="Grade Analysis">
-            <div className="grid grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-4 gap-6 mb-4">
               <SubgradeBox label="Centering" value={grades.centering} />
               <SubgradeBox label="Corners" value={grades.corners} />
               <SubgradeBox label="Edges" value={grades.edges} />
               <SubgradeBox label="Surface" value={grades.surface} />
             </div>
+            <p className="text-[10px] text-[#555555] text-center mb-6">Surface 40% · Corners 25% · Edges 25% · Centering 10%</p>
 
             {/* Centering ratios */}
             {(centering.frontLR || centering.backLR) && (
@@ -223,6 +232,7 @@ export default function LogbookPage() {
               </div>
             )}
           </Section>
+          )}
 
           {/* Authentication */}
           <Section title="Authentication">
@@ -265,12 +275,31 @@ export default function LogbookPage() {
             </Section>
           )}
 
+          {/* Ownership Status */}
+          <Section title="Ownership">
+            {provenance.ownershipStatus === "unclaimed" ? (
+              <div className="bg-[#0D0D0D] border border-[#D4AF37]/30 rounded-lg p-5 text-center">
+                <p className="text-[#D4AF37] text-sm font-bold uppercase tracking-wider mb-2">Unclaimed Certificate</p>
+                <p className="text-[#888888] text-xs mb-4">This certificate has not been registered to an owner yet.</p>
+                <a href={`/claim?certId=${encodeURIComponent(data.certId)}`}
+                  className="inline-flex items-center gap-2 bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-6 py-2.5 rounded-lg transition-colors">
+                  Claim This Certificate
+                </a>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-[#16A34A]" />
+                <span className="text-[#16A34A] text-sm font-bold">Verified Ownership</span>
+              </div>
+            )}
+          </Section>
+
           {/* Provenance */}
           <Section title="Provenance">
             <div className="space-y-0">
               {provenance.issuedAt && <Field label="Certificate Issued" value={new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
               {provenance.gradedAt && <Field label="Grade Approved" value={new Date(provenance.gradedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
-              <Field label="NFC Enabled" value={provenance.nfcEnabled ? "Yes" : "No"} />
+              {provenance.nfcEnabled && <Field label="NFC Enabled" value="Yes" />}
               {provenance.nfcScanCount > 0 && <Field label="NFC Scans" value={String(provenance.nfcScanCount)} />}
               {provenance.stolenStatus && <Field label="Stolen Flag" value="REPORTED STOLEN" />}
             </div>
@@ -311,7 +340,8 @@ export default function LogbookPage() {
           {/* Footer — Verification + Download */}
           <div className="text-center py-8">
             <p className="text-[10px] uppercase tracking-[0.2em] text-[#555555] mb-3">Digital Signature</p>
-            <p className="font-mono text-xs text-[#888888] break-all mb-6">{verification.signature || "\u2014"}</p>
+            <p className="font-mono text-xs text-[#888888] break-all mb-2">{verification.signature || "\u2014"}</p>
+            <p className="text-[10px] text-[#333333] mb-6">Cryptographic hash covering certificate ID, card identity, and all grade data. Any modification invalidates this signature.</p>
 
             <div className="flex flex-col items-center gap-3">
               <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
