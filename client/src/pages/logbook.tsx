@@ -34,7 +34,7 @@ function titleCase(s: string | null | undefined): string {
 }
 
 function GoldDivider() {
-  return <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/40 to-transparent my-8" />;
+  return <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/40 to-transparent my-6" />;
 }
 
 function SubgradeBox({ label, value }: { label: string; value: number | string | null }) {
@@ -51,7 +51,7 @@ function SubgradeBox({ label, value }: { label: string; value: number | string |
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-12">
+    <div className="mb-8">
       <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] font-bold mb-4">{title}</h2>
       <div className="h-px bg-[#E8E4DC] mb-6" />
       {children}

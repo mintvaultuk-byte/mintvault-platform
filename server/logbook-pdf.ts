@@ -24,6 +24,12 @@ const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 
 const s = (v: any, fb = "\u2014") => (v == null || v === "") ? fb : String(v);
 
+function titleCase(str: string | null | undefined): string {
+  if (!str) return "\u2014";
+  const specials: Record<string, string> = { pokemon: "Pok\u00e9mon", "pokémon": "Pok\u00e9mon" };
+  return str.split(" ").map(w => specials[w.toLowerCase()] || (w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join(" ");
+}
+
 async function qr(url: string): Promise<Buffer> {
   return QRCode.toBuffer(url, { width: 140, margin: 1, color: { dark: "#000", light: "#fff" }, errorCorrectionLevel: "H" });
 }
@@ -76,7 +82,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       y += 38; // clear logo + embedded subtext
       doc.font("Helvetica").fontSize(4.5).fillColor(GOLD).text("OWNERSHIP LOGBOOK", M, y, { width: CW, align: "center", height: 7, characterSpacing: 3.5 }); y += 8;
       doc.save().rect(M + CW * 0.35, y, CW * 0.3, 0.35).fill(GOLD).restore(); y += 6;
-      doc.font("Helvetica-Bold").fontSize(12).fillColor(CHARCOAL).text(s(card.name, "Certificate"), M, y, { width: CW, align: "center", height: 15 }); y += 15;
+      doc.font("Helvetica-Bold").fontSize(12).fillColor(CHARCOAL).text(titleCase(card.name), M, y, { width: CW, align: "center", height: 15 }); y += 15;
       doc.font("Helvetica").fontSize(6.5).fillColor(GRAY).text(`${s(card.set)} ${card.number ? `#${card.number}` : ""} ${card.year ? `(${card.year})` : ""}`.trim(), M, y, { width: CW, align: "center", height: 9 }); y += 10;
       doc.font("Helvetica-Bold").fontSize(22).fillColor(GOLD).text(gradeStr, M, y, { width: CW, align: "center", height: 25 }); y += 26;
       doc.font("Helvetica-Bold").fontSize(6).fillColor(GOLD_DARK).text(gradeLabel, M, y, { width: CW, align: "center", height: 8, characterSpacing: 1.5 }); y += 8;
@@ -89,27 +95,32 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       // ── CARD IDENTITY (budget: ~80pt) ──────────────────────────────────────
       if (fits(80, "Card Identity")) {
         hr(); hd("Card Identity");
-        rw("Card Name", s(card.name)); rw("Game", s(card.game)); rw("Set", s(card.set));
+        rw("Card Name", titleCase(card.name)); rw("Game", titleCase(card.game)); rw("Set", s(card.set));
         rw("Number", s(card.number)); rw("Year", s(card.year));
         if (card.variant) rw("Variant", card.variant);
         rw("Rarity", s(card.rarity)); rw("Language", s(card.language));
       }
 
       // ── GRADE ANALYSIS (budget: ~45pt) ─────────────────────────────────────
-      if (fits(45, "Grade Analysis")) {
+      const hasSubgrades = grades.centering != null || grades.corners != null || grades.edges != null || grades.surface != null;
+      if (fits(hasSubgrades ? 45 : 30, "Grade Analysis")) {
         hr(); hd("Grade Analysis");
-        doc.font("Helvetica-Bold").fontSize(14).fillColor(GOLD).text(gradeStr, M, y, { width: 40, align: "center", height: 16 });
-        doc.font("Helvetica").fontSize(4).fillColor(GOLD_DARK).text(gradeLabel, M, y + 16, { width: 40, align: "center", height: 6 });
-        const sx = M + 55; const sw = (CW - 55) / 4;
-        ["Centering", "Corners", "Edges", "Surface"].forEach((l, i) => {
-          const v = [grades.centering, grades.corners, grades.edges, grades.surface][i];
-          doc.font("Helvetica").fontSize(4).fillColor(GRAY).text(l.toUpperCase(), sx + i * sw, y, { width: sw, align: "center", height: 6 });
-          doc.font("Helvetica-Bold").fontSize(10).fillColor(TEXT).text(s(v), sx + i * sw, y + 5, { width: sw, align: "center", height: 12 });
-        });
+        doc.font("Helvetica-Bold").fontSize(14).fillColor(GOLD).text(gradeStr, M, y, { width: hasSubgrades ? 40 : CW, align: "center", height: 16 });
+        doc.font("Helvetica").fontSize(4).fillColor(GOLD_DARK).text(gradeLabel, M, y + 16, { width: hasSubgrades ? 40 : CW, align: "center", height: 6 });
+        if (hasSubgrades) {
+          const sx = M + 55; const sw = (CW - 55) / 4;
+          ["Centering", "Corners", "Edges", "Surface"].forEach((l, i) => {
+            const v = [grades.centering, grades.corners, grades.edges, grades.surface][i];
+            doc.font("Helvetica").fontSize(4).fillColor(GRAY).text(l.toUpperCase(), sx + i * sw, y, { width: sw, align: "center", height: 6 });
+            doc.font("Helvetica-Bold").fontSize(10).fillColor(TEXT).text(s(v), sx + i * sw, y + 5, { width: sw, align: "center", height: 12 });
+          });
+        }
         y += 24;
-        // Centering single line
-        const cp = [centering.frontLR && `Front L/R: ${centering.frontLR}`, centering.frontTB && `T/B: ${centering.frontTB}`, centering.backLR && `Back L/R: ${centering.backLR}`, centering.backTB && `T/B: ${centering.backTB}`].filter(Boolean);
-        if (cp.length) { doc.font("Helvetica").fontSize(4.5).fillColor(MUTED).text(cp.join("  \u00B7  "), M, y, { width: CW, height: 7 }); y += 7; }
+        // Centering single line (only if subgrades exist)
+        if (hasSubgrades) {
+          const cp = [centering.frontLR && `Front L/R: ${centering.frontLR}`, centering.frontTB && `T/B: ${centering.frontTB}`, centering.backLR && `Back L/R: ${centering.backLR}`, centering.backTB && `T/B: ${centering.backTB}`].filter(Boolean);
+          if (cp.length) { doc.font("Helvetica").fontSize(4.5).fillColor(MUTED).text(cp.join("  \u00B7  "), M, y, { width: CW, height: 7 }); y += 7; }
+        }
       }
 
       // ── AUTH + CONDITION (budget: ~30pt) ────────────────────────────────────
