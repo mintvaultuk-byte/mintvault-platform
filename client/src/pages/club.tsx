@@ -155,13 +155,13 @@ const FAQS = [
 function IntervalToggle({ interval, onChange }: { interval: "month" | "year"; onChange: (v: "month" | "year") => void }) {
   return (
     <div className="flex items-center justify-center mb-10">
-      <div className="flex items-center gap-0 bg-[#F5F2EB] rounded-xl p-1 border border-[#E8E4DC]">
+      <div className="flex items-center gap-0 bg-[#F7F7F5] rounded-xl p-1 border border-[#E8E4DC]">
         <button
           onClick={() => onChange("month")}
           className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${
             interval === "month"
               ? "bg-white text-[#1A1A1A] shadow-sm"
-              : "text-[#999999] hover:text-[#666666]"
+              : "text-[#888888] hover:text-[#555555]"
           }`}
         >
           Monthly
@@ -171,7 +171,7 @@ function IntervalToggle({ interval, onChange }: { interval: "month" | "year"; on
           className={`px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 ${
             interval === "year"
               ? "bg-white text-[#1A1A1A] shadow-sm"
-              : "text-[#999999] hover:text-[#666666]"
+              : "text-[#888888] hover:text-[#555555]"
           }`}
         >
           Annual
@@ -233,7 +233,7 @@ function TierCard({
         {/* Price */}
         <div className="mb-1">
           <span className="text-3xl font-black text-[#1A1A1A]">£{price.toFixed(2)}</span>
-          <span className="text-sm text-[#999999] ml-1">/month</span>
+          <span className="text-sm text-[#888888] ml-1">/month</span>
         </div>
         <p className="text-xs text-[#AAAAAA] mb-1">{annualLabel}</p>
         {interval === "year" && (
@@ -255,7 +255,7 @@ function TierCard({
           }}
         >
           {isPending && <Loader2 size={14} className="animate-spin" />}
-          Subscribe
+          Subscribe <span className="ml-1">→</span>
         </button>
 
         <p className="text-[10px] text-[#AAAAAA] text-center mb-5">Cancel anytime</p>
@@ -263,7 +263,7 @@ function TierCard({
         {/* Features */}
         <ul className="space-y-2">
           {tier.features.map((f) => (
-            <li key={f} className="flex items-start gap-2 text-sm text-[#444444]">
+            <li key={f} className="flex items-start gap-2 text-sm text-[#555555]">
               <Check size={14} className="text-[#D4AF37] flex-shrink-0 mt-0.5" />
               {f}
             </li>
@@ -280,7 +280,7 @@ function ComparisonTable() {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[#E8E4DC]">
-            <th className="text-left px-4 py-3 text-[#999999] font-bold text-xs uppercase tracking-wider">Feature</th>
+            <th className="text-left px-4 py-3 text-[#888888] font-bold text-xs uppercase tracking-wider">Feature</th>
             <th className="px-4 py-3 text-center" style={{ color: "#CD7F32" }}>
               <div className="font-black text-sm">Bronze</div>
             </th>
@@ -295,23 +295,23 @@ function ComparisonTable() {
         <tbody>
           {COMPARISON_ROWS.map((row, i) => (
             <tr key={row.feature} className={`border-b border-[#F0EDE6] ${i % 2 === 0 ? "bg-[#FAFAF8]" : "bg-white"}`}>
-              <td className="px-4 py-2.5 text-[#444444] font-medium text-xs">{row.feature}</td>
+              <td className="px-4 py-2.5 text-[#555555] font-medium text-xs">{row.feature}</td>
               <td className="px-4 py-2.5 text-center">
                 {typeof row.bronze === "boolean"
-                  ? row.bronze ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.bronze}</span>
+                  ? row.bronze ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#E8E4DC] text-lg leading-none">—</span>
+                  : <span className="text-xs font-semibold text-[#555555]">{row.bronze}</span>
                 }
               </td>
               <td className="px-4 py-2.5 text-center bg-[#D4AF37]/5">
                 {typeof row.silver === "boolean"
-                  ? row.silver ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.silver}</span>
+                  ? row.silver ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#E8E4DC] text-lg leading-none">—</span>
+                  : <span className="text-xs font-semibold text-[#555555]">{row.silver}</span>
                 }
               </td>
               <td className="px-4 py-2.5 text-center">
                 {typeof row.gold === "boolean"
-                  ? row.gold ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.gold}</span>
+                  ? row.gold ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#E8E4DC] text-lg leading-none">—</span>
+                  : <span className="text-xs font-semibold text-[#555555]">{row.gold}</span>
                 }
               </td>
             </tr>
@@ -334,7 +334,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
         {open ? <ChevronUp size={16} className="text-[#AAAAAA] flex-shrink-0 mt-0.5" /> : <ChevronDown size={16} className="text-[#AAAAAA] flex-shrink-0 mt-0.5" />}
       </button>
       {open && (
-        <p className="text-sm text-[#666666] pb-4 leading-relaxed">{a}</p>
+        <p className="text-sm text-[#555555] pb-4 leading-relaxed">{a}</p>
       )}
     </div>
   );
@@ -395,7 +395,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
             {me.label || "Vault Club"}
           </h1>
           {me.status && (
-            <span className={`inline-block mt-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusColour[me.status] || "text-[#999999]"}`}>
+            <span className={`inline-block mt-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusColour[me.status] || "text-[#888888]"}`}>
               {statusLabel[me.status] || me.status}
             </span>
           )}
@@ -410,7 +410,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
         <div className="flex items-start justify-between flex-wrap gap-4 mb-4">
           <div>
             {renewsDate && (
-              <p className="text-sm text-[#666666]">
+              <p className="text-sm text-[#555555]">
                 {me.cancels_at ? "Cancels on" : "Renews on"}: <strong className="text-[#1A1A1A]">{renewsDate}</strong>
               </p>
             )}
@@ -421,7 +421,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
           <button
             onClick={() => portalMutation.mutate()}
             disabled={portalMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#444444] hover:border-[#D4AF37]/40 transition-colors disabled:opacity-60"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#555555] hover:border-[#D4AF37]/40 transition-colors disabled:opacity-60"
           >
             {portalMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <CreditCard size={13} />}
             Manage Subscription
@@ -439,7 +439,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
           </div>
           <p className="text-xl font-black text-[#1A1A1A]">{me.ai_credits_balance}</p>
           <p className="text-xs text-[#AAAAAA]">of {me.ai_credits_monthly}/month</p>
-          <div className="mt-2 h-1.5 bg-[#F0EDE6] rounded-full overflow-hidden">
+          <div className="mt-2 h-1.5 bg-[#F7F7F5] rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
               style={{ width: `${creditPercent}%`, background: "linear-gradient(90deg,#B8960C,#D4AF37)" }}
@@ -483,7 +483,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
       <div className="grid grid-cols-1 gap-2 mb-8">
         {me.username && (
           <Link href={`/showroom/${me.username}`}>
-            <button className="w-full py-3 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#444444] hover:border-[#D4AF37]/40 text-left px-4 transition-colors">
+            <button className="w-full py-3 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#555555] hover:border-[#D4AF37]/40 text-left px-4 transition-colors">
               View My Showroom → <span className="text-[#AAAAAA]">mintvaultuk.com/showroom/{me.username}</span>
             </button>
           </Link>
@@ -497,7 +497,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
           </button>
         </Link>
         <Link href="/tools/estimate">
-          <button className="w-full py-3 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#444444] hover:border-[#D4AF37]/40 transition-colors">
+          <button className="w-full py-3 rounded-xl border border-[#E8E4DC] bg-white text-sm font-semibold text-[#555555] hover:border-[#D4AF37]/40 transition-colors">
             AI Pre-Grade Checker — {me.ai_credits_balance} credits remaining
           </button>
         </Link>
@@ -507,7 +507,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
       <div className="bg-white border border-[#D4AF37]/20 rounded-xl p-5">
         <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-3">What's New for Members</h2>
         <div className="border border-dashed border-[#E8E4DC] rounded-lg p-4 text-center">
-          <p className="text-sm text-[#999999]">More members-only features coming soon.</p>
+          <p className="text-sm text-[#888888]">More members-only features coming soon.</p>
           <p className="text-xs text-[#AAAAAA] mt-1">Early access, exclusive tools, and collector events.</p>
         </div>
       </div>
@@ -551,9 +551,9 @@ function MarketingView() {
       {/* Hero */}
       <div
         className="relative overflow-hidden"
-        style={{ background: "linear-gradient(135deg,#0A0A0A 0%,#1A1200 100%)" }}
+        style={{ background: "linear-gradient(135deg, #FFF9E6 0%, #FFFFFF 100%)" }}
       >
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.12) 0%, transparent 70%)" }} />
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.06) 0%, transparent 70%)" }} />
         <div className="relative max-w-3xl mx-auto px-4 py-20 text-center">
           <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-full px-3 py-1 mb-5">
             <Shield size={11} className="text-[#D4AF37]" />
@@ -565,14 +565,14 @@ function MarketingView() {
           >
             Vault Club
           </h1>
-          <p className="text-[#B8A060] text-base max-w-xl mx-auto">
+          <p className="text-[#888888] text-base max-w-xl mx-auto">
             Exclusive perks for serious collectors. Discounts on grading, AI Pre-Grade credits, your own Showroom, and more.
           </p>
         </div>
       </div>
 
       {/* Tier cards */}
-      <div className="max-w-5xl mx-auto px-4 py-14">
+      <div className="max-w-5xl mx-auto px-4 py-16">
         <IntervalToggle interval={interval} onChange={setInterval} />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
@@ -599,7 +599,7 @@ function MarketingView() {
                 {item.icon}
               </div>
               <h3 className="font-bold text-[#1A1A1A] mb-2">{item.title}</h3>
-              <p className="text-xs text-[#666666] leading-relaxed">{item.body}</p>
+              <p className="text-xs text-[#555555] leading-relaxed">{item.body}</p>
             </div>
           ))}
         </div>
@@ -628,8 +628,7 @@ function MarketingView() {
 
         {/* CTA */}
         <div
-          className="rounded-2xl p-10 text-center"
-          style={{ background: "linear-gradient(135deg,#0A0A0A 0%,#1A1200 100%)" }}
+          className="rounded-2xl p-10 text-center bg-[#FFF9E6] border border-[#D4AF37]/30"
         >
           <h2
             className="text-3xl font-black mb-4"
@@ -637,7 +636,7 @@ function MarketingView() {
           >
             Ready to join?
           </h2>
-          <p className="text-[#B8A060] text-sm mb-6 max-w-md mx-auto">
+          <p className="text-[#888888] text-sm mb-6 max-w-md mx-auto">
             Start with Silver — the most popular choice for serious collectors.
           </p>
           <button
@@ -675,7 +674,7 @@ export default function ClubPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-24">
+      <div className="flex items-center justify-center py-20">
         <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
       </div>
     );
