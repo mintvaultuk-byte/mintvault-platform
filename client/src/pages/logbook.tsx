@@ -1,6 +1,6 @@
 import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
 
@@ -319,10 +319,16 @@ export default function LogbookPage() {
                 <Download className="w-4 h-4" /> Download Logbook PDF
               </a>
               {isOwner && (
-                <a href={`/logbook/${data.certId}/owner.pdf`} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors">
-                  <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
-                </a>
+                <>
+                  <a href={`/logbook/${data.certId}/owner.pdf`} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors">
+                    <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
+                  </a>
+                  <a href={`/transfer?certId=${encodeURIComponent(data.certId)}`}
+                    className="inline-flex items-center gap-2 border border-[#555555]/40 text-[#888888] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#333333]/10 hover:text-[#D4AF37] transition-colors">
+                    <ArrowRightLeft className="w-3 h-3" /> Transfer Keepership
+                  </a>
+                </>
               )}
             </div>
 

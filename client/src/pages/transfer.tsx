@@ -10,7 +10,8 @@ type PageState =
   | { type: "form" }
   | { type: "success"; message: string }
   | { type: "error"; message: string }
-  | { type: "owner_confirmed"; certId: string };
+  | { type: "owner_confirmed"; certId: string }
+  | { type: "outgoing_confirmed"; certId: string };
 
 export default function TransferPage() {
   const [certId, setCertId] = useState("");
@@ -27,8 +28,13 @@ export default function TransferPage() {
     const step = params.get("step");
     const verifiedCertId = params.get("certId");
 
+    const version = params.get("v");
+
     if (success === "true" && verifiedCertId) {
       setPageState({ type: "success", message: `Ownership of certificate ${verifiedCertId} has been successfully transferred. The new owner now holds the registration.` });
+      window.history.replaceState({}, "", "/transfer");
+    } else if (step === "outgoing_confirmed" && verifiedCertId && version === "2") {
+      setPageState({ type: "outgoing_confirmed", certId: verifiedCertId });
       window.history.replaceState({}, "", "/transfer");
     } else if (step === "owner_confirmed" && verifiedCertId) {
       setPageState({ type: "owner_confirmed", certId: verifiedCertId });
@@ -41,6 +47,13 @@ export default function TransferPage() {
       setPageState({ type: "error", message: msg });
       window.history.replaceState({}, "", "/transfer");
     }
+
+    // Pre-fill cert ID from URL (e.g. from logbook Transfer button)
+    const prefillCert = params.get("certId");
+    if (prefillCert && !success && !error && !step) {
+      setCertId(prefillCert);
+      window.history.replaceState({}, "", "/transfer");
+    }
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -50,7 +63,7 @@ export default function TransferPage() {
     setLoading(true);
 
     try {
-      const res = await apiRequest("POST", "/api/transfer/request", {
+      const res = await apiRequest("POST", "/api/v2/transfers/initiate", {
         certId: certId.trim(),
         fromEmail: fromEmail.trim(),
         toEmail: toEmail.trim(),
@@ -83,7 +96,22 @@ export default function TransferPage() {
           </p>
         </div>
 
-        {/* Owner confirmed — waiting for new owner */}
+        {/* v2: Outgoing keeper confirmed — waiting for incoming keeper */}
+        {pageState.type === "outgoing_confirmed" && (
+          <Card className="mb-6 border border-[#D4AF37]/40 bg-[#FFF9E6]">
+            <CardContent className="flex items-start gap-3 pt-5 pb-4">
+              <Clock className="w-5 h-5 text-[#D4AF37] flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm text-[#D4AF37] font-semibold mb-1">Your authorisation received</p>
+                <p className="text-sm text-[#444444]">
+                  Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new keeper has been emailed. They must verify the Document Reference Number from the Logbook within 14 days. A further 14-day dispute window applies after they confirm.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* v1: Owner confirmed — waiting for new owner */}
         {pageState.type === "owner_confirmed" && (
           <Card className="mb-6 border border-[#D4AF37]/40 bg-[#FFF9E6]">
             <CardContent className="flex items-start gap-3 pt-5 pb-4">
@@ -207,10 +235,11 @@ export default function TransferPage() {
               <div className="mt-6 pt-5 border-t border-[#E8E4DC]">
                 <h3 className="text-sm font-semibold text-[#666666] mb-3">How transfer works</h3>
                 <ol className="text-xs text-[#999999] space-y-2 list-decimal list-inside">
-                  <li>You enter the certificate number, your email, and the new owner's email</li>
+                  <li>You enter the certificate number, your email, and the new keeper's email</li>
                   <li>You receive a confirmation email — click to authorise the transfer</li>
-                  <li>The new owner receives a confirmation email — they click to accept</li>
-                  <li>Transfer completes — ownership is updated in the MintVault registry</li>
+                  <li>The new keeper receives an email — they verify the Document Reference Number from the Logbook</li>
+                  <li>A 14-day dispute window begins — either party can raise a concern</li>
+                  <li>Transfer finalises automatically — the registry is updated</li>
                 </ol>
                 <p className="text-xs text-[#999999] mt-3">
                   Registering a card for the first time?{" "}

@@ -1,4 +1,4 @@
-import { users, submissions, submissionItems, certificates, certificateImages, cardSets, cardMaster, auditLog, serviceTiers, labelPrints, labelOverrides, reprintLog, ownershipHistory, claimVerifications, transferVerifications, type User, type Submission, type SubmissionItem, type CertificateRecord, type InsertCertificate, type CertificateImage, type InsertCertificateImage, type CardMaster, type CardSet, type AuditLog, type ServiceTierRecord, type LabelPrint, type LabelOverride, type OwnershipHistoryRecord, type ClaimVerification, isNonNumericGrade } from "@shared/schema";
+import { users, submissions, submissionItems, certificates, certificateImages, cardSets, cardMaster, auditLog, serviceTiers, labelPrints, labelOverrides, reprintLog, ownershipHistory, claimVerifications, transferVerifications, type User, type Submission, type SubmissionItem, type CertificateRecord, type InsertCertificate, type CertificateImage, type InsertCertificateImage, type CardMaster, type CardSet, type AuditLog, type ServiceTierRecord, type LabelPrint, type LabelOverride, type OwnershipHistoryRecord, type ClaimVerification, type TransferVerification, isNonNumericGrade } from "@shared/schema";
 import { eq, sql, desc, or, ilike, like, and, isNull, isNotNull, ne, inArray } from "drizzle-orm";
 import { db } from "./db";
 import crypto from "crypto";
@@ -123,6 +123,22 @@ export interface IStorage {
   createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string>;
   confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
   completeTransferByNewOwnerToken(token: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+
+  // ── v2 transfer flow (DVLA-style with ref number + dispute window) ─────────
+  createTransferV2(data: {
+    certId: string; fromEmail: string; toEmail: string; newOwnerName?: string;
+    outgoingKeeperUserId: string; referenceNumber: string;
+  }): Promise<string>;
+  confirmOutgoingKeeperV2(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
+  confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  getTransferV2(id: number): Promise<TransferVerification | undefined>;
+  getTransferV2ByCertId(certId: string): Promise<TransferVerification | undefined>;
+  listTransfersV2(filters?: { status?: string; certId?: string }): Promise<TransferVerification[]>;
+  disputeTransferV2(transferId: number, disputedBy: "outgoing" | "incoming", reason: string): Promise<{ success: boolean; error?: string }>;
+  cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }>;
+  finaliseTransferV2(transferId: number): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  getTransfersReadyToFinalise(): Promise<TransferVerification[]>;
+  expireStaleTransfersV2(): Promise<number>;
 
   // ── Customer dashboard queries ──────────────────────────────────────────────
   getSubmissionsByEmail(email: string): Promise<any[]>;
@@ -1672,6 +1688,368 @@ export class DatabaseStorage implements IStorage {
       g7:       Number(r.g7),
       gLow:     Number(r.glow ?? r.gLow ?? 0),
     }));
+  }
+
+  // ── v2 Transfer Flow (DVLA-style) ─────────────────────────────────────────
+  async createTransferV2(data: {
+    certId: string; fromEmail: string; toEmail: string; newOwnerName?: string;
+    outgoingKeeperUserId: string; referenceNumber: string;
+  }): Promise<string> {
+    const ownerToken = crypto.randomBytes(32).toString("hex");
+    const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
+    const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+
+    await db.insert(transferVerifications).values({
+      certId: data.certId,
+      fromEmail: data.fromEmail.toLowerCase().trim(),
+      toEmail: data.toEmail.toLowerCase().trim(),
+      ownerTokenHash,
+      ownerExpiresAt,
+      newOwnerName: data.newOwnerName?.trim() || null,
+      flowVersion: "v2",
+      status: "pending_owner",
+      outgoingKeeperUserId: data.outgoingKeeperUserId,
+      referenceNumberProvided: null, // incoming keeper provides this at step 2
+    });
+
+    // Mark cert as transfer_pending
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'transfer_pending', updated_at = NOW()
+      WHERE certificate_number = ${data.certId}
+    `);
+
+    return ownerToken;
+  }
+
+  async confirmOutgoingKeeperV2(token: string): Promise<{
+    success: boolean; certId?: string; fromEmail?: string; toEmail?: string;
+    newOwnerToken?: string; error?: string;
+  }> {
+    const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!verification) return { success: false, error: "Invalid confirmation link." };
+    if (verification.ownerConfirmedAt) return { success: false, error: "You have already confirmed this transfer." };
+    if (new Date() > verification.ownerExpiresAt) return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+    if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+
+    // Generate token for incoming keeper — 14-day deadline
+    const newOwnerToken = crypto.randomBytes(32).toString("hex");
+    const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
+    const incomingConfirmDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+
+    await db.update(transferVerifications)
+      .set({
+        ownerConfirmedAt: new Date(),
+        newOwnerTokenHash,
+        newOwnerExpiresAt: incomingConfirmDeadline,
+        incomingConfirmDeadline,
+        status: "pending_incoming",
+      })
+      .where(eq(transferVerifications.id, verification.id));
+
+    return {
+      success: true,
+      certId: verification.certId,
+      fromEmail: verification.fromEmail,
+      toEmail: verification.toEmail,
+      newOwnerToken,
+    };
+  }
+
+  async confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{
+    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string;
+  }> {
+    const newOwnerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!verification) return { success: false, error: "Invalid confirmation link." };
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+    if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+    if (!verification.incomingConfirmDeadline || new Date() > verification.incomingConfirmDeadline) {
+      return { success: false, error: "This confirmation link has expired (14-day deadline passed)." };
+    }
+
+    // Verify reference number matches the certificate
+    const cert = await this.getCertificateByCertId(verification.certId);
+    if (!cert) return { success: false, error: "Certificate not found." };
+
+    const certRefNumber = (cert as any).referenceNumber as string | null;
+    if (!certRefNumber) {
+      return { success: false, error: "This certificate does not have a Document Reference Number. Please contact support." };
+    }
+
+    // Normalise: strip dashes and compare uppercase
+    const normalise = (s: string) => s.replace(/-/g, "").toUpperCase().trim();
+    if (normalise(referenceNumberProvided) !== normalise(certRefNumber)) {
+      // Record the failed attempt (store what they provided for admin review)
+      await db.update(transferVerifications)
+        .set({ referenceNumberProvided: referenceNumberProvided.trim() })
+        .where(eq(transferVerifications.id, verification.id));
+
+      // Audit the failed attempt (do not log the actual ref number)
+      await db.insert(auditLog).values({
+        entityType: "transfer",
+        entityId: verification.certId,
+        action: "transfer_v2.ref_number_mismatch",
+        adminUser: null,
+        details: { transferId: verification.id, toEmail: verification.toEmail },
+      });
+
+      return { success: false, error: "The Document Reference Number you entered does not match. Please check your Logbook and try again." };
+    }
+
+    // Reference number correct — start dispute window (14 days from now)
+    const disputeDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    // Create/find incoming keeper user
+    let incomingUser = await this.getUserByEmail(verification.toEmail);
+    if (!incomingUser) {
+      incomingUser = await this.createUser({ email: verification.toEmail });
+    }
+
+    await db.update(transferVerifications)
+      .set({
+        referenceNumberProvided: referenceNumberProvided.trim(),
+        incomingKeeperUserId: incomingUser.id,
+        disputeDeadline,
+        status: "pending_dispute",
+      })
+      .where(eq(transferVerifications.id, verification.id));
+
+    return {
+      success: true,
+      certId: verification.certId,
+      toEmail: verification.toEmail,
+      ownerName: verification.newOwnerName ?? null,
+    };
+  }
+
+  async getTransferV2(id: number): Promise<TransferVerification | undefined> {
+    const [row] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.id, id),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+    return row;
+  }
+
+  async getTransferV2ByCertId(certId: string): Promise<TransferVerification | undefined> {
+    const [row] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.certId, certId),
+        eq(transferVerifications.flowVersion, "v2"),
+        isNull(transferVerifications.usedAt),
+        isNull(transferVerifications.cancelledAt),
+      ))
+      .orderBy(desc(transferVerifications.createdAt))
+      .limit(1);
+    return row;
+  }
+
+  async listTransfersV2(filters?: { status?: string; certId?: string }): Promise<TransferVerification[]> {
+    const conditions = [eq(transferVerifications.flowVersion, "v2")];
+    if (filters?.status) conditions.push(eq(transferVerifications.status, filters.status));
+    if (filters?.certId) conditions.push(eq(transferVerifications.certId, filters.certId));
+
+    return db.select()
+      .from(transferVerifications)
+      .where(and(...conditions))
+      .orderBy(desc(transferVerifications.createdAt));
+  }
+
+  async disputeTransferV2(transferId: number, disputedBy: "outgoing" | "incoming", reason: string): Promise<{ success: boolean; error?: string }> {
+    const [transfer] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.id, transferId),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!transfer) return { success: false, error: "Transfer not found." };
+    if (transfer.status !== "pending_dispute") return { success: false, error: "This transfer is not in the dispute window." };
+    if (transfer.disputeDeadline && new Date() > transfer.disputeDeadline) {
+      return { success: false, error: "The dispute window has closed." };
+    }
+
+    await db.update(transferVerifications)
+      .set({
+        status: "disputed",
+        disputedAt: new Date(),
+        disputedBy,
+        disputeReason: reason.trim().slice(0, 2000),
+      })
+      .where(eq(transferVerifications.id, transferId));
+
+    // Reset cert to claimed (transfer no longer proceeding)
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'claimed', updated_at = NOW()
+      WHERE certificate_number = ${transfer.certId}
+    `);
+
+    return { success: true };
+  }
+
+  async cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }> {
+    const [transfer] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.id, transferId),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!transfer) return { success: false, error: "Transfer not found." };
+    // Can only cancel if not yet completed or already cancelled
+    if (transfer.status === "completed" || transfer.status === "cancelled") {
+      return { success: false, error: "This transfer cannot be cancelled." };
+    }
+
+    await db.update(transferVerifications)
+      .set({
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancellationReason: reason.trim().slice(0, 2000),
+      })
+      .where(eq(transferVerifications.id, transferId));
+
+    // Reset cert to claimed
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'claimed', updated_at = NOW()
+      WHERE certificate_number = ${transfer.certId}
+    `);
+
+    return { success: true };
+  }
+
+  async finaliseTransferV2(transferId: number): Promise<{
+    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string;
+  }> {
+    const [transfer] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.id, transferId),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!transfer) return { success: false, error: "Transfer not found." };
+    if (transfer.status !== "pending_dispute") return { success: false, error: "Transfer is not in dispute window." };
+    if (transfer.finalisedAt) return { success: false, error: "Already finalised." };
+
+    const cert = await this.getCertificateByCertId(transfer.certId);
+    if (!cert) return { success: false, error: "Certificate not found." };
+
+    // Create or find incoming keeper user
+    let incomingUser = await this.getUserByEmail(transfer.toEmail);
+    if (!incomingUser) {
+      incomingUser = await this.createUser({ email: transfer.toEmail });
+    }
+
+    // Generate new ownership token
+    const ownershipToken = await this._generateOwnershipToken();
+
+    // Transfer ownership on the certificate
+    await db.execute(sql`
+      UPDATE certificates
+      SET current_owner_user_id = ${incomingUser.id},
+          ownership_status = 'claimed',
+          ownership_token = ${ownershipToken},
+          ownership_token_generated_at = NOW(),
+          owner_name = ${transfer.newOwnerName ?? null},
+          owner_email = ${transfer.toEmail},
+          updated_at = NOW()
+      WHERE certificate_number = ${transfer.certId}
+    `);
+
+    // Record in ownership history
+    await db.insert(ownershipHistory).values({
+      certId: transfer.certId,
+      fromUserId: transfer.outgoingKeeperUserId || cert.currentOwnerUserId || null,
+      toUserId: incomingUser.id,
+      toEmail: transfer.toEmail,
+      eventType: "transfer_completed",
+      notes: `v2 transfer — ref number verified, dispute window passed. From ${transfer.fromEmail}`,
+    });
+
+    // Mark transfer as completed
+    await db.update(transferVerifications)
+      .set({
+        status: "completed",
+        finalisedAt: new Date(),
+        usedAt: new Date(),
+        incomingKeeperUserId: incomingUser.id,
+      })
+      .where(eq(transferVerifications.id, transferId));
+
+    return {
+      success: true,
+      certId: transfer.certId,
+      toEmail: transfer.toEmail,
+      ownerName: transfer.newOwnerName ?? null,
+    };
+  }
+
+  async getTransfersReadyToFinalise(): Promise<TransferVerification[]> {
+    return db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.flowVersion, "v2"),
+        eq(transferVerifications.status, "pending_dispute"),
+        isNotNull(transferVerifications.disputeDeadline),
+        sql`${transferVerifications.disputeDeadline} <= NOW()`,
+      ));
+  }
+
+  async expireStaleTransfersV2(): Promise<number> {
+    // Expire pending_owner transfers where ownerExpiresAt has passed
+    const expiredOwner = await db.execute(sql`
+      UPDATE transfer_verifications
+      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Outgoing keeper did not confirm within 24 hours'
+      WHERE flow_version = 'v2'
+        AND transfer_status = 'pending_owner'
+        AND owner_expires_at < NOW()
+      RETURNING id, cert_id
+    `);
+
+    // Expire pending_incoming transfers where incoming_confirm_deadline has passed
+    const expiredIncoming = await db.execute(sql`
+      UPDATE transfer_verifications
+      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Incoming keeper did not confirm within 14 days'
+      WHERE flow_version = 'v2'
+        AND transfer_status = 'pending_incoming'
+        AND incoming_confirm_deadline < NOW()
+      RETURNING id, cert_id
+    `);
+
+    // Reset cert ownership status for expired transfers
+    const allExpired = [...(expiredOwner.rows as any[]), ...(expiredIncoming.rows as any[])];
+    for (const row of allExpired) {
+      await db.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'claimed', updated_at = NOW()
+        WHERE certificate_number = ${row.cert_id}
+          AND ownership_status = 'transfer_pending'
+      `);
+    }
+
+    return allExpired.length;
   }
 }
 

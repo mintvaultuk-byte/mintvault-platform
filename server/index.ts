@@ -8,7 +8,7 @@ import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendVaultClubGraceExpiredEmail } from "./email";
+import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
 import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
@@ -301,6 +301,41 @@ async function runVaultClubGraceSweep() {
   }
 }
 
+// ── Transfer v2 auto-finalise cron ──────────────────────────────────────────
+async function runTransferV2Sweep() {
+  try {
+    // 1. Expire stale transfers (outgoing 24h, incoming 14d)
+    const { storage } = await import("./storage");
+    const expired = await storage.expireStaleTransfersV2();
+    if (expired > 0) {
+      log(`[transfer-v2] Expired ${expired} stale transfer(s)`, "transfer-v2");
+    }
+
+    // 2. Auto-finalise transfers past dispute deadline
+    const ready = await storage.getTransfersReadyToFinalise();
+    for (const transfer of ready) {
+      try {
+        const result = await storage.finaliseTransferV2(transfer.id);
+        if (result.success) {
+          log(`[transfer-v2] Auto-finalised transfer ${transfer.id} for cert ${result.certId}`, "transfer-v2");
+
+          // Email both parties
+          try {
+            await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
+            await sendTransferV2Completed({ email: result.toEmail!, certId: result.certId!, role: "incoming", newKeeperName: result.ownerName });
+          } catch (emailErr: any) {
+            log(`[transfer-v2] Completion emails failed (non-fatal): ${emailErr.message}`, "transfer-v2");
+          }
+        }
+      } catch (fErr: any) {
+        log(`[transfer-v2] Failed to finalise transfer ${transfer.id}: ${fErr.message}`, "transfer-v2");
+      }
+    }
+  } catch (err: any) {
+    log(`[transfer-v2] Sweep error: ${err.message}`, "transfer-v2");
+  }
+}
+
 (async () => {
   await registerRoutes(httpServer, app);
 
@@ -311,6 +346,10 @@ async function runVaultClubGraceSweep() {
   // Run Vault Club grace sweep once on startup, then every 24 hours
   runVaultClubGraceSweep();
   setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
+
+  // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
+  setTimeout(runTransferV2Sweep, 30_000);
+  setInterval(runTransferV2Sweep, 60 * 60 * 1000);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
