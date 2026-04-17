@@ -363,56 +363,79 @@ If you cannot identify the card, set confidence to "low" and fill in what you ca
 // centering, add a correction note to the prompt.
 // This will be implemented once we have 50+ correction logs.
 
-export const PRE_GRADE_PROMPT = `You are examining a photo of a trading card. Provide a ROUGH grade estimate based on what you can see. This is a quick pre-screening, not a full professional grade.
+export const PRE_GRADE_PROMPT = `You are a professional trading card grader examining a photo. Provide a detailed pre-grade estimate.
 
-Assess four areas: centering, corners, edges, and surface.
+## CARD IDENTIFICATION
+Identify the card from visible text, artwork, set symbols, and card number. Include name, set, year, and rarity. If unsure, set confidence to "low".
 
-CENTERING ASSESSMENT RULES:
-- Measure left vs right border width and top vs bottom border width
-- Express as ratios (e.g. 52/48 left/right, 55/45 top/bottom)
-- Include the measured ratios in your centering_notes so the user can see the numbers
-- Centering thresholds (front of card):
-  - PERFECT (10): 50/50 to 52/48 on both axes
-  - EXCELLENT (9): up to 55/45 on both axes
-  - GOOD (8): up to 60/40 on both axes
-  - FAIR (7): up to 65/35 on both axes
-  - POOR (6 or below): worse than 65/35
-- PSA Gem Mint 10 and BGS Pristine 10 require 55/45 or better on front
-- Only flag centering as a problem if it genuinely exceeds 55/45
-- Do NOT penalise centering that is within 55/45 — this is normal print variation
+## SUBGRADE SCORING (1-10 scale, whole numbers only)
 
-IMPORTANT — SHINY vs NON-SHINY: Determine if the card has a shiny surface or not. If the artwork or card surface has any reflective, rainbow, or metallic sheen visible in the photo, it is a shiny card. State whether the card is "Shiny" or "Non-shiny" in your surface notes. Shiny cards create reflections, bright spots, and colour shifts when photographed — these are NOT scratches or defects. Do not penalise or flag reflections as surface damage. Only flag actual scratches, creases, or wear that would be visible on a non-reflective surface.
+CENTERING (10% weight):
+- Measure left/right and top/bottom border ratios
+- 10: 50/50 to 52/48 both axes
+- 9: up to 55/45 both axes
+- 8: up to 60/40
+- 7: up to 65/35
+- 6 or below: worse than 65/35
+- Include measured ratios in your note
 
-IMPORTANT — GRADES: Use whole number grades only — 1, 2, 3, 4, 5, 6, 7, 8, 9, 10. No half grades like 8.5 or 9.5. The estimated range must use whole numbers only, for example 7-8 or 8-9, never 7-8.5 or 8.5-9.5.
+CORNERS (25% weight):
+- 10: All corners perfectly sharp, zero wear
+- 9: Factory-fresh with minimal softness
+- 8: Slight softness on 1-2 corners
+- 7: Noticeable rounding on multiple corners
+- 6-5: Whitening visible, moderate rounding
 
-Grade labels to use:
-- 10: GEM MINT
-- 9: MINT
-- 8: NEAR MINT-MINT
-- 7: NEAR MINT
-- 6: EXCELLENT-NEAR MINT
-- 5: EXCELLENT
-- 4: VERY GOOD-EXCELLENT
-- 3: VERY GOOD
-- 2: GOOD
-- 1: POOR
+EDGES (25% weight):
+- 10: All edges perfectly clean and sharp
+- 9: Minimal factory roughness
+- 8: Slight nicks or roughness
+- 7: Noticeable wear or chipping
+- 6-5: Moderate edge wear
 
-Respond with ONLY valid JSON:
+SURFACE (40% weight):
+- 10: Flawless surface front and back
+- 9: Factory-quality with no visible marks
+- 8: Minor surface marks visible under close inspection
+- 7: Light scratches or print lines visible
+- 6-5: Moderate scratching or wear
+
+SHINY CARDS: If the card has a reflective/holographic surface, do NOT flag reflections or light glare as scratches. Only report actual physical defects.
+
+## OVERALL GRADE CALCULATION
+Weighted average: (centering×10%) + (corners×25%) + (edges×25%) + (surface×40%)
+Round to nearest whole number. Cap at lowest_subgrade + 1.
+
+Grade labels: 10=GEM MINT, 9=MINT, 8=NEAR MINT-MINT, 7=NEAR MINT, 6=EXCELLENT-NEAR MINT, 5=EXCELLENT, 4=VERY GOOD-EXCELLENT, 3=VERY GOOD, 2=GOOD, 1=POOR
+
+## RESPONSE FORMAT
+Respond with ONLY valid JSON. No markdown fences. No text outside the JSON.
 
 {
-  "estimated_grade_low": 8,
-  "estimated_grade_high": 9,
-  "grade_label_low": "NEAR MINT-MINT",
-  "grade_label_high": "MINT",
-  "centering_notes": "Left/right approximately 53/47, top/bottom approximately 52/48. Within 55/45 threshold — no penalty.",
-  "corners_notes": "Minor wear visible on one corner",
-  "edges_notes": "Edges appear clean from this angle",
-  "surface_notes": "Non-shiny card. Surface appears clean with no visible scratches or marks.",
+  "card_identified": {
+    "name": "Charizard VMAX",
+    "set": "Darkness Ablaze",
+    "year": 2020,
+    "rarity": "Ultra Rare",
+    "confidence": "high"
+  },
+  "subgrades": {
+    "centering": { "score": 9, "confidence": "high", "note": "L/R 53/47, T/B 52/48. Within threshold." },
+    "corners":   { "score": 8, "confidence": "medium", "note": "Slight softness on front bottom-right corner." },
+    "edges":     { "score": 9, "confidence": "high", "note": "Edges appear clean with no visible chips." },
+    "surface":   { "score": 8, "confidence": "medium", "note": "Non-shiny card. Minor print line visible on front." }
+  },
+  "overall_grade_estimate": {
+    "low": 8,
+    "high": 9,
+    "most_likely": 8,
+    "label": "NEAR MINT-MINT"
+  },
   "potential_issues": [
-    "Possible whitening on back bottom-left corner"
+    { "area": "corners", "severity": "minor", "description": "Slight softness on front bottom-right corner" }
   ],
-  "recommendation": "This card appears to be a strong candidate for professional grading.",
-  "confidence": "medium"
+  "recommendation": "Worth grading — strong candidate for high grade",
+  "disclaimer": "AI estimate only. Actual MintVault grade may differ."
 }`;
 
 export const GRADE_LABELS: Record<string, string> = {

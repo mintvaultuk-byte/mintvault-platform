@@ -7102,7 +7102,7 @@ export async function registerRoutes(
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 1024,
+          max_tokens: 2048,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
             { type: "text", text: PRE_GRADE_PROMPT },
@@ -7119,6 +7119,26 @@ export async function registerRoutes(
       const text = aiData.content?.[0]?.text || "";
       const cleaned = text.replace(/```json|```/g, "").trim();
       const estimate = JSON.parse(cleaned);
+
+      // Backwards-compatible fields for existing client UI
+      const sub = estimate.subgrades || {};
+      const overall = estimate.overall_grade_estimate || {};
+      const compat = {
+        estimated_grade_low: overall.low ?? estimate.estimated_grade_low ?? 5,
+        estimated_grade_high: overall.high ?? estimate.estimated_grade_high ?? 5,
+        grade_label_low: overall.label ?? estimate.grade_label_low ?? "",
+        grade_label_high: overall.label ?? estimate.grade_label_high ?? "",
+        centering_notes: sub.centering?.note ?? estimate.centering_notes ?? "",
+        corners_notes: sub.corners?.note ?? estimate.corners_notes ?? "",
+        edges_notes: sub.edges?.note ?? estimate.edges_notes ?? "",
+        surface_notes: sub.surface?.note ?? estimate.surface_notes ?? "",
+        potential_issues: Array.isArray(estimate.potential_issues)
+          ? estimate.potential_issues.map((p: any) => typeof p === "string" ? p : p.description || "")
+          : [],
+        recommendation: estimate.recommendation ?? "",
+        confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
+      };
+
       // Return remaining credits with response
       let creditsLeft: number | undefined;
       if (usedUserBalance && sessionUserId) {
@@ -7128,7 +7148,8 @@ export async function registerRoutes(
         const cr = await db.execute(sql`SELECT credits_remaining FROM estimate_credits WHERE email = ${email}`);
         creditsLeft = cr.rows.length ? (cr.rows[0] as any).credits_remaining : 0;
       }
-      res.json({ ...estimate, credits_remaining: creditsLeft });
+      // Merge: new structured fields + compat fields + credits
+      res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
     } catch (err: any) {
       console.error("[tools/estimate] error:", err.message);
       res.status(500).json({ error: err.message });
