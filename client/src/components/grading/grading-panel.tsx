@@ -100,6 +100,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // Manual centering state
   const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
   const [centeringMethod, setCenteringMethod] = useState<"ai" | "manual" | null>(null);
+  const [manualOuterFront, setManualOuterFront] = useState<any>(null);
+  const [manualInnerFront, setManualInnerFront] = useState<any>(null);
+  const [manualOuterBack, setManualOuterBack] = useState<any>(null);
+  const [manualInnerBack, setManualInnerBack] = useState<any>(null);
 
   // State
   const [frontLR, setFrontLR] = useState("50/50");
@@ -168,6 +172,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (gradingData.privateNotes)   setPrivateNotes(gradingData.privateNotes);
     if (gradingData.gradeExplanation) setGradeExplanation(gradingData.gradeExplanation);
     if (gradingData.gradeApprovedBy)  setApproved(true);
+    // Manual centering frame rects (persisted)
+    if (gradingData.centeringOuterFront) setManualOuterFront(gradingData.centeringOuterFront);
+    if (gradingData.centeringInnerFront) setManualInnerFront(gradingData.centeringInnerFront);
+    if (gradingData.centeringOuterBack)  setManualOuterBack(gradingData.centeringOuterBack);
+    if (gradingData.centeringInnerBack)  setManualInnerBack(gradingData.centeringInnerBack);
+    if (gradingData.centeringMethod)     setCenteringMethod(gradingData.centeringMethod);
   }, [gradingData]);
 
   // AI analysis state
@@ -443,14 +453,22 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 centeringFront={frontLR ? {
                   ratioLR: frontLR,
                   ratioTB: frontTB,
-                  outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
-                  innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
+                  outerFrame: centeringMethod === "manual" && manualOuterFront
+                    ? manualOuterFront
+                    : (aiAnalysis?.centering?.front_outer_frame || null),
+                  innerFrame: centeringMethod === "manual" && manualInnerFront
+                    ? manualInnerFront
+                    : (aiAnalysis?.centering?.front_inner_frame || null),
                 } : null}
                 centeringBack={backLR ? {
                   ratioLR: backLR,
                   ratioTB: backTB,
-                  outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
-                  innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
+                  outerFrame: centeringMethod === "manual" && manualOuterBack
+                    ? manualOuterBack
+                    : (aiAnalysis?.centering?.back_outer_frame || null),
+                  innerFrame: centeringMethod === "manual" && manualInnerBack
+                    ? manualInnerBack
+                    : (aiAnalysis?.centering?.back_inner_frame || null),
                 } : null}
                 certId={certId}
                 onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
@@ -758,9 +776,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               setFrontLR(result.leftRight);
               setFrontTB(result.topBottom);
               setCenteringOverride(result.subgrade);
+              setManualOuterFront(result.outer);
+              setManualInnerFront(result.inner);
             } else {
               setBackLR(result.leftRight);
               setBackTB(result.topBottom);
+              setCenteringOverride(result.subgrade);
+              setManualOuterBack(result.outer);
+              setManualInnerBack(result.inner);
             }
             setCenteringMethod("manual");
             setManualCenteringSide(null);
