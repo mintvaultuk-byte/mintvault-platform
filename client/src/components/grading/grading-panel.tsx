@@ -431,92 +431,128 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
-          <div className="relative" style={{ overflow: "visible", margin: "0 60px 16px 60px" }}>
-            <ImageViewer
-              urls={urls}
-              defects={defects}
-              onDefectAdded={d => setDefects(prev => [...prev, d])}
-              highlightId={highlightDefect}
-              referenceImageUrl={aiIdentification?.referenceImageUrl}
-              centeringFront={frontLR ? {
-                ratioLR: frontLR,
-                ratioTB: frontTB,
-                outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
-                innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
-              } : null}
-              centeringBack={backLR ? {
-                ratioLR: backLR,
-                ratioTB: backTB,
-                outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
-                innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
-              } : null}
-              certId={certId}
-              onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
-              onSideChange={setViewerSide}
-              onZoomChange={setViewerZoom}
-              onModeChange={setViewerMode}
-            />
-            {/* Corner + edge score overlays on card image */}
+          <div style={{ margin: "0 60px" }}>
+            <div className="relative" style={{ overflow: "visible" }}>
+              <ImageViewer
+                urls={urls}
+                defects={defects}
+                onDefectAdded={d => setDefects(prev => [...prev, d])}
+                highlightId={highlightDefect}
+                referenceImageUrl={aiIdentification?.referenceImageUrl}
+                centeringFront={frontLR ? {
+                  ratioLR: frontLR,
+                  ratioTB: frontTB,
+                  outerFrame: aiAnalysis?.centering?.front_outer_frame || null,
+                  innerFrame: aiAnalysis?.centering?.front_inner_frame || null,
+                } : null}
+                centeringBack={backLR ? {
+                  ratioLR: backLR,
+                  ratioTB: backTB,
+                  outerFrame: aiAnalysis?.centering?.back_outer_frame || null,
+                  innerFrame: aiAnalysis?.centering?.back_inner_frame || null,
+                } : null}
+                certId={certId}
+                onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+                onSideChange={setViewerSide}
+                onZoomChange={setViewerZoom}
+                onModeChange={setViewerMode}
+              />
+              {/* Top + side overlays (absolute — these work fine) */}
+              {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
+                const cc = viewerSide === "back"
+                  ? { tl: corners.backTL, tr: corners.backTR }
+                  : { tl: corners.frontTL, tr: corners.frontTR };
+                const allCorners = viewerSide === "back"
+                  ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
+                  : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
+                const cLow = Math.min(...allCorners);
+                const isCLow = (v: number) => v === cLow && cLow < 10;
+                const setC = (pos: "tl" | "tr", v: number) => {
+                  const key = viewerSide === "back"
+                    ? ({ tl: "backTL", tr: "backTR" } as const)[pos]
+                    : ({ tl: "frontTL", tr: "frontTR" } as const)[pos];
+                  setCorners(prev => ({ ...prev, [key]: v }));
+                };
+                const ee = viewerSide === "back"
+                  ? { top: edges.backTop, left: edges.backLeft, right: edges.backRight }
+                  : { top: edges.frontTop, left: edges.frontLeft, right: edges.frontRight };
+                const allEdges = viewerSide === "back"
+                  ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
+                  : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
+                const eLow = Math.min(...allEdges);
+                const isELow = (v: number) => v === eLow && eLow < 10;
+                const setE = (pos: "top" | "left" | "right", v: number) => {
+                  const key = viewerSide === "back"
+                    ? ({ top: "backTop", left: "backLeft", right: "backRight" } as const)[pos]
+                    : ({ top: "frontTop", left: "frontLeft", right: "frontRight" } as const)[pos];
+                  setEdges(prev => ({ ...prev, [key]: v }));
+                };
+                return (
+                  <>
+                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, left: -56 }}>
+                      <span className="text-[8px] font-bold text-[#555555]">TL</span>
+                      <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
+                    </div>
+                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, right: -56 }}>
+                      <span className="text-[8px] font-bold text-[#555555]">TR</span>
+                      <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
+                    </div>
+                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 16, left: "50%", transform: "translateX(-50%)" }}>
+                      <span className="text-[8px] font-bold text-[#555555]">T</span>
+                      <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
+                    </div>
+                    <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}>
+                      <span className="text-[8px] font-bold text-[#555555]">L</span>
+                      <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
+                    </div>
+                    <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}>
+                      <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
+                      <span className="text-[8px] font-bold text-[#555555]">R</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            {/* Bottom row — normal flow, always below card + controls */}
             {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
               const cc = viewerSide === "back"
-                ? { tl: corners.backTL, tr: corners.backTR, bl: corners.backBL, br: corners.backBR }
-                : { tl: corners.frontTL, tr: corners.frontTR, bl: corners.frontBL, br: corners.frontBR };
-              const cLow = Math.min(cc.tl, cc.tr, cc.bl, cc.br);
+                ? { bl: corners.backBL, br: corners.backBR }
+                : { bl: corners.frontBL, br: corners.frontBR };
+              const allCorners = viewerSide === "back"
+                ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
+                : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
+              const cLow = Math.min(...allCorners);
               const isCLow = (v: number) => v === cLow && cLow < 10;
-              const setC = (pos: "tl" | "tr" | "bl" | "br", v: number) => {
+              const setCBot = (pos: "bl" | "br", v: number) => {
                 const key = viewerSide === "back"
-                  ? ({ tl: "backTL", tr: "backTR", bl: "backBL", br: "backBR" } as const)[pos]
-                  : ({ tl: "frontTL", tr: "frontTR", bl: "frontBL", br: "frontBR" } as const)[pos];
+                  ? ({ bl: "backBL", br: "backBR" } as const)[pos]
+                  : ({ bl: "frontBL", br: "frontBR" } as const)[pos];
                 setCorners(prev => ({ ...prev, [key]: v }));
               };
-              const ee = viewerSide === "back"
-                ? { top: edges.backTop, bottom: edges.backBottom, left: edges.backLeft, right: edges.backRight }
-                : { top: edges.frontTop, bottom: edges.frontBottom, left: edges.frontLeft, right: edges.frontRight };
-              const eLow = Math.min(ee.top, ee.bottom, ee.left, ee.right);
-              const isELow = (v: number) => v === eLow && eLow < 10;
-              const setE = (pos: "top" | "bottom" | "left" | "right", v: number) => {
-                const key = viewerSide === "back"
-                  ? ({ top: "backTop", bottom: "backBottom", left: "backLeft", right: "backRight" } as const)[pos]
-                  : ({ top: "frontTop", bottom: "frontBottom", left: "frontLeft", right: "frontRight" } as const)[pos];
-                setEdges(prev => ({ ...prev, [key]: v }));
-              };
+              const eeBot = viewerSide === "back" ? edges.backBottom : edges.frontBottom;
+              const allEdges = viewerSide === "back"
+                ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
+                : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
+              const eLow = Math.min(...allEdges);
+              const isELow = eeBot === eLow && eLow < 10;
               return (
-                <>
-                  {/* Corners — in margin gutter outside the card image */}
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, left: -56 }}>
-                    <span className="text-[8px] font-bold text-[#555555]">TL</span>
-                    <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
-                  </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, right: -56 }}>
-                    <span className="text-[8px] font-bold text-[#555555]">TR</span>
-                    <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
-                  </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, left: -56 }}>
-                    <CornerSelect value={cc.bl} onChange={v => setC("bl", v)} isLowest={isCLow(cc.bl)} />
+                <div className="flex items-start justify-between mt-1 px-1">
+                  <div className="flex flex-col items-center gap-0.5">
+                    <CornerSelect value={cc.bl} onChange={v => setCBot("bl", v)} isLowest={isCLow(cc.bl)} />
                     <span className="text-[8px] font-bold text-[#555555]">BL</span>
                   </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 56, right: -56 }}>
-                    <CornerSelect value={cc.br} onChange={v => setC("br", v)} isLowest={isCLow(cc.br)} />
-                    <span className="text-[8px] font-bold text-[#555555]">BR</span>
-                  </div>
-                  {/* Edges — in margin gutter outside the card image */}
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 16, left: "50%", transform: "translateX(-50%)" }}>
-                    <span className="text-[8px] font-bold text-[#555555]">T</span>
-                    <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
-                  </div>
-                  <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ bottom: 64, left: "50%", transform: "translateX(-50%)" }}>
-                    <EdgeSelect value={ee.bottom} onChange={v => setE("bottom", v)} isLowest={isELow(ee.bottom)} />
+                  <div className="flex flex-col items-center gap-0.5">
+                    <EdgeSelect value={eeBot} onChange={v => {
+                      const key = viewerSide === "back" ? "backBottom" : "frontBottom";
+                      setEdges(prev => ({ ...prev, [key]: v }));
+                    }} isLowest={isELow} />
                     <span className="text-[8px] font-bold text-[#555555]">B</span>
                   </div>
-                  <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}>
-                    <span className="text-[8px] font-bold text-[#555555]">L</span>
-                    <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
+                  <div className="flex flex-col items-center gap-0.5">
+                    <CornerSelect value={cc.br} onChange={v => setCBot("br", v)} isLowest={isCLow(cc.br)} />
+                    <span className="text-[8px] font-bold text-[#555555]">BR</span>
                   </div>
-                  <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}>
-                    <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
-                    <span className="text-[8px] font-bold text-[#555555]">R</span>
-                  </div>
-                </>
+                </div>
               );
             })()}
           </div>
