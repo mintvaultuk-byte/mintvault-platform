@@ -4099,7 +4099,7 @@ export async function registerRoutes(
   });
 
   // ── REPRINT SINGLE LABEL ───────────────────────────────────────────────────
-  // Generates a 70×20mm PDF, logs the reprint. Does NOT affect the printed flag.
+  // Generates a 72×22mm PDF, logs the reprint. Does NOT affect the printed flag.
   app.post("/api/admin/printing/reprint/:certId", requireAdmin, async (req, res) => {
     try {
       const certId = String(req.params.certId);

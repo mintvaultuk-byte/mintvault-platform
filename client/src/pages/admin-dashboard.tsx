@@ -1587,7 +1587,7 @@ function LabelPreviewModal({
 
         <div className="p-4 space-y-6">
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (72mm x 22mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/front?format=png&preview=1&t=${ts}`}
@@ -1600,7 +1600,7 @@ function LabelPreviewModal({
           </div>
 
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (72mm x 22mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/back?format=png&preview=1&t=${ts}`}
@@ -1613,7 +1613,7 @@ function LabelPreviewModal({
           </div>
 
           <div className="border-t border-[#D4AF37]/10 pt-4">
-            <p className="text-[#999999] text-xs mb-3">Print specs: 827 x 236px at 300 DPI = 70mm x 20mm exact</p>
+            <p className="text-[#999999] text-xs mb-3">Print specs: 850 x 260px at 300 DPI = 72mm x 22mm exact</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}
