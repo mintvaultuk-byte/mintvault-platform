@@ -65,11 +65,11 @@ export default function OnePieceCardGradingUk() {
           One Piece Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK provides professional One Piece TCG card grading for collectors and investors across the United Kingdom. As the One Piece card game has grown rapidly in popularity, the value of top-tier cards — particularly alt art Secret Rares and early set cards — has surged. Grading protects and authenticates these investments.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Every graded One Piece card is assessed on our 1–10 grading scale, sealed in a tamper-evident precision slab with an NFC chip, and given a unique certificate number. Ownership can be claimed and transferred through the MintVault verified ownership registry.
         </p>
 
@@ -83,19 +83,19 @@ export default function OnePieceCardGradingUk() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+                <span className="text-[#555555] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-onepiece-ownership">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership Registry</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-3">
+          <p className="text-[#555555] text-sm leading-relaxed mb-3">
             MintVault is the only UK grading company with a verified ownership registry. After receiving your graded One Piece card, use the unique claim code to register your ownership online. When you sell the card, the ownership record transfers to the new owner — providing buyers with confidence that the card is genuine and the seller is its registered owner.
           </p>
         </section>
@@ -113,7 +113,7 @@ export default function OnePieceCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}

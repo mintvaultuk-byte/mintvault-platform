@@ -75,16 +75,16 @@ export default function TradingCardGradingUk() {
           Trading Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault provides professional trading card grading for collectors across the United Kingdom. We grade cards from all major trading card games, including Pokemon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, Dragon Ball Super, Lorcana, and many more. Every card receives expert assessment, a tamper-evident precision slab, a unique certificate, and fully insured return shipping.
         </p>
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Whether you collect a single TCG or have cards spanning multiple games, MintVault's grading service covers them all under one roof. Our graders are trained to recognise the printing characteristics and quality standards specific to each card game, ensuring accurate and fair grades every time.
         </p>
 
         <section className="mb-10" data-testid="section-supported-games">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Trading Card Games We Grade</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#555555] text-sm leading-relaxed mb-4">
             MintVault accepts submissions from all major trading card games. Our grading standards are consistent and rigorous across every TCG we support:
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
@@ -94,14 +94,14 @@ export default function TradingCardGradingUk() {
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             See our <Link href="/tcg" className="text-[#D4AF37] hover:underline" data-testid="link-tcg-list">full list of supported TCGs</Link> for more information on each game.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-grading-process">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Our Grading Process</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Every trading card submitted to MintVault undergoes the same thorough grading process, regardless of the game it comes from. Our graders work in controlled conditions using proper lighting and magnification tools to assess each card fairly and consistently.
             </p>
@@ -125,7 +125,7 @@ export default function TradingCardGradingUk() {
 
         <section className="mb-10" data-testid="section-certification">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Certification and Verification</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Every card graded by MintVault receives a unique certificate number. This number is printed directly on the slab label and recorded in our database. Anyone can verify a MintVault certificate using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert-verify">online certificate lookup tool</Link>.
             </p>
@@ -151,7 +151,7 @@ export default function TradingCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -160,7 +160,7 @@ export default function TradingCardGradingUk() {
 
         <section className="mb-10" data-testid="section-uk-advantage">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">The UK Grading Advantage</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Choosing a UK-based grading service means your cards never leave the country. There is no risk of loss during international transit, no customs paperwork, no import duties or VAT surprises, and no weeks of additional waiting for overseas shipping.
             </p>

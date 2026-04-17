@@ -96,16 +96,16 @@ export default function HowToGradePokemonCards() {
           How to Grade Pokemon Cards
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           Getting your Pokemon cards professionally graded protects their condition, verifies their authenticity, and can significantly increase their market value. This guide walks you through the entire process, from assessing which cards to grade through to receiving your graded cards back in tamper-evident slabs.
         </p>
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Whether you are submitting your first card or your hundredth, following these steps will help ensure the best possible experience and outcome from the grading process.
         </p>
 
         <section className="mb-10" data-testid="section-step-1">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 1: Assess Your Cards</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Before submitting cards for grading, take time to examine them carefully. Use good overhead lighting and handle cards by their edges or while wearing clean cotton gloves to avoid adding fingerprints or oils to the surface.
             </p>
@@ -129,11 +129,11 @@ export default function HowToGradePokemonCards() {
 
         <section className="mb-10" data-testid="section-step-2">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 2: Create Your Submission Online</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Visit the MintVault <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> to start your order. You will need to:
             </p>
-            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Choose your service tier (Standard, Priority, or Express)</li>
               <li>Enter the details for each card, including the card name, set, and card number</li>
               <li>Declare the value of each card for insurance purposes</li>
@@ -150,27 +150,27 @@ export default function HowToGradePokemonCards() {
 
         <section className="mb-10" data-testid="section-step-3">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 3: Prepare and Package Your Cards</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Proper packaging is essential to ensure your cards arrive in the same condition they left. Follow these steps for each card:
             </p>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Individual Card Protection</h3>
-            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Place each card in a clean, new penny sleeve (also called soft sleeves). Insert the card top-edge first so the opening faces down when stored upright.</li>
               <li>Slide the penny-sleeved card into a top loader (rigid plastic holder). The top loader should be the correct size for standard trading cards.</li>
               <li>If you have semi-rigid card savers, these are also acceptable and are preferred by some grading services.</li>
             </ul>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Bundling Multiple Cards</h3>
-            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Stack your loaded top loaders together with all cards facing the same direction.</li>
               <li>Secure the stack with a rubber band or painter's tape wrapped around the outside of the top loaders. Never apply tape directly to the cards or the openings of the top loaders.</li>
               <li>If you have a large submission, group cards into smaller stacks of 10-15 cards each.</li>
             </ul>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Outer Packaging</h3>
-            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Place the card stack(s) in a small box or rigid mailer. Cards should not be able to move around inside the packaging.</li>
               <li>Fill any empty space with bubble wrap, packing paper, or similar padding material.</li>
               <li>Include your printed submission confirmation in the package.</li>
@@ -185,11 +185,11 @@ export default function HowToGradePokemonCards() {
 
         <section className="mb-10" data-testid="section-step-4">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 4: Ship Your Cards</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Send your packaged cards to MintVault using a tracked and insured shipping service. We strongly recommend:
             </p>
-            <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Royal Mail Special Delivery Guaranteed for high-value submissions (includes tracking and insurance up to £500)</li>
               <li>Royal Mail Tracked 24/48 for lower-value submissions</li>
               <li>Any courier service that provides tracking and insurance appropriate to your card values</li>
@@ -202,7 +202,7 @@ export default function HowToGradePokemonCards() {
 
         <section className="mb-10" data-testid="section-step-5">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 5: Grading and Return</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Once we receive your cards, the grading process begins according to your chosen service tier's turnaround time. You can track the status of your submission online at any time.
             </p>
@@ -228,12 +228,12 @@ export default function HowToGradePokemonCards() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             The overall grade is a holistic assessment that takes all four factors into account. A significant defect in any single area will limit the maximum achievable grade.
           </p>
         </section>

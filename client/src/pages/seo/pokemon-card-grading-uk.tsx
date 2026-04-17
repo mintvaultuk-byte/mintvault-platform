@@ -90,10 +90,10 @@ export default function PokemonCardGradingUk() {
         </h1>
         <p className="text-[#888888] italic text-base mb-6">Gotta grade 'em all</p>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault is a professional Pokemon card grading service based in the United Kingdom. We provide expert card assessment, tamper-evident precision slabs, and fully insured return shipping for collectors, investors, and resellers across the UK. Whether you have a single high-value chase card or a bulk submission of vintage pulls, our grading service is designed to protect and authenticate your collection.
         </p>
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Every card submitted to MintVault is individually assessed by trained graders who evaluate centering, corners, edges, and surface quality on a 1 to 10 scale. Your graded cards are sealed in our precision slabs and assigned a unique certificate that can be <Link href="/cert" className="text-[#E3350D] hover:underline" data-testid="link-cert-lookup">verified online</Link> at any time.
         </p>
 
@@ -110,18 +110,18 @@ export default function PokemonCardGradingUk() {
               <div key={i} className="border border-[#E3350D]/20 rounded-lg p-5 text-center" data-testid={`card-process-${i}`}>
                 <div className="text-[#E3350D] mb-3 flex justify-center">{step.icon}</div>
                 <h3 className="text-[#1A1A1A] font-semibold mb-2">{step.title}</h3>
-                <p className="text-[#666666] text-sm leading-relaxed">{step.desc}</p>
+                <p className="text-[#555555] text-sm leading-relaxed">{step.desc}</p>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             Ready to get started? <Link href="/submit" className="text-[#E3350D] hover:underline" data-testid="link-submit-cards">Submit your Pokemon cards now</Link> or read our <Link href="/how-to-grade-pokemon-cards" className="text-[#E3350D] hover:underline" data-testid="link-how-to-guide">step-by-step grading guide</Link> first.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-benefits">
           <h2 className="text-2xl font-bold text-[#E3350D] tracking-wide mb-4">Benefits of Grading Your Pokemon Cards</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Professional grading transforms a raw Pokemon card into an authenticated, condition-verified collectible sealed in a protective slab. For UK collectors and investors, there are several compelling reasons to grade your cards.
             </p>
@@ -144,7 +144,7 @@ export default function PokemonCardGradingUk() {
 
         <section className="mb-10" data-testid="section-grading-standards">
           <h2 className="text-2xl font-bold text-[#E3350D] tracking-wide mb-4">Our Grading Standards</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-3">
+          <p className="text-[#555555] text-sm leading-relaxed mb-3">
             MintVault graders assess every Pokemon card across four distinct categories. Each factor contributes to the overall grade assigned on our 1 to 10 scale:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -156,18 +156,18 @@ export default function PokemonCardGradingUk() {
             ].map((item, i) => (
               <div key={i} className="border border-[#E3350D]/15 rounded-lg p-4" data-testid={`card-standard-${i}`}>
                 <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             Learn more about <Link href="/why-mintvault" className="text-[#E3350D] hover:underline" data-testid="link-why-mintvault">why collectors choose MintVault</Link> for accurate and consistent grading.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-tiers">
           <h2 className="text-2xl font-bold text-[#E3350D] tracking-wide mb-4">Service Tiers and Turnaround</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#555555] text-sm leading-relaxed mb-4">
             MintVault offers three grading tiers to accommodate different timelines and budgets. All tiers include the same rigorous grading process, tamper-evident slab, unique certificate, and insured return shipping.
           </p>
           <div className="border border-[#E3350D]/20 rounded-lg overflow-hidden mb-4">
@@ -178,19 +178,19 @@ export default function PokemonCardGradingUk() {
             ].map((t, i) => (
               <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#E3350D]/10" : ""}`} data-testid={`row-tier-${i}`}>
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.turnaround}</span>
+                <span className="text-[#555555] text-sm">{t.turnaround}</span>
                 <span className="text-[#E3350D] text-sm font-semibold">{t.price}/card</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             View full pricing details and bulk discounts on our <Link href="/" className="text-[#E3350D] hover:underline" data-testid="link-pricing">pricing page</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-what-to-grade">
           <h2 className="text-2xl font-bold text-[#E3350D] tracking-wide mb-4">Which Pokemon Cards Should You Grade?</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Not every Pokemon card benefits equally from professional grading. The best candidates are cards where the grading cost represents a small fraction of the card's potential graded value. Here are some categories to consider:
             </p>
@@ -222,12 +222,12 @@ export default function PokemonCardGradingUk() {
                 <div className="text-[#E3350D] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             See our full <Link href="/psa-alternative-uk" className="text-[#E3350D] hover:underline" data-testid="link-psa-alt">comparison with international grading services</Link>.
           </p>
         </section>
@@ -260,7 +260,7 @@ export default function PokemonCardGradingUk() {
 
         <section className="max-w-3xl mx-auto border border-[#E3350D]/30 rounded-lg p-6 md:p-8 bg-[#E3350D]/5 text-center" data-testid="section-cta">
           <h2 className="text-xl md:text-2xl font-bold text-[#E3350D] tracking-wide mb-3">Grade Your Pokemon Cards Today</h2>
-          <p className="text-[#666666] text-sm mb-6 max-w-lg mx-auto">Professional UK-based grading with fast turnaround and insured return shipping.</p>
+          <p className="text-[#555555] text-sm mb-6 max-w-lg mx-auto">Professional UK-based grading with fast turnaround and insured return shipping.</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link href="/submit?tier=standard">
               <span className="inline-flex items-center gap-2 border border-[#E3350D] bg-[#E3350D]/10 text-[#E3350D] px-6 py-2.5 rounded font-semibold text-sm tracking-wide transition-all hover:bg-[#E3350D]/20 cursor-pointer" data-testid="button-cta-submit">

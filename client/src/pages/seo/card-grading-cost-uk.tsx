@@ -65,11 +65,11 @@ export default function CardGradingCostUk() {
           Card Grading Cost UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK offers transparent, all-inclusive card grading pricing with no hidden fees. Every tier includes the professional grade assessment, tamper-evident precision slab with NFC chip, and fully insured return shipping. Choose the turnaround speed that suits your needs.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Unlike sending cards abroad, MintVault's UK pricing means no international shipping costs, no customs duties, and no import VAT. What you see is what you pay.
         </p>
 
@@ -87,13 +87,13 @@ export default function CardGradingCostUk() {
                   <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[#999999] text-xs">{t.desc}</span>
-                  <span className="text-[#666666] text-xs">{t.days}</span>
+                  <span className="text-[#888888] text-xs">{t.desc}</span>
+                  <span className="text-[#555555] text-xs">{t.days}</span>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing & bulk discounts</Link>.
           </p>
         </section>
@@ -108,7 +108,7 @@ export default function CardGradingCostUk() {
               "Claim code to register verified ownership in the MintVault registry",
               "Fully insured return shipping based on declared card value",
             ].map((item) => (
-              <div key={item} className="flex items-start gap-2 text-[#444444] text-sm">
+              <div key={item} className="flex items-start gap-2 text-[#555555] text-sm">
                 <span className="text-[#D4AF37] mt-0.5 shrink-0">✓</span>
                 <span>{item}</span>
               </div>
@@ -118,7 +118,7 @@ export default function CardGradingCostUk() {
 
         <section className="mb-10" data-testid="section-cost-vs-overseas">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">True Cost: UK vs Overseas Grading</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#555555] text-sm leading-relaxed mb-4">
             When UK collectors send cards to overseas graders, the advertised grade fee is only part of the cost. Here's a realistic cost breakdown for sending 10 cards to a US grader:
           </p>
           <div className="border border-[#E8E4DC] bg-[#FAFAF8] rounded-lg p-4 space-y-2 text-sm mb-4">
@@ -130,13 +130,13 @@ export default function CardGradingCostUk() {
               ["Import VAT (20% on value + duty)", "~£45"],
               ["Total estimated cost", "~£325"],
             ].map(([label, value], i) => (
-              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#E8E4DC] font-semibold text-[#1A1A1A]" : "text-[#444444]"}`}>
+              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#E8E4DC] font-semibold text-[#1A1A1A]" : "text-[#555555]"}`}>
                 <span>{label}</span>
                 <span className={i === 5 ? "text-[#D4AF37]" : ""}>{value}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#444444] text-sm leading-relaxed">
+          <p className="text-[#555555] text-sm leading-relaxed">
             The same 10 cards with MintVault Vault Queue tier: <strong className="text-[#1A1A1A]">£190 all-inclusive</strong>. No customs. No import VAT. No surprises.
           </p>
         </section>

@@ -65,11 +65,11 @@ export default function CardGradingNearMe() {
           Card Grading Near Me
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK is a fully postal card grading service, accepting submissions from anywhere in the United Kingdom. Whether you're in London, Glasgow, Cardiff, Belfast, or anywhere in between — you have access to professional UK card grading without needing to travel to a physical location.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Submit your cards online, pack them securely using our guidance, and post them to our UK facility. We'll grade, encapsulate, and return them via fully insured tracked delivery. No drop-off, no travel, no hassle.
         </p>
 
@@ -88,7 +88,7 @@ export default function CardGradingNearMe() {
                 </div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -108,7 +108,7 @@ export default function CardGradingNearMe() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -125,12 +125,12 @@ export default function CardGradingNearMe() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+                <span className="text-[#555555] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>

@@ -65,17 +65,17 @@ export default function MtgCardGradingUk() {
           MTG Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK provides professional Magic: The Gathering card grading for collectors and investors across the United Kingdom. From Alpha Power Nine to modern Secret Lair foils, our expert graders assess every card across centering, corners, edges, and surface quality, and seal them in tamper-evident NFC-enabled precision slabs.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           MTG has one of the most established collectible card markets in the world. Vintage cards in high grades command enormous premiums, and even modern staples benefit from professional grading when in exceptional condition. As a UK-based service, MintVault eliminates international shipping risks and customs delays.
         </p>
 
         <section className="mb-10" data-testid="section-mtg-why">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Magic: The Gathering Cards?</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               <strong className="text-[#1A1A1A]">Vintage MTG commands premium grades</strong> — an Alpha Black Lotus or Mox Sapphire in Gem Mint condition can be worth multiples of the same card in ungraded form. The grade provides buyers with certainty about condition that raw cards simply cannot offer.
             </p>
@@ -98,12 +98,12 @@ export default function MtgCardGradingUk() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+                <span className="text-[#555555] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
@@ -120,7 +120,7 @@ export default function MtgCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
