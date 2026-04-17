@@ -9,7 +9,6 @@ import {
 import SeoHead from "@/components/seo-head";
 import SiteHeader from "@/components/header";
 import FadeIn from "@/components/fade-in";
-import MintVaultWordmark from "@/components/mintvault-wordmark";
 
 /* ── 3D slab tilt ───────────────────────────────────────────────────── */
 function SlabTilt({ children }: { children: React.ReactNode }) {
@@ -81,28 +80,6 @@ export default function HomePage() {
 
           <div className="max-w-4xl w-full text-center relative z-10">
 
-            {/* Wordmark lockup — responsive clamp so it never overflows on mobile */}
-            <div className="flex justify-center mb-10 w-full px-4">
-              <div
-                style={{
-                  border: "2px solid #D4AF37",
-                  padding: "clamp(10px,2.5vw,22px) clamp(16px,4vw,50px)",
-                  maxWidth: "100%",
-                }}
-              >
-                <div style={{
-                                    fontWeight: 900,
-                  fontSize: "clamp(44px,11vw,72px)",
-                  color: "#D4AF37",
-                  letterSpacing: "0.04em",
-                  lineHeight: 0.9,
-                  WebkitTextStroke: "1.5px #D4AF37",
-                  textShadow: "0 0 1px #D4AF37",
-                  whiteSpace: "nowrap",
-                }}>MINTVAULT</div>
-              </div>
-            </div>
-
             {/* Eyebrow badge */}
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#D4AF37]/40 bg-[#D4AF37]/08 mb-8">
               <CheckCircle size={13} className="text-[#D4AF37]" />
@@ -114,19 +91,19 @@ export default function HomePage() {
               <span style={{ color: "#D4AF37" }}>VERIFIED OWNERSHIP</span>
             </h1>
 
-            <p className="text-lg md:text-xl text-[#666666] max-w-2xl mx-auto mb-10 font-medium leading-relaxed">
+            <p className="text-lg md:text-xl text-[#555555] max-w-2xl mx-auto mb-10 font-medium leading-relaxed">
               Every graded card gets a VaultLock™ NFC slab, a VaultLink™ QR-verified certificate, and a registered ownership record. Prove who owns your card at any point in time.
             </p>
 
             <div className="flex flex-col md:flex-row gap-4 justify-center items-center mb-14">
               <Link href="/submit">
-                <button className="btn-gold w-full md:w-auto px-10 py-4 rounded-xl uppercase tracking-widest text-sm">
-                  Submit Your Cards
+                <button className="btn-gold w-full md:w-auto px-10 py-4 rounded-xl uppercase tracking-widest text-sm inline-flex items-center gap-2 justify-center">
+                  Submit Cards <ArrowRight size={14} />
                 </button>
               </Link>
               <Link href="/cert">
-                <button className="relative z-[3] w-full md:w-auto px-10 py-4 rounded-xl bg-transparent border border-[#1A1A1A]/30 text-[#1A1A1A] font-bold uppercase tracking-widest text-sm hover:border-[#B8960C] hover:text-[#B8960C] transition-colors">
-                  Verify a Certificate
+                <button className="relative z-[3] w-full md:w-auto px-10 py-4 rounded-xl bg-transparent border border-[#1A1A1A]/30 text-[#1A1A1A] font-bold uppercase tracking-widest text-sm hover:border-[#B8960C] hover:text-[#B8960C] transition-colors inline-flex items-center gap-2 justify-center">
+                  Verify <ArrowRight size={14} />
                 </button>
               </Link>
             </div>
@@ -149,7 +126,7 @@ export default function HomePage() {
         </section>
 
         {/* ── AI Pre-Grade Checker CTA ──────────────────────────────── */}
-        <section className="py-14 md:py-20 px-6 bg-white border-b border-[#E8E4DC] relative overflow-hidden">
+        <section className="py-16 md:py-20 px-6 bg-white border-b border-[#E8E4DC] relative overflow-hidden">
           {/* Gold accent lines */}
           <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
@@ -159,7 +136,7 @@ export default function HomePage() {
               <h2 className="text-3xl md:text-4xl font-black text-[#1A1A1A] leading-tight">
                 AI Pre-Grade Checker
               </h2>
-              <p className="text-[#666666] text-base mt-3">Upload a photo. Get an instant AI condition report.</p>
+              <p className="text-[#555555] text-base mt-3">Upload a photo. Get an instant AI condition report.</p>
             </div>
 
             {/* 3-step flow */}
@@ -183,7 +160,7 @@ export default function HomePage() {
                 </button>
               </Link>
             </div>
-            <p className="text-[#999999] text-xs">First estimate free — no account needed</p>
+            <p className="text-[#888888] text-xs">First estimate free — no account needed</p>
           </div>
         </section>
 
@@ -233,9 +210,9 @@ export default function HomePage() {
             <div className="text-center mb-12">
               <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">What Makes Us Different</p>
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                How Ownership Works
+                The Ownership Journey
               </h2>
-              <p className="text-[#666666] mt-3 max-w-xl mx-auto text-sm">
+              <p className="text-[#555555] mt-3 max-w-xl mx-auto text-sm">
                 We're the only UK grader that can prove who owns a card at any point in time — combining VaultLock™, VaultLink™, and a registered ownership record.
               </p>
             </div>
@@ -258,7 +235,7 @@ export default function HomePage() {
                   </div>
                   <div className="text-left md:text-center md:mt-4 md:px-2">
                     <p className="font-bold text-[#1A1A1A] text-sm">{title}</p>
-                    <p className="text-[#666666] text-xs mt-1 leading-relaxed">{desc}</p>
+                    <p className="text-[#555555] text-xs mt-1 leading-relaxed">{desc}</p>
                   </div>
                 </div>
               ))}
@@ -275,9 +252,9 @@ export default function HomePage() {
               <div className="flex-1 text-center lg:text-left">
                 <span className="reveal-on-scroll text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-4 block">The MintVault Slab</span>
                 <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight leading-tight mb-6 text-[#1A1A1A]">
-                  ENGINEERED FOR<br /><span className="gold-shimmer-text">PERMANENCE</span>
+                  Engineered for<br /><span className="gold-shimmer-text">Permanence</span>
                 </h2>
-                <p className="reveal-on-scroll text-[#666666] text-base leading-relaxed mb-8 max-w-md mx-auto lg:mx-0">
+                <p className="reveal-on-scroll text-[#555555] text-base leading-relaxed mb-8 max-w-md mx-auto lg:mx-0">
                   Every MintVault slab is precision-manufactured with VaultGlass™ UV-resistant acrylic and a MintSeal™ tamper-evident seal. Your card is protected for decades, not years.
                 </p>
                 <div className="reveal-on-scroll flex flex-wrap gap-2 justify-center lg:justify-start">
@@ -303,24 +280,24 @@ export default function HomePage() {
                 </SlabTilt>
                 {/* Callout annotations */}
                 <div className="absolute top-10 -left-4 lg:-left-16 flex items-center gap-2">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">UV-Resistant</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888] whitespace-nowrap">UV-Resistant</span>
                   <div className="h-px w-8 bg-[#D4AF37]/40" />
                   <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
                 </div>
                 <div className="absolute top-1/3 -right-2 lg:-right-16 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
                   <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">VaultLock™</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888] whitespace-nowrap">VaultLock™</span>
                 </div>
                 <div className="absolute bottom-16 -left-4 lg:-left-16 flex items-center gap-2">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">VaultLink™</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888] whitespace-nowrap">VaultLink™</span>
                   <div className="h-px w-8 bg-[#D4AF37]/40" />
                   <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
                 </div>
                 <div className="absolute bottom-4 -right-2 lg:-right-20 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
                   <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">Tamper-Evident</span>
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#888888] whitespace-nowrap">Tamper-Evident</span>
                 </div>
               </div>
             </div>
@@ -328,12 +305,12 @@ export default function HomePage() {
         </section>
 
         {/* ── Features ──────────────────────────────────────────────── */}
-        <section className="py-12 md:py-20 px-6 bg-white border-b border-[#E8E4DC]">
+        <section className="py-16 md:py-20 px-6 bg-white border-b border-[#E8E4DC]">
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-12">
               <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">Why Collectors Choose MintVault</p>
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                THE MINTVAULT ADVANTAGE
+                The MintVault Advantage
               </h2>
             </div>
 
@@ -342,7 +319,7 @@ export default function HomePage() {
               {/* NFC — 7 cols */}
               <div className="reveal-on-scroll md:col-span-7 glass-card p-8 rounded-2xl relative overflow-hidden group" data-delay="1">
                 <h3 className="text-xl font-bold mb-3 text-[#1A1A1A]">VaultLock™ &amp; VaultLink™</h3>
-                <p className="text-[#666666] max-w-sm mb-6 text-sm leading-relaxed">
+                <p className="text-[#555555] max-w-sm mb-6 text-sm leading-relaxed">
                   Every slab contains a VaultLock™ NFC chip. Instant verification with no app required. Tap and prove authenticity in seconds.
                 </p>
                 <div className="absolute -bottom-4 -right-4 group-hover:scale-110 transition-transform duration-700">
@@ -357,7 +334,7 @@ export default function HomePage() {
                 <div>
                   <Shield size={28} className="text-[#D4AF37] mb-4" />
                   <h3 className="text-xl font-bold mb-2 text-[#1A1A1A]">No Conflict of Interest</h3>
-                  <p className="text-[#666666] text-sm leading-relaxed">
+                  <p className="text-[#555555] text-sm leading-relaxed">
                     We do not buy, sell, or trade cards. Our grading is purely technical, unbiased, and objective. Every time.
                   </p>
                 </div>
@@ -369,7 +346,7 @@ export default function HomePage() {
                 <ul className="space-y-3 font-mono">
                   {[["REGISTERED OWNER","You"],["CERTIFICATE","Verifiable"],["TRANSFER","Email Verified"],["STATUS","Active"]].map(([label, val], i, arr) => (
                     <li key={label} className={`flex justify-between text-xs pb-2 ${i < arr.length - 1 ? "border-b border-[#E8E4DC]" : ""}`}>
-                      <span className="text-[#666666]">{label}</span>
+                      <span className="text-[#555555]">{label}</span>
                       <span className="text-[#D4AF37] font-bold">{val}</span>
                     </li>
                   ))}
@@ -378,15 +355,14 @@ export default function HomePage() {
 
               {/* Fast Turnaround — 7 cols */}
               <div
-                className="reveal-on-scroll md:col-span-7 p-8 rounded-2xl flex items-center justify-between"
-                style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)", boxShadow: "0 4px 20px rgba(212,175,55,0.3)" }}
+                className="reveal-on-scroll md:col-span-7 p-8 rounded-2xl flex items-center justify-between bg-white border border-[#D4AF37]/30"
                 data-delay="4"
               >
-                <div className="text-[#3c2f00]">
+                <div className="text-[#1A1A1A]">
                   <h3 className="text-2xl font-black mb-2 tracking-tight">Fast UK Turnaround</h3>
-                  <p className="font-medium opacity-80 text-sm">5 to 40 working days depending on tier. No international shipping delays.</p>
+                  <p className="font-medium text-[#555555] text-sm">5 to 40 working days depending on tier. No international shipping delays.</p>
                 </div>
-                <Zap size={56} className="text-[#3c2f00]/20 flex-shrink-0" />
+                <Zap size={56} className="text-[#D4AF37]/20 flex-shrink-0" />
               </div>
             </div>
           </div>
@@ -400,10 +376,10 @@ export default function HomePage() {
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A] mb-6">
                 Your Card,<br />Provably Yours
               </h2>
-              <p className="text-[#666666] leading-relaxed mb-6">
+              <p className="text-[#555555] leading-relaxed mb-6">
                 Every MintVault-graded card is registered in our ownership registry. When you claim your card, you become the verified owner — with a certificate of authenticity emailed to you.
               </p>
-              <p className="text-[#666666] leading-relaxed mb-8">
+              <p className="text-[#555555] leading-relaxed mb-8">
                 When you sell, you transfer ownership through a two-step email-verified process. The new owner gets their own certificate. The registry is permanent and tamper-proof.
               </p>
               <div className="flex gap-3 flex-wrap">
@@ -430,7 +406,7 @@ export default function HomePage() {
                   { label: "NFC Status", value: "✓ Active" },
                 ].map(({ label, value, gold, green }) => (
                   <div key={label} className="flex justify-between items-center py-2.5 border-b border-[#E8E4DC] last:border-0">
-                    <span className="text-[#999999] text-sm">{label}</span>
+                    <span className="text-[#888888] text-sm">{label}</span>
                     <span className={`text-sm font-semibold ${gold ? "text-[#D4AF37] font-mono" : green ? "text-emerald-600" : "text-[#1A1A1A]"}`}>{value}</span>
                   </div>
                 ))}
@@ -447,10 +423,10 @@ export default function HomePage() {
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A] mb-6">
                 Stolen? We'll<br />Flag It Instantly.
               </h2>
-              <p className="text-[#666666] leading-relaxed mb-6">
+              <p className="text-[#555555] leading-relaxed mb-6">
                 If your graded card is stolen, report it to our registry and we'll flag its certificate. Any buyer who scans the VaultLink™ QR code or VaultLock™ NFC chip on the slab sees a red warning — making fraudulent resale much harder.
               </p>
-              <p className="text-[#666666] leading-relaxed mb-8">
+              <p className="text-[#555555] leading-relaxed mb-8">
                 Reports are email-verified to prevent false flags. Once confirmed, the warning is live instantly — no delay, no gatekeeping.
               </p>
               <Link href="/stolen-card-protection">
@@ -473,7 +449,7 @@ export default function HomePage() {
                   { label: "Registry", value: "Flagged — do not buy" },
                 ].map(({ label, value, gold, red }) => (
                   <div key={label} className="flex justify-between items-center py-2.5 border-b border-red-100 last:border-0">
-                    <span className="text-[#999999] text-sm">{label}</span>
+                    <span className="text-[#888888] text-sm">{label}</span>
                     <span className={`text-sm font-semibold ${gold ? "text-[#D4AF37] font-mono" : red ? "text-red-600 font-bold" : "text-[#1A1A1A]"}`}>{value}</span>
                   </div>
                 ))}
@@ -488,7 +464,7 @@ export default function HomePage() {
             <div className="text-center mb-12">
               <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">The Process</p>
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                HOW IT WORKS
+                How It Works
               </h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -508,7 +484,7 @@ export default function HomePage() {
                     </div>
                     <div className="font-mono text-[#D4AF37] text-xs mb-2">STEP {step}</div>
                     <h3 className="text-sm font-bold mb-2 text-[#1A1A1A] uppercase tracking-tight">{title}</h3>
-                    <p className="text-[#666666] text-xs leading-relaxed">{desc}</p>
+                    <p className="text-[#555555] text-xs leading-relaxed">{desc}</p>
                   </div>
                 </Link>
               ))}
@@ -522,7 +498,7 @@ export default function HomePage() {
             <h2 className="reveal-on-scroll text-3xl font-black tracking-tight text-[#1A1A1A] mb-4">
               Simple, Transparent Pricing
             </h2>
-            <p className="text-[#666666] mb-8 max-w-xl mx-auto">
+            <p className="text-[#555555] mb-8 max-w-xl mx-auto">
               From £19 per card. All tiers include grading, labelling, encapsulation, and fully insured Royal Mail return. Bulk discounts from 10 cards.
             </p>
             <div className="flex gap-4 justify-center">
@@ -546,9 +522,9 @@ export default function HomePage() {
             <div className="text-center mb-12">
               <span className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3 block">Why Switch</span>
               <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                THE CLEAR CHOICE
+                The Clear Choice
               </h2>
-              <p className="text-[#666666] text-sm mt-4 max-w-xl mx-auto">
+              <p className="text-[#555555] text-sm mt-4 max-w-xl mx-auto">
                 UK collectors deserve a grading service built for them — not one built for another market and shipped internationally.
               </p>
             </div>
@@ -557,23 +533,23 @@ export default function HomePage() {
               <table className="w-full min-w-[480px]">
                 <thead>
                   <tr>
-                    <th className="text-left pb-4 pt-4 px-4 text-[#999999] text-xs uppercase tracking-widest font-bold w-[40%]">Feature</th>
+                    <th className="text-left pb-4 pt-4 px-4 text-[#888888] text-xs uppercase tracking-widest font-bold w-[40%]">Feature</th>
                     <th className="pb-4 pt-4 text-center">
                       <div className="inline-flex flex-col items-center gap-1">
                         <span className="text-[#D4AF37] font-black text-sm uppercase tracking-widest">MintVault</span>
-                        <span className="text-[#999999] text-[10px] font-mono">UK-BASED</span>
+                        <span className="text-[#888888] text-[10px] font-mono">UK-BASED</span>
                       </div>
                     </th>
                     <th className="pb-4 pt-4 text-center">
                       <div className="inline-flex flex-col items-center gap-1">
-                        <span className="text-[#666666] font-bold text-sm uppercase tracking-widest">Other UK Graders</span>
-                        <span className="text-[#999999] text-[10px] font-mono">DOMESTIC</span>
+                        <span className="text-[#555555] font-bold text-sm uppercase tracking-widest">Other UK Graders</span>
+                        <span className="text-[#888888] text-[10px] font-mono">DOMESTIC</span>
                       </div>
                     </th>
                     <th className="pb-4 pt-4 text-center">
                       <div className="inline-flex flex-col items-center gap-1">
-                        <span className="text-[#666666] font-bold text-sm uppercase tracking-widest">International</span>
-                        <span className="text-[#999999] text-[10px] font-mono">OVERSEAS</span>
+                        <span className="text-[#555555] font-bold text-sm uppercase tracking-widest">International</span>
+                        <span className="text-[#888888] text-[10px] font-mono">OVERSEAS</span>
                       </div>
                     </th>
                   </tr>
@@ -598,7 +574,7 @@ export default function HomePage() {
                     ["Verified Ownership Registry",     "✓", "✗", "✗"],
                   ].map(([feature, mv, uk, intl], i) => (
                     <tr key={i} className={i % 2 === 0 ? "bg-[#FAFAF8]" : "bg-white"}>
-                      <td className="py-3 px-4 text-[#666666] text-sm rounded-l-lg">{feature}</td>
+                      <td className="py-3 px-4 text-[#555555] text-sm rounded-l-lg">{feature}</td>
                       <td className="py-3 text-center text-base font-bold">
                         <span className={mv === "✓" ? "compare-check" : mv === "~" ? "compare-partial" : "compare-cross"}>
                           {mv === "✓" ? "✓" : mv === "~" ? "◐" : "✗"}
@@ -620,7 +596,7 @@ export default function HomePage() {
               </table>
             </div>
             <div className="text-center mt-6">
-              <span className="text-[#999999] text-[10px] font-mono">✓ confirmed · ◐ partial / varies · ✗ not available</span>
+              <span className="text-[#888888] text-[10px] font-mono">✓ confirmed · ◐ partial / varies · ✗ not available</span>
             </div>
           </div>
         </section>
@@ -631,7 +607,7 @@ export default function HomePage() {
             <div className="text-center mb-12">
               <span className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3 block">Got Questions</span>
               <h2 className="reveal-on-scroll text-3xl font-black tracking-tight text-[#1A1A1A]">
-                FREQUENTLY ASKED
+                Frequently Asked
               </h2>
             </div>
 
@@ -674,7 +650,7 @@ export default function HomePage() {
                     />
                   </button>
                   {faqOpen === i && (
-                    <div className="px-6 pb-5 text-[#666666] text-sm leading-relaxed border-t border-[#E8E4DC] pt-4">
+                    <div className="px-6 pb-5 text-[#555555] text-sm leading-relaxed border-t border-[#E8E4DC] pt-4">
                       {a}
                     </div>
                   )}
@@ -685,7 +661,7 @@ export default function HomePage() {
         </section>
 
         {/* ── What We Grade ticker ──────────────────────────────────── */}
-        <section className="py-12 bg-[#FAFAF8] border-t border-[#E8E4DC] overflow-hidden">
+        <section className="py-16 bg-[#FAFAF8] border-t border-[#E8E4DC] overflow-hidden">
           <div className="max-w-7xl mx-auto px-6">
             <div className="flex gap-16 items-center opacity-60 animate-[scroll_25s_linear_infinite] whitespace-nowrap">
               {[
@@ -707,26 +683,26 @@ export default function HomePage() {
       <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-16 px-4 bg-white/95 backdrop-blur-xl border-t border-[#E8E4DC] md:hidden">
         <Link href="/" className="flex flex-col items-center justify-center text-[#B8960C]">
           <Home size={20} />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#666666]">Home</span>
+          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#555555]">Home</span>
         </Link>
         <Link href="/cert" className="flex flex-col items-center justify-center">
-          <CheckCircle size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Verify</span>
+          <CheckCircle size={20} className="text-[#888888]" />
+          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#888888]">Verify</span>
         </Link>
         <Link href="/pricing" className="flex flex-col items-center justify-center">
-          <CreditCard size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Pricing</span>
+          <CreditCard size={20} className="text-[#888888]" />
+          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#888888]">Pricing</span>
         </Link>
         <Link href="/dashboard" className="flex flex-col items-center justify-center">
-          <ClipboardList size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Dashboard</span>
+          <ClipboardList size={20} className="text-[#888888]" />
+          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#888888]">Dashboard</span>
         </Link>
       </nav>
 
       {/* ── Mobile FAB ────────────────────────────────────────────── */}
       <div className="fixed bottom-20 right-5 md:hidden z-40">
         <Link href="/submit">
-          <button className="gold-shimmer w-12 h-12 rounded-full flex items-center justify-center text-[#1A1400] active:scale-90 transition-transform" style={{ boxShadow: "0 4px 20px rgba(212, 175, 55, 0.5), 0 0 30px rgba(212, 175, 55, 0.2)" }}>
+          <button className="gold-shimmer w-12 h-12 rounded-full flex items-center justify-center text-[#1A1400] active:scale-90 transition-transform">
             <Plus size={24} />
           </button>
         </Link>
