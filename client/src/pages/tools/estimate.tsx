@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Upload, Loader2, ChevronDown, ChevronUp, ArrowRight, AlertTriangle, RotateCcw, Star, Mail, CheckCircle, Coins } from "lucide-react";
+import { Upload, Camera, Loader2, ChevronDown, ChevronUp, ArrowRight, AlertTriangle, RotateCcw, Star, Mail, CheckCircle, Coins } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 
 const LS_FREE_KEY = "mv_est_free";
@@ -65,7 +65,9 @@ export default function PreGradeEstimatePage() {
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [error, setError] = useState("");
   const [showAccuracy, setShowAccuracy] = useState(false);
+  const [showEmailCheck, setShowEmailCheck] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   // Free usage tracking (localStorage)
   const [freeUsed, setFreeUsed] = useState(() => localStorage.getItem(LS_FREE_KEY) === "1");
@@ -232,53 +234,44 @@ export default function PreGradeEstimatePage() {
           </div>
         )}
 
-        {/* Credit check — only show when free used and no credits loaded */}
-        {freeUsed && credits === null && !showPaywall && (
-          <div className="border border-[#D4AF37]/30 rounded-2xl p-5 bg-[#FAFAF8]">
-            <div className="flex items-center gap-2 mb-3">
-              <Mail size={15} className="text-[#D4AF37]" />
-              <p className="text-[#1A1A1A] font-semibold text-sm">Have credits? Enter your email</p>
-            </div>
-            <div className="flex gap-2">
-              <input
-                type="email"
-                value={emailInput}
-                onChange={e => { setEmailInput(e.target.value); setCreditError(""); }}
-                onKeyDown={e => e.key === "Enter" && checkCredits(emailInput)}
-                placeholder="your@email.com"
-                className="flex-1 border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#D4AF37]/60"
-              />
-              <button
-                onClick={() => checkCredits(emailInput)}
-                disabled={checkingCredits || !emailInput.trim()}
-                className="gold-shimmer px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider disabled:opacity-50"
-              >
-                {checkingCredits ? <Loader2 size={14} className="animate-spin" /> : "Check"}
-              </button>
-            </div>
-            {creditError && <p className="text-red-500 text-xs mt-2">{creditError}</p>}
-            {credits === 0 && creditEmail && (
-              <p className="text-[#888888] text-xs mt-2">No credits found for {creditEmail}. <button onClick={() => setShowPaywall(true)} className="text-[#D4AF37] underline">Buy estimates</button></p>
-            )}
-          </div>
-        )}
-
         {/* Upload panel */}
         <div className="space-y-4">
           {!preview ? (
             <div
-              className="border-2 border-dashed border-[#D4AF37]/60 rounded-2xl p-10 text-center cursor-pointer hover:border-[#D4AF37] hover:bg-[#FFFAE8] transition-all bg-[#FAFAF8]"
-              onClick={() => inputRef.current?.click()}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+              className="relative bg-white rounded-2xl border border-[#E8E4DC] shadow-sm overflow-hidden"
+              onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add("ring-2", "ring-[#D4AF37]"); }}
+              onDragLeave={e => { e.currentTarget.classList.remove("ring-2", "ring-[#D4AF37]"); }}
+              onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove("ring-2", "ring-[#D4AF37]"); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
             >
-              <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-4">
-                <Upload size={26} className="text-[#D4AF37]" />
+              <div className="px-8 py-10 text-center">
+                <div className="mx-auto w-16 h-16 rounded-full bg-[#D4AF37]/10 flex items-center justify-center mb-4">
+                  <Upload size={28} className="text-[#D4AF37]" />
+                </div>
+                <h3 className="text-xl font-bold text-[#1A1A1A] mb-2">Upload your card</h3>
+                <p className="text-sm text-[#555555] mb-6">Get an instant AI grading report in ~10 seconds</p>
+
+                <div className="flex flex-col sm:flex-row gap-2 justify-center max-w-md mx-auto">
+                  <button type="button" onClick={() => cameraRef.current?.click()}
+                    className="flex-1 bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] font-bold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <Camera size={18} /> Take Photo
+                  </button>
+                  <button type="button" onClick={() => inputRef.current?.click()}
+                    className="flex-1 bg-white border border-[#E8E4DC] hover:border-[#D4AF37] text-[#1A1A1A] font-bold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <Upload size={18} /> Choose Image
+                  </button>
+                </div>
               </div>
-              <p className="text-[#1A1A1A] font-bold text-base mb-1">Upload a photo of your card</p>
-              <p className="text-[#888888] text-sm">Drag & drop or tap to browse</p>
-              <p className="text-[#AAAAAA] text-xs mt-3">Clear, well-lit photo. Remove from sleeve for best results.</p>
-              <input ref={inputRef} type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+
+              <div className="bg-[#F7F7F5] border-t border-[#E8E4DC] px-8 py-4">
+                <div className="flex flex-col sm:flex-row gap-2 sm:gap-6 text-xs text-[#555555] justify-center">
+                  <span className="flex items-center gap-1.5"><CheckCircle size={13} className="text-green-600" /> Remove from sleeve</span>
+                  <span className="flex items-center gap-1.5"><CheckCircle size={13} className="text-green-600" /> Good lighting, no glare</span>
+                  <span className="flex items-center gap-1.5"><CheckCircle size={13} className="text-green-600" /> Card fills the frame</span>
+                </div>
+              </div>
+
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
             </div>
           ) : (
             <div className="space-y-4">
@@ -289,7 +282,6 @@ export default function PreGradeEstimatePage() {
                   <RotateCcw size={14} /> Try Another
                 </button>
 
-                {/* Free estimate button */}
                 {!result && canRunFree && (
                   <button type="button" onClick={() => getEstimate(false)} disabled={loading}
                     className="gold-shimmer flex-1 flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl disabled:opacity-60">
@@ -298,7 +290,6 @@ export default function PreGradeEstimatePage() {
                   </button>
                 )}
 
-                {/* Paid estimate button */}
                 {!result && !canRunFree && canRunPaid && (
                   <button type="button" onClick={() => getEstimate(true)} disabled={loading}
                     className="gold-shimmer flex-1 flex items-center justify-center gap-2 text-sm font-bold py-2.5 rounded-xl disabled:opacity-60">
@@ -317,6 +308,42 @@ export default function PreGradeEstimatePage() {
             </div>
           )}
         </div>
+
+        {/* Collapsed email credit check — only when free used + no credits loaded */}
+        {freeUsed && credits === null && !showPaywall && !result && (
+          <div className="text-center">
+            {!showEmailCheck ? (
+              <button onClick={() => setShowEmailCheck(true)}
+                className="text-xs text-[#888888] hover:text-[#D4AF37] underline underline-offset-2 transition-colors">
+                Already have credits? Enter your email
+              </button>
+            ) : (
+              <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4 max-w-md mx-auto">
+                <div className="flex items-center gap-2 mb-2">
+                  <Mail size={14} className="text-[#D4AF37]" />
+                  <p className="text-xs font-bold text-[#1A1A1A] uppercase tracking-wider">Enter your email</p>
+                </div>
+                <div className="flex gap-2">
+                  <input type="email" value={emailInput}
+                    onChange={e => { setEmailInput(e.target.value); setCreditError(""); }}
+                    onKeyDown={e => e.key === "Enter" && checkCredits(emailInput)}
+                    placeholder="you@email.com"
+                    className="flex-1 bg-white border border-[#E8E4DC] rounded px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+                  />
+                  <button onClick={() => checkCredits(emailInput)} disabled={checkingCredits || !emailInput.trim()}
+                    className="bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] text-xs font-bold uppercase tracking-wider px-4 rounded transition-colors disabled:opacity-50">
+                    {checkingCredits ? <Loader2 size={14} className="animate-spin" /> : "Check"}
+                  </button>
+                </div>
+                {creditError && <p className="text-red-500 text-xs mt-2">{creditError}</p>}
+                {credits === 0 && creditEmail && (
+                  <p className="text-[#888888] text-xs mt-2">No credits for {creditEmail}. <button onClick={() => setShowPaywall(true)} className="text-[#D4AF37] underline">Buy estimates</button></p>
+                )}
+                <button onClick={() => setShowEmailCheck(false)} className="text-[10px] text-[#888888] hover:text-[#555555] mt-2 underline">Cancel</button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Paywall — shown when free used, no paid credits, file uploaded */}
         {(needsPaywall || showPaywall) && (
