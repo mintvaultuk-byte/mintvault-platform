@@ -122,20 +122,29 @@ This is the most complex and most heavily weighted category (40% of overall grad
 - 2: Extreme surface damage. Card surface heavily compromised.
 - 1: Surface virtually destroyed.
 
-DEFECT TYPES — check for ALL of these:
-- Scratches (especially on holographic/foil areas — these often only show in greyscale or angled images)
-- Print lines (horizontal or vertical lines from the printing process — very common on holo cards)
+DEFECT TYPES — you MUST check for ALL of the following. Report each defect found with its type, location, severity, and description. If a defect type is not present, do not report it. Do not skip any category.
+
+- Whitening on edges (all 4 edges, front and back — exposed cardboard layer)
+- Whitening on corners (all 4 corners, front and back — exposed cardboard layer)
+- Print dots on foil/holo surfaces (visible under magnification or in greyscale)
+- Scratches across surface (especially holo areas — check greyscale and angled images)
+- Edge chips or nicks (small pieces missing from card edges)
+- Corner dings or bends (indentations at corners from impact)
+- Surface scuffs (light abrasion marks, often visible in high-contrast)
+- Holo scratches (scratches on holographic layer — often invisible in colour, visible in greyscale)
+- Creases (ANY crease caps overall grade at 5.0 maximum — this is non-negotiable)
+- Indentations or pressure marks (show in high-contrast images as subtle shadows)
+- Fingerprints or oils (residue on surface, visible in angled light)
+- Stains (water damage, wax residue, adhesive residue, dirt)
+- Print lines (horizontal/vertical lines from printing process)
 - Ink spots or missing ink areas
-- Stains (water damage, wax residue, adhesive residue, dirt, fingerprints)
-- Indentations or dents (from pressure, stacking, or impact — these show up in high-contrast images)
 - Roller marks (wavy horizontal lines from factory printing rollers)
-- Creases (ANY crease, no matter how small, is a MAJOR flaw — caps overall grade at 5.0 maximum)
-- Surface whitening (different from edge whitening — white spots or areas on the card face)
+- Foil peeling or lifting
+- Surface whitening (white spots on card face, different from edge whitening)
 - Colour fading or inconsistency
 - Focus or registration errors (printed image misaligned with borders)
-- Holo scratches (scratches specifically on the holographic layer — check the greyscale image carefully)
-- Foil peeling or lifting
-- Texture inconsistency on textured cards (full art, VMAX, etc.)
+- Texture inconsistency on textured cards (full art, VMAX, alt art, etc.)
+- Tear or missing card material (caps overall grade at 3.0 maximum)
 
 HOLO/FOIL CARDS: These require EXTRA surface scrutiny. Scratches on holographic surfaces are frequently invisible in straight-on colour photos but show clearly in greyscale images and angled photos. If a greyscale or angled image is provided, examine it very carefully for surface scratches. Report your surface confidence as LOW if only a straight-on colour image is available for a holo card.
 
@@ -177,9 +186,22 @@ ABSOLUTE RULES — these override the formula:
 
 ---
 
+## OVERALL GRADE — INTEGER ONLY
+
+The overall grade MUST be a whole integer from 1 to 10. NEVER return a decimal (9.5, 8.5, etc.).
+All four subgrades (centering, corners, edges, surface) MUST also be whole integers from 1 to 10.
+The grade_strength_score (0–99) captures within-tier granularity instead of half-grades.
+
+Compute: weighted = (centering × 0.10) + (corners × 0.25) + (edges × 0.25) + (surface × 0.40)
+Round to nearest integer: overall_grade = Math.round(weighted)
+Apply proximity cap: overall_grade = min(overall_grade, lowest_subgrade + 1)
+Apply defect caps: crease → max 5, tear → max 3
+
 ## RESPONSE FORMAT
 
 You MUST respond with ONLY valid JSON. No other text before or after. No markdown backticks. No explanations outside the JSON. Pure JSON only.
+
+For every field in the schema below: return the field with a value. If a field does not apply, return null — do NOT omit the field. Every field must be present in the response.
 
 {
   "card_identification": {

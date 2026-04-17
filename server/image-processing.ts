@@ -431,33 +431,33 @@ export async function generateVariants(inputBuffer: Buffer): Promise<{
   edgeenhanced: Buffer;
   inverted: Buffer;
 }> {
-  // Resize to 2000px max first — keeps peak RAM manageable
+  // Resize to 2576px max (Opus 4.7 resolution) — keeps peak RAM manageable
   const resized = await sharp(inputBuffer)
-    .resize(2000, 2000, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 90 })
+    .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 95 })
     .toBuffer();
 
   // Sequential processing to limit peak memory
   const greyscale = await sharp(resized)
     .greyscale()
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: 95 })
     .toBuffer();
 
   const highcontrast = await sharp(resized)
     .modulate({ brightness: 1.1 })
     .linear(1.6, -(128 * 1.6 - 128))
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: 95 })
     .toBuffer();
 
   const edgeenhanced = await sharp(resized)
     .greyscale()
     .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: 95 })
     .toBuffer();
 
   const inverted = await sharp(resized)
     .negate()
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: 95 })
     .toBuffer();
 
   return { greyscale, highcontrast, edgeenhanced, inverted };

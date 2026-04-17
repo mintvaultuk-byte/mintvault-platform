@@ -175,15 +175,15 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
   const cropped = await autoCropCard(buffer);
 
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
-    sharp(cropped).grayscale().jpeg({ quality: 85 }).toBuffer(),
-    sharp(cropped).linear(1.5, -30).jpeg({ quality: 85 }).toBuffer(),
+    sharp(cropped).grayscale().jpeg({ quality: 95 }).toBuffer(),
+    sharp(cropped).linear(1.5, -30).jpeg({ quality: 95 }).toBuffer(),
     sharp(cropped)
       .greyscale()
       .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
       .normalize()
-      .jpeg({ quality: 85 })
+      .jpeg({ quality: 95 })
       .toBuffer(),
-    sharp(cropped).negate().jpeg({ quality: 85 }).toBuffer(),
+    sharp(cropped).negate().jpeg({ quality: 95 }).toBuffer(),
   ]);
 
   console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB`);
@@ -403,19 +403,18 @@ function clampAllGrades(result: GradingAnalysis): GradingAnalysis {
 
 /**
  * Resize an image buffer to fit Anthropic Claude Vision API constraints.
- * Resizes to max 2000x2000 (preserves aspect ratio) and re-encodes as JPEG quality 85.
- * Output is typically 300-700 KB which is well under the 5 MB Anthropic limit.
- * 2000px on the longest edge is plenty of detail for card identification and grading.
+ * Resizes to max 2576x2576 (Opus 4.7 supports up to 3.75MP / 2576px long edge).
+ * JPEG quality 95 preserves fine detail for grading (scratches, whitening, print dots).
  */
 export async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaType: "image/jpeg" }> {
   const inputSize = buffer.length;
   const resized = await sharp(buffer)
     .rotate() // auto-orient based on EXIF
-    .resize(2000, 2000, {
+    .resize(2576, 2576, {
       fit: "inside",
       withoutEnlargement: true,
     })
-    .jpeg({ quality: 85, mozjpeg: true })
+    .jpeg({ quality: 95, mozjpeg: true })
     .toBuffer();
   console.log(`[ai/resize] ${(inputSize / 1024 / 1024).toFixed(2)}MB -> ${(resized.length / 1024 / 1024).toFixed(2)}MB`);
   return { buffer: resized, mediaType: "image/jpeg" };
@@ -426,7 +425,7 @@ export async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer;
 /**
  * Auto-crop a card image to its actual edges and center it with a clean border.
  * Uses sharp's trim to detect the card bounding box against a light background.
- * Adds a uniform white border and resizes to max 2000px for Claude Vision.
+ * Adds a uniform white border and resizes to max 2576px for Claude Vision (Opus 4.7).
  */
 export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffer> {
   const meta = await sharp(buffer).metadata();
@@ -450,8 +449,8 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
       top: borderPx, bottom: borderPx, left: borderPx, right: borderPx,
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
-    .resize(2000, 2000, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 90, mozjpeg: true })
+    .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 95, mozjpeg: true })
     .toBuffer();
 
   console.log(
@@ -487,7 +486,7 @@ export async function analyzeCardFromBuffers(
 
   let text: string;
   try {
-    text = await callClaude(content, 4096);
+    text = await callClaude(content, 4096, "claude-opus-4-7", "xhigh");
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
   }
@@ -550,10 +549,20 @@ function imageBlock(base64: string, mediaType = "image/jpeg"): object {
 async function callClaude(
   content: object[],
   maxTokens: number,
-  model = "claude-sonnet-4-6"
+  model = "claude-opus-4-7",
+  effort?: string,
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
+
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: maxTokens,
+    messages: [{ role: "user", content }],
+  };
+  if (effort) {
+    body.thinking = { type: "enabled", budget_tokens: effort === "xhigh" ? 8192 : 4096 };
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -562,11 +571,7 @@ async function callClaude(
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [{ role: "user", content }],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -834,7 +839,7 @@ export async function analyzeCard(
 
   let text: string;
   try {
-    text = await callClaude(content, 4096);
+    text = await callClaude(content, 4096, "claude-opus-4-7", "xhigh");
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
   }

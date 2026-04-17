@@ -1856,7 +1856,7 @@ export async function registerRoutes(
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           max_tokens: 4096,
           messages: [{ role: "user", content: contentParts }],
         }),
@@ -5861,14 +5861,15 @@ export async function registerRoutes(
       // Log to grading_sessions
       try {
         await db.execute(sql`
-          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes)
+          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes, model_version)
           VALUES (
             ${cert.certId},
             NOW(),
             ${"Cornelius Oliver"},
             ${gradeNum},
             ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
-            ${b.private_notes || null}
+            ${b.private_notes || null},
+            'claude-opus-4-7'
           )
         `);
       } catch (sessionErr) {
@@ -6354,7 +6355,7 @@ export async function registerRoutes(
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2048, messages: [{ role: "user", content }] }),
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
       });
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
@@ -6472,7 +6473,7 @@ export async function registerRoutes(
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 4096, messages: [{ role: "user", content }] }),
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] }),
       });
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
@@ -6564,7 +6565,7 @@ export async function registerRoutes(
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2048, messages: [{ role: "user", content }] }),
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
       });
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiResp = await response.json() as { content: { text: string }[] };
@@ -7163,7 +7164,7 @@ export async function registerRoutes(
 
   // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
 
-  const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+  const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post(
     "/api/admin/scan-ingest",
@@ -7180,8 +7181,9 @@ export async function registerRoutes(
         const frontBuf = files.front[0].buffer;
         const backBuf = files.back?.[0]?.buffer || null;
         const notes = (req.body?.notes || "").trim();
+        const clientSource = (req.body?.client_source || "admin_ui").trim();
 
-        console.log(`[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"}`);
+        console.log(`[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`);
 
         // Step 1: Create cert
         certInfo = await createCertForScan();
@@ -7191,27 +7193,54 @@ export async function registerRoutes(
         const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
         console.log(`[scan-ingest] images processed for cert ${certInfo.certId}`);
 
-        // Step 3: Run AI (fire-and-forget — respond immediately with cert info)
-        // AI runs async so the scanner watcher gets a fast response
-        const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
-          .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
-          .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
-
         // Save notes if provided
         if (notes) {
           await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
         }
 
-        res.json({
-          certId: certInfo.certId,
-          dbId: certInfo.id,
-          workstationUrl: `/admin#grading-${certInfo.id}`,
-          aiStatus: "processing",
-          message: `Certificate ${certInfo.certId} created. AI grading in progress.`,
-        });
+        // Step 3: Run AI — sync if client_source is scanner_app, async otherwise
+        const isSync = clientSource === "scanner_app";
 
-        // Wait for AI to finish (doesn't block response)
-        await aiPromise;
+        if (isSync) {
+          // Scanner desktop app needs result inline for display
+          try {
+            const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
+            console.log(`[scan-ingest] AI done for ${certInfo.certId}: grade=${aiResult.grade}`);
+            res.json({
+              certId: certInfo.certId,
+              dbId: certInfo.id,
+              workstationUrl: `/admin#grading-${certInfo.id}`,
+              aiStatus: "complete",
+              aiResult,
+              message: `Certificate ${certInfo.certId} graded.`,
+            });
+          } catch (aiErr: any) {
+            console.error(`[scan-ingest] AI failed for ${certInfo.certId}: ${aiErr.message}`);
+            res.json({
+              certId: certInfo.certId,
+              dbId: certInfo.id,
+              workstationUrl: `/admin#grading-${certInfo.id}`,
+              aiStatus: "failed",
+              aiError: aiErr.message,
+              message: `Certificate ${certInfo.certId} created but AI grading failed. Retry from workstation.`,
+            });
+          }
+        } else {
+          // Watcher script / admin UI — respond immediately, AI runs in background
+          const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
+            .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
+            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
+
+          res.json({
+            certId: certInfo.certId,
+            dbId: certInfo.id,
+            workstationUrl: `/admin#grading-${certInfo.id}`,
+            aiStatus: "processing",
+            message: `Certificate ${certInfo.certId} created. AI grading in progress.`,
+          });
+
+          await aiPromise;
+        }
       } catch (err: any) {
         console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
         res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });

@@ -294,6 +294,18 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v232-migrate] source column skipped:", e.message);
   }
 
+  // ── v233: Backfill model_version on grading_sessions ───────────────────────
+  try {
+    // Backfill all existing rows (graded before Opus 4.7 switch) with the prior model
+    await db.execute(sql`
+      UPDATE grading_sessions SET model_version = 'claude-sonnet-4-6'
+      WHERE model_version IS NULL
+    `);
+    console.log("[v233-migrate] grading_sessions.model_version backfilled");
+  } catch (e: any) {
+    console.log("[v233-migrate] model_version backfill skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`
