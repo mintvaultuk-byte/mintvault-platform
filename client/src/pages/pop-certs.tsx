@@ -14,7 +14,7 @@ interface PopCert {
 
 function gradeColor(grade: string | null): string {
   const n = parseFloat(grade ?? "");
-  if (isNaN(n)) return "#999999";
+  if (isNaN(n)) return "#888888";
   if (n === 10) return "#D4AF37";
   if (n >= 9)   return "#B8960C";
   if (n >= 8)   return "#555555";
@@ -51,7 +51,7 @@ export default function PopCertsPage() {
         canonical="/population"
       />
 
-      <div className="px-4 py-12 max-w-4xl mx-auto">
+      <div className="px-4 py-16 max-w-4xl mx-auto">
 
         {/* Back link */}
         <Link href="/population" className="inline-flex items-center gap-1.5 text-[#B8960C] text-sm font-semibold hover:underline underline-offset-2 mb-8">
@@ -61,12 +61,12 @@ export default function PopCertsPage() {
 
         {/* Header */}
         <div className="mb-8">
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.25em] mb-2">Population Report</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-2">Card Profile</p>
           <h1 className="text-2xl md:text-3xl font-black text-[#1A1A1A] tracking-tight mb-1">
             {card || set || "All Certificates"}
           </h1>
           {set && card && (
-            <p className="text-[#666666] text-sm">{set}</p>
+            <p className="text-[#555555] text-sm">{set}</p>
           )}
         </div>
 
@@ -80,14 +80,14 @@ export default function PopCertsPage() {
 
         {/* Error */}
         {isError && (
-          <p className="text-center text-red-400 text-sm py-10">
+          <p className="text-center text-red-600 text-sm py-10">
             Failed to load certificates. Please try again.
           </p>
         )}
 
         {/* Empty */}
         {!isLoading && !isError && data && data.length === 0 && (
-          <p className="text-center text-[#999999] text-sm py-10">
+          <p className="text-center text-[#888888] text-sm py-10">
             No certificates found for this card.
           </p>
         )}
@@ -134,7 +134,7 @@ export default function PopCertsPage() {
                           {cert.grade ?? "—"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-[#999999] text-xs text-right hidden sm:table-cell">
+                      <td className="px-4 py-3 text-[#888888] text-xs text-right hidden sm:table-cell">
                         {cert.gradedAt
                           ? new Date(cert.gradedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                           : "—"}
@@ -153,7 +153,7 @@ export default function PopCertsPage() {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-3 border-t border-[#E8E4DC] text-xs text-[#999999]">
+            <div className="px-4 py-3 border-t border-[#E8E4DC] text-xs text-[#888888]">
               {data.length} certificate{data.length !== 1 ? "s" : ""}
               {data.length === 500 ? " (limit 500)" : ""}
             </div>

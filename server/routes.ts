@@ -7427,7 +7427,56 @@ export async function registerRoutes(
         set:  set  || undefined,
         card: card || undefined,
       });
-      res.json(rows);
+
+      // Counters + recent certs for the showcase hero
+      const countersResult = await db.execute(sql`
+        SELECT
+          COUNT(*)::int as total_graded,
+          COUNT(DISTINCT card_name)::int as unique_cards,
+          COUNT(DISTINCT set_name)::int as unique_sets,
+          COUNT(CASE WHEN ownership_status = 'claimed' THEN 1 END)::int as claimed_count,
+          ROUND(AVG(grade::numeric), 1) as avg_grade
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL
+      `);
+      const counters = countersResult.rows[0] as any;
+
+      const recentResult = await db.execute(sql`
+        SELECT certificate_number, card_name, set_name, grade, label_type, front_image_path, grade_approved_at
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
+        ORDER BY grade_approved_at DESC
+        LIMIT 12
+      `);
+      const recent = await Promise.all((recentResult.rows as any[]).map(async (r) => {
+        let imageUrl: string | null = null;
+        const imgKey = r.front_image_path;
+        if (imgKey) {
+          try { imageUrl = await getR2SignedUrl(imgKey, 3600); } catch {}
+        }
+        const certNum = String(r.certificate_number).replace(/^MV-?0+/, "MV");
+        return {
+          certificate_number: certNum,
+          card_name: r.card_name || null,
+          card_set: r.set_name || null,
+          grade: r.grade ? parseFloat(r.grade) : null,
+          label_type: r.label_type || "Standard",
+          card_image_front_url: imageUrl,
+          approved_at: r.grade_approved_at,
+        };
+      }));
+
+      res.json({
+        counters: {
+          total_graded: counters.total_graded || 0,
+          unique_cards: counters.unique_cards || 0,
+          unique_sets: counters.unique_sets || 0,
+          claimed_count: counters.claimed_count || 0,
+          avg_grade: counters.avg_grade ? parseFloat(counters.avg_grade) : 0,
+        },
+        recent,
+        population: rows,
+      });
     } catch (err) {
       console.error("[population] error:", err);
       res.status(500).json({ error: "Failed to load population data." });
