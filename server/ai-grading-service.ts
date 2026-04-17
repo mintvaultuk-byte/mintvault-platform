@@ -561,7 +561,8 @@ async function callClaude(
     messages: [{ role: "user", content }],
   };
   if (effort) {
-    body.thinking = { type: "enabled", budget_tokens: effort === "xhigh" ? 8192 : 4096 };
+    body.thinking = { type: "adaptive" };
+    body.output_config = { effort };
   }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
