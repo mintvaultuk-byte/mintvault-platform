@@ -62,9 +62,9 @@ export default function CertLookupPage() {
             className="text-4xl md:text-5xl font-sans font-black text-[#1A1A1A] tracking-tight leading-none mb-0"
             data-testid="text-cert-title"
           >
-            CERTIFICATE
+            Certificate
             <br />
-            LOOKUP
+            Lookup
           </h1>
 
           {/* Gold hairline divider */}
@@ -116,11 +116,11 @@ export default function CertLookupPage() {
                 data-testid="button-cert-search"
                 className="gold-shimmer px-7 py-3 rounded-xl font-black tracking-widest text-sm shrink-0 text-[#1A1400] active:scale-95 transition-transform"
               >
-                VERIFY
+                Verify →
               </button>
             </div>
             {error && (
-              <p className="text-red-400 text-xs pt-0.5" data-testid="text-cert-error">
+              <p className="text-red-600 text-xs pt-0.5" data-testid="text-cert-error">
                 {error}
               </p>
             )}
