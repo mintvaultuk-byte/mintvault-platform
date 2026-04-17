@@ -286,6 +286,14 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v231-migrate] Black Label deactivation skipped:", e.message);
   }
 
+  // ── v232: Add source column to certificates for scan-ingest tracking ────────
+  try {
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_submission'`);
+    console.log("[v232-migrate] certificates.source column ensured");
+  } catch (e: any) {
+    console.log("[v232-migrate] source column skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`

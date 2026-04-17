@@ -22,6 +22,7 @@ import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
 import AdminCapacity from "@/pages/admin-capacity";
 import AdminTransfers from "@/pages/admin-transfers";
+import AdminScanHistory from "@/pages/admin-scan-history";
 
 interface DbInfo {
   env: string;
@@ -57,7 +58,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -241,6 +242,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}
       {activeTab === "transfers" && <AdminTransfers />}
+      {activeTab === "scans" && <AdminScanHistory />}
       {activeTab === "grading" && (() => {
         const gradingCert = certs.find(c => c.id === selectedGradingCertId) ?? null;
         return (
@@ -304,8 +306,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -436,6 +438,17 @@ function AdminHeader({
                 data-testid="tab-transfers"
               >
                 <ArrowRightLeft size={12} /> Transfers
+              </button>
+              <button
+                onClick={() => onTabChange("scans")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "scans"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-scans"
+              >
+                <ScanLine size={12} /> Scans
               </button>
             </nav>
           </div>

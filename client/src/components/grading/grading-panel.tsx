@@ -15,6 +15,7 @@ import CaptureWizard from "./capture-wizard";
 import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCentering, { type CenteringResult } from "./manual-centering";
+import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade } from "./grade-logic";
@@ -614,6 +615,15 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 else if (key === "edges") setEdgesOverride(val);
                 else if (key === "surface") setSurfaceOverride(val);
               }}
+            />
+          )}
+
+          {/* Cross-grade estimate */}
+          {!isNonNumeric && overall > 0 && (
+            <CrossGradeDisplay
+              mvGrade={overall}
+              subgrades={sub}
+              strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
             />
           )}
 

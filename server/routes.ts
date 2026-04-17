@@ -7156,6 +7156,121 @@ export async function registerRoutes(
     }
   });
 
+  // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
+
+  const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+
+  app.post(
+    "/api/admin/scan-ingest",
+    requireAdmin,
+    scanUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
+    async (req, res) => {
+      const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
+      let certInfo: { id: number; certId: string } | null = null;
+
+      try {
+        const files = req.files as Record<string, Express.Multer.File[]>;
+        if (!files?.front?.[0]) return res.status(400).json({ error: "Front image is required" });
+
+        const frontBuf = files.front[0].buffer;
+        const backBuf = files.back?.[0]?.buffer || null;
+        const notes = (req.body?.notes || "").trim();
+
+        console.log(`[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"}`);
+
+        // Step 1: Create cert
+        certInfo = await createCertForScan();
+        console.log(`[scan-ingest] cert created: ${certInfo.certId} (id=${certInfo.id})`);
+
+        // Step 2: Upload + process images
+        const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
+        console.log(`[scan-ingest] images processed for cert ${certInfo.certId}`);
+
+        // Step 3: Run AI (fire-and-forget — respond immediately with cert info)
+        // AI runs async so the scanner watcher gets a fast response
+        const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
+          .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
+          .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
+
+        // Save notes if provided
+        if (notes) {
+          await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
+        }
+
+        res.json({
+          certId: certInfo.certId,
+          dbId: certInfo.id,
+          workstationUrl: `/admin#grading-${certInfo.id}`,
+          aiStatus: "processing",
+          message: `Certificate ${certInfo.certId} created. AI grading in progress.`,
+        });
+
+        // Wait for AI to finish (doesn't block response)
+        await aiPromise;
+      } catch (err: any) {
+        console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
+        res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });
+      }
+    }
+  );
+
+  // ── Admin scan-history: list certs from scanner ───────────────────────────
+
+  app.get("/api/admin/scan-history", requireAdmin, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+      const limit = 50;
+      const offset = (page - 1) * limit;
+      const status = (req.query.status as string) || null;
+
+      let whereClause = sql`source = 'admin_scan' AND deleted_at IS NULL`;
+      if (status === "graded") whereClause = sql`${whereClause} AND grade IS NOT NULL`;
+      else if (status === "pending") whereClause = sql`${whereClause} AND grade IS NULL`;
+
+      const countResult = await db.execute(sql`SELECT COUNT(*)::int as total FROM certificates WHERE ${whereClause}`);
+      const total = (countResult.rows[0] as any).total;
+
+      const rows = await db.execute(sql`
+        SELECT id, certificate_number, card_name, card_game, grade, grade_type, label_type,
+               centering_score, corners_score, edges_score, surface_score,
+               ai_draft_grade, grade_strength_score, grade_approved_by,
+               front_image_path, issued_at, updated_at, source
+        FROM certificates
+        WHERE ${whereClause}
+        ORDER BY issued_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+
+      res.json({
+        scans: (rows.rows as any[]).map(r => ({
+          id: r.id,
+          certId: r.certificate_number?.replace(/^MV-?0+/, "MV") || "",
+          cardName: r.card_name || null,
+          cardGame: r.card_game || null,
+          grade: r.grade ? parseFloat(r.grade) : null,
+          gradeType: r.grade_type || "numeric",
+          labelType: r.label_type || "Standard",
+          centering: r.centering_score ? parseFloat(r.centering_score) : null,
+          corners: r.corners_score ? parseFloat(r.corners_score) : null,
+          edges: r.edges_score ? parseFloat(r.edges_score) : null,
+          surface: r.surface_score ? parseFloat(r.surface_score) : null,
+          aiDraftGrade: r.ai_draft_grade ? parseFloat(r.ai_draft_grade) : null,
+          strengthScore: r.grade_strength_score || null,
+          grader: r.grade_approved_by || null,
+          frontImagePath: r.front_image_path || null,
+          createdAt: r.issued_at,
+          updatedAt: r.updated_at,
+        })),
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err: any) {
+      console.error("[scan-history] error:", err.message);
+      res.status(500).json({ error: "Failed to load scan history" });
+    }
+  });
+
   // ── Build 6: Admin Learning Dashboard ─────────────────────────────────────
 
   app.get("/api/admin/learning/overview", requireAdmin, async (_req, res) => {
