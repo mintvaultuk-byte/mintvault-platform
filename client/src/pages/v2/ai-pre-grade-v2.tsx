@@ -38,9 +38,9 @@ const RETURNS_ITEMS = [
 // ── Credit packs (Section III) ─────────────────────────────────────────────
 
 const PACKS = [
-  { credits: "5 estimates",   price: "£2",  perUnit: "40p each" },
-  { credits: "15 estimates",  price: "£4",  perUnit: "27p each" },
-  { credits: "100 estimates", price: "£10", perUnit: "10p each" },
+  { credits: "5 estimates",   price: "£2",  perUnit: "40p each", featured: false },
+  { credits: "15 estimates",  price: "£4",  perUnit: "27p each", featured: false },
+  { credits: "100 estimates", price: "£10", perUnit: "10p each", featured: true  },
 ];
 
 // ── FAQ (Section V) ────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ export default function AiPreGradeV2() {
               Upload one photo. Get a subgrade breakdown, card identity, and a grade range
               in seconds. Free first estimate, no account needed, credit packs from &pound;2.
             </p>
-            <div className="flex flex-wrap items-center gap-3 mb-5">
+            <div className="flex flex-wrap items-center gap-3">
               <Link
                 href="/tools/estimate"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
@@ -119,6 +119,64 @@ export default function AiPreGradeV2() {
                 See pricing <ArrowRight size={14} />
               </Link>
             </div>
+
+            {/* Price strip — Bloomberg-style data row. Mirrors Section III PACKS config. */}
+            <div
+              className="flex flex-col md:flex-row md:items-end gap-3 md:gap-0 py-4 mt-5 mb-5"
+              style={{
+                borderTop: "1px solid var(--v2-line-soft)",
+                borderBottom: "1px solid var(--v2-line-soft)",
+              }}
+            >
+              {PACKS.map((p, i) => (
+                <div
+                  key={p.credits}
+                  className="flex-1 flex flex-col gap-1"
+                  style={i > 0 ? { borderLeft: undefined } : undefined}
+                >
+                  <div
+                    className="md:pl-6"
+                    style={
+                      // Vertical divider between items on md+ only, skipping the first item.
+                      i > 0
+                        ? { borderLeft: "1px solid var(--v2-line-soft)" }
+                        : undefined
+                    }
+                  >
+                    {p.featured && (
+                      <p
+                        className="font-mono-v2 text-[8px] uppercase tracking-widest mb-1"
+                        style={{ color: "var(--v2-gold)" }}
+                      >
+                        Best
+                      </p>
+                    )}
+                    <p
+                      className="font-mono-v2 text-[9px] uppercase tracking-widest"
+                      style={{ color: "var(--v2-ink-mute)" }}
+                    >
+                      {p.credits}
+                    </p>
+                    <p
+                      className="font-display font-semibold leading-none mt-1"
+                      style={{
+                        fontSize: "clamp(1.25rem, 2vw, 1.5rem)",
+                        color: p.featured ? "var(--v2-gold)" : "var(--v2-ink)",
+                      }}
+                    >
+                      {p.price}
+                    </p>
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase mt-1"
+                      style={{ color: "var(--v2-ink-soft)" }}
+                    >
+                      {p.perUnit}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <p
               className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
