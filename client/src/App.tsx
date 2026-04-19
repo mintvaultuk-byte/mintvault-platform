@@ -165,6 +165,7 @@ import ClubPage from "@/pages/club";
 import V2TestPage from "@/pages/v2-test";
 import HomeV2 from "@/pages/v2/home-v2";
 import PricingV2 from "@/pages/v2/pricing-v2";
+import VaultClubV2 from "@/pages/v2/vault-club-v2";
 
 function Router() {
   return (
@@ -178,6 +179,7 @@ function Router() {
         <Route path="/v2-test" component={V2TestPage} />
         <Route path="/v2-home" component={HomeV2} />
         <Route path="/v2-pricing" component={PricingV2} />
+        <Route path="/v2-vault-club" component={VaultClubV2} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />
