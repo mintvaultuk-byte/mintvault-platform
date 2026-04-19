@@ -554,7 +554,7 @@ export default function PreGradeEstimatePage() {
               </button>
               {showAccuracy && (
                 <div className="px-4 pb-4 text-[#666666] text-sm leading-relaxed space-y-2 bg-[#FAFAF8]">
-                  <p>Pre-grading from a single phone photo is roughly 70% accurate for the overall grade estimate. It's useful for a quick sense-check but not a definitive grade.</p>
+                  <p>Pre-grading from a single phone photo is an AI-assisted first-look estimate — useful for a quick sense-check, not a definitive grade. Full grading uses a scanner, multiple image variants, and physical inspection.</p>
                   <p>Professional grading at MintVault uses a high-resolution scanner (600 DPI), 6 image variants including greyscale and high-contrast, and physical inspection under magnification. This is significantly more accurate than any photo-based estimate.</p>
                   <p>Holo cards, in particular, often have surface scratches that are invisible in straight-on photos but clearly visible under angled lighting.</p>
                 </div>
