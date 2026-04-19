@@ -36,7 +36,7 @@ seen.json
 seen_rss_ids.json
 sold_cache.json
 sold_cache_simple.json
-data/
+/data/
 
 # Logs
 *.log
