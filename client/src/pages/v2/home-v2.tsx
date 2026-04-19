@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
+import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,182 +25,8 @@ interface HomepageStats {
   }[];
 }
 
-// ── Hero slab ──────────────────────────────────────────────────────────────
-// Premium graded-slab visual for hero right column. Per design-system skill
-// (Layer B, "Gradient slabs"): no card artwork, generic moody gradient +
-// MintVault monogram only. All data live-sourced from /api/v2/homepage-stats.
-
 type RecentCert = HomepageStats["recent_certs"][number];
 
-// 2% fractal noise overlay to break up gradient banding — inline SVG so we
-// don't ship a separate asset. `%23` = `#` (URL-encoded for the data URL).
-const SLAB_NOISE_SVG =
-  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")";
-
-function HeroSlab({
-  cert,
-  rotation,
-  offset,
-  zIndex,
-}: {
-  cert: RecentCert | null;
-  rotation: number;
-  offset: { x: number; y: number };
-  zIndex: number;
-}) {
-  const certNumber = cert?.cert_number ?? null;
-  const hasCardName = !!(cert?.card_name && cert.card_name.trim());
-  const cardName = hasCardName ? cert!.card_name : "MintVault";
-  const grade = cert?.grade ?? null;
-  const gradeLabel = grade ? `MV ${grade}` : null;
-
-  return (
-    <div
-      className="absolute overflow-hidden transition-shadow duration-300 hover:shadow-[0_20px_40px_-12px_rgba(15,14,11,0.25)]"
-      style={{
-        // Responsive width per skill spec; aspectRatio drives height.
-        ["--slab-width" as any]: "clamp(120px, 40vw, 220px)",
-        width: "var(--slab-width)",
-        aspectRatio: "0.82",
-        borderRadius: "12px",
-        border: "1px solid rgba(212, 175, 55, 0.4)",
-        backgroundColor: "var(--v2-paper-raised)",
-        transform: `rotate(${rotation}deg) translate(${offset.x}px, ${offset.y}px)`,
-        zIndex,
-      }}
-    >
-      {/* ─── TOP BAR (~10%) — gold MV[n] pill, top-right ─── */}
-      <div
-        style={{
-          height: "10%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          padding: "0 8px",
-        }}
-      >
-        {certNumber && (
-          <span
-            className="font-mono-v2"
-            style={{
-              color: "var(--v2-gold-soft)",
-              fontSize: "clamp(8px, 2.2vw, 10px)",
-              letterSpacing: "0.1em",
-              padding: "1px 6px",
-              border: "1px solid rgba(212, 175, 55, 0.4)",
-              borderRadius: "999px",
-              lineHeight: 1,
-            }}
-          >
-            {certNumber}
-          </span>
-        )}
-      </div>
-
-      {/* ─── DISPLAY FIELD (~65%) — gradient + noise + monogram ─── */}
-      <div
-        style={{
-          height: "65%",
-          position: "relative",
-          background:
-            "radial-gradient(circle at top left, var(--v2-slab-gradient-navy) 0%, var(--v2-slab-gradient-petrol) 35%, var(--v2-slab-gradient-teal) 70%, var(--v2-slab-gradient-bronze) 100%)",
-        }}
-      >
-        {/* 2% noise to break gradient banding */}
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            inset: 0,
-            backgroundImage: SLAB_NOISE_SVG,
-            opacity: 0.02,
-            pointerEvents: "none",
-          }}
-        />
-        {/* Centered monogram — Fraunces italic, ~14% of slab width */}
-        <div
-          className="absolute inset-0 flex items-center justify-center font-display italic"
-          style={{
-            color: "rgba(255, 255, 255, 0.12)",
-            fontSize: "calc(var(--slab-width) * 0.14)",
-            whiteSpace: "nowrap",
-            lineHeight: 1,
-            userSelect: "none",
-          }}
-        >
-          MintVault
-        </div>
-      </div>
-
-      {/* ─── BOTTOM BAR (~25%) — card_name, grade, NFC badge ─── */}
-      <div
-        style={{
-          height: "25%",
-          padding: "6px 10px",
-          backgroundColor: "var(--v2-paper-raised)",
-          // Gold hairline divider between display field and bottom bar —
-          // v2-gold-soft (#D4AF37) at 30% opacity.
-          borderTop: "1px solid rgba(212, 175, 55, 0.3)",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          gap: "4px",
-        }}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span
-            className="font-body truncate"
-            style={{
-              color: "var(--v2-ink)",
-              fontSize: "clamp(10px, 2.8vw, 14px)",
-              fontWeight: 500,
-              minWidth: 0,
-            }}
-          >
-            {cardName}
-          </span>
-          {gradeLabel && (
-            <span
-              className="font-mono-v2 shrink-0"
-              style={{
-                color: "var(--v2-gold)",
-                fontSize: "clamp(9px, 2.4vw, 12px)",
-                fontWeight: 600,
-                lineHeight: 1,
-              }}
-            >
-              {gradeLabel}
-            </span>
-          )}
-        </div>
-        {/* NFC badge — desktop only per spec */}
-        <div className="hidden md:flex items-center gap-1">
-          <span
-            aria-hidden="true"
-            style={{
-              width: "5px",
-              height: "5px",
-              borderRadius: "999px",
-              backgroundColor: "var(--v2-gold)",
-              display: "inline-block",
-            }}
-          />
-          <span
-            className="font-mono-v2"
-            style={{
-              color: "var(--v2-ink-mute)",
-              fontSize: "9px",
-              letterSpacing: "0.05em",
-              lineHeight: 1,
-            }}
-          >
-            NFC &middot; Verified
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Animated counter ───────────────────────────────────────────────────────
 
@@ -276,19 +103,6 @@ export default function HomeV2() {
     if (statsError) console.error("Homepage stats fetch failed:", statsError);
   }, [statsError]);
 
-  // Responsive offset scaling for the hero slab fan. Narrower mobile slab needs
-  // tighter ±75 offsets so the back slab doesn't clip the container.
-  const [isHeroMobile, setIsHeroMobile] = useState(() =>
-    typeof window !== "undefined" &&
-    window.matchMedia("(max-width: 767px)").matches
-  );
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsHeroMobile(mq.matches);
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-
   const totalGraded = stats?.total_graded ?? 132;
   const uniqueSets = stats?.unique_sets ?? 71;
   const avgGrade = stats?.avg_grade ?? 8.9;
@@ -342,47 +156,30 @@ export default function HomeV2() {
               className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
-              From &pound;19 &middot; 45 day turnaround &middot; UK return shipping insured
+              From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
             </p>
           </div>
 
-          {/* Right — slab stack. Live data from /api/v2/homepage-stats → recent_certs.
+          {/* Right — slab fan. Live data from /api/v2/homepage-stats → recent_certs.
               Fallback: 3 monogram slabs when API returns 0 rows or errors.
-              Container sized for ±100 desktop offsets + 220 slab + rotation bbox. */}
-          <div
-            className="relative h-[300px] md:h-[500px] flex items-center justify-center mx-auto"
-            style={{ width: "min(95vw, 520px)", maxWidth: "none" }}
-          >
-            {(() => {
-              const slots: (RecentCert | null)[] =
-                recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null];
-              const rotations = [-8, 4, -2];
-              // Full fan: each slab gets ~100px unique visible width on desktop
-              // so cert pill + card name + grade + NFC line all read cleanly.
-              // Mobile drops to ±75 so the narrower slab stack doesn't clip.
-              const offsets = isHeroMobile
-                ? [
-                    { x: -75, y: 20 },
-                    { x: 0, y: -20 },
-                    { x: 75, y: 20 },
-                  ]
-                : [
-                    { x: -100, y: 20 },
-                    { x: 0, y: -20 },
-                    { x: 100, y: 20 },
-                  ];
-              // Newest cert sits on top; supporting slabs behind.
-              return slots.map((cert, i) => (
-                <HeroSlab
-                  key={cert?.id ?? `slot-${i}`}
-                  cert={cert}
-                  rotation={rotations[i]}
-                  offset={offsets[i]}
-                  zIndex={slots.length - i}
-                />
-              ));
-            })()}
-          </div>
+              Newest cert on top (slot 0) per HeroSlabFan's z-stacking. */}
+          {(() => {
+            const slots = recentCerts.length > 0
+              ? recentCerts.slice(0, 3)
+              : [null, null, null];
+            const padded: (RecentCert | null)[] = [...slots, null, null, null].slice(0, 3);
+            const slabs = padded.map((cert, i): SlabContent => {
+              const hasCardName = !!(cert?.card_name && cert.card_name.trim());
+              return {
+                topBadge: cert?.cert_number ?? null,
+                mainLabel: hasCardName ? cert!.card_name : "MintVault",
+                rightLabel: cert?.grade ? `MV ${cert.grade}` : null,
+                footnote: "NFC \u00b7 Verified",
+                key: cert ? String(cert.id) : `slot-${i}`,
+              };
+            }) as [SlabContent, SlabContent, SlabContent];
+            return <HeroSlabFan slabs={slabs} />;
+          })()}
         </div>
       </section>
 
