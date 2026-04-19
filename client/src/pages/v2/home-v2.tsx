@@ -133,7 +133,7 @@ export default function HomeV2() {
               className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              AI-powered precision grading with tamper-evident NFC certification.
+              AI-powered precision grading with NFC-linked certification.
               Every grade logged, every slab traceable.
             </p>
             <div className="flex flex-wrap items-center gap-3 mb-5">

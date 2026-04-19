@@ -41,12 +41,12 @@ const METHODS = [
   {
     number: "01",
     title: "NFC chip in the slab",
-    body: "A small passive chip inside the slab shell. Tap with any NFC-enabled phone (iPhone XS+, most Androids). The chip returns a signed certificate URL that we verify in real time.",
+    body: "A small passive chip inside the slab shell. Tap with any NFC-enabled phone (iPhone XS+, most Androids). The chip opens the slab's live registry record — no app, no typing.",
   },
   {
     number: "02",
-    title: "Cert number and signature",
-    body: "Every slab has a unique cert number (MVXXX) paired with a cryptographic signature stored in our registry. Type the number here to cross-check without NFC.",
+    title: "Cert number lookup",
+    body: "Every slab has a unique cert number (MVXXX) stored in our registry. Type the number here to cross-check any slab, even when NFC isn't working.",
   },
   {
     number: "03",
@@ -63,7 +63,6 @@ const RETURNS_ITEMS = [
   { title: "Ownership status", body: "Claimed (with keeper count) or unclaimed. Current owner shown only if they\u2019ve made their profile public." },
   { title: "Graded date", body: "The exact date MintVault issued the slab." },
   { title: "Cross-grade estimate", body: "How the card might score at PSA, BGS, or other graders. Advisory only." },
-  { title: "Integrity hash", body: "Tamper check. Re-verified on every scan — any inconsistency flags the slab." },
 ];
 
 // ── FAQ (Section IV) ───────────────────────────────────────────────────────
@@ -359,9 +358,10 @@ export default function VerifyV2() {
               <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One truth.</span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
-              Every MintVault slab carries three independent verification methods. Any
-              single one confirms authenticity; together they make counterfeiting
-              impractical.
+              Every MintVault slab has three ways into the registry: the NFC chip, the
+              printed cert number, and the visible ownership chain. Any one opens the
+              same record — the tamper-evident slab is what ties that record to the
+              card in your hand.
             </p>
           </div>
 
