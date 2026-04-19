@@ -836,7 +836,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const whereClause = conditions.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`);
-    return await db.select().from(certificates).where(whereClause).orderBy(desc(certificates.createdAt));
+    return await db.select().from(certificates).where(whereClause).orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
   }
 
   async searchCertificates(query: string): Promise<CertificateRecord[]> {
