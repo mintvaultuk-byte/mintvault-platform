@@ -810,7 +810,10 @@ export class DatabaseStorage implements IStorage {
     }
 
     const whereClause = conditions.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`);
-    return await db.select().from(certificates).where(whereClause).orderBy(desc(certificates.createdAt));
+    // Sort by numeric portion of certId DESC so MV141 > MV140 > MV135 — admin
+    // dashboard list, CSV export, ownership export, and printing sheet all
+    // read via this method. createdAt order puts renumbered certs out of place.
+    return await db.select().from(certificates).where(whereClause).orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
   }
 
   async searchCertificates(query: string): Promise<CertificateRecord[]> {
