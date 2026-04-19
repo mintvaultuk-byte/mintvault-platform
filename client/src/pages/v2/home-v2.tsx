@@ -276,6 +276,19 @@ export default function HomeV2() {
     if (statsError) console.error("Homepage stats fetch failed:", statsError);
   }, [statsError]);
 
+  // Responsive offset scaling for the hero slab fan. Narrower mobile slab needs
+  // tighter ±75 offsets so the back slab doesn't clip the container.
+  const [isHeroMobile, setIsHeroMobile] = useState(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 767px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsHeroMobile(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
   const totalGraded = stats?.total_graded ?? 132;
   const uniqueSets = stats?.unique_sets ?? 71;
   const avgGrade = stats?.avg_grade ?? 8.9;
@@ -335,22 +348,29 @@ export default function HomeV2() {
 
           {/* Right — slab stack. Live data from /api/v2/homepage-stats → recent_certs.
               Fallback: 3 monogram slabs when API returns 0 rows or errors.
-              Container width computed for 220 slab + rotation bbox (~10%) + ±60 offsets. */}
+              Container sized for ±100 desktop offsets + 220 slab + rotation bbox. */}
           <div
             className="relative h-[300px] md:h-[500px] flex items-center justify-center mx-auto"
-            style={{ width: "min(90vw, 400px)", maxWidth: "none" }}
+            style={{ width: "min(95vw, 520px)", maxWidth: "none" }}
           >
             {(() => {
               const slots: (RecentCert | null)[] =
                 recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null];
               const rotations = [-8, 4, -2];
-              // Wider fan so all 3 slabs have a clear visible area; front/back
-              // pair mirrored on x, middle lifted for asymmetry.
-              const offsets = [
-                { x: -60, y: 24 },
-                { x: 0, y: -16 },
-                { x: 60, y: 24 },
-              ];
+              // Full fan: each slab gets ~100px unique visible width on desktop
+              // so cert pill + card name + grade + NFC line all read cleanly.
+              // Mobile drops to ±75 so the narrower slab stack doesn't clip.
+              const offsets = isHeroMobile
+                ? [
+                    { x: -75, y: 20 },
+                    { x: 0, y: -20 },
+                    { x: 75, y: 20 },
+                  ]
+                : [
+                    { x: -100, y: 20 },
+                    { x: 0, y: -20 },
+                    { x: 100, y: 20 },
+                  ];
               // Newest cert sits on top; supporting slabs behind.
               return slots.map((cert, i) => (
                 <HeroSlab
