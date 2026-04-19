@@ -33,7 +33,7 @@ export const guides: Guide[] = [
 <p>Before submitting, inspect each card carefully under good lighting. Look for whitening on edges and corners, scratches on the surface, print defects, and centering issues. Cards with visible damage are unlikely to score above 7.</p>
 
 <h2>Step 3: Choose a Grading Service</h2>
-<p>In the UK, you can use MintVault UK for fast, affordable grading without the delays and import costs associated with US-based graders like PSA or BGS. MintVault offers five service tiers with turnaround times from 2 to 60 working days.</p>
+<p>In the UK, you can use MintVault UK for fast, affordable grading without the delays and import costs associated with US-based graders like PSA or BGS. MintVault offers three service tiers with turnaround times from 5 to 40 working days.</p>
 
 <h2>Step 4: Submit Online</h2>
 <p>Visit the MintVault UK submission page, select your service tier, add your cards, and pay securely via Stripe. You will receive a confirmation email with packing instructions.</p>
@@ -76,7 +76,7 @@ export const guides: Guide[] = [
 <p>Check recent eBay sold listings for graded versions of the card you are considering. Search for the card name plus "PSA 10" or "GEM MT" to see what graded copies are selling for. Compare this to the raw price and the grading fee to decide if it makes sense.</p>
 
 <h2>Bulk Submissions</h2>
-<p>If you have a large collection to grade, bulk discounts can make marginal cards more viable. MintVault UK offers discounts of up to 10% for submissions of 100 or more cards.</p>
+<p>If you have a large collection to grade, bulk discounts can make marginal cards more viable. MintVault UK offers 5% at 10+ cards, 10% at 25+ cards, and 15% at 50+ cards.</p>
     `,
   },
   {
@@ -179,7 +179,7 @@ export const guides: Guide[] = [
     metaDescription: "Understand the full cost of grading Pokémon cards in the UK. Service fees, shipping, insurance, and bulk discounts explained clearly.",
     body: `
 <h2>Service Tier Fees</h2>
-<p>MintVault UK offers five grading tiers. Vault Queue tier (40 working days) starts at £19 per card. Standard is £25 (15 working days) and Express is £45 (5 working days). Choose based on how quickly you need your cards back and the value of the cards being graded.</p>
+<p>MintVault UK offers three grading tiers. Vault Queue tier (40 working days) starts at £19 per card. Standard is £25 (15 working days) and Express is £45 (5 working days). Choose based on how quickly you need your cards back and the value of the cards being graded.</p>
 
 <h2>Bulk Discounts</h2>
 <p>Submitting more cards reduces the per-card cost significantly. Discounts apply at 10 cards (3% off), 25 cards (5% off), 50 cards (7% off), and 100+ cards (10% off the service fee).</p>
@@ -194,7 +194,7 @@ export const guides: Guide[] = [
 <p>For high-value cards, a small insurance surcharge applies based on declared value per card: free for cards declared at £500 or less, £2 per card up to £1,500, £5 per card up to £3,000, and £10 per card up to £7,500.</p>
 
 <h2>Total Cost Example</h2>
-<p>Submitting 10 cards on the Vault Queue tier (£19/card) with a declared value under £500 each would cost: £19 × 10 = £190, minus 3% bulk discount = £184.30 in service fees, plus outbound shipping of ~£8. Total: approximately £192.</p>
+<p>Submitting 10 cards on the Vault Queue tier (£19/card) with a declared value under £500 each would cost: £19 × 10 = £190, minus 5% bulk discount = £180.50 in service fees, plus outbound shipping of ~£8. Total: approximately £188.50.</p>
 
 <h2>Comparing to US Graders</h2>
 <p>Sending 10 cards to PSA involves international tracked shipping (~£30), PSA fees (~$25/card = ~£200), return international shipping (~£30), and potential import duties (~20% VAT on fees). Total can exceed £300 — nearly twice the MintVault cost.</p>
@@ -703,8 +703,8 @@ export const guides: Guide[] = [
 <p>See our full guide on <a href="/guides/what-pokemon-cards-are-worth-grading" class="text-[#D4AF37] hover:underline">which cards are worth grading</a> for more detail.</p>
 
 <h2>Step 1: Choose Your Service Tier</h2>
-<p>MintVault offers several service tiers at different price points and turnaround times. Visit the <a href="/pricing" class="text-[#D4AF37] hover:underline">pricing page</a> to see all options. For most first-time submitters, the Vault Queue tier (40 working days) is the most affordable option, while Standard (15 working days) offers a good balance of cost and speed.</p>
-<p>If you have time-sensitive cards or are submitting ahead of a sale, consider Premier (10 working days) or Ultra (5 working days).</p>
+<p>MintVault offers three service tiers at different price points and turnaround times. Visit the <a href="/pricing" class="text-[#D4AF37] hover:underline">pricing page</a> to see all options. For most first-time submitters, the Vault Queue tier (40 working days) is the most affordable option, while Standard (15 working days) offers a good balance of cost and speed.</p>
+<p>If you have time-sensitive cards or are submitting ahead of a sale, consider the Express tier (5 working days).</p>
 
 <h2>Step 2: Fill in the Submission Form</h2>
 <p>Go to the <a href="/submit" class="text-[#D4AF37] hover:underline">Submit Cards page</a> and complete the online form. You will need to provide:</p>

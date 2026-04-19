@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does Yu-Gi-Oh card grading cost with MintVault?",
-    answer: "MintVault UK offers grading from £19 per card (Vault Queue, 40 working days), £25 (Standard, 15 working days), and £45 (Express, 5 working days). Bulk discounts apply for 10 or more cards. All prices include fully insured return shipping.",
+    answer: "MintVault UK offers three service tiers: Vault Queue at £19 per card (40 working days), Standard at £25 (15 working days), and Express at £45 (5 working days). Bulk discounts apply for 10 or more cards. All prices include fully insured return shipping.",
   },
   {
     question: "How long does YGO card grading take?",
@@ -65,17 +65,17 @@ export default function YugiohCardGradingUk() {
           Yu-Gi-Oh Card Grading UK
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#444444] text-base leading-relaxed mb-4">
           MintVault UK offers professional Yu-Gi-Oh card grading for collectors and investors across the United Kingdom. Whether you have vintage first edition Blue-Eyes White Dragon cards, high-value tournament rewards, or modern collector and starlight rares, our grading service provides expert assessment and tamper-evident encapsulation to protect and authenticate your cards.
         </p>
 
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#666666] text-sm leading-relaxed mb-8">
           Every graded Yu-Gi-Oh card receives a unique certificate number and is placed in a precision slab with an NFC chip for instant verification. Ownership can be registered and transferred through our verified ownership registry — the only service of its kind offered by a UK grading company.
         </p>
 
         <section className="mb-10" data-testid="section-why-grade-ygo">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Your Yu-Gi-Oh Cards?</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
             <p>
               <strong className="text-[#1A1A1A]">Increased resale value</strong> — professionally graded Yu-Gi-Oh cards consistently sell for significantly more than their raw counterparts. A high-grade first edition card can command a considerable premium on platforms like eBay and TCGPlayer.
             </p>
@@ -98,22 +98,22 @@ export default function YugiohCardGradingUk() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#555555] text-sm">{t.days}</span>
+                <span className="text-[#666666] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#555555] text-sm mt-3">
+          <p className="text-[#666666] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-ygo-ownership">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership for Yu-Gi-Oh Cards</h2>
-          <p className="text-[#555555] text-sm leading-relaxed mb-3">
+          <p className="text-[#444444] text-sm leading-relaxed mb-3">
             MintVault is the only UK grading company offering a verified ownership registry. After your Yu-Gi-Oh card is graded and returned, you can register as the verified owner using the unique claim code included with your slab. Your ownership is then recorded on the MintVault registry and can be transferred to a new owner when you sell.
           </p>
-          <p className="text-[#555555] text-sm leading-relaxed">
+          <p className="text-[#444444] text-sm leading-relaxed">
             This makes it straightforward for buyers to verify that the card being sold matches its certificate and that the seller is the registered owner — a significant trust advantage when selling high-value vintage Yu-Gi-Oh cards.
           </p>
         </section>
@@ -131,7 +131,7 @@ export default function YugiohCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
