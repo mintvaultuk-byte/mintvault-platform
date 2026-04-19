@@ -66,8 +66,11 @@ interface Props {
   onGradeApproved?: (certId?: string, grade?: string) => void;
   onCertUpdated?: () => void;
   /** When set, GradingPanel processes this analysis as if AI panel completed */
-  pendingAnalysis?: { analysis: AiAnalysisResult; identification: AiIdentification | null } | null;
+  pendingAnalysis?: { analysis: AiAnalysisResult | null; identification: AiIdentification | null } | null;
   onPendingAnalysisConsumed?: () => void;
+  /** Callback when user manually identifies a card from the AI panel's Search TCG */
+  onManualIdentification?: (identification: Record<string, unknown>) => void;
+  cardGame?: string;
 }
 
 // Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
@@ -75,7 +78,7 @@ const DEFAULT_CORNERS: CornerValues = { frontTL: 0, frontTR: 0, frontBL: 0, fron
 const DEFAULT_EDGES: EdgeValues = { frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0, backTop: 0, backBottom: 0, backLeft: 0, backRight: 0 };
 const DEFAULT_SURFACE: SurfaceValues = { front: 0, back: 0, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
 
-export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated, pendingAnalysis, onPendingAnalysisConsumed }: Props) {
+export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated, pendingAnalysis, onPendingAnalysisConsumed, onManualIdentification, cardGame }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -181,6 +184,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (gradingData.centeringOuterBack)  setManualOuterBack(gradingData.centeringOuterBack);
     if (gradingData.centeringInnerBack)  setManualInnerBack(gradingData.centeringInnerBack);
     if (gradingData.centeringMethod)     setCenteringMethod(gradingData.centeringMethod);
+    // Hydrate saved aggregate subgrades as overrides
+    if (gradingData.cornersScore != null)  setCornersOverride(Number(gradingData.cornersScore));
+    if (gradingData.edgesScore != null)    setEdgesOverride(Number(gradingData.edgesScore));
+    if (gradingData.surfaceScore != null)  setSurfaceOverride(Number(gradingData.surfaceScore));
+    if (gradingData.grade != null)         setOverallOverride(Number(gradingData.grade));
+    // Centering: don't override — let centeringCalc derive from L/R + T/B ratios
   }, [gradingData]);
 
   // AI analysis state
@@ -190,21 +199,28 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>({});
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
-    setAiAnalysis(analysis);
+    setAiAnalysis(prev => analysis.overall_grade ? analysis : prev);
     setAiIdentification(identification);
 
-    // Populate subgrade overrides from AI
+    // Populate subgrade overrides from AI (skip zero = "not measured")
     const c = analysis.centering.subgrade;
     const co = analysis.corners.subgrade;
     const e  = analysis.edges.subgrade;
     const s  = analysis.surface.subgrade;
 
-    setCenteringOverride(c);
-    setCornersOverride(co);
-    setEdgesOverride(e);
-    setSurfaceOverride(s);
+    // Centering: clear override so centeringCalc (from all 4 ratios) is authoritative
+    if (c > 0) setCenteringOverride(null);
+    if (co > 0) setCornersOverride(co);
+    if (e > 0) setEdgesOverride(e);
+    if (s > 0) setSurfaceOverride(s);
 
-    setAiSources({ centering: c, corners: co, edges: e, surface: s });
+    setAiSources(prev => ({
+      ...prev,
+      ...(c > 0 ? { centering: c } : {}),
+      ...(co > 0 ? { corners: co } : {}),
+      ...(e > 0 ? { edges: e } : {}),
+      ...(s > 0 ? { surface: s } : {}),
+    }));
 
     // Populate centering ratios
     if (analysis.centering.front_left_right) setFrontLR(analysis.centering.front_left_right);
@@ -212,44 +228,57 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (analysis.centering.back_left_right)  setBackLR(analysis.centering.back_left_right);
     if (analysis.centering.back_top_bottom)  setBackTB(analysis.centering.back_top_bottom);
 
-    // Populate corners
-    const co2 = analysis.corners;
-    setCorners({
-      frontTL: co2.front_top_left?.grade     ?? 10,
-      frontTR: co2.front_top_right?.grade    ?? 10,
-      frontBL: co2.front_bottom_left?.grade  ?? 10,
-      frontBR: co2.front_bottom_right?.grade ?? 10,
-      backTL:  co2.back_top_left?.grade      ?? 10,
-      backTR:  co2.back_top_right?.grade     ?? 10,
-      backBL:  co2.back_bottom_left?.grade   ?? 10,
-      backBR:  co2.back_bottom_right?.grade  ?? 10,
-    });
+    // Populate corners (skip if subgrade is 0 = not measured)
+    if (co > 0) {
+      const co2 = analysis.corners;
+      setCorners({
+        frontTL: co2.front_top_left?.grade     ?? 10,
+        frontTR: co2.front_top_right?.grade    ?? 10,
+        frontBL: co2.front_bottom_left?.grade  ?? 10,
+        frontBR: co2.front_bottom_right?.grade ?? 10,
+        backTL:  co2.back_top_left?.grade      ?? 10,
+        backTR:  co2.back_top_right?.grade     ?? 10,
+        backBL:  co2.back_bottom_left?.grade   ?? 10,
+        backBR:  co2.back_bottom_right?.grade  ?? 10,
+      });
+    }
 
-    // Populate edges
-    const ed = analysis.edges;
-    setEdges({
-      frontTop:    ed.front_top?.grade    ?? 10,
-      frontBottom: ed.front_bottom?.grade ?? 10,
-      frontLeft:   ed.front_left?.grade   ?? 10,
-      frontRight:  ed.front_right?.grade  ?? 10,
-      backTop:     ed.back_top?.grade     ?? 10,
-      backBottom:  ed.back_bottom?.grade  ?? 10,
-      backLeft:    ed.back_left?.grade    ?? 10,
-      backRight:   ed.back_right?.grade   ?? 10,
-    });
+    // Populate edges (skip if subgrade is 0)
+    if (e > 0) {
+      const ed = analysis.edges;
+      setEdges({
+        frontTop:    ed.front_top?.grade    ?? 10,
+        frontBottom: ed.front_bottom?.grade ?? 10,
+        frontLeft:   ed.front_left?.grade   ?? 10,
+        frontRight:  ed.front_right?.grade  ?? 10,
+        backTop:     ed.back_top?.grade     ?? 10,
+        backBottom:  ed.back_bottom?.grade  ?? 10,
+        backLeft:    ed.back_left?.grade    ?? 10,
+        backRight:   ed.back_right?.grade   ?? 10,
+      });
+    }
 
-    // Populate surface
-    setSurface(prev => ({
-      ...prev,
-      front: analysis.surface.front_grade ?? 10,
-      back:  analysis.surface.back_grade  ?? 10,
-      hasHoloScratches: analysis.defects?.some(d => d.type === "holo_scratch"),
-      hasSurfaceScratches: analysis.defects?.some(d => d.type === "scratch"),
-      hasPrintLines: analysis.defects?.some(d => d.type === "print_line"),
-      hasStaining: analysis.defects?.some(d => d.type === "stain"),
-      hasCrease: analysis.defects?.some(d => d.type === "crease"),
-      hasTear: analysis.defects?.some(d => d.type === "tear"),
-    }));
+    // Populate surface (skip if subgrade is 0)
+    if (s > 0) {
+      setSurface(prev => ({
+        ...prev,
+        front: analysis.surface.front_grade ?? 10,
+        back:  analysis.surface.back_grade  ?? 10,
+      }));
+    }
+
+    // Populate surface defect flags from defects array (always update if defects present)
+    if (analysis.defects?.length > 0) {
+      setSurface(prev => ({
+        ...prev,
+        hasHoloScratches: analysis.defects?.some(d => d.type === "holo_scratch"),
+        hasSurfaceScratches: analysis.defects?.some(d => d.type === "scratch"),
+        hasPrintLines: analysis.defects?.some(d => d.type === "print_line"),
+        hasStaining: analysis.defects?.some(d => d.type === "stain"),
+        hasCrease: analysis.defects?.some(d => d.type === "crease"),
+        hasTear: analysis.defects?.some(d => d.type === "tear"),
+      }));
+    }
 
     // Convert AI defects to Defect format and merge with any existing human defects
     if (analysis.defects?.length > 0) {
@@ -347,7 +376,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     }
   }
 
-  async function approveGrade(andNext = false) {
+  async function approveGrade() {
     setApproving(true);
     try {
       const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
@@ -361,25 +390,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       setApproved(true);
       setShowConfirm(false);
       toast({ title: `${certIdStr || "Certificate"} approved — ${finalGradeOverall} ${label}` });
-
-      if (andNext) {
-        // Create next cert and switch to it
-        try {
-          const nextRes = await fetch("/api/admin/certificates/new", {
-            method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-          });
-          if (nextRes.ok) {
-            const nextCert = await nextRes.json();
-            if (nextCert?.id) {
-              onGradeApproved?.(certIdStr, finalGradeOverall);
-              onCertUpdated?.(); // triggers parent refetch which will switch to the new cert
-              // Parent handles the navigation via onGradeApproved
-              return;
-            }
-          }
-        } catch { /* fall through to normal close */ }
-      }
-
       onGradeApproved?.(certIdStr, finalGradeOverall);
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
@@ -440,6 +450,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             referenceImageUrl={aiIdentification?.referenceImageUrl}
             externalAnalysis={pendingAnalysis}
             onExternalAnalysisConsumed={onPendingAnalysisConsumed}
+            onManualIdentification={onManualIdentification}
+            cardGame={cardGame}
           />
         </div>
         <ReprocessButton certId={certId} onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })} />
@@ -782,16 +794,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             if (result.side === "front") {
               setFrontLR(result.leftRight);
               setFrontTB(result.topBottom);
-              setCenteringOverride(result.subgrade);
               setManualOuterFront(result.outer);
               setManualInnerFront(result.inner);
             } else {
               setBackLR(result.leftRight);
               setBackTB(result.topBottom);
-              setCenteringOverride(result.subgrade);
               setManualOuterBack(result.outer);
               setManualInnerBack(result.inner);
             }
+            // Clear override so centeringCalc (using all 4 values) becomes authoritative
+            setCenteringOverride(null);
             setCenteringMethod("manual");
             setManualCenteringSide(null);
           }}
@@ -818,19 +830,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               <button type="button" onClick={() => setShowConfirm(false)} className="border border-[#333333] text-[#555555] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]">Cancel</button>
               <button
                 type="button"
-                onClick={() => approveGrade(false)}
-                disabled={approving}
-                className="flex-1 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold py-2 rounded hover:bg-[#D4AF37]/10 disabled:opacity-40"
-              >
-                {approving ? "Approving…" : "Approve & Close"}
-              </button>
-              <button
-                type="button"
-                onClick={() => approveGrade(true)}
+                onClick={() => approveGrade()}
                 disabled={approving}
                 className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
-                {approving ? "Approving…" : "Approve & Next"}
+                {approving ? "Approving…" : "Approve"}
               </button>
             </div>
           </div>

@@ -15,6 +15,9 @@ interface Props {
   certificate: CertificateRecord | null;
   onSuccess: (newCert?: any) => void;
   onIdentifyAndGrade?: (result: { analysis: any; identification: any }) => void;
+  /** External identification pushed from AI panel's "Change card" button */
+  externalIdentification?: Record<string, unknown> | null;
+  onExternalIdentificationConsumed?: () => void;
 }
 
 const cardGames = [
@@ -59,7 +62,7 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
 type AutofillField = typeof AUTOFILL_FIELDS[number];
 type ProtectedField = AutofillField | "designations";
 
-export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade }: Props) {
+export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade, externalIdentification, onExternalIdentificationConsumed }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
 
@@ -153,6 +156,23 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   const [manuallyVerified, setManuallyVerified] = useState(false);
   const tcgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Accept identification from AI panel's "Change card" button
+  useEffect(() => {
+    if (externalIdentification) {
+      const id = externalIdentification as any;
+      setForm(prev => ({
+        ...prev,
+        cardName: id.officialName || id.detected_name || prev.cardName,
+        setName: id.officialSet || id.detected_set || prev.setName,
+        cardNumber: id.officialNumber || id.detected_number || prev.cardNumber,
+        year: id.detected_year || prev.year,
+        rarity: id.detected_rarity || prev.rarity,
+      }));
+      setManuallyVerified(true);
+      onExternalIdentificationConsumed?.();
+    }
+  }, [externalIdentification]);
+
   function handleTcgSearch(query: string) {
     setTcgQuery(query);
     if (tcgDebounceRef.current) clearTimeout(tcgDebounceRef.current);
@@ -195,6 +215,27 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     setTcgQuery("");
     setTcgResults([]);
     toast({ title: "Card selected", description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}` });
+
+    // Sync manual verification to AI panel via the existing pipeline
+    const manualId = {
+      detected_name: card.name || "",
+      detected_set: card.setName || "",
+      detected_number: card.number || null,
+      detected_year: card.year || null,
+      detected_game: form.cardGame || "pokemon",
+      detected_language: form.language || "English",
+      detected_rarity: card.rarity || null,
+      is_holo: false,
+      confidence: "high",
+      verified: true,
+      officialName: card.name || "",
+      officialSet: card.setName || "",
+      officialNumber: card.number || null,
+      referenceImageUrl: card.imageUrl || null,
+      dbSource: "manual-tcg-search",
+      manuallyVerified: true,
+    };
+    onIdentifyAndGrade?.({ analysis: null, identification: manualId });
   }
 
   async function runIdentifyAndGrade() {

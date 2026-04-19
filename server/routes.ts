@@ -5810,6 +5810,13 @@ export async function registerRoutes(
         gradeApprovedBy:  c.gradeApprovedBy  || null,
         gradeApprovedAt:  c.gradeApprovedAt  || null,
         gradeStrengthScore: c.gradeStrengthScore ?? (c as any).grade_strength_score ?? null,
+        // Saved aggregate subgrades for hydration on reload
+        centeringScore: c.centeringScore ?? (c as any).centering_score ?? null,
+        cornersScore:   c.cornersScore   ?? (c as any).corners_score   ?? null,
+        edgesScore:     c.edgesScore     ?? (c as any).edges_score     ?? null,
+        surfaceScore:   c.surfaceScore   ?? (c as any).surface_score   ?? null,
+        grade:          c.gradeOverall   ?? (c as any).grade           ?? null,
+        aiDraftGrade:   c.aiDraftGrade   ?? (c as any).ai_draft_grade  ?? null,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

@@ -63,6 +63,7 @@ export default function AdminDashboard({ onLogout }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
   const [pendingAnalysis, setPendingAnalysis] = useState<{ analysis: any; identification: any } | null>(null);
+  const [externalIdentification, setExternalIdentification] = useState<Record<string, unknown> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
@@ -118,23 +119,8 @@ export default function AdminDashboard({ onLogout }: Props) {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
 
-  const handleNewCert = async () => {
-    try {
-      const res = await fetch("/api/admin/certificates/new", {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-      });
-      if (res.ok) {
-        const cert = await res.json();
-        if (cert && cert.id) {
-          setEditingCert(cert);
-          setShowForm(true);
-          setActiveTab("certs");
-          queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-          return;
-        }
-      }
-    } catch { /* fall through */ }
-    // Fallback: open blank form
+  const handleNewCert = () => {
+    // Open blank form — no DB row created until user saves with real data
     setEditingCert(null);
     setShowForm(true);
     setActiveTab("certs");
@@ -168,6 +154,8 @@ export default function AdminDashboard({ onLogout }: Props) {
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
+            externalIdentification={externalIdentification}
+            onExternalIdentificationConsumed={() => setExternalIdentification(null)}
             onIdentifyAndGrade={(result) => {
               // Push analysis to GradingPanel so it populates subgrades, defects, etc.
               setPendingAnalysis(result);
@@ -190,22 +178,17 @@ export default function AdminDashboard({ onLogout }: Props) {
                 certId={editingCert.id}
                 cardName={editingCert.cardName || ""}
                 cardSet={editingCert.setName || ""}
+                cardGame={editingCert.cardGame || ""}
                 existingGrade={editingCert.gradeOverall}
                 pendingAnalysis={pendingAnalysis}
                 onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
-                onGradeApproved={async () => {
+                onManualIdentification={(id) => {
+                  // Sync AI panel's manual identification to the cert form
+                  setExternalIdentification(id);
+                }}
+                onGradeApproved={() => {
                   queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                  // Check if a new cert was just created (from "Approve & Next") — switch to it
-                  try {
-                    const r = await fetch("/api/admin/certificates?limit=1&sort=newest", { credentials: "include" });
-                    const certs = await r.json();
-                    const newest = Array.isArray(certs) ? certs[0] : null;
-                    if (newest && newest.id !== editingCert.id && newest.cardName === "(untitled)") {
-                      setEditingCert(newest);
-                      return;
-                    }
-                  } catch { /* ignore */ }
-                  // No new cert → close form
+                  // Return to cert list
                   setShowForm(false);
                   setEditingCert(null);
                 }}
