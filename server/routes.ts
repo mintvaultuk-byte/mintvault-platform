@@ -1268,7 +1268,7 @@ export async function registerRoutes(
         phone: phone || null,
         shippingAddress,
         turnaroundDays,
-        shippingCost: shippingFinal,
+        shippingCost: totals.shipping,
         shippingInsuranceTier: totals.shippingLabel,
         gradingCost: discountedSubtotal,
         pricePerCardAtPurchase: tierData.pricePerCard,
@@ -1332,7 +1332,6 @@ export async function registerRoutes(
           insuranceFee: String(totals.totalInsuranceFee),
           highValue: String(highValueFlag),
           ...(creditApplied ? { creditApplied: "true", creditType: creditTypeApplied || "", creditAmountPence: String(creditAmountPence) } : {}),
-          ...(shippingFinal === 0 ? { freeShipping: "vault_club" } : {}),
           ...(type === "crossover" && crossoverCompany ? {
             crossoverCompany: crossoverCompany,
             crossoverOriginalGrade: crossoverOriginalGrade || "",
@@ -1399,7 +1398,7 @@ export async function registerRoutes(
           type: creditTypeApplied,
           amount_pence: creditAmountPence,
         } : null,
-        freeShipping: shippingFinal === 0,
+        freeShipping: false,
       });
     } catch (error: any) {
       console.error("Error creating payment intent:", error.message);
