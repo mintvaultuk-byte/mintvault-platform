@@ -22,11 +22,12 @@
 
   /* Hero gradient slab — stops for moody radial (navy → petrol → teal → bronze).
      Used only by the HeroSlab display field. HSL chosen deliberately to avoid
-     the warm paper palette and read as a "slab window". */
-  --v2-slab-gradient-navy: hsl(220, 35%, 25%);      /* deep navy · 0%   */
-  --v2-slab-gradient-petrol: hsl(200, 40%, 30%);    /* petrol blue · 35% */
-  --v2-slab-gradient-teal: hsl(160, 25%, 35%);      /* muted teal · 70%  */
-  --v2-slab-gradient-bronze: hsl(45, 30%, 45%);     /* warm bronze · 100%*/
+     the warm paper palette and read as a "slab window". Widened luminance range
+     for dramatic contrast: deeper navy origin, more vivid bronze edge. */
+  --v2-slab-gradient-navy: hsl(220, 45%, 15%);      /* deep navy · 0%   — darker origin */
+  --v2-slab-gradient-petrol: hsl(200, 50%, 25%);    /* petrol blue · 35% */
+  --v2-slab-gradient-teal: hsl(160, 30%, 35%);      /* muted teal · 70% */
+  --v2-slab-gradient-bronze: hsl(45, 45%, 55%);     /* warm bronze · 100% — vivid edge */
 
   /* Type scale */
   --v2-text-7xl: 5rem;

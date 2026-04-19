@@ -137,7 +137,9 @@ function HeroSlab({
           height: "25%",
           padding: "6px 10px",
           backgroundColor: "var(--v2-paper-raised)",
-          borderTop: "1px solid var(--v2-line)",
+          // Gold hairline divider between display field and bottom bar —
+          // v2-gold-soft (#D4AF37) at 30% opacity.
+          borderTop: "1px solid rgba(212, 175, 55, 0.3)",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
