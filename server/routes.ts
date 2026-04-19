@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
-import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier } from "@shared/schema";
+import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -268,6 +268,20 @@ async function createAiGradeCorrectionsTable() {
   `);
 }
 
+// Server-side "1 free estimate per IP per day" gate for anonymous-no-email
+// callers on POST /api/tools/estimate. Prevents unlimited Anthropic API burn.
+// IP is hashed (SHA-256) before storage — never store raw IPs per privacy rules.
+async function createEstimateFreeUsesTable() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS estimate_free_uses (
+      ip_hash       TEXT PRIMARY KEY,
+      last_used_at  TIMESTAMP NOT NULL,
+      count_today   INTEGER NOT NULL DEFAULT 0,
+      created_at    TIMESTAMP DEFAULT NOW()
+    )
+  `);
+}
+
 // Admin email gets unlimited free access to all tools
 const ADMIN_FREE_EMAIL = "neilsophieoliver@gmail.com";
 
@@ -381,6 +395,7 @@ export async function registerRoutes(
   seedAdminCredits().catch(() => {});
   addRevealWrapColumn().catch(() => {});
   createAiGradeCorrectionsTable().catch(() => {});
+  createEstimateFreeUsesTable().catch(() => {});
   createEbayPriceCacheTable().catch(() => {});
   seedTierCapacityTable().catch(() => {});
   migrateAccountSchema().catch((e: any) => console.error("[account-auth] migration error:", e.message));
@@ -4860,10 +4875,18 @@ export async function registerRoutes(
     standardHeaders: true, legacyHeaders: false,
     message: { error: "Too many requests — please wait a minute." },
   });
+  // Admin bypass uses the `x-mv-admin-email` request header — body isn't parsed
+  // yet when `skip` runs (multer is downstream). Admins hitting the web UI form
+  // without the header will share the 5/hour bucket; power use should curl with
+  // the header set.
   const estimateRateLimit = rateLimit({
     windowMs: 60 * 60 * 1000, max: 5,
     standardHeaders: true, legacyHeaders: false,
     message: { error: "Too many estimate requests — you can request up to 5 estimates per hour." },
+    skip: (req) => {
+      const headerEmail = (req.headers["x-mv-admin-email"] as string || "").trim().toLowerCase();
+      return headerEmail === ADMIN_FREE_EMAIL;
+    },
   });
 
   const toolsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -4933,7 +4956,7 @@ export async function registerRoutes(
   // are resized in-memory with sharp, sent to Anthropic as base64, then garbage collected with
   // the request. Nothing is written to R2, Neon, or disk.
   // No rate limit for paid users (email + credits > 0); free uses get the standard limit.
-  app.post("/api/tools/estimate", toolsUpload.single("image"), async (req, res) => {
+  app.post("/api/tools/estimate", estimateRateLimit, toolsUpload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "No image uploaded" });
       const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -4966,6 +4989,10 @@ export async function registerRoutes(
               SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
             `);
             if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
+              await db.insert(auditLog).values({
+                entityType: "estimate", entityId: sessionUserId, action: "402_insufficient",
+                adminUser: null, details: { path: "user_then_email_empty", email },
+              }).catch(() => {});
               return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
             }
             await db.execute(sql`
@@ -4976,7 +5003,11 @@ export async function registerRoutes(
               WHERE email = ${email} AND credits_remaining > 0
             `);
           } else {
-            return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
+            await db.insert(auditLog).values({
+              entityType: "estimate", entityId: sessionUserId, action: "402_insufficient",
+              adminUser: null, details: { path: "user_no_balance_no_email" },
+            }).catch(() => {});
+            return res.status(402).json({ error: "No AI credits remaining. Buy a pack or join Vault Club Silver when it reopens." });
           }
         } else if (email) {
           // Anonymous with email — use email credits only
@@ -4984,6 +5015,10 @@ export async function registerRoutes(
             SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
           `);
           if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
+            await db.insert(auditLog).values({
+              entityType: "estimate", entityId: email, action: "402_insufficient",
+              adminUser: null, details: { path: "anon_email_empty" },
+            }).catch(() => {});
             return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
           }
           await db.execute(sql`
@@ -4993,6 +5028,37 @@ export async function registerRoutes(
                 updated_at = NOW()
             WHERE email = ${email} AND credits_remaining > 0
           `);
+        } else {
+          // Anonymous + no email — server-side free tier: 1 estimate per IP per UTC day.
+          // IP hashed SHA-256 before storage (never raw, per privacy rules).
+          const ipRaw = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+                        || req.socket.remoteAddress || "unknown";
+          const ipHash = crypto.createHash("sha256").update(ipRaw).digest("hex");
+          const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
+          const upsert = await db.execute(sql`
+            INSERT INTO estimate_free_uses (ip_hash, last_used_at, count_today)
+            VALUES (${ipHash}, NOW(), 1)
+            ON CONFLICT (ip_hash) DO UPDATE SET
+              count_today = CASE
+                WHEN to_char(estimate_free_uses.last_used_at, 'YYYY-MM-DD') = ${today}
+                THEN estimate_free_uses.count_today + 1
+                ELSE 1
+              END,
+              last_used_at = NOW()
+            RETURNING count_today
+          `);
+          const countToday = Number((upsert.rows[0] as any).count_today);
+          if (countToday > 1) {
+            await db.insert(auditLog).values({
+              entityType: "estimate", entityId: ipHash, action: "402_insufficient",
+              adminUser: null, details: { path: "anon_ip_day_limit", countToday },
+            }).catch(() => {});
+            return res.status(402).json({
+              error: "Free estimate used for today. Add an email to buy a credit pack from £2 for 5 estimates.",
+              freeLimit: 1,
+              windowResetAt: "midnight UTC",
+            });
+          }
         }
       }
 
