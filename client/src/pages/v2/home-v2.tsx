@@ -287,7 +287,7 @@ export default function HomeV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
-        <div className="mx-auto max-w-7xl px-6 py-20 md:py-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
+        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
           {/* Left — copy */}
           <div>
             <p
@@ -334,19 +334,22 @@ export default function HomeV2() {
           </div>
 
           {/* Right — slab stack. Live data from /api/v2/homepage-stats → recent_certs.
-              Fallback: 3 monogram slabs when API returns 0 rows or errors. */}
+              Fallback: 3 monogram slabs when API returns 0 rows or errors.
+              Container width computed for 220 slab + rotation bbox (~10%) + ±60 offsets. */}
           <div
             className="relative h-[300px] md:h-[500px] flex items-center justify-center mx-auto"
-            style={{ width: "min(70vw, 260px)", maxWidth: "none" }}
+            style={{ width: "min(90vw, 400px)", maxWidth: "none" }}
           >
             {(() => {
               const slots: (RecentCert | null)[] =
                 recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null];
               const rotations = [-8, 4, -2];
+              // Wider fan so all 3 slabs have a clear visible area; front/back
+              // pair mirrored on x, middle lifted for asymmetry.
               const offsets = [
-                { x: -14, y: 18 },
-                { x: 8, y: -14 },
-                { x: 28, y: 8 },
+                { x: -60, y: 24 },
+                { x: 0, y: -16 },
+                { x: 60, y: 24 },
               ];
               // Newest cert sits on top; supporting slabs behind.
               return slots.map((cert, i) => (

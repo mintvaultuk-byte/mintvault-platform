@@ -708,15 +708,21 @@ export async function registerRoutes(
           COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
         FROM certificates
       `);
+      // Hero slab stack shows grade RANGE, not just the 3 most recent.
+      // For each distinct numeric grade, pick the most recent cert; then take
+      // the top 3 grades (highest first). Falls back to <3 rows if DB has
+      // fewer distinct grades — caller degrades gracefully.
       const recentResult = await db.execute(sql`
-        SELECT id, card_name, set_name, grade, grade_type,
+        SELECT DISTINCT ON (grade::numeric)
+               id, card_name, set_name, grade, grade_type,
                REGEXP_REPLACE(REGEXP_REPLACE(id::text, '^0+', ''), '^', 'MV') AS cert_number,
                front_image_path
         FROM certificates
         WHERE deleted_at IS NULL AND grade IS NOT NULL
+          AND grade_type = 'numeric'
           AND card_name IS NOT NULL AND card_name != '' AND card_name != '(untitled)'
-        ORDER BY issued_at DESC
-        LIMIT 5
+        ORDER BY grade::numeric DESC, issued_at DESC
+        LIMIT 3
       `);
       const stats = statsResult.rows[0] as any;
       const data = {
