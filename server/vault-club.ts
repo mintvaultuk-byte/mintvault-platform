@@ -176,6 +176,12 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── GET /api/vault-club/check-discount ────────────────────────────────────
+  // Legacy endpoint — percentage grading discount removed 2026-04-19 when the
+  // club moved to a perks-and-credits model. Returns 0 always so any
+  // still-subscribed clients degrade gracefully. Returns the user's tier
+  // when known (active+trialing) so receipts can show "Silver member" etc.
+  // When the Phase 1B perk evaluator ships, this endpoint can either be
+  // removed or repurposed to surface per-perk availability.
   app.get("/api/vault-club/check-discount", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -192,10 +198,7 @@ export function registerVaultClubRoutes(app: Express): void {
       if (!tier || !isActiveStatus(status)) {
         return res.json({ discount_percent: 0, tier: null });
       }
-      return res.json({
-        discount_percent: VAULT_CLUB_TIERS[tier].grading_discount_percent,
-        tier,
-      });
+      return res.json({ discount_percent: 0, tier });
     } catch (err: any) {
       console.error("[vault-club] check-discount error:", err.message);
       return res.status(500).json({ error: "Failed to check discount." });
@@ -304,25 +307,17 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
-/** Grant initial reholder credits for the given tier at signup/renewal */
+/**
+ * Grant initial reholder credits for the given tier at signup/renewal.
+ *
+ * No-op since 2026-04-19 — the quarterly_reholders perk was dropped when the
+ * club moved to perks-and-credits. Function retained for webhook call-sites;
+ * will be removed when Phase 1B updates webhooks to use the new perk model.
+ */
 export async function grantReholderCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
-  const qty = VAULT_CLUB_TIERS[tier].quarterly_reholders;
-  if (qty <= 0) return;
-  const expiresAt = endOfCurrentQuarter();
-  // Check if we already granted credits for this quarter+source
-  const existing = await db.execute(sql`
-    SELECT id FROM reholder_credits
-    WHERE user_id = ${userId} AND source = ${source}
-      AND granted_at >= (NOW() - INTERVAL '92 days')
-    LIMIT 1
-  `);
-  if (existing.rows.length > 0) return; // already granted
-  for (let i = 0; i < qty; i++) {
-    await db.execute(sql`
-      INSERT INTO reholder_credits (user_id, expires_at, source)
-      VALUES (${userId}, ${expiresAt.toISOString()}, ${source})
-    `);
-  }
+  void userId; void tier; void source;
+  console.log("[vault-club] grantReholderCredits skipped — quarterly_reholders perk deprecated 2026-04-19");
+  return;
 }
 
 /** Insert a vault_club_events audit row (idempotent via stripe_event_id UNIQUE) */

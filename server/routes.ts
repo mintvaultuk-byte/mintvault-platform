@@ -36,7 +36,7 @@ import {
 import { requireAuth } from "./middleware/auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
-import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus } from "./vault-club-tiers";
+import { isActiveStatus } from "./vault-club-tiers";
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -739,36 +739,17 @@ export async function registerRoutes(
 
       const totals = calculateOrderTotals(tierData.pricePerCard, quantity, totalDeclaredValue);
 
-      // Vault Club grading discount — applies to grading service only, never stacks with bulk.
-      // We take whichever discount is bigger: Vault Club % vs bulk %. Shipping is never discounted.
-      let vaultClubDiscountPercent = 0;
-      let vaultClubTierApplied: string | null = null;
-      if (serviceType === "grading" && req.session?.userId) {
-        try {
-          const vcRows = await db.execute(sql`
-            SELECT vault_club_tier, vault_club_status
-            FROM users WHERE id = ${(req.session as any).userId} AND deleted_at IS NULL LIMIT 1
-          `);
-          const vcUser = vcRows.rows[0] as any;
-          if (vcUser && isActiveStatus(vcUser.vault_club_status) && vcUser.vault_club_tier in VAULT_CLUB_TIERS) {
-            vaultClubDiscountPercent = VAULT_CLUB_TIERS[vcUser.vault_club_tier as VaultClubTier].grading_discount_percent;
-            vaultClubTierApplied = vcUser.vault_club_tier;
-          }
-        } catch { /* non-critical — never block checkout */ }
-      }
-
-      // Apply max(vault_club_discount, bulk_discount) to grading fees only
-      let effectiveDiscountPercent = totals.discountPercent;
-      let effectiveDiscountAmount = totals.discountAmount;
-      let discountType: string | null = null;
-      if (vaultClubDiscountPercent > totals.discountPercent) {
-        const subtotal = tierData.pricePerCard * quantity;
-        effectiveDiscountAmount = Math.round(subtotal * vaultClubDiscountPercent / 100);
-        effectiveDiscountPercent = vaultClubDiscountPercent;
-        discountType = `vault_club_${vaultClubTierApplied}`;
-      } else if (totals.discountPercent > 0) {
-        discountType = "bulk";
-      }
+      // Vault Club perks — Bronze/Gold deprecated 2026-04-19, Silver paused
+      // pending the Phase 1B perk evaluator (free return shipping / free
+      // authentication credits / queue jump). No percentage discount applies.
+      // Bulk discount still works via totals.discountPercent. The locked
+      // max(vault_club, bulk) rule still holds — vault_club side is 0 in
+      // Phase 1A, so bulk always wins when present. Tier tracking will be
+      // re-introduced when the perk evaluator ships and starts exempting
+      // specific fees per-member.
+      const effectiveDiscountPercent = totals.discountPercent;
+      const effectiveDiscountAmount = totals.discountAmount;
+      const discountType: string | null = totals.discountPercent > 0 ? "bulk" : null;
       const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
       const total = discountedSubtotal + totals.shipping + totals.totalInsuranceFee;
 

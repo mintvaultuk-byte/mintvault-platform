@@ -3,7 +3,12 @@
  *
  * Stripe price IDs for Vault Club subscriptions.
  *
- * HOW TO POPULATE:
+ * Bronze and Gold deprecated 2026-04-19 — Silver-only launch. Price IDs
+ * retained below so historical webhook events still route; archive the Bronze
+ * and Gold prices via the Stripe dashboard manually. Do not delete the entries
+ * — deprecation is config-level (is_active=false in vault-club-tiers.ts).
+ *
+ * HOW TO POPULATE (Silver only, post-1A):
  *   After deploying, call:
  *     POST /api/admin/vault-club/setup-stripe-products
  *   It will print the price IDs to the console. Paste them here, then redeploy.

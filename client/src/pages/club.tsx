@@ -29,28 +29,11 @@ interface VaultClubMe {
 }
 
 // ── Pricing data (mirrors server/vault-club-tiers.ts) ─────────────────────────
+//
+// Bronze and Gold deprecated 2026-04-19 — Silver-only launch. Perk evaluator
+// (free shipping, free monthly authentication, queue-jump) ships in Phase 1B.
 
 const TIERS = [
-  {
-    key: "bronze" as const,
-    label: "Bronze Vault",
-    icon: <Shield size={28} style={{ color: "#CD7F32" }} />,
-    monthly: 4.99,
-    annual: 49.00,
-    monthlyPence: 499,
-    annualPence: 4900,
-    popular: false,
-    colour: "#CD7F32",
-    features: [
-      "10% off all grading submissions",
-      "30 AI Pre-Grade credits per month",
-      "Bronze Verified badge",
-      "Showroom activated",
-      "3 Showroom themes",
-      "Skip-queue: Standard tier",
-      "Email support",
-    ],
-  },
   {
     key: "silver" as const,
     label: "Silver Vault",
@@ -62,63 +45,22 @@ const TIERS = [
     popular: true,
     colour: "#C0C0C0",
     features: [
-      "20% off all grading submissions",
+      "Free insured UK return shipping on every submission",
+      "2 free Authentication add-ons per month",
+      "Queue-jump within your chosen grading tier",
       "100 AI Pre-Grade credits per month",
-      "Silver Verified badge",
-      "All 8 Showroom themes",
-      "Custom Showroom banner",
-      "Skip-queue: all tiers",
-      "1 free reholder credit per quarter",
+      "Early access to Population Report insights",
+      "Silver Verified badge on certificates and Showroom",
+      "All 8 Showroom themes + custom banner",
       "Members-only Vault report design",
-      "Birthday gift",
-      "Live chat support",
     ],
   },
-  {
-    key: "gold" as const,
-    label: "Gold Vault",
-    icon: <ShieldCheck size={28} style={{ color: "#D4AF37" }} />,
-    monthly: 19.99,
-    annual: 199.00,
-    monthlyPence: 1999,
-    annualPence: 19900,
-    popular: false,
-    colour: "#D4AF37",
-    features: [
-      "30% off all grading submissions",
-      "400 AI Pre-Grade credits per month",
-      "Gold Vault badge with checkmark",
-      "Featured Collector rotation",
-      "Free Express upgrade every submission",
-      "4 free reholder credits per quarter",
-      "Members-only Vault report design",
-      "Quarterly limited-edition slab",
-      "Early access to new features",
-      "Dedicated account manager",
-      "Annual physical gift",
-    ],
-  },
-];
-
-const COMPARISON_ROWS = [
-  { feature: "Grading discount",           bronze: "10%",    silver: "20%",    gold: "30%" },
-  { feature: "AI Pre-Grade credits/month", bronze: "30",     silver: "100",    gold: "400" },
-  { feature: "Showroom activated",         bronze: true,     silver: true,     gold: true },
-  { feature: "Showroom themes",            bronze: "3",      silver: "8",      gold: "8" },
-  { feature: "Custom banner",              bronze: false,    silver: true,     gold: true },
-  { feature: "Skip-queue Standard",        bronze: true,     silver: true,     gold: true },
-  { feature: "Skip-queue Priority/Express",bronze: false,    silver: true,     gold: true },
-  { feature: "Free reholders/quarter",     bronze: "—",      silver: "1",      gold: "4" },
-  { feature: "Members-only Vault design",  bronze: false,    silver: true,     gold: true },
-  { feature: "Featured Collector",         bronze: false,    silver: false,    gold: true },
-  { feature: "Free Express upgrade",       bronze: false,    silver: false,    gold: true },
-  { feature: "Dedicated account manager",  bronze: false,    silver: false,    gold: true },
 ];
 
 const FAQS = [
   {
     q: "What is Vault Club?",
-    a: "Vault Club is MintVault's exclusive membership programme for serious collectors. Members get discounts on grading, monthly AI Pre-Grade credits, an activated Showroom to display their collection publicly, verified tier badges, and more perks depending on their tier.",
+    a: "Vault Club is MintVault's exclusive membership programme for serious collectors. Silver members get free insured return shipping, two free Authentication add-ons per month, queue-jump on submissions, monthly AI Pre-Grade credits, an activated Showroom, and a verified tier badge on every certificate and report.",
   },
   {
     q: "Can I cancel anytime?",
@@ -133,20 +75,12 @@ const FAQS = [
     a: "No. AI Pre-Grade credits refresh to your monthly allowance on each billing date. Unused credits do not carry over.",
   },
   {
-    q: "Can I upgrade or downgrade my tier?",
-    a: "Yes. Visit the billing portal (accessible from your /club dashboard) to change tiers. Upgrades take effect immediately; downgrades apply at the next renewal.",
-  },
-  {
     q: "How does the free trial work?",
     a: "Annual plans include a 14-day free trial. You won't be charged for 14 days, and you can cancel anytime before the trial ends without paying anything. Monthly plans do not include a trial.",
   },
   {
-    q: "Does the discount stack with bulk discounts?",
-    a: "No. When you check out, we apply whichever discount is bigger — your Vault Club tier discount or your bulk discount. They never stack.",
-  },
-  {
-    q: "Are credits and discounts available on all card games?",
-    a: "Yes. Vault Club discounts and AI credits apply to all grading submissions regardless of card game — Pokémon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, sports cards, and more.",
+    q: "Are Vault Club perks available on all card games?",
+    a: "Yes. Silver member perks — free shipping, monthly free Authentication credits, queue-jump, AI Pre-Grade credits — apply to all grading submissions regardless of card game: Pokémon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, sports cards, and more.",
   },
 ];
 
@@ -270,54 +204,6 @@ function TierCard({
           ))}
         </ul>
       </div>
-    </div>
-  );
-}
-
-function ComparisonTable() {
-  return (
-    <div className="overflow-x-auto rounded-2xl border border-[#E8E4DC] bg-white shadow-sm mb-16">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-[#E8E4DC]">
-            <th className="text-left px-4 py-3 text-[#999999] font-bold text-xs uppercase tracking-wider">Feature</th>
-            <th className="px-4 py-3 text-center" style={{ color: "#CD7F32" }}>
-              <div className="font-black text-sm">Bronze</div>
-            </th>
-            <th className="px-4 py-3 text-center bg-[#D4AF37]/5" style={{ color: "#C0C0C0" }}>
-              <div className="font-black text-sm">Silver</div>
-            </th>
-            <th className="px-4 py-3 text-center" style={{ color: "#D4AF37" }}>
-              <div className="font-black text-sm">Gold</div>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {COMPARISON_ROWS.map((row, i) => (
-            <tr key={row.feature} className={`border-b border-[#F0EDE6] ${i % 2 === 0 ? "bg-[#FAFAF8]" : "bg-white"}`}>
-              <td className="px-4 py-2.5 text-[#444444] font-medium text-xs">{row.feature}</td>
-              <td className="px-4 py-2.5 text-center">
-                {typeof row.bronze === "boolean"
-                  ? row.bronze ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.bronze}</span>
-                }
-              </td>
-              <td className="px-4 py-2.5 text-center bg-[#D4AF37]/5">
-                {typeof row.silver === "boolean"
-                  ? row.silver ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.silver}</span>
-                }
-              </td>
-              <td className="px-4 py-2.5 text-center">
-                {typeof row.gold === "boolean"
-                  ? row.gold ? <Check size={14} className="mx-auto text-[#D4AF37]" /> : <span className="text-[#DDDDDD] text-lg leading-none">—</span>
-                  : <span className="text-xs font-semibold text-[#444444]">{row.gold}</span>
-                }
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -457,16 +343,14 @@ function MemberView({ me }: { me: VaultClubMe }) {
           <p className="text-xs text-[#AAAAAA]">quarterly</p>
         </div>
 
-        {/* Discount */}
+        {/* Free shipping perk */}
         <div className="bg-white border border-[#E8E4DC] rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <TrendingDown size={14} className="text-[#D4AF37]" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Grading Discount</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#888888]">Return Shipping</span>
           </div>
-          <p className="text-xl font-black text-[#1A1A1A]">
-            {me.tier ? { bronze: "10%", silver: "20%", gold: "30%" }[me.tier] : "—"}
-          </p>
-          <p className="text-xs text-[#AAAAAA]">on all submissions</p>
+          <p className="text-xl font-black text-[#1A1A1A]">Free</p>
+          <p className="text-[10px] text-[#AAAAAA]">insured, UK, every submission</p>
         </div>
 
         {/* Member since */}
@@ -493,7 +377,7 @@ function MemberView({ me }: { me: VaultClubMe }) {
             className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] transition-all active:scale-95"
             style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
           >
-            Submit Cards (with {me.tier ? { bronze: "10%", silver: "20%", gold: "30%" }[me.tier] : "0%"} discount) →
+            Submit cards (free return shipping) →
           </button>
         </Link>
         <Link href="/tools/estimate">
@@ -544,7 +428,7 @@ function MarketingView() {
     <div className="bg-[#FAFAF8]">
       <SeoHead
         title="Vault Club | MintVault UK"
-        description="Join Vault Club — exclusive perks for serious collectors. Up to 30% off grading, monthly AI Pre-Grade credits, your own Showroom, and verified tier badges."
+        description="Join Vault Club — Silver membership gives serious collectors free insured return shipping, free monthly Authentication credits, queue-jump, AI Pre-Grade credits, and a verified badge on every certificate."
         canonical="https://mintvaultuk.com/club"
       />
 
@@ -566,7 +450,7 @@ function MarketingView() {
             Vault Club
           </h1>
           <p className="text-[#B8A060] text-base max-w-xl mx-auto">
-            Exclusive perks for serious collectors. Discounts on grading, AI Pre-Grade credits, your own Showroom, and more.
+            Exclusive perks for serious collectors. Free return shipping, free monthly Authentication credits, queue-jump, AI Pre-Grade credits, and your own Showroom.
           </p>
         </div>
       </div>
@@ -590,9 +474,9 @@ function MarketingView() {
         {/* Why section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
           {[
-            { icon: <TrendingDown size={24} className="text-[#D4AF37]" />, title: "Save Money", body: "Up to 30% off every grading submission. The discount pays for your membership in just a few cards." },
-            { icon: <Shield size={24} className="text-[#D4AF37]" />, title: "Stand Out", body: "A verified badge on your Showroom and certificates tells other collectors you're a serious member of the registry." },
-            { icon: <Zap size={24} className="text-[#D4AF37]" />, title: "Get Priority", body: "Skip-queue access, monthly AI Pre-Grade credits, and members-only design on your Vault reports." },
+            { icon: <TrendingDown size={24} className="text-[#D4AF37]" />, title: "Save on every submission", body: "Free insured UK return shipping on every submission, plus two free Authentication add-ons every month." },
+            { icon: <Shield size={24} className="text-[#D4AF37]" />, title: "Stand out", body: "A verified Silver badge on your Showroom and certificates tells other collectors you're a serious member of the registry." },
+            { icon: <Zap size={24} className="text-[#D4AF37]" />, title: "Get priority", body: "Queue-jump within your grading tier, 100 AI Pre-Grade credits a month, and members-only Vault report design." },
           ].map((item) => (
             <div key={item.title} className="bg-white border border-[#E8E4DC] rounded-xl p-6 text-center shadow-sm">
               <div className="w-12 h-12 rounded-xl bg-[#D4AF37]/10 flex items-center justify-center mx-auto mb-4">
@@ -603,15 +487,6 @@ function MarketingView() {
             </div>
           ))}
         </div>
-
-        {/* Comparison table */}
-        <h2
-          className="text-2xl font-black text-[#1A1A1A] mb-6 text-center"
-         
-        >
-          Compare Plans
-        </h2>
-        <ComparisonTable />
 
         {/* FAQ */}
         <h2
