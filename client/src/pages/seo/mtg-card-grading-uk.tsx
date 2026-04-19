@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does MTG card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £12 per card. Three tiers: Standard (20 working days, £12), Priority (10 days, £15), and Express (5 days, £20). Bulk discounts available for 10+ cards.",
+    answer: "MintVault UK grading starts from £19 per card. Three tiers: Vault Queue (40 working days, £19), Standard (15 days, £25), and Express (5 days, £45). Bulk discounts available for 10+ cards.",
   },
   {
     question: "What is the grading scale MintVault uses for MTG?",
@@ -52,7 +52,7 @@ export default function MtgCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="MTG Card Grading UK | Magic: The Gathering Grading | MintVault"
-        description="Professional Magic: The Gathering card grading in the UK. Grade your rarest MTG cards with MintVault — NFC-enabled slabs, verified ownership, from £12."
+        description="Professional Magic: The Gathering card grading in the UK. Grade your rarest MTG cards with MintVault — NFC-enabled slabs, verified ownership, from £19."
         canonical="https://mintvaultuk.com/mtg-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -92,9 +92,9 @@ export default function MtgCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

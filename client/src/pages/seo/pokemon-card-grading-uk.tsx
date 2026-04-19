@@ -27,11 +27,11 @@ const breadcrumbs = [
 const faqs = [
   {
     question: "How much does Pokemon card grading cost in the UK?",
-    answer: "MintVault UK offers grading from just £12 per card Standard tier (20 working days). Priority is £15 (10 working days) and Express is £20 (5 working days). Bulk discounts are available for 10+ card submissions. All prices include fully insured return shipping based on your declared card value.",
+    answer: "MintVault UK offers grading from £19 per card on the Vault Queue tier (40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts are available for 10+ card submissions. All prices include fully insured return shipping based on your declared card value.",
   },
   {
     question: "How long does Pokemon card grading take with MintVault?",
-    answer: "Turnaround times depend on your chosen service tier. Standard is 20 working days, Priority is 10 working days, and Express is 5 working days. You can track your submission status online at any time via our <a href='/track' class='text-[#E3350D] hover:underline'>tracking page</a>.",
+    answer: "Turnaround times depend on your chosen service tier. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. You can track your submission status online at any time via our <a href='/track' class='text-[#E3350D] hover:underline'>tracking page</a>.",
   },
   {
     question: "What Pokemon cards are worth grading?",
@@ -76,7 +76,7 @@ export default function PokemonCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Pokemon Card Grading UK | Professional Grading Service | MintVault"
-        description="Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault from £12 per card."
+        description="Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault from £19 per card."
         canonical="https://mintvaultuk.com/pokemon-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -172,9 +172,9 @@ export default function PokemonCardGradingUk() {
           </p>
           <div className="border border-[#E3350D]/20 rounded-lg overflow-hidden mb-4">
             {[
-              { tier: "Standard", price: "£12", turnaround: "20 working days" },
-              { tier: "Priority", price: "£15", turnaround: "10 working days" },
-              { tier: "Express", price: "£20", turnaround: "5 working days" },
+              { tier: "Vault Queue", price: "£19", turnaround: "40 working days" },
+              { tier: "Standard", price: "£25", turnaround: "15 working days" },
+              { tier: "Express", price: "£45", turnaround: "5 working days" },
             ].map((t, i) => (
               <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#E3350D]/10" : ""}`} data-testid={`row-tier-${i}`}>
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

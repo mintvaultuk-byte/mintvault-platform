@@ -21,11 +21,11 @@ const faqs = [
   },
   {
     question: "How much does Yu-Gi-Oh card grading cost with MintVault?",
-    answer: "MintVault UK offers grading from £12 per card (Standard, 20 working days), £15 (Priority, 10 working days), and £20 (Express, 5 working days). Bulk discounts apply for 10 or more cards. All prices include fully insured return shipping.",
+    answer: "MintVault UK offers three service tiers: Vault Queue at £19 per card (40 working days), Standard at £25 (15 working days), and Express at £45 (5 working days). Bulk discounts apply for 10 or more cards. All prices include fully insured return shipping.",
   },
   {
     question: "How long does YGO card grading take?",
-    answer: "Turnaround depends on your chosen tier. Standard is 20 working days, Priority is 10 working days, and Express is 5 working days. You can track your submission status online at any time.",
+    answer: "Turnaround depends on your chosen tier. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. You can track your submission status online at any time.",
   },
   {
     question: "What grading scale is used for Yu-Gi-Oh cards?",
@@ -52,7 +52,7 @@ export default function YugiohCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault"
-        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £12 per card."
+        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £19 per card."
         canonical="https://mintvaultuk.com/yugioh-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -92,9 +92,9 @@ export default function YugiohCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Yu-Gi-Oh Grading Service Tiers</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

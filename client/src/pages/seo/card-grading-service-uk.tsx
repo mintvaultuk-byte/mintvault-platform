@@ -62,7 +62,7 @@ export default function CardGradingServiceUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Card Grading Service UK | Professional Trading Card Grading | MintVault"
-        description="Professional card grading service in the UK. Grade your Pokemon, Yu-Gi-Oh!, Magic and TCG cards locally. No customs, fast turnaround, insured shipping. From £12/card."
+        description="Professional card grading service in the UK. Grade your Pokemon, Yu-Gi-Oh!, Magic and TCG cards locally. No customs, fast turnaround, insured shipping. From £19/card."
         canonical="https://mintvaultuk.com/card-grading-service-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -102,11 +102,11 @@ export default function CardGradingServiceUk() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <MapPin size={20} />, title: "UK-Based Throughout", desc: "Your cards stay within the United Kingdom from receipt to return. No international shipping means lower risk and faster service." },
-              { icon: <Clock size={20} />, title: "Predictable Turnaround", desc: "Choose from three service tiers with turnaround from 5 to 20 working days. Track your submission status online at any time." },
+              { icon: <Clock size={20} />, title: "Predictable Turnaround", desc: "Choose from three service tiers with turnaround from 5 to 40 working days. Track your submission status online at any time." },
               { icon: <Shield size={20} />, title: "Insured Return Shipping", desc: "All graded cards are returned via fully insured tracked delivery based on your declared card value." },
               { icon: <Award size={20} />, title: "Professional Standards", desc: "Every card is graded on our 1-10 scale by trained assessors evaluating centering, corners, edges, and surface quality." },
               { icon: <CheckCircle size={20} />, title: "Verifiable Certificates", desc: "Each slab carries a unique certificate number that can be checked online using our certificate verification tool." },
-              { icon: <MapPin size={20} />, title: "No Hidden Costs", desc: "No customs fees, no import duties, no international shipping premiums. Pricing starts from £12 per card with bulk discounts available." },
+              { icon: <MapPin size={20} />, title: "No Hidden Costs", desc: "No customs fees, no import duties, no international shipping premiums. Pricing starts from £19 per card with bulk discounts available." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-advantage-${i}`}>
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
@@ -171,9 +171,9 @@ export default function CardGradingServiceUk() {
           </p>
           <div className="border border-[#D4AF37]/20 rounded-lg overflow-hidden mb-4">
             {[
-              { tier: "Standard", price: "£12", turnaround: "20 working days" },
-              { tier: "Priority", price: "£15", turnaround: "10 working days" },
-              { tier: "Express", price: "£20", turnaround: "5 working days" },
+              { tier: "Vault Queue", price: "£19", turnaround: "40 working days" },
+              { tier: "Standard", price: "£25", turnaround: "15 working days" },
+              { tier: "Express", price: "£45", turnaround: "5 working days" },
             ].map((t, i) => (
               <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#D4AF37]/10" : ""}`} data-testid={`row-tier-${i}`}>
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>

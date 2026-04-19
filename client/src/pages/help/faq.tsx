@@ -10,8 +10,8 @@ const FAQ_DATA: FAQGroup[] = [
     category: "Submission",
     items: [
       { q: "How do I submit cards for grading?", a: "Choose your service tier on our Pricing page, then click Submit Cards. You'll receive a submission reference number. Place each card in a penny sleeve and semi-rigid card saver, pack securely, and post to MintVault UK, Rochester, Kent, including your order number inside." },
-      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Standard is 20 working days, Express is 10 working days, and Premium is 5 working days. Black Label review adds additional assessment time." },
-      { q: "How much does grading cost?", a: "Standard grading starts from £12 per card. Express starts from £20 per card. Premium starts from £35 per card. Full pricing including bulk discounts is on our Pricing page." },
+      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. Black Label is a free automatic upgrade when every subgrade scores a 10 — no separate tier or fee." },
+      { q: "How much does grading cost?", a: "Vault Queue grading is £19 per card. Standard is £25 per card. Express is £45 per card. Full pricing including bulk discounts is on our Pricing page." },
       { q: "What payment methods do you accept?", a: "We accept all major credit and debit cards via Stripe. Payment is taken at the time of submission. We do not currently accept bank transfer or PayPal." },
       { q: "Can I track my submission?", a: "Yes. Visit the Track Submission page and enter your submission reference number to see the current status of your order." },
     ],
@@ -29,8 +29,8 @@ const FAQ_DATA: FAQGroup[] = [
   {
     category: "Slabs",
     items: [
-      { q: "Are your slabs tamper-proof?", a: "Yes. Each slab is sealed with a tamper-evident bond. Once closed, the slab cannot be opened without leaving visible damage. The grade label is inscribed — there are no paper inserts that can be swapped." },
-      { q: "How does NFC verification work?", a: "Every slab contains an embedded NFC chip. Tap it with any NFC-capable smartphone to instantly verify the card's authenticity and open your Vault. The chip is registered to a specific certificate ID and cannot be transferred." },
+      { q: "Are your slabs tamper-evident?", a: "Yes. Each slab is sealed with a tamper-evident bond. Once closed, the slab cannot be opened without leaving visible damage. The grade label is inscribed — there are no paper inserts that can be swapped." },
+      { q: "How does NFC verification work?", a: "Every slab contains an embedded NFC chip. Tap it with any NFC-capable smartphone to instantly open the card's certificate record. The chip is embedded during encapsulation — it can't be lifted or swapped without damaging the slab." },
       { q: "What sizes/thicknesses do you support?", a: "We currently support card thicknesses of 35pt, 75pt, 130pt, and 180pt. If you have cards outside these ranges, contact us before submitting." },
       { q: "Can I crack open a slab?", a: "Technically yes, but doing so voids the grade and certificate. The slab is designed to be permanent. If you need your card re-encapsulated or regraded, submit it as a reholder service." },
     ],

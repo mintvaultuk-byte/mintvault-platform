@@ -13,8 +13,8 @@ const features = [
   },
   {
     icon: <Fingerprint size={24} />,
-    title: "Anti-Counterfeit Design",
-    description: "MintVault labels incorporate micro-printing, holographic elements, and unique serial patterns that are extremely difficult to replicate.",
+    title: "Distinctive Label Design",
+    description: "MintVault labels use a precise, professional layout built around the certificate number, grade, and card details. Every label is printed consistently across the run.",
   },
   {
     icon: <Shield size={24} />,

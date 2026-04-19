@@ -34,7 +34,7 @@ const faqs = [
   },
   {
     question: "What is the minimum value a card should have before grading is worthwhile?",
-    answer: "As a general guideline, the raw market value of the card should be at least 3 to 5 times the grading cost for grading to make financial sense. However, many collectors grade cards for protection and personal enjoyment regardless of monetary value. Our grading starts from £12 per card.",
+    answer: "As a general guideline, the raw market value of the card should be at least 3 to 5 times the grading cost for grading to make financial sense. However, many collectors grade cards for protection and personal enjoyment regardless of monetary value. Our grading starts from £19 per card.",
   },
 ];
 
@@ -134,7 +134,7 @@ export default function HowToGradePokemonCards() {
               Visit the MintVault <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> to start your order. You will need to:
             </p>
             <ul className="list-disc list-inside space-y-2 text-[#666666] text-sm pl-2">
-              <li>Choose your service tier (Standard, Priority, or Express)</li>
+              <li>Choose your service tier (Vault Queue, Standard, or Express)</li>
               <li>Enter the details for each card, including the card name, set, and card number</li>
               <li>Declare the value of each card for insurance purposes</li>
               <li>Pay securely online</li>

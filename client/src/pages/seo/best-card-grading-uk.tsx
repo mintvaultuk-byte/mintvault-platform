@@ -25,7 +25,7 @@ const faqs = [
   },
   {
     question: "How much does professional card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £12 per card (Standard, 20 working days) up to £20 (Express, 5 working days). All tiers include fully insured return shipping. Bulk discounts apply for 10 or more cards.",
+    answer: "MintVault UK grading starts from £19 per card (Vault Queue, 40 working days) up to £45 (Express, 5 working days). All tiers include fully insured return shipping. Bulk discounts apply for 10 or more cards.",
   },
   {
     question: "Is MintVault recognised for resale on eBay and other platforms?",
@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "Best Card Grading UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "The best UK card grading company — professional grading, NFC-enabled slabs, verified ownership registry. From £12 per card.",
+    description: "The best UK card grading company — professional grading, NFC-enabled slabs, verified ownership registry. From £19 per card.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },
@@ -52,7 +52,7 @@ export default function BestCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Best Card Grading UK | Top UK Card Grading Company | MintVault"
-        description="Looking for the best card grading in the UK? MintVault offers professional grading, NFC slabs, and a verified ownership registry — from £12 per card."
+        description="Looking for the best card grading in the UK? MintVault offers professional grading, NFC slabs, and a verified ownership registry — from £19 per card."
         canonical="https://mintvaultuk.com/best-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -80,7 +80,7 @@ export default function BestCardGradingUk() {
               { icon: <Shield size={16} />, title: "UK-based, no customs", desc: "Cards never leave the UK. No import duties, no border delays, no international shipping risk." },
               { icon: <Award size={16} />, title: "NFC-enabled slabs", desc: "Every slab has an NFC chip. Buyers can verify any certificate instantly with a phone scan." },
               { icon: <CheckCircle size={16} />, title: "Verified ownership registry", desc: "The only UK grader with an ownership registry. Transfer ownership securely when you sell." },
-              { icon: <Clock size={16} />, title: "Fast turnarounds", desc: "Standard (20 days), Priority (10 days), or Express (5 days). Choose the speed you need." },
+              { icon: <Clock size={16} />, title: "Fast turnarounds", desc: "Vault Queue (40 days), Standard (15 days), or Express (5 days). Choose the speed you need." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
@@ -128,9 +128,9 @@ export default function BestCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
-              { tier: "Standard", days: "20 working days", price: "£12/card" },
-              { tier: "Priority", days: "10 working days", price: "£15/card" },
-              { tier: "Express", days: "5 working days", price: "£20/card" },
+              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
+              { tier: "Standard", days: "15 working days", price: "£25/card" },
+              { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
