@@ -715,7 +715,7 @@ export async function registerRoutes(
         FROM certificates
         WHERE deleted_at IS NULL AND grade IS NOT NULL
           AND card_name IS NOT NULL AND card_name != '' AND card_name != '(untitled)'
-        ORDER BY created_at DESC
+        ORDER BY issued_at DESC
         LIMIT 5
       `);
       const stats = statsResult.rows[0] as any;

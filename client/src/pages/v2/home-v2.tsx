@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, Check } from "lucide-react";
+import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 
@@ -105,7 +105,7 @@ export default function HomeV2() {
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
-      <section className="relative overflow-hidden">
+      <section className="relative">
         <div className="mx-auto max-w-7xl px-6 py-20 md:py-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
           {/* Left — copy */}
           <div>
@@ -126,7 +126,7 @@ export default function HomeV2() {
               style={{ color: "var(--v2-ink-soft)" }}
             >
               AI-powered precision grading with tamper-evident NFC certification.
-              Every card verified, every grade transparent.
+              Every grade logged, every slab traceable.
             </p>
             <div className="flex flex-wrap items-center gap-3 mb-5">
               <Link
@@ -153,15 +153,16 @@ export default function HomeV2() {
           </div>
 
           {/* Right — slab stack */}
-          <div className="relative h-[360px] md:h-[440px] flex items-center justify-center">
+          <div className="relative h-[260px] md:h-[500px] flex items-center justify-center mx-auto" style={{ width: "min(60vw, 220px)", maxWidth: "none" }}>
             {(recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null]).map((cert, i) => {
               const rotations = [-6, 3, 8];
-              const offsets = [{ x: -20, y: 30 }, { x: 10, y: -10 }, { x: 40, y: 20 }];
+              const offsets = [{ x: -14, y: 16 }, { x: 8, y: -14 }, { x: 28, y: 8 }];
               return (
                 <div
                   key={i}
-                  className={`absolute w-[180px] md:w-[220px] rounded-xl border-2 shadow-xl overflow-hidden transition-transform duration-500 ${i > 0 ? "hidden md:block" : ""}`}
+                  className="absolute rounded-xl border-2 shadow-xl overflow-hidden transition-transform duration-500"
                   style={{
+                    width: "clamp(120px, 40vw, 220px)",
                     borderColor: "var(--v2-gold)",
                     backgroundColor: "var(--v2-paper-raised)",
                     transform: `rotate(${rotations[i]}deg) translate(${offsets[i].x}px, ${offsets[i].y}px)`,
@@ -175,18 +176,17 @@ export default function HomeV2() {
                         src={`/api/images/${cert.front_image_path}?w=220`}
                         alt={cert.card_name || ""}
                         className="w-full h-full object-cover"
-                        loading="lazy"
                       />
                     ) : (
                       <span className="font-display italic text-lg" style={{ color: "var(--v2-ink-mute)" }}>MV</span>
                     )}
                   </div>
                   {/* Slab footer */}
-                  <div className="px-3 py-2 flex items-center justify-between" style={{ borderTop: "1px solid var(--v2-line)" }}>
-                    <span className="font-body text-[9px] font-semibold truncate" style={{ color: "var(--v2-ink-soft)" }}>
+                  <div className="px-2 md:px-3 py-1.5 md:py-2 flex items-center justify-between" style={{ borderTop: "1px solid var(--v2-line)" }}>
+                    <span className="font-body text-[7px] md:text-[9px] font-semibold truncate" style={{ color: "var(--v2-ink-soft)" }}>
                       {cert?.card_name || "Card Name"}
                     </span>
-                    <span className="font-mono-v2 text-[8px]" style={{ color: "var(--v2-gold)" }}>
+                    <span className="font-mono-v2 text-[6px] md:text-[8px]" style={{ color: "var(--v2-gold)" }}>
                       {cert?.cert_number || `MV${i + 1}`}
                     </span>
                   </div>
@@ -256,65 +256,116 @@ export default function HomeV2() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
-              {[
-                {
-                  name: "Vault Queue", price: "19", days: "45 day", featured: false,
-                  features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Value up to \u00a3500"],
-                },
-                {
-                  name: "Standard", price: "25", days: "21 day", featured: true,
-                  features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Value up to \u00a32,500"],
-                },
-                {
-                  name: "Express", price: "45", days: "5 day", featured: false,
-                  features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Priority handling", "Value up to \u00a310,000"],
-                },
-              ].map((tier) => (
-                <div
-                  key={tier.name}
-                  className="relative rounded-xl p-6 flex flex-col"
-                  style={{
-                    backgroundColor: "var(--v2-panel-dark-soft)",
-                    border: tier.featured ? "1px solid var(--v2-gold)" : "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  {tier.featured && (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-3 py-1 rounded-full" style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}>
-                      Most chosen
-                    </span>
-                  )}
-                  <p className="font-body text-xs uppercase tracking-widest mb-3" style={{ color: "rgba(255,255,255,0.4)" }}>
-                    {tier.name}
-                  </p>
-                  <div className="flex items-baseline gap-1 mb-1">
-                    <span className="font-display italic text-4xl font-medium" style={{ color: "#FFFFFF" }}>&pound;{tier.price}</span>
-                  </div>
-                  <p className="font-body text-xs mb-6" style={{ color: "rgba(255,255,255,0.4)" }}>{tier.days} turnaround</p>
-                  <ul className="space-y-2.5 mb-8 flex-1">
-                    {tier.features.map((f) => (
-                      <li key={f} className="flex items-start gap-2 font-body text-xs" style={{ color: "rgba(255,255,255,0.7)" }}>
-                        <Check size={13} className="mt-0.5 shrink-0" style={{ color: "var(--v2-gold)" }} />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    href="/submit"
-                    className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2.5 rounded-full transition-all hover:scale-[1.03] w-full"
-                    style={
-                      tier.featured
-                        ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
-                        : { border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }
-                    }
+            {/* Pricing cards — outlined, narrow, centred */}
+            <div className="flex justify-center">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
+                {[
+                  {
+                    name: "Vault Queue", price: "19", days: "45 day", featured: false,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Value up to \u00a3500"],
+                  },
+                  {
+                    name: "Standard", price: "25", days: "21 day", featured: true,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Value up to \u00a32,500"],
+                  },
+                  {
+                    name: "Express", price: "45", days: "5 day", featured: false,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Priority handling", "Value up to \u00a310,000"],
+                  },
+                ].map((tier) => (
+                  <div
+                    key={tier.name}
+                    className="relative rounded-xl flex flex-col"
+                    style={{
+                      padding: "48px 40px",
+                      backgroundColor: "transparent",
+                      border: tier.featured
+                        ? "1px solid rgba(212, 175, 55, 0.6)"
+                        : "1px solid rgba(212, 175, 55, 0.25)",
+                    }}
                   >
-                    Start a submission <ArrowRight size={14} />
-                  </Link>
-                </div>
-              ))}
+                    {/* MOST CHOSEN floating pill */}
+                    {tier.featured && (
+                      <span
+                        className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded"
+                        style={{
+                          top: "-14px",
+                          backgroundColor: "var(--v2-gold)",
+                          color: "var(--v2-panel-dark)",
+                        }}
+                      >
+                        Most chosen
+                      </span>
+                    )}
+
+                    {/* Tier name */}
+                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      {tier.name}
+                    </p>
+
+                    {/* Price — Fraunces non-italic, floating pound sign */}
+                    <div className="relative mb-1" style={{ lineHeight: 1 }}>
+                      <span
+                        className="font-display font-semibold absolute"
+                        style={{
+                          color: "rgba(255,255,255,0.4)",
+                          fontSize: "clamp(28px, 3vw, 36px)",
+                          top: "4px",
+                          left: "-2px",
+                          transform: "translateX(-100%)",
+                        }}
+                      >
+                        &pound;
+                      </span>
+                      <span
+                        className="font-display font-semibold"
+                        style={{
+                          color: "#FFFFFF",
+                          fontSize: "clamp(72px, 6vw, 96px)",
+                          marginLeft: "20px",
+                        }}
+                      >
+                        {tier.price}
+                      </span>
+                    </div>
+
+                    {/* Turnaround — mono */}
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase mb-8"
+                      style={{ color: "#888888", letterSpacing: "0.15em" }}
+                    >
+                      {tier.days} turnaround
+                    </p>
+
+                    {/* Feature bullets — em-dash prefix */}
+                    <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                      {tier.features.map((f) => (
+                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "#E8E4DC" }}>
+                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+
+                    {/* CTA button */}
+                    <Link
+                      href="/submit"
+                      className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] w-full"
+                      style={
+                        tier.featured
+                          ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
+                          : { border: "1px solid var(--v2-gold)", color: "var(--v2-gold)" }
+                      }
+                    >
+                      Start a submission <ArrowRight size={14} />
+                    </Link>
+                  </div>
+                ))}
+              </div>
             </div>
+
             <p className="font-body text-xs text-center mt-8" style={{ color: "rgba(255,255,255,0.35)" }}>
-              Bulk discounts from 10 cards. Vault Club members save up to 20%.
+              Bulk discounts from 10 cards.
             </p>
           </div>
         </section>
@@ -398,7 +449,7 @@ export default function HomeV2() {
                 </Link>
               </div>
 
-              {/* Card 3 — Vault Club */}
+              {/* Card 3 — Vault Club (Silver only at launch) */}
               <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line-soft)" }}>
                 <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
                   03 &middot; Vault Club
@@ -410,17 +461,17 @@ export default function HomeV2() {
                   Grading discounts, higher AI Pre-Grade allowance, priority queue,
                   and a reserved username on the public registry.
                 </p>
-                <div className="space-y-2.5 mb-5">
-                  {[
-                    { tier: "Bronze", price: "\u00a34.99/mo" },
-                    { tier: "Silver", price: "\u00a39.99/mo" },
-                    { tier: "Gold", price: "\u00a319.99/mo" },
-                  ].map((t) => (
-                    <div key={t.tier} className="flex items-center justify-between font-body text-xs" style={{ color: "var(--v2-ink-soft)" }}>
-                      <span>{t.tier}</span>
-                      <span className="font-mono-v2 text-[10px]" style={{ color: "var(--v2-ink)" }}>{t.price}</span>
+                <div className="space-y-2 mb-5">
+                  <div className="flex items-center justify-between font-body text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>
+                    <span>Silver</span>
+                    <div className="text-right">
+                      <span className="font-mono-v2 text-[11px]">&pound;9.99/mo</span>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex items-center justify-between font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>
+                    <span></span>
+                    <span className="font-mono-v2 text-[10px]">&pound;99/year</span>
+                  </div>
                 </div>
                 <Link
                   href="/club"
@@ -474,7 +525,7 @@ export default function HomeV2() {
 
             {/* Mini table */}
             {recentCerts.length > 0 && (
-              <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--v2-line)" }}>
+              <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid var(--v2-line)" }}>
                 <table className="w-full text-left">
                   <thead>
                     <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
