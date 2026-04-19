@@ -24,6 +24,181 @@ interface HomepageStats {
   }[];
 }
 
+// ── Hero slab ──────────────────────────────────────────────────────────────
+// Premium graded-slab visual for hero right column. Per design-system skill
+// (Layer B, "Gradient slabs"): no card artwork, generic moody gradient +
+// MintVault monogram only. All data live-sourced from /api/v2/homepage-stats.
+
+type RecentCert = HomepageStats["recent_certs"][number];
+
+// 2% fractal noise overlay to break up gradient banding — inline SVG so we
+// don't ship a separate asset. `%23` = `#` (URL-encoded for the data URL).
+const SLAB_NOISE_SVG =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")";
+
+function HeroSlab({
+  cert,
+  rotation,
+  offset,
+  zIndex,
+}: {
+  cert: RecentCert | null;
+  rotation: number;
+  offset: { x: number; y: number };
+  zIndex: number;
+}) {
+  const certNumber = cert?.cert_number ?? null;
+  const hasCardName = !!(cert?.card_name && cert.card_name.trim());
+  const cardName = hasCardName ? cert!.card_name : "MintVault";
+  const grade = cert?.grade ?? null;
+  const gradeLabel = grade ? `MV ${grade}` : null;
+
+  return (
+    <div
+      className="absolute overflow-hidden transition-shadow duration-300 hover:shadow-[0_20px_40px_-12px_rgba(15,14,11,0.25)]"
+      style={{
+        // Responsive width per skill spec; aspectRatio drives height.
+        ["--slab-width" as any]: "clamp(120px, 40vw, 220px)",
+        width: "var(--slab-width)",
+        aspectRatio: "0.82",
+        borderRadius: "12px",
+        border: "1px solid rgba(212, 175, 55, 0.4)",
+        backgroundColor: "var(--v2-paper-raised)",
+        transform: `rotate(${rotation}deg) translate(${offset.x}px, ${offset.y}px)`,
+        zIndex,
+      }}
+    >
+      {/* ─── TOP BAR (~10%) — gold MV[n] pill, top-right ─── */}
+      <div
+        style={{
+          height: "10%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          padding: "0 8px",
+        }}
+      >
+        {certNumber && (
+          <span
+            className="font-mono-v2"
+            style={{
+              color: "var(--v2-gold-soft)",
+              fontSize: "clamp(8px, 2.2vw, 10px)",
+              letterSpacing: "0.1em",
+              padding: "1px 6px",
+              border: "1px solid rgba(212, 175, 55, 0.4)",
+              borderRadius: "999px",
+              lineHeight: 1,
+            }}
+          >
+            {certNumber}
+          </span>
+        )}
+      </div>
+
+      {/* ─── DISPLAY FIELD (~65%) — gradient + noise + monogram ─── */}
+      <div
+        style={{
+          height: "65%",
+          position: "relative",
+          background:
+            "radial-gradient(circle at top left, var(--v2-slab-gradient-navy) 0%, var(--v2-slab-gradient-petrol) 35%, var(--v2-slab-gradient-teal) 70%, var(--v2-slab-gradient-bronze) 100%)",
+        }}
+      >
+        {/* 2% noise to break gradient banding */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage: SLAB_NOISE_SVG,
+            opacity: 0.02,
+            pointerEvents: "none",
+          }}
+        />
+        {/* Centered monogram — Fraunces italic, ~14% of slab width */}
+        <div
+          className="absolute inset-0 flex items-center justify-center font-display italic"
+          style={{
+            color: "rgba(255, 255, 255, 0.12)",
+            fontSize: "calc(var(--slab-width) * 0.14)",
+            whiteSpace: "nowrap",
+            lineHeight: 1,
+            userSelect: "none",
+          }}
+        >
+          MintVault
+        </div>
+      </div>
+
+      {/* ─── BOTTOM BAR (~25%) — card_name, grade, NFC badge ─── */}
+      <div
+        style={{
+          height: "25%",
+          padding: "6px 10px",
+          backgroundColor: "var(--v2-paper-raised)",
+          borderTop: "1px solid var(--v2-line)",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          gap: "4px",
+        }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className="font-body truncate"
+            style={{
+              color: "var(--v2-ink)",
+              fontSize: "clamp(10px, 2.8vw, 14px)",
+              fontWeight: 500,
+              minWidth: 0,
+            }}
+          >
+            {cardName}
+          </span>
+          {gradeLabel && (
+            <span
+              className="font-mono-v2 shrink-0"
+              style={{
+                color: "var(--v2-gold)",
+                fontSize: "clamp(9px, 2.4vw, 12px)",
+                fontWeight: 600,
+                lineHeight: 1,
+              }}
+            >
+              {gradeLabel}
+            </span>
+          )}
+        </div>
+        {/* NFC badge — desktop only per spec */}
+        <div className="hidden md:flex items-center gap-1">
+          <span
+            aria-hidden="true"
+            style={{
+              width: "5px",
+              height: "5px",
+              borderRadius: "999px",
+              backgroundColor: "var(--v2-gold)",
+              display: "inline-block",
+            }}
+          />
+          <span
+            className="font-mono-v2"
+            style={{
+              color: "var(--v2-ink-mute)",
+              fontSize: "9px",
+              letterSpacing: "0.05em",
+              lineHeight: 1,
+            }}
+          >
+            NFC &middot; Verified
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Animated counter ───────────────────────────────────────────────────────
 
 function CountUp({ end, decimals = 0, duration = 1800 }: { end: number; decimals?: number; duration?: number }) {
@@ -85,7 +260,7 @@ function FadeIn({ children, className = "" }: { children: React.ReactNode; class
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function HomeV2() {
-  const { data: stats } = useQuery<HomepageStats>({
+  const { data: stats, error: statsError } = useQuery<HomepageStats>({
     queryKey: ["/api/v2/homepage-stats"],
     queryFn: async () => {
       const res = await fetch("/api/v2/homepage-stats");
@@ -94,6 +269,10 @@ export default function HomeV2() {
     },
     staleTime: 60_000,
   });
+
+  useEffect(() => {
+    if (statsError) console.error("Homepage stats fetch failed:", statsError);
+  }, [statsError]);
 
   const totalGraded = stats?.total_graded ?? 132;
   const uniqueSets = stats?.unique_sets ?? 71;
@@ -152,47 +331,32 @@ export default function HomeV2() {
             </p>
           </div>
 
-          {/* Right — slab stack */}
-          <div className="relative h-[260px] md:h-[500px] flex items-center justify-center mx-auto" style={{ width: "min(60vw, 220px)", maxWidth: "none" }}>
-            {(recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null]).map((cert, i) => {
-              const rotations = [-6, 3, 8];
-              const offsets = [{ x: -14, y: 16 }, { x: 8, y: -14 }, { x: 28, y: 8 }];
-              return (
-                <div
-                  key={i}
-                  className="absolute rounded-xl border-2 shadow-xl overflow-hidden transition-transform duration-500"
-                  style={{
-                    width: "clamp(120px, 40vw, 220px)",
-                    borderColor: "var(--v2-gold)",
-                    backgroundColor: "var(--v2-paper-raised)",
-                    transform: `rotate(${rotations[i]}deg) translate(${offsets[i].x}px, ${offsets[i].y}px)`,
-                    zIndex: i + 1,
-                  }}
-                >
-                  {/* Card image area */}
-                  <div className="aspect-[2.5/3.5] bg-gradient-to-br from-[#F4F0E6] to-[#E8E1D0] flex items-center justify-center">
-                    {cert?.front_image_path ? (
-                      <img
-                        src={`/api/images/${cert.front_image_path}?w=220`}
-                        alt={cert.card_name || ""}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="font-display italic text-lg" style={{ color: "var(--v2-ink-mute)" }}>MV</span>
-                    )}
-                  </div>
-                  {/* Slab footer */}
-                  <div className="px-2 md:px-3 py-1.5 md:py-2 flex items-center justify-between" style={{ borderTop: "1px solid var(--v2-line)" }}>
-                    <span className="font-body text-[7px] md:text-[9px] font-semibold truncate" style={{ color: "var(--v2-ink-soft)" }}>
-                      {cert?.card_name || "Card Name"}
-                    </span>
-                    <span className="font-mono-v2 text-[6px] md:text-[8px]" style={{ color: "var(--v2-gold)" }}>
-                      {cert?.cert_number || `MV${i + 1}`}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+          {/* Right — slab stack. Live data from /api/v2/homepage-stats → recent_certs.
+              Fallback: 3 monogram slabs when API returns 0 rows or errors. */}
+          <div
+            className="relative h-[300px] md:h-[500px] flex items-center justify-center mx-auto"
+            style={{ width: "min(70vw, 260px)", maxWidth: "none" }}
+          >
+            {(() => {
+              const slots: (RecentCert | null)[] =
+                recentCerts.length > 0 ? recentCerts.slice(0, 3) : [null, null, null];
+              const rotations = [-8, 4, -2];
+              const offsets = [
+                { x: -14, y: 18 },
+                { x: 8, y: -14 },
+                { x: 28, y: 8 },
+              ];
+              // Newest cert sits on top; supporting slabs behind.
+              return slots.map((cert, i) => (
+                <HeroSlab
+                  key={cert?.id ?? `slot-${i}`}
+                  cert={cert}
+                  rotation={rotations[i]}
+                  offset={offsets[i]}
+                  zIndex={slots.length - i}
+                />
+              ));
+            })()}
           </div>
         </div>
       </section>
