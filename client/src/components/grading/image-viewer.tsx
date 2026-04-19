@@ -283,7 +283,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
     return (
       <div
         ref={containerRef}
-        className={`relative overflow-hidden rounded-lg bg-[#0A0A0A] border border-[#222222] select-none ${
+        className={`relative overflow-hidden rounded-lg select-none ${
           markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
         }`}
         style={{ aspectRatio: "5/7", maxHeight: maxH }}
@@ -492,15 +492,19 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
-            <div className="rounded-lg bg-[#0A0A0A] border border-[#222222] overflow-hidden" style={{ aspectRatio: "5/7" }}>
-              {urls.front_cropped || urls.front_original
-                ? <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
-                : <div className="w-full h-full flex items-center justify-center"><p className="text-[#888888] text-xs">No scan</p></div>}
+            <div className="rounded-lg overflow-hidden" style={{ aspectRatio: "5/7" }}>
+              {urls.front_cropped || urls.front_original ? (
+                <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <p className="text-[#333333] text-xs">No scan</p>
+                </div>
+              )}
             </div>
           </div>
           <div className="space-y-1">
             <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Reference Image</p>
-            <div className="rounded-lg bg-[#0A0A0A] border border-[#D4AF37]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
+            <div className="rounded-lg border border-[#D4AF37]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
               <img src={referenceImageUrl} alt="reference" className="w-full h-full object-contain" />
             </div>
           </div>

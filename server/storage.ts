@@ -836,6 +836,9 @@ export class DatabaseStorage implements IStorage {
     }
 
     const whereClause = conditions.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`);
+    // Sort by numeric portion of certId DESC so MV141 > MV140 > MV135 — admin
+    // dashboard list, CSV export, ownership export, and printing sheet all
+    // read via this method. createdAt order puts renumbered certs out of place.
     return await db.select().from(certificates).where(whereClause).orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
   }
 
@@ -1189,11 +1192,14 @@ export class DatabaseStorage implements IStorage {
   // ── Certificate browser ──────────────────────────────────────────────────────
 
   async listCertificatesBrowser(): Promise<Array<CertificateRecord & { isPrinted: boolean; reprintCount: number }>> {
+    // Sort by numeric portion of certId DESC so MV141 > MV140 > MV135, not by
+    // createdAt (which puts renumbered certs out of sequence). Text sort alone
+    // would give MV9 > MV141 lexically — CAST avoids that.
     const certs = await db
       .select()
       .from(certificates)
       .where(isNull(certificates.deletedAt))
-      .orderBy(desc(certificates.createdAt));
+      .orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
 
     const printedRows = await db
       .select({ certId: labelPrints.certId })

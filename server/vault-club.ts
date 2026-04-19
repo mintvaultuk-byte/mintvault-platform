@@ -83,71 +83,15 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── POST /api/vault-club/checkout ──────────────────────────────────────────
-  app.post("/api/vault-club/checkout", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).userId as string;
-      const { tier, interval } = req.body;
-
-      if (!tier || !["bronze", "silver", "gold"].includes(tier)) {
-        return res.status(400).json({ error: "Invalid tier. Must be bronze, silver, or gold." });
-      }
-      if (!interval || !["month", "year"].includes(interval)) {
-        return res.status(400).json({ error: "Invalid interval. Must be month or year." });
-      }
-
-      const priceId = getPriceId(tier, interval);
-      if (!priceId) {
-        return res.status(503).json({ error: "Stripe products not yet configured. Run POST /api/admin/vault-club/setup-stripe-products first." });
-      }
-
-      const user = await getUserVaultClub(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const stripe = await getStripe();
-      const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
-
-      // Get or create Stripe customer
-      let customerId = user.stripe_customer_id as string | null;
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: user.email as string,
-          name: (user.display_name as string) || undefined,
-          metadata: { user_id: userId },
-        });
-        customerId = customer.id;
-        await db.execute(sql`
-          UPDATE users SET stripe_customer_id = ${customerId} WHERE id = ${userId}
-        `);
-      }
-
-      const sessionParams: Stripe.Checkout.SessionCreateParams = {
-        mode: "subscription",
-        customer: customerId,
-        line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${appUrl}/club?welcome=1`,
-        cancel_url: `${appUrl}/club`,
-        allow_promotion_codes: true,
-        metadata: { user_id: userId, tier, interval },
-      };
-
-      // Annual plans get a 14-day trial; monthly plans do not
-      if (interval === "year") {
-        sessionParams.subscription_data = {
-          trial_period_days: 14,
-          metadata: { user_id: userId, tier, interval },
-        };
-      } else {
-        sessionParams.subscription_data = {
-          metadata: { user_id: userId, tier, interval },
-        };
-      }
-
-      const session = await stripe.checkout.sessions.create(sessionParams);
-      return res.json({ url: session.url });
-    } catch (err: any) {
-      console.error("[vault-club] checkout error:", err.message);
-      return res.status(500).json({ error: "Failed to create checkout session." });
-    }
+  // Re-enable in Phase 1B (perk evaluator). Disabled because config no longer
+  // maps to checkout behaviour — Silver's perks (free return shipping, free
+  // monthly Authentication, queue-jump) need server-side exemption logic that
+  // doesn't exist yet. Shipping users to Stripe now would take their money for
+  // perks we aren't actually applying.
+  app.post("/api/vault-club/checkout", requireAuth, async (_req: Request, res: Response) => {
+    return res.status(503).json({
+      error: "Vault Club temporarily unavailable — re-enables with the full perks system. Contact support@mintvaultuk.com to be notified.",
+    });
   });
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
@@ -176,6 +120,12 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── GET /api/vault-club/check-discount ────────────────────────────────────
+  // Legacy endpoint — percentage grading discount removed 2026-04-19 when the
+  // club moved to a perks-and-credits model. Returns 0 always so any
+  // still-subscribed clients degrade gracefully. Returns the user's tier
+  // when known (active+trialing) so receipts can show "Silver member" etc.
+  // When the Phase 1B perk evaluator ships, this endpoint can either be
+  // removed or repurposed to surface per-perk availability.
   app.get("/api/vault-club/check-discount", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -192,10 +142,7 @@ export function registerVaultClubRoutes(app: Express): void {
       if (!tier || !isActiveStatus(status)) {
         return res.json({ discount_percent: 0, tier: null });
       }
-      return res.json({
-        discount_percent: VAULT_CLUB_TIERS[tier].grading_discount_percent,
-        tier,
-      });
+      return res.json({ discount_percent: 0, tier });
     } catch (err: any) {
       console.error("[vault-club] check-discount error:", err.message);
       return res.status(500).json({ error: "Failed to check discount." });
@@ -305,25 +252,17 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
-/** Grant quarterly member credits for the given tier at signup/renewal */
+/**
+ * Grant member credits for the given tier at signup/renewal.
+ *
+ * No-op since 2026-04-19 — the quarterly_reholders perk was dropped when the
+ * club moved to perks-and-credits. Function retained for webhook call-sites;
+ * will be removed when Phase 1B updates webhooks to use the new perk model.
+ */
 export async function grantMemberCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
-  const qty = VAULT_CLUB_TIERS[tier].quarterly_reholders;
-  if (qty <= 0) return;
-  const expiresAt = endOfCurrentQuarter();
-  // Check if we already granted credits for this quarter+source
-  const existing = await db.execute(sql`
-    SELECT id FROM member_credits
-    WHERE user_id = ${userId} AND source = ${source}
-      AND granted_at >= (NOW() - INTERVAL '92 days')
-    LIMIT 1
-  `);
-  if (existing.rows.length > 0) return; // already granted
-  for (let i = 0; i < qty; i++) {
-    await db.execute(sql`
-      INSERT INTO member_credits (user_id, expires_at, source)
-      VALUES (${userId}, ${expiresAt.toISOString()}, ${source})
-    `);
-  }
+  void userId; void tier; void source;
+  console.log("[vault-club] grantMemberCredits skipped — quarterly_reholders perk deprecated 2026-04-19");
+  return;
 }
 
 /** Insert a vault_club_events audit row (idempotent via stripe_event_id UNIQUE) */
