@@ -54,7 +54,7 @@ const steps = [
     num: "04",
     icon: Shield,
     title: "Encapsulation & Quality Check",
-    body: "Your card is encased in an archival-quality, UV-protected slab with a tamper-evident NFC chip. The grade label is inscribed — no paper labels that can be swapped. Every slab undergoes a final quality inspection before shipping.",
+    body: "Your card is encased in an archival-quality, UV-protected, tamper-evident slab with an embedded NFC chip. The grade label is inscribed — no paper labels that can be swapped. Every slab undergoes a final quality inspection before shipping.",
     cta: null,
     note: null,
   },
