@@ -20,7 +20,7 @@ const sections = [
     id: "our-labels",
     icon: <Award size={22} className="text-[#3c2f00]" />,
     headline: "Premium MintVault Labels",
-    text: "MintVault labels are designed for clarity, security, and prestige. Each label features a unique certificate number, VaultLink QR verification, and anti-counterfeit design elements.",
+    text: "MintVault labels are designed for clarity, security, and prestige. Each label features a unique certificate number and VaultLink QR verification.",
     bullets: [
       "Unique certification number",
       "VaultLink QR verification",

@@ -24,7 +24,7 @@ export default function NfcRedirectPage() {
         setStatus("redirecting");
         setTimeout(() => setLocation(data.redirectTo || `/cert/${certId.toUpperCase()}`), 800);
       } catch {
-        setError("Failed to verify NFC tag.");
+        setError("Couldn't open this certificate.");
         setStatus("error");
       }
     };
@@ -42,20 +42,20 @@ export default function NfcRedirectPage() {
           <ShieldCheck className="h-8 w-8 text-[#1A1400]" />
         </div>
         <h1 className="text-lg font-black text-[#D4AF37] tracking-widest uppercase mb-1">MintVault</h1>
-        <p className="text-[#999999] text-xs uppercase tracking-widest mb-8 font-mono">NFC Verification</p>
+        <p className="text-[#999999] text-xs uppercase tracking-widest mb-8 font-mono">Scan Result</p>
 
         {status === "verifying" && (
           <div className="space-y-3">
             <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
-            <p className="text-[#666666] text-sm">Verifying NFC tag…</p>
+            <p className="text-[#666666] text-sm">Opening certificate…</p>
             <p className="text-[#D4AF37]/30 text-xs font-mono">{certId?.toUpperCase()}</p>
           </div>
         )}
 
         {status === "redirecting" && (
           <div className="space-y-3">
-            <ShieldCheck className="h-7 w-7 text-emerald-400 mx-auto" />
-            <p className="text-[#666666] text-sm">Verified — opening certificate…</p>
+            <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
+            <p className="text-[#666666] text-sm">Opening certificate…</p>
           </div>
         )}
 

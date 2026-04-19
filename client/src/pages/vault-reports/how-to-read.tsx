@@ -36,7 +36,7 @@ const SECTIONS = [
   {
     num: "07",
     title: "Authentication",
-    body: "Every slab has multiple verification methods: NFC chip, QR code, certificate ID, and tamper-evident seal. All must be intact for the card to remain verified.",
+    body: "Every slab has multiple ways to look it up: tap the NFC chip, scan the QR code, or type the certificate ID. The tamper-evident seal makes it obvious if anyone has tried to open the slab.",
   },
 ];
 
