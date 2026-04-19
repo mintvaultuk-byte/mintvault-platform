@@ -83,71 +83,15 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── POST /api/vault-club/checkout ──────────────────────────────────────────
-  app.post("/api/vault-club/checkout", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).userId as string;
-      const { tier, interval } = req.body;
-
-      if (!tier || !["bronze", "silver", "gold"].includes(tier)) {
-        return res.status(400).json({ error: "Invalid tier. Must be bronze, silver, or gold." });
-      }
-      if (!interval || !["month", "year"].includes(interval)) {
-        return res.status(400).json({ error: "Invalid interval. Must be month or year." });
-      }
-
-      const priceId = getPriceId(tier, interval);
-      if (!priceId) {
-        return res.status(503).json({ error: "Stripe products not yet configured. Run POST /api/admin/vault-club/setup-stripe-products first." });
-      }
-
-      const user = await getUserVaultClub(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const stripe = await getStripe();
-      const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
-
-      // Get or create Stripe customer
-      let customerId = user.stripe_customer_id as string | null;
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: user.email as string,
-          name: (user.display_name as string) || undefined,
-          metadata: { user_id: userId },
-        });
-        customerId = customer.id;
-        await db.execute(sql`
-          UPDATE users SET stripe_customer_id = ${customerId} WHERE id = ${userId}
-        `);
-      }
-
-      const sessionParams: Stripe.Checkout.SessionCreateParams = {
-        mode: "subscription",
-        customer: customerId,
-        line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${appUrl}/club?welcome=1`,
-        cancel_url: `${appUrl}/club`,
-        allow_promotion_codes: true,
-        metadata: { user_id: userId, tier, interval },
-      };
-
-      // Annual plans get a 14-day trial; monthly plans do not
-      if (interval === "year") {
-        sessionParams.subscription_data = {
-          trial_period_days: 14,
-          metadata: { user_id: userId, tier, interval },
-        };
-      } else {
-        sessionParams.subscription_data = {
-          metadata: { user_id: userId, tier, interval },
-        };
-      }
-
-      const session = await stripe.checkout.sessions.create(sessionParams);
-      return res.json({ url: session.url });
-    } catch (err: any) {
-      console.error("[vault-club] checkout error:", err.message);
-      return res.status(500).json({ error: "Failed to create checkout session." });
-    }
+  // Re-enable in Phase 1B (perk evaluator). Disabled because config no longer
+  // maps to checkout behaviour — Silver's perks (free return shipping, free
+  // monthly Authentication, queue-jump) need server-side exemption logic that
+  // doesn't exist yet. Shipping users to Stripe now would take their money for
+  // perks we aren't actually applying.
+  app.post("/api/vault-club/checkout", requireAuth, async (_req: Request, res: Response) => {
+    return res.status(503).json({
+      error: "Vault Club temporarily unavailable — re-enables with the full perks system. Contact support@mintvaultuk.com to be notified.",
+    });
   });
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
