@@ -167,6 +167,7 @@ import HomeV2 from "@/pages/v2/home-v2";
 import PricingV2 from "@/pages/v2/pricing-v2";
 import VaultClubV2 from "@/pages/v2/vault-club-v2";
 import VerifyV2 from "@/pages/v2/verify-v2";
+import AiPreGradeV2 from "@/pages/v2/ai-pre-grade-v2";
 
 function Router() {
   return (
@@ -182,6 +183,7 @@ function Router() {
         <Route path="/v2-pricing" component={PricingV2} />
         <Route path="/v2-vault-club" component={VaultClubV2} />
         <Route path="/v2-verify" component={VerifyV2} />
+        <Route path="/v2-ai-pre-grade" component={AiPreGradeV2} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />
