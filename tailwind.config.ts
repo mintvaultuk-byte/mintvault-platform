@@ -86,6 +86,9 @@ export default {
         sans: ["var(--font-sans)"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
+        display: ["Fraunces", "Georgia", "serif"],
+        body: ["Geist Variable", "Geist", "system-ui", "sans-serif"],
+        "mono-v2": ['"JetBrains Mono"', "ui-monospace", "monospace"],
       },
       keyframes: {
         "accordion-down": {

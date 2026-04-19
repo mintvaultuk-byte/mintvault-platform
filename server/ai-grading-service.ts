@@ -191,6 +191,34 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
   return { original: buffer, cropped, greyscale, highcontrast, edgeenhanced, inverted };
 }
 
+// ── Pokémon card-code → TCG API set ID normalisation ─────────────────────
+
+/** Map printed card set codes to the TCG API's internal set IDs */
+const CARD_CODE_TO_TCG_ID: Record<string, string> = {
+  // Scarlet & Violet era
+  SVI: "sv1", PAL: "sv2", OBF: "sv3", MEW: "sv3pt5",
+  PAR: "sv4", KSS: "sv4pt5", TEF: "sv5", TWM: "sv6",
+  SFA: "sv6pt5", SCR: "sv7", SSP: "sv8", PRE: "sv8pt5",
+  JTG: "sv9", DRI: "sv10", BLT: "sv11", WHT: "sv12", MEG: "sv13",
+  SVP: "svp",
+  // Sword & Shield era (common)
+  SWH: "swsh1", RCL: "swsh2", DAA: "swsh3", VIV: "swsh4",
+  BST: "swsh5", CRE: "swsh6", EVS: "swsh7", FST: "swsh8",
+  BRS: "swsh9", ASR: "swsh10", LOR: "swsh11", SIT: "swsh12",
+  CRZ: "swsh12pt5",
+  // Promos / specials
+  "M24EN": "mcd19",
+};
+
+/** Resolve a printed card code to TCG API set ID(s) to try */
+function resolveSetCodeToTcgIds(setCode: string | null | undefined): string[] {
+  if (!setCode) return [];
+  const upper = setCode.replace(/\s+/g, "").toUpperCase();
+  const mapped = CARD_CODE_TO_TCG_ID[upper];
+  if (mapped) return [mapped, upper.toLowerCase()];
+  return [upper.toLowerCase()];
+}
+
 // ── Pokémon TCG API verification ──────────────────────────────────────────
 
 /**
@@ -227,18 +255,22 @@ export async function verifyPokemonCardWithTcgApi(
   // Detect Japanese/promo patterns
   const isPromoPattern = setCode && /^(M\d+|S-?P|SVP|SVPja|.*ja$)/i.test(setCode);
 
+  // TCG API expects card numbers without leading zeros (e.g. "13" not "013")
+  const queryNumber = detectedNumber ? detectedNumber.replace(/^0+/, "") || detectedNumber : detectedNumber;
+
   try {
     let results: any[] = [];
 
     // Strategy 1: If we have a set code, search by set.id + number (most precise)
     if (setCode) {
+      // Use the card-code → TCG API ID map, then fall back to raw variants
+      const mapped = resolveSetCodeToTcgIds(setCode);
       const codeClean = normaliseSetCode(setCode).toLowerCase();
-      // Try multiple code formats (TCG API is inconsistent: "svp", "sv-p", "pop1", etc.)
-      const codeVariants = [codeClean, setCode.replace(/\s+/g, "-").toLowerCase(), setCode.toLowerCase()];
+      const codeVariants = [...mapped, codeClean, setCode.replace(/\s+/g, "-").toLowerCase(), setCode.toLowerCase()];
       const uniqueCodes = [...new Set(codeVariants)];
       for (const code of uniqueCodes) {
         if (results.length > 0) break;
-        const setQuery = encodeURIComponent(`set.id:${code} number:${detectedNumber}`);
+        const setQuery = encodeURIComponent(`set.id:${code} number:${queryNumber}`);
         const queryUrl = `https://api.pokemontcg.io/v2/cards?q=${setQuery}&pageSize=5`;
         console.log(`[tcg-verify] strategy 1 URL: ${queryUrl}`);
         const setRes = await fetch(queryUrl, { headers: { "X-Api-Key": apiKey } });
@@ -252,17 +284,22 @@ export async function verifyPokemonCardWithTcgApi(
 
     // Strategy 2: Fallback to name + number search, with guards
     if (results.length === 0) {
-      console.log(`[identify-debug] TCG query strategy 2: name:"${detectedName}" number:${detectedNumber}`);
-      const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${detectedNumber}`);
+      console.log(`[identify-debug] TCG query strategy 2: name:"${detectedName}" number:${queryNumber}`);
+      const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${queryNumber}`);
       const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, { headers: { "X-Api-Key": apiKey } });
       if (nameRes.ok) {
         const nameData = await nameRes.json();
         const rawResults = nameData.data || [];
 
-        // Filter out mismatches: reject if card number or year doesn't match
+        // Filter out mismatches: reject if card name, number, or year doesn't match
         results = rawResults.filter((card: any) => {
-          // Number guard: TCG card number must match AI-detected number
-          if (detectedNumber && card.number && String(card.number) !== String(detectedNumber)) {
+          // Name guard: card name must match AI-detected name
+          if (normaliseCardName(card.name) !== normaliseCardName(detectedName)) {
+            console.log(`[tcg-verify] strategy 2: rejected ${card.name} — name mismatch (AI: ${detectedName})`);
+            return false;
+          }
+          // Number guard: TCG card number must match AI-detected number (strip leading zeros)
+          if (detectedNumber && card.number && String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")) {
             console.log(`[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — number mismatch (AI: ${detectedNumber}, TCG: ${card.number})`);
             return false;
           }
@@ -351,10 +388,16 @@ export async function verifyPokemonCardWithTcgApi(
       }
     }
 
-    // Number sanity check: TCG card number must match what the AI detected
-    if (detectedNumber && card.number && String(card.number) !== String(detectedNumber)) {
+    // Number sanity check: TCG card number must match what the AI detected (strip leading zeros)
+    if (detectedNumber && card.number && String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")) {
       console.warn(`[pokemon-tcg] number mismatch: AI detected #${detectedNumber} but TCG match is #${card.number} — rejecting`);
       return { verified: false, rejectReason: `Card number mismatch: detected #${detectedNumber} but TCG match is #${card.number}` };
+    }
+
+    // Name sanity check: TCG card name must match AI-detected name
+    if (normaliseCardName(card.name) !== normaliseCardName(detectedName)) {
+      console.warn(`[pokemon-tcg] name mismatch: AI="${detectedName}" TCG="${card.name}" — rejecting (set_code may be wrong)`);
+      return { verified: false, trustAi: true, rejectReason: `Name mismatch: AI detected "${detectedName}" but TCG match is "${card.name}" — likely wrong set code` };
     }
 
     console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (${card.rarity})`);
@@ -478,15 +521,22 @@ export async function analyzeCardFromBuffers(
   const content: object[] = [imageBlock(frontB64)];
   if (backB64) content.push(imageBlock(backB64));
 
-  let prompt = GRADING_SYSTEM_PROMPT;
+  // Build system prompt (static grading prompt + optional game-specific module)
+  let systemPrompt = GRADING_SYSTEM_PROMPT;
   if (cardGame && CARD_GAME_MODULES[cardGame]) {
-    prompt += "\n\n" + CARD_GAME_MODULES[cardGame];
+    systemPrompt += "\n\n" + CARD_GAME_MODULES[cardGame];
   }
-  content.push({ type: "text", text: prompt });
+
+  // Add a brief instruction in user content to trigger grading
+  content.push({ type: "text", text: "Grade this card. Return ONLY valid JSON." });
 
   let text: string;
   try {
-    text = await callClaude(content, 4096, "claude-opus-4-7", "xhigh");
+    text = await callClaude(content, 4096, "claude-opus-4-7", {
+      thinking: true,
+      systemPrompt,
+      label: "grade",
+    });
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
   }
@@ -496,7 +546,7 @@ export async function analyzeCardFromBuffers(
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096);
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix" });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -550,7 +600,7 @@ async function callClaude(
   content: object[],
   maxTokens: number,
   model = "claude-opus-4-7",
-  effort?: string,
+  options?: { thinking?: boolean; systemPrompt?: string; label?: string },
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
@@ -560,9 +610,19 @@ async function callClaude(
     max_tokens: maxTokens,
     messages: [{ role: "user", content }],
   };
-  if (effort) {
+
+  // Adaptive thinking (self-determines budget — no xhigh forcing)
+  if (options?.thinking) {
     body.thinking = { type: "adaptive" };
-    body.output_config = { effort };
+  }
+
+  // System prompt with prompt caching
+  if (options?.systemPrompt) {
+    body.system = [{
+      type: "text",
+      text: options.systemPrompt,
+      cache_control: { type: "ephemeral" },
+    }];
   }
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -580,9 +640,34 @@ async function callClaude(
     throw new Error(`Claude API error ${response.status}: ${errText.slice(0, 300)}`);
   }
 
-  const data = await response.json() as { content: { type: string; text: string }[] };
-  if (!data.content?.[0]?.text) throw new Error("Claude returned empty response");
-  return data.content[0].text;
+  const data = await response.json() as Record<string, unknown>;
+  const usage = data.usage as any;
+
+  // ── Cost logging ──────────────────────────────────────────────────────────
+  const inputTokens = usage?.input_tokens || 0;
+  const cacheCreation = usage?.cache_creation_input_tokens || 0;
+  const cacheRead = usage?.cache_read_input_tokens || 0;
+  const outputTokens = usage?.output_tokens || 0;
+  // Opus 4.7 pricing: input $5/M, cache-write $6.25/M, cache-read $0.50/M, output $25/M
+  const costUsd =
+    (inputTokens / 1_000_000) * 5 +
+    (cacheCreation / 1_000_000) * 6.25 +
+    (cacheRead / 1_000_000) * 0.5 +
+    (outputTokens / 1_000_000) * 25;
+  const costGbp = costUsd * 0.79; // approximate USD→GBP
+  const label = options?.label || "unknown";
+  console.log(`[ai-cost] ${label}: input=${inputTokens} cached=${cacheRead} cache-write=${cacheCreation} output=${outputTokens} → £${costGbp.toFixed(4)} ($${costUsd.toFixed(4)})`);
+  // ── End cost logging ──────────────────────────────────────────────────────
+
+  const contentArr = data.content as { type: string; text?: string; thinking?: string }[] | undefined;
+  if (!contentArr?.length) throw new Error("Claude returned empty content array");
+
+  // With adaptive thinking, content[0] may be a thinking block — find the text block
+  const textBlock = contentArr.find(b => b.type === "text");
+  if (!textBlock?.text) {
+    throw new Error(`Claude returned no text block. Content types: [${contentArr.map(b => b.type).join(", ")}]`);
+  }
+  return textBlock.text;
 }
 
 function parseJson<T>(text: string): T {
@@ -633,6 +718,14 @@ async function identifyWithGpt(base64: string): Promise<CardIdentification | nul
 /** Normalise set code: strip whitespace, uppercase. "M24 EN" and "M24EN" become "M24EN" */
 function normaliseSetCode(code: string | null | undefined): string {
   return String(code || "").replace(/\s+/g, "").toUpperCase();
+}
+
+/** Normalise card name for comparison: lowercase, strip TCG suffixes */
+export function normaliseCardName(name: string): string {
+  return name
+    .replace(/[-\s]?(EX|GX|V|VMAX|VSTAR|V-UNION|Tag Team|★|δ|◇|ex|gx)$/gi, "")
+    .toLowerCase()
+    .trim();
 }
 
 /** Reconcile Claude + GPT results. Returns the best identification. */
@@ -692,7 +785,8 @@ export async function identifyCardFromBuffer(
     callClaude(
       [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
       1024,
-      "claude-haiku-4-5-20251001"
+      "claude-haiku-4-5-20251001",
+      { label: "identify-haiku" }
     ),
     identifyWithGpt(base64),
   ]);
@@ -719,7 +813,8 @@ export async function identifyCard(frontKey: string): Promise<CardIdentification
   const text = await callClaude(
     [imageBlock(frontBase64), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
     1024,
-    "claude-haiku-4-5-20251001"
+    "claude-haiku-4-5-20251001",
+    { label: "identify-haiku-r2" }
   );
 
   try {
@@ -731,45 +826,14 @@ export async function identifyCard(frontKey: string): Promise<CardIdentification
 
 // ── Database verification ──────────────────────────────────────────────────
 
+/**
+ * Verify AI identification against external card databases.
+ * A match is only marked `verified: true` when name + number + year all agree.
+ * For Pokémon, callers should prefer `verifyPokemonCardWithTcgApi()` which has
+ * richer disambiguation logic — this function is the general-purpose fallback.
+ */
 export async function verifyAndEnrichCardData(id: CardIdentification): Promise<EnrichedCardData> {
-  try {
-    const query = id.detected_number
-      ? `${id.detected_name} ${id.detected_number}`
-      : id.detected_name;
-    const results = await lookupCard(id.detected_game, query);
-
-    if (results.length > 0) {
-      const match = results[0];
-      return {
-        ...id,
-        verified: true,
-        officialName:   match.name,
-        officialSet:    match.setName,
-        officialNumber: match.number,
-        referenceImageUrl: match.imageUrl,
-        dbSource: match.source,
-      };
-    }
-
-    // Fuzzy fallback — name only
-    const fallback = await lookupCard(id.detected_game, id.detected_name);
-    if (fallback.length > 0) {
-      const match = fallback[0];
-      return {
-        ...id,
-        verified: true,
-        officialName:   match.name,
-        officialSet:    match.setName,
-        officialNumber: match.number,
-        referenceImageUrl: match.imageUrl,
-        dbSource: match.source,
-      };
-    }
-  } catch {
-    // DB lookup failed — continue with unverified
-  }
-
-  return {
+  const unverified: EnrichedCardData = {
     ...id,
     verified: false,
     officialName:   id.detected_name,
@@ -778,6 +842,86 @@ export async function verifyAndEnrichCardData(id: CardIdentification): Promise<E
     referenceImageUrl: null,
     dbSource: null,
   };
+
+  try {
+    const query = id.detected_number
+      ? `${id.detected_name} ${id.detected_number}`
+      : id.detected_name;
+    const results = await lookupCard(id.detected_game, query);
+
+    // Find a match that passes all three guards: name, number, year
+    const match = findGuardedMatch(results, id);
+    if (match) {
+      return {
+        ...id,
+        verified: true,
+        officialName:   match.name,
+        officialSet:    match.setName,
+        officialNumber: match.number,
+        referenceImageUrl: match.imageUrl,
+        dbSource: match.source,
+      };
+    }
+
+    // Name-only fallback — still requires guards
+    if (id.detected_number) {
+      const fallback = await lookupCard(id.detected_game, id.detected_name);
+      const fallbackMatch = findGuardedMatch(fallback, id);
+      if (fallbackMatch) {
+        return {
+          ...id,
+          verified: true,
+          officialName:   fallbackMatch.name,
+          officialSet:    fallbackMatch.setName,
+          officialNumber: fallbackMatch.number,
+          referenceImageUrl: fallbackMatch.imageUrl,
+          dbSource: fallbackMatch.source,
+        };
+      }
+    }
+  } catch {
+    // DB lookup failed — continue with unverified
+  }
+
+  return unverified;
+}
+
+/** Find first result where name matches AND card number matches AND year is within ±1 */
+function findGuardedMatch(
+  results: { name: string; number: string | null; year: string | null; setName: string; imageUrl: string | null; source: string }[],
+  id: CardIdentification,
+): typeof results[number] | null {
+  for (const r of results) {
+    // Name guard: base name must match (ignore suffixes like -EX, -V, VSTAR etc.)
+    const aiName = id.detected_name.replace(/[-\s]?(EX|GX|V|VMAX|VSTAR|ex)$/i, "").toLowerCase();
+    const dbName = r.name.replace(/[-\s]?(EX|GX|V|VMAX|VSTAR|ex)$/i, "").toLowerCase();
+    if (aiName !== dbName) {
+      console.log(`[verify-guard] name mismatch: AI="${id.detected_name}" DB="${r.name}" — skipping`);
+      continue;
+    }
+
+    // Number guard: must match if both present
+    if (id.detected_number && r.number) {
+      const aiNum = String(id.detected_number).replace(/^0+/, "");
+      const dbNum = String(r.number).replace(/^0+/, "");
+      if (aiNum !== dbNum) {
+        console.log(`[verify-guard] number mismatch: AI=#${id.detected_number} DB=#${r.number} — skipping`);
+        continue;
+      }
+    }
+
+    // Year guard: must be within ±1 if both present
+    const aiYear = parseInt(id.copyright_year || id.detected_year || "", 10);
+    const dbYear = parseInt(r.year || "", 10);
+    if (aiYear > 0 && dbYear > 0 && Math.abs(aiYear - dbYear) > 1) {
+      console.log(`[verify-guard] year mismatch: AI=${aiYear} DB=${dbYear} — skipping`);
+      continue;
+    }
+
+    console.log(`[verify-guard] match found: "${r.name}" #${r.number} from ${r.setName} (${r.year})`);
+    return r;
+  }
+  return null;
 }
 
 // ── Full grading analysis ──────────────────────────────────────────────────
@@ -832,15 +976,19 @@ export async function analyzeCard(
   if (angledB64)    content.push(imageBlock(angledB64));
   if (closeupB64)   content.push(imageBlock(closeupB64));
 
-  let prompt = GRADING_SYSTEM_PROMPT;
+  let systemPrompt = GRADING_SYSTEM_PROMPT;
   if (cardGame && CARD_GAME_MODULES[cardGame]) {
-    prompt += "\n\n" + CARD_GAME_MODULES[cardGame];
+    systemPrompt += "\n\n" + CARD_GAME_MODULES[cardGame];
   }
-  content.push({ type: "text", text: prompt });
+  content.push({ type: "text", text: "Grade this card. Return ONLY valid JSON." });
 
   let text: string;
   try {
-    text = await callClaude(content, 4096, "claude-opus-4-7", "xhigh");
+    text = await callClaude(content, 4096, "claude-opus-4-7", {
+      thinking: true,
+      systemPrompt,
+      label: "grade-r2",
+    });
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
   }
@@ -849,12 +997,13 @@ export async function analyzeCard(
   try {
     return clampAllGrades(parseJson<GradingAnalysis>(text));
   } catch {
-    // Retry: ask Claude to fix the JSON
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
       const fixedText = await callClaude(
         [{ type: "text", text: fixPrompt }],
-        4096
+        4096,
+        "claude-opus-4-7",
+        { label: "json-fix-r2" }
       );
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Bot, CheckCircle2, AlertTriangle, Loader2, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -115,6 +115,9 @@ interface Props {
   certId: number;
   onAnalysisComplete: (analysis: AiAnalysisResult, identification: AiIdentification | null) => void;
   referenceImageUrl?: string | null;
+  /** External analysis pushed from CertificateForm's "Identify & Grade" button */
+  externalAnalysis?: { analysis: AiAnalysisResult; identification: AiIdentification | null } | null;
+  onExternalAnalysisConsumed?: () => void;
 }
 
 type Step =
@@ -180,7 +183,7 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
   );
 }
 
-export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl }: Props) {
+export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl, externalAnalysis, onExternalAnalysisConsumed }: Props) {
   const { toast } = useToast();
 
   // Legacy state for full analysis (kept for backward compat)
@@ -205,6 +208,19 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl 
   const [gradeStatus, setGradeStatus] = useState<ActionStatus>("idle");
   const [gradeError, setGradeError] = useState("");
   const [gradeResult, setGradeResult] = useState<any>(null);
+
+  // Accept external analysis from CertificateForm's "Identify & Grade" button
+  useEffect(() => {
+    if (externalAnalysis) {
+      setIdentification(externalAnalysis.identification ?? null);
+      setResult(externalAnalysis.analysis);
+      setIdConfidence(externalAnalysis.identification?.confidence || null);
+      setIdVerified(externalAnalysis.identification?.verified || false);
+      setStep("complete");
+      onAnalysisComplete(externalAnalysis.analysis, externalAnalysis.identification ?? null);
+      onExternalAnalysisConsumed?.();
+    }
+  }, [externalAnalysis]);
 
   async function runCentering() {
     setCenteringStatus("loading"); setCenteringError("");

@@ -1,0 +1,27 @@
+app = "mintvault-v2"
+primary_region = "lhr"
+
+[build]
+
+[env]
+  PORT = "5000"
+  NODE_ENV = "production"
+  VAULT_VERSION = "v2"
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

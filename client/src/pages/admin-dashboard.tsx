@@ -62,6 +62,7 @@ export default function AdminDashboard({ onLogout }: Props) {
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
+  const [pendingAnalysis, setPendingAnalysis] = useState<{ analysis: any; identification: any } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
@@ -167,6 +168,21 @@ export default function AdminDashboard({ onLogout }: Props) {
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
+            onIdentifyAndGrade={(result) => {
+              // Push analysis to GradingPanel so it populates subgrades, defects, etc.
+              setPendingAnalysis(result);
+              // Also refetch cert for list updates
+              if (editingCert) {
+                fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
+                  .then(r => r.json())
+                  .then(certs => {
+                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                    if (updated) setEditingCert(updated);
+                  })
+                  .catch(() => {});
+              }
+              queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+            }}
           />
           {editingCert && editingCert.id && (
             <div className="mt-6 space-y-6">
@@ -175,6 +191,8 @@ export default function AdminDashboard({ onLogout }: Props) {
                 cardName={editingCert.cardName || ""}
                 cardSet={editingCert.setName || ""}
                 existingGrade={editingCert.gradeOverall}
+                pendingAnalysis={pendingAnalysis}
+                onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
                 onGradeApproved={async () => {
                   queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
                   // Check if a new cert was just created (from "Approve & Next") — switch to it

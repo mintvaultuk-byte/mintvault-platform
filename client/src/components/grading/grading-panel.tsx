@@ -65,6 +65,9 @@ interface Props {
   existingGrade?: string | null;
   onGradeApproved?: (certId?: string, grade?: string) => void;
   onCertUpdated?: () => void;
+  /** When set, GradingPanel processes this analysis as if AI panel completed */
+  pendingAnalysis?: { analysis: AiAnalysisResult; identification: AiIdentification | null } | null;
+  onPendingAnalysisConsumed?: () => void;
 }
 
 // Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
@@ -72,7 +75,7 @@ const DEFAULT_CORNERS: CornerValues = { frontTL: 0, frontTR: 0, frontBL: 0, fron
 const DEFAULT_EDGES: EdgeValues = { frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0, backTop: 0, backBottom: 0, backLeft: 0, backRight: 0 };
 const DEFAULT_SURFACE: SurfaceValues = { front: 0, back: 0, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
 
-export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated }: Props) {
+export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated, pendingAnalysis, onPendingAnalysisConsumed }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -278,6 +281,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     onCertUpdated?.();
   }
 
+  // pendingAnalysis is passed through to AiPanel via externalAnalysis prop
+
   const hasFront = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
   const hasBack = !!(imageData?.urls?.back_display || imageData?.urls?.back_original);
   const hasAnyImage = hasFront || hasBack;
@@ -433,6 +438,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             certId={certId}
             onAnalysisComplete={handleAiComplete}
             referenceImageUrl={aiIdentification?.referenceImageUrl}
+            externalAnalysis={pendingAnalysis}
+            onExternalAnalysisConsumed={onPendingAnalysisConsumed}
           />
         </div>
         <ReprocessButton certId={certId} onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })} />

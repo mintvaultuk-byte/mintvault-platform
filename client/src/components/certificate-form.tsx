@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
-import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw } from "lucide-react";
+import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw, Database, Pencil } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
@@ -13,6 +14,7 @@ import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptio
 interface Props {
   certificate: CertificateRecord | null;
   onSuccess: (newCert?: any) => void;
+  onIdentifyAndGrade?: (result: { analysis: any; identification: any }) => void;
 }
 
 const cardGames = [
@@ -57,7 +59,7 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
 type AutofillField = typeof AUTOFILL_FIELDS[number];
 type ProtectedField = AutofillField | "designations";
 
-export default function CertificateForm({ certificate, onSuccess }: Props) {
+export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
 
@@ -137,46 +139,124 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   const [autofillLoading, setAutofillLoading] = useState(false);
   const [autofillRan, setAutofillRan] = useState(false);
 
-  // AI Identify-only state
+  // AI Identify & Grade state
   const [identifyLoading, setIdentifyLoading] = useState(false);
   const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
   const [identifyVerified, setIdentifyVerified] = useState(false);
 
-  async function runIdentifyOnly() {
+  // TCG manual search state
+  const [tcgSearchOpen, setTcgSearchOpen] = useState(false);
+  const [tcgQuery, setTcgQuery] = useState("");
+  const [tcgResults, setTcgResults] = useState<{ id: string; name: string; setName: string; number: string | null; rarity: string | null; year: string | null; imageUrl: string | null }[]>([]);
+  const [tcgLoading, setTcgLoading] = useState(false);
+  const [tcgCache] = useState(() => new Map<string, typeof tcgResults>());
+  const [manuallyVerified, setManuallyVerified] = useState(false);
+  const tcgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleTcgSearch(query: string) {
+    setTcgQuery(query);
+    if (tcgDebounceRef.current) clearTimeout(tcgDebounceRef.current);
+    if (query.trim().length < 3) { setTcgResults([]); setTcgLoading(false); return; }
+
+    const cacheKey = `${form.cardGame || "pokemon"}:${query.trim().toLowerCase()}`;
+    if (tcgCache.has(cacheKey)) { setTcgResults(tcgCache.get(cacheKey)!); return; }
+
+    setTcgLoading(true);
+    tcgDebounceRef.current = setTimeout(async () => {
+      try {
+        const gameSlug = (form.cardGame || "pokemon").toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+        const fetchUrl = `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`;
+        console.log("[tcg-search] fetching:", fetchUrl);
+        const res = await fetch(fetchUrl, { credentials: "include" });
+        if (!res.ok) throw new Error("Search failed");
+        const data = await res.json();
+        const results = Array.isArray(data) ? data : [];
+        tcgCache.set(cacheKey, results);
+        setTcgResults(results);
+      } catch {
+        setTcgResults([]);
+      } finally {
+        setTcgLoading(false);
+      }
+    }, 400);
+  }
+
+  function selectTcgCard(card: typeof tcgResults[number]) {
+    setForm(prev => ({
+      ...prev,
+      cardName: card.name || prev.cardName,
+      setName: card.setName || prev.setName,
+      cardNumber: card.number || prev.cardNumber,
+      year: card.year || prev.year,
+      rarity: card.rarity || prev.rarity,
+    }));
+    setManuallyVerified(true);
+    setTcgSearchOpen(false);
+    setTcgQuery("");
+    setTcgResults([]);
+    toast({ title: "Card selected", description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}` });
+  }
+
+  async function runIdentifyAndGrade() {
     if (!isEdit || !certificate?.id) return;
     setIdentifyLoading(true);
     setIdentifyConfidence(null);
     try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify-only`, {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify-and-analyze`, {
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Identification failed");
+      if (!res.ok) throw new Error(data.error || "Identify & Grade failed");
 
-      setIdentifyConfidence(data.confidence);
-      setIdentifyVerified(data.tcgVerified);
+      setIdentifyConfidence(data.identificationConfidence);
+      setIdentifyVerified(data.identificationVerified);
 
-      if (data.detailsWritten && data.cert) {
-        // Directly update form fields from the returned cert
+      if (data.detailsWritten) {
+        const id = data.identification;
         const c = data.cert;
         const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
-        const yearMatch = String(c.year || "").match(/\d{4}/);
+
+        // Use identification object (source of truth) with cert as fallback
+        const newName = id?.officialName || id?.detected_name || c?.cardName || null;
+        const newSet = id?.officialSet || id?.detected_set || c?.setName || null;
+        const newNumber = id?.officialNumber || id?.detected_number || c?.cardNumber || null;
+        const rawYear = id?.detected_year || id?.copyright_year || c?.year || null;
+        const newYear = String(rawYear || "").match(/\d{4}/)?.[0] || null;
+        const newGame = id?.detected_game || c?.cardGame || null;
+        const newRarity = id?.detected_rarity || c?.rarity || null;
+        const newLanguage = id?.detected_language || c?.language || null;
+
+        // Overwrite unconditionally when verified or high-confidence;
+        // only fill empty fields for uncertain results
+        const overwrite = data.identificationVerified || data.identificationConfidence === "high";
+
         setForm(prev => ({
           ...prev,
-          cardName: isEmpty(prev.cardName) ? (c.cardName || prev.cardName) : prev.cardName,
-          setName: isEmpty(prev.setName) ? (c.setName || prev.setName) : prev.setName,
-          cardNumber: isEmpty(prev.cardNumber) ? (c.cardNumber || prev.cardNumber) : prev.cardNumber,
-          year: isEmpty(prev.year) ? (yearMatch ? yearMatch[0] : prev.year) : prev.year,
-          cardGame: isEmpty(prev.cardGame) ? (c.cardGame || prev.cardGame) : prev.cardGame,
-          rarity: isEmpty(prev.rarity) ? (c.rarity || prev.rarity) : prev.rarity,
-          language: isEmpty(prev.language) ? (c.language || prev.language) : prev.language,
+          cardName:   overwrite ? (newName || prev.cardName)     : (isEmpty(prev.cardName)   ? (newName || prev.cardName)     : prev.cardName),
+          setName:    overwrite ? (newSet || prev.setName)        : (isEmpty(prev.setName)    ? (newSet || prev.setName)        : prev.setName),
+          cardNumber: overwrite ? (newNumber || prev.cardNumber)  : (isEmpty(prev.cardNumber) ? (newNumber || prev.cardNumber)  : prev.cardNumber),
+          year:       overwrite ? (newYear || prev.year)          : (isEmpty(prev.year)       ? (newYear || prev.year)          : prev.year),
+          cardGame:   overwrite ? (newGame || prev.cardGame)      : (isEmpty(prev.cardGame)   ? (newGame || prev.cardGame)      : prev.cardGame),
+          rarity:     overwrite ? (newRarity || prev.rarity)      : (isEmpty(prev.rarity)     ? (newRarity || prev.rarity)      : prev.rarity),
+          language:   overwrite ? (newLanguage || prev.language)  : (isEmpty(prev.language)   ? (newLanguage || prev.language)  : prev.language),
         }));
-        toast({ title: "Card identified", description: `${data.identification?.officialName || data.identification?.detected_name || "Card"} — ${data.identification?.officialSet || data.identification?.detected_set || "Unknown set"}` });
+
+        const grade = data.analysis?.overall_grade;
+        const gradeLabel = data.analysis?.grade_label;
+        toast({
+          title: "Card identified & graded",
+          description: `${newName || "Card"} — ${newSet || "Unknown set"}${grade ? ` · Grade ${grade} ${gradeLabel || ""}` : ""}`,
+        });
       } else {
-        toast({ title: "Couldn't identify confidently", description: data.rejectReason || "Please fill in card details manually", variant: "destructive" });
+        toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
+      }
+
+      // Pass analysis + identification to parent so GradingPanel can populate
+      if (data.analysis && data.identification) {
+        onIdentifyAndGrade?.({ analysis: data.analysis, identification: data.identification });
       }
     } catch (e: any) {
-      toast({ title: "Identification failed", description: e.message, variant: "destructive" });
+      toast({ title: "Identify & Grade failed", description: e.message, variant: "destructive" });
     } finally {
       setIdentifyLoading(false);
     }
@@ -618,22 +698,22 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
             }));
           }}
         />}
-        {/* AI Identify button — populate card details from uploaded scans */}
+        {/* AI Identify & Grade — single button for full pipeline */}
         {isEdit && certificate?.id && (
           <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Card Identification</p>
-                <p className="text-[#888888] text-[10px] mt-0.5">Auto-fill card details from the uploaded scan (fast, no grading)</p>
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Identify & Grade</p>
+                <p className="text-[#888888] text-[10px] mt-0.5">Identify the card and run full AI grading in one step</p>
               </div>
               <button
                 type="button"
-                onClick={runIdentifyOnly}
+                onClick={runIdentifyAndGrade}
                 disabled={identifyLoading}
                 className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shrink-0"
               >
                 {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                {identifyLoading ? "Identifying…" : "Identify Card"}
+                {identifyLoading ? "Identifying & Grading…" : "Identify & Grade"}
               </button>
             </div>
             {identifyConfidence && (
@@ -643,7 +723,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
                 </span>
                 {identifyConfidence !== "high" && !identifyVerified && (
-                  <button type="button" onClick={runIdentifyOnly} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
+                  <button type="button" onClick={runIdentifyAndGrade} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
                     Retry
                   </button>
                 )}
@@ -654,6 +734,80 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
         <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
+
+          {/* TCG search + manual entry helpers */}
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="text-[#888888]">Can't find the right card?</span>
+            <button
+              type="button"
+              onClick={() => { setTcgSearchOpen(true); setTcgQuery(""); setTcgResults([]); }}
+              disabled={!form.cardGame}
+              className="flex items-center gap-1 text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <Database size={10} />
+              Search TCG
+            </button>
+            {!form.cardGame && <span className="text-[#AAAAAA] italic">Select card game first</span>}
+            {manuallyVerified && (
+              <span className="flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 size={10} />
+                Manually verified
+              </span>
+            )}
+          </div>
+
+          {/* TCG Search Dialog */}
+          <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
+            <DialogContent className="max-w-lg p-0 overflow-hidden">
+              <div className="p-4 pb-2 border-b border-[#E8E4DC]">
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
+                <div className="flex items-center gap-2 border border-[#D4AF37]/30 rounded-lg px-3 py-2 focus-within:border-[#D4AF37] transition-colors">
+                  <Search size={14} className="text-[#D4AF37]/50 shrink-0" />
+                  <input
+                    type="text"
+                    value={tcgQuery}
+                    onChange={(e) => handleTcgSearch(e.target.value)}
+                    placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
+                    className="flex-1 bg-transparent text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] outline-none"
+                    autoFocus
+                  />
+                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
+                </div>
+                <p className="text-[#AAAAAA] text-[9px] mt-1">Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters</p>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto">
+                {tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
+                  <div className="py-8 text-center">
+                    <p className="text-[#888888] text-sm">No cards found</p>
+                    <p className="text-[#AAAAAA] text-[10px] mt-1">Check spelling or enter details manually</p>
+                  </div>
+                )}
+                {tcgResults.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => selectTcgCard(card)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#D4AF37]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
+                  >
+                    {card.imageUrl ? (
+                      <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
+                    ) : (
+                      <div className="w-10 h-14 bg-[#F7F7F5] rounded shrink-0 flex items-center justify-center">
+                        <Search size={12} className="text-[#AAAAAA]" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[#1A1A1A] text-sm font-bold truncate">{card.name}</p>
+                      <p className="text-[#555555] text-xs truncate">{card.setName}{card.number ? ` · #${card.number}` : ""}</p>
+                      <p className="text-[#AAAAAA] text-[10px]">
+                        {[card.rarity, card.year].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormSelect

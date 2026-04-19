@@ -19,7 +19,7 @@ import { sql } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, type ImageKeys } from "./ai-grading-service";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -690,6 +690,57 @@ export async function registerRoutes(
   app.get("/api/config/public-flags", (_req, res) => {
     const { FEATURE_FLAGS } = require("./config/feature-flags");
     res.json({ legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE });
+  });
+
+  // ── v2 Homepage Stats ──────────────────────────────────────────────────────
+  let homepageStatsCache: { data: any; ts: number } | null = null;
+  app.get("/api/v2/homepage-stats", async (_req, res) => {
+    try {
+      if (homepageStatsCache && Date.now() - homepageStatsCache.ts < 60_000) {
+        return res.json(homepageStatsCache.data);
+      }
+      const statsResult = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS total_graded,
+          COUNT(DISTINCT card_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_cards,
+          COUNT(DISTINCT set_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_sets,
+          ROUND(AVG(grade::numeric) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL), 1) AS avg_grade,
+          COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
+        FROM certificates
+      `);
+      const recentResult = await db.execute(sql`
+        SELECT id, card_name, set_name, grade, grade_type,
+               REGEXP_REPLACE(REGEXP_REPLACE(id::text, '^0+', ''), '^', 'MV') AS cert_number,
+               front_image_path
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL
+          AND card_name IS NOT NULL AND card_name != '' AND card_name != '(untitled)'
+        ORDER BY created_at DESC
+        LIMIT 5
+      `);
+      const stats = statsResult.rows[0] as any;
+      const data = {
+        total_graded: parseInt(stats.total_graded || "0"),
+        unique_cards: parseInt(stats.unique_cards || "0"),
+        unique_sets: parseInt(stats.unique_sets || "0"),
+        avg_grade: parseFloat(stats.avg_grade || "0"),
+        claimed_count: parseInt(stats.claimed_count || "0"),
+        recent_certs: (recentResult.rows as any[]).map(r => ({
+          id: r.id,
+          card_name: r.card_name,
+          set_name: r.set_name,
+          grade: r.grade,
+          grade_type: r.grade_type,
+          cert_number: r.cert_number,
+          front_image_path: r.front_image_path,
+        })),
+      };
+      homepageStatsCache = { data, ts: Date.now() };
+      res.json(data);
+    } catch (err: any) {
+      console.error("[v2/homepage-stats] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch stats" });
+    }
   });
 
   // ── Legal page API routes ─────────────────────────────────────────────────
@@ -5996,8 +6047,10 @@ export async function registerRoutes(
       const { lookupCard } = await import("./card-database");
       const game  = typeof req.query.game  === "string" ? req.query.game.trim()  : "";
       const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+      const mode  = req.query.mode === "wildcard" ? "wildcard" as const : "exact" as const;
+      console.log(`[card-lookup] game=${game} query=${query} mode=${mode}`);
       if (!query) return res.status(400).json({ error: "query is required" });
-      const results = await lookupCard(game, query);
+      const results = await lookupCard(game, query, mode);
       res.json(results);
     } catch (error: any) {
       console.error("[card-lookup] error:", error.message);
@@ -6254,23 +6307,31 @@ export async function registerRoutes(
       if (game === "pokemon") {
         tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
         if (tcgResult.verified) {
-          enrichedId = {
-            ...enrichedId, verified: true,
-            officialName: tcgResult.officialCardName || enrichedId.officialName,
-            officialSet: tcgResult.officialSetName || enrichedId.officialSet,
-            officialNumber: rawId.detected_number,
-            referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
-            dbSource: "pokemon-tcg-api",
-            detected_set: tcgResult.officialSetName || enrichedId.detected_set,
-            detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
-            detected_year: tcgResult.officialYear || enrichedId.detected_year,
-          };
+          // Only override enrichedId if it wasn't already verified with a different card name
+          const enrichedAlreadyVerified = enrichedId.verified === true;
+          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+            normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
+          if (!enrichedAlreadyVerified || namesAgree) {
+            enrichedId = {
+              ...enrichedId, verified: true,
+              officialName: tcgResult.officialCardName || enrichedId.officialName,
+              officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+              officialNumber: rawId.detected_number,
+              referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+              dbSource: "pokemon-tcg-api",
+              detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+              detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+              detected_year: tcgResult.officialYear || enrichedId.detected_year,
+            };
+          } else {
+            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+          }
         }
       }
 
       // Confidence guard
       const aiConfidence = rawId.confidence || "low";
-      const verified = tcgResult.verified === true;
+      const verified = enrichedId.verified === true || tcgResult.verified === true;
       const trustAi = tcgResult.trustAi === true;
       const shouldWrite = verified || aiConfidence === "high" || trustAi;
 
@@ -6286,18 +6347,36 @@ export async function registerRoutes(
         const yearMatch = String(rawYear || "").match(/\d{4}/);
         const yearText = yearMatch ? yearMatch[0] : null;
 
-        await db.execute(sql`
-          UPDATE certificates SET
-            card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
-            set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
-            card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
-            year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
-            card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
-            rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
-            updated_at = NOW()
-          WHERE id = ${id}
-        `);
-        console.log(`[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText}`);
+        // Overwrite existing fields when verified or high-confidence;
+        // otherwise only fill empty fields (protects manual entries from uncertain guesses)
+        const overwrite = verified || aiConfidence === "high";
+
+        if (overwrite) {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name = COALESCE(${cardName}, card_name),
+              set_name = COALESCE(${setName}, set_name),
+              card_number_display = COALESCE(${cardNumber}, card_number_display),
+              year_text = COALESCE(${yearText}, year_text),
+              card_game = COALESCE(${cardGame}, card_game),
+              rarity = COALESCE(${rarity}, rarity),
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        } else {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+              set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+              card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+              year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+              card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+              rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        }
+        console.log(`[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText} overwrite=${overwrite}`);
       } else {
         console.log(`[identify-only] cert ${id}: confidence=${aiConfidence} tcg=${verified} — NOT writing details`);
       }
@@ -6718,19 +6797,27 @@ export async function registerRoutes(
           identification.copyright_year
         );
         if (tcgResult.verified) {
-          console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);
-          enrichedId = {
-            ...enrichedId,
-            verified: true,
-            officialName: tcgResult.officialCardName || enrichedId.officialName,
-            officialSet: tcgResult.officialSetName || enrichedId.officialSet,
-            officialNumber: identification.detected_number,
-            referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
-            dbSource: "pokemon-tcg-api",
-            detected_set: tcgResult.officialSetName || enrichedId.detected_set,
-            detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
-            detected_year: tcgResult.officialYear || enrichedId.detected_year,
-          };
+          // Only override enrichedId if it wasn't already verified with a different card name
+          const enrichedAlreadyVerified = enrichedId.verified === true;
+          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+            normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
+          if (!enrichedAlreadyVerified || namesAgree) {
+            console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);
+            enrichedId = {
+              ...enrichedId,
+              verified: true,
+              officialName: tcgResult.officialCardName || enrichedId.officialName,
+              officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+              officialNumber: identification.detected_number,
+              referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+              dbSource: "pokemon-tcg-api",
+              detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+              detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+              detected_year: tcgResult.officialYear || enrichedId.detected_year,
+            };
+          } else {
+            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+          }
         }
         if (tcgResult.trustAi) tcgTrustAiFlag = true;
       }
@@ -6755,7 +6842,7 @@ export async function registerRoutes(
 
       // Step 9: Confidence check — trust AI when TCG has zero results
       const aiConfidence = identification.confidence || "low";
-      const tcgVerified = enrichedId.verified && enrichedId.dbSource === "pokemon-tcg-api";
+      const tcgVerified = enrichedId.verified === true;
       const shouldWriteDetails = tcgVerified || aiConfidence === "high" || tcgTrustAiFlag;
 
       const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
@@ -6782,21 +6869,44 @@ export async function registerRoutes(
         }
       }
 
-      console.log(`[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`);
+      // Overwrite existing fields when verified or high-confidence;
+      // otherwise only fill empty fields (protects manual entries from uncertain guesses)
+      const overwrite = tcgVerified || aiConfidence === "high";
 
-      await db.execute(sql`
-        UPDATE certificates SET
-          ai_analysis = ${JSON.stringify({ identification: enrichedId, grading: analysis })}::jsonb,
-          ai_draft_grade = ${typeof analysis.overall_grade === "number" ? analysis.overall_grade : null},
-          card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
-          set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
-          card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
-          year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
-          card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
-          rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
-          updated_at = NOW()
-        WHERE id = ${id}
-      `);
+      console.log(`[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} overwrite=${overwrite} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`);
+
+      const aiAnalysisJson = JSON.stringify({ identification: enrichedId, grading: analysis });
+      const aiDraftGrade = typeof analysis.overall_grade === "number" ? analysis.overall_grade : null;
+
+      if (overwrite) {
+        await db.execute(sql`
+          UPDATE certificates SET
+            ai_analysis = ${aiAnalysisJson}::jsonb,
+            ai_draft_grade = ${aiDraftGrade},
+            card_name = COALESCE(${cardName}, card_name),
+            set_name = COALESCE(${setName}, set_name),
+            card_number_display = COALESCE(${cardNumber}, card_number_display),
+            year_text = COALESCE(${yearText}, year_text),
+            card_game = COALESCE(${cardGame}, card_game),
+            rarity = COALESCE(${rarity}, rarity),
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+      } else {
+        await db.execute(sql`
+          UPDATE certificates SET
+            ai_analysis = ${aiAnalysisJson}::jsonb,
+            ai_draft_grade = ${aiDraftGrade},
+            card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+            set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+            card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+            year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+            card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+            rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+      }
 
       console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${cardName}" set="${setName}" grade=${analysis.overall_grade} strength=${strengthScore}`);
 
