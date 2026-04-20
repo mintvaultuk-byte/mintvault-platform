@@ -1971,7 +1971,30 @@ export class DatabaseStorage implements IStorage {
     // Generate new ownership token
     const ownershipToken = await this._generateOwnershipToken();
 
-    // Transfer ownership on the certificate
+    // ── DRN rotation on transfer completion ──────────────────────────────────
+    // Ensures previous owner's Owner Copy PDF no longer displays a DRN that
+    // matches the live cert record. Retry on 32^12 collision (essentially
+    // never-fires but handled defensively — mirrors backfill retry pattern).
+    const oldReferenceNumber = (cert as any).referenceNumber ?? null;
+    const currentLogbookVersion = (cert as any).logbookVersion ?? 1;
+    const { generateReferenceNumber } = await import("./reference-number");
+    let newReferenceNumber: string | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const candidate = generateReferenceNumber();
+      const existing = await db.select({ id: certificates.id })
+        .from(certificates)
+        .where(eq(certificates.referenceNumber, candidate))
+        .limit(1);
+      if (existing.length === 0) {
+        newReferenceNumber = candidate;
+        break;
+      }
+    }
+    if (!newReferenceNumber) {
+      return { success: false, error: "Failed to generate unique reference number after 3 attempts — please try again." };
+    }
+
+    // Transfer ownership on the certificate (rotate DRN + bump logbook version)
     await db.execute(sql`
       UPDATE certificates
       SET current_owner_user_id = ${incomingUser.id},
@@ -1980,9 +2003,27 @@ export class DatabaseStorage implements IStorage {
           ownership_token_generated_at = NOW(),
           owner_name = ${transfer.newOwnerName ?? null},
           owner_email = ${transfer.toEmail},
+          reference_number = ${newReferenceNumber},
+          logbook_version = logbook_version + 1,
+          logbook_last_issued_at = NOW(),
           updated_at = NOW()
       WHERE certificate_number = ${transfer.certId}
     `);
+
+    // Audit log — DRN rotation event paired with transfer completion
+    await db.insert(auditLog).values({
+      entityType: "certificate",
+      entityId: transfer.certId,
+      action: "drn_rotated_on_transfer",
+      adminUser: null,
+      details: {
+        transferId,
+        previousDrn: oldReferenceNumber,
+        newDrn: newReferenceNumber,
+        logbookVersionBefore: currentLogbookVersion,
+        logbookVersionAfter: currentLogbookVersion + 1,
+      },
+    });
 
     // Record in ownership history
     await db.insert(ownershipHistory).values({

@@ -859,6 +859,18 @@ export async function registerRoutes(
     standardHeaders: true, legacyHeaders: false,
     message: { error: "Too many requests." },
   });
+  // Rate limit for owner-triggered logbook reissue — belt-and-braces behind
+  // owner auth. Admin bypass via x-mv-admin-email header (for support cases).
+  const reissueRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 5,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many reissue requests — please try again later." },
+    skip: (req) => {
+      const adminEmail = (req.header("x-mv-admin-email") || "").trim().toLowerCase();
+      return adminEmail === ADMIN_FREE_EMAIL;
+    },
+  });
+
   app.post("/api/cookies/acknowledge", cookieAckRateLimit, async (req, res) => {
     try {
       const userAgent = (req.headers["user-agent"] as string || "").slice(0, 500);
@@ -2481,7 +2493,7 @@ export async function registerRoutes(
   });
 
   // Reissue logbook — generates new reference number, increments version (V5C replacement)
-  app.post("/api/logbook/:certId/reissue", async (req, res) => {
+  app.post("/api/logbook/:certId/reissue", reissueRateLimit, async (req, res) => {
     try {
       const { buildLogbookData } = await import("./logbook-service");
       const { generateReferenceNumber } = await import("./reference-number");
