@@ -62,7 +62,6 @@ export interface IStorage {
   getCertificate(id: number): Promise<CertificateRecord | undefined>;
   getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined>;
   updateCertificate(id: number, data: Partial<CertificateRecord>): Promise<CertificateRecord | undefined>;
-  deleteCertificate(id: number): Promise<boolean>;
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
   getNextCertId(): Promise<string>;
@@ -96,7 +95,6 @@ export interface IStorage {
 
   addCertificateImage(data: InsertCertificateImage): Promise<CertificateImage>;
   getCertificateImages(certificateId: number): Promise<CertificateImage[]>;
-  deleteCertificateImage(id: number): Promise<boolean>;
 
   autofillCard(setId: string, cardNumber: string, language: string, allowFallbackLanguage: boolean): Promise<{ match: CardMaster | null; matchType: "exact" | "fallback_language" | "none"; setName: string | null; suggestions?: CardMaster[] }>;
   getCardSets(game?: string): Promise<CardSet[]>;
@@ -633,12 +631,6 @@ export class DatabaseStorage implements IStorage {
     return cert;
   }
 
-  async deleteCertificate(id: number): Promise<boolean> {
-    await db.delete(certificateImages).where(eq(certificateImages.certificateId, id));
-    const result = await db.delete(certificates).where(eq(certificates.id, id)).returning();
-    return result.length > 0;
-  }
-
   async getCertificateByNfcUid(uid: string): Promise<CertificateRecord | undefined> {
     const normalised = uid.toLowerCase();
     const [cert] = await db.select().from(certificates)
@@ -1030,11 +1022,6 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(certificateImages)
       .where(eq(certificateImages.certificateId, certificateId))
       .orderBy(certificateImages.sortOrder);
-  }
-
-  async deleteCertificateImage(id: number): Promise<boolean> {
-    const result = await db.delete(certificateImages).where(eq(certificateImages.id, id)).returning();
-    return result.length > 0;
   }
 
   async autofillCard(setId: string, cardNumber: string, language: string, allowFallbackLanguage: boolean): Promise<{ match: CardMaster | null; matchType: "exact" | "fallback_language" | "none"; setName: string | null; suggestions?: CardMaster[] }> {
