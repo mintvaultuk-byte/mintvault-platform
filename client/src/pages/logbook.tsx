@@ -367,7 +367,7 @@ export default function LogbookPage() {
             </div>
 
             <p className="text-[#888888] text-[10px] mt-8 max-w-md mx-auto leading-relaxed">
-              This Ownership Logbook is an official record issued by MintVault Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification to the underlying data will invalidate the signature.
+              This Ownership Logbook is an official record issued by Mint Vault UK Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification to the underlying data will invalidate the signature.
             </p>
           </div>
         </div>

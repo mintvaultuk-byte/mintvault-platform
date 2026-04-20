@@ -10,9 +10,9 @@
  */
 
 export const COMPANY = {
-  legalName: "MintVault Ltd",
+  legalName: "Mint Vault UK Ltd",
   tradingName: "MintVault",
-  companyNumber: "[PENDING — Companies House registration]",
+  companyNumber: "17170013",
   icoRegistrationNumber: "[PENDING — ICO registration]",
   tradingAddress: {
     city: "Kent",

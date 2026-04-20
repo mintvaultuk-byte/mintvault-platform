@@ -1,13 +1,13 @@
 ---
 title: "Website Terms of Use"
-document: "MintVault Ltd — Website Terms of Use"
+document: "Mint Vault UK Ltd — Website Terms of Use"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor review"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
-# MintVault Ltd — Website Terms of Use
+# Mint Vault UK Ltd — Website Terms of Use
 
 **Version 1.0 — Draft for solicitor review**
 
@@ -15,7 +15,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## Placeholders to complete before publication
 
-- **[COMPANY NUMBER]** — CLIENT to insert from Companies House.
+- **17170013** — CLIENT to insert from Companies House.
 - **[REGISTERED OFFICE]** — CLIENT to insert full registered office address.
 - **[DATE TO BE INSERTED BY SOLICITOR]** (Last updated / Effective from) — SOLICITOR to set on finalisation.
 - Privacy Policy URL — currently shown as mintvaultuk.com/privacy. CLIENT to confirm live URL and that the Privacy Policy itself is published.
@@ -30,7 +30,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## 1. Introduction
 
-**1.1** These Website Terms govern your use of the MintVault website at mintvaultuk.com and any related subdomains, applications, and APIs (the **"Site"**). They are entered into between you and MintVault Ltd (**"MintVault"**, **"we"**, **"us"**, **"our"**), a limited company registered in England and Wales (company number: **[COMPANY NUMBER]**, registered office: **[REGISTERED OFFICE]**).
+**1.1** These Website Terms govern your use of the MintVault website at mintvaultuk.com and any related subdomains, applications, and APIs (the **"Site"**). They are entered into between you and Mint Vault UK Ltd (**"MintVault"**, **"we"**, **"us"**, **"our"**), a limited company registered in England and Wales (company number: **17170013**, registered office: **[REGISTERED OFFICE]**).
 
 **1.2** By accessing or using the Site you agree to be bound by these Website Terms. If you do not agree, you must not use the Site.
 
@@ -102,7 +102,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## 7. Intellectual property
 
-**7.1** All rights in the Site and its underlying materials — including without limitation the website content, software and source code, user interface and layout, design elements, branding and trade marks, logos, text, graphics, video, audio, database rights in any data compiled or curated by MintVault, and all documentation — are owned by MintVault Ltd or our licensors, and are protected by UK and international intellectual-property laws.
+**7.1** All rights in the Site and its underlying materials — including without limitation the website content, software and source code, user interface and layout, design elements, branding and trade marks, logos, text, graphics, video, audio, database rights in any data compiled or curated by MintVault, and all documentation — are owned by Mint Vault UK Ltd or our licensors, and are protected by UK and international intellectual-property laws.
 
 **7.2** You are granted a limited, non-exclusive, non-transferable, revocable licence to access and use the Site for its intended purpose. No other licence is granted, whether by implication or otherwise.
 
@@ -232,8 +232,8 @@ The Site may link to third-party websites or services. We do not control and are
 
 ## 16. Contact
 
-MintVault Ltd
+Mint Vault UK Ltd
 **[REGISTERED OFFICE]**
-Company number: **[COMPANY NUMBER]**
+Company number: **17170013**
 support@mintvaultuk.com
 mintvaultuk.com

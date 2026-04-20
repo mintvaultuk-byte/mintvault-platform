@@ -1,6 +1,6 @@
 ---
 title: "Cancellation"
-document: "MintVault Ltd — Cancellation"
+document: "Mint Vault UK Ltd — Cancellation"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor content"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"

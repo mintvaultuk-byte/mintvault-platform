@@ -1,13 +1,13 @@
 ---
 title: "Submission Agreement"
-document: "MintVault Ltd — Submission Agreement"
+document: "Mint Vault UK Ltd — Submission Agreement"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor review"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
-# MintVault Ltd — Submission Agreement
+# Mint Vault UK Ltd — Submission Agreement
 
 **Version 1.2 — Final draft for solicitor review**
 
@@ -15,7 +15,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## Placeholders to complete before publication
 
-- **[COMPANY NUMBER]** — CLIENT to insert from Companies House.
+- **17170013** — CLIENT to insert from Companies House.
 - **[REGISTERED OFFICE]** — CLIENT to insert full registered office address.
 - **[DATE TO BE INSERTED BY SOLICITOR]** — Last updated / Effective from.
 - **[ADR PROVIDER]** — SOLICITOR to identify suitable UK consumer ADR provider or confirm general ADR routes.
@@ -38,7 +38,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## 1. Introduction and contract formation
 
-**1.1** This Submission Agreement is entered into between you ("you", "the Submitter", "the Customer") and MintVault Ltd ("MintVault", "we", "us", "our") each time you submit one or more Cards to MintVault for grading, authentication, reholder, crossover, review, or related services.
+**1.1** This Submission Agreement is entered into between you ("you", "the Submitter", "the Customer") and Mint Vault UK Ltd ("MintVault", "we", "us", "our") each time you submit one or more Cards to MintVault for grading, authentication, reholder, crossover, review, or related services.
 
 **1.2** A Submission Agreement is formed when all of the following occur:
 
@@ -192,7 +192,7 @@ MintVault will use reasonable endeavours to progress Verification promptly and w
 
 **4A.8** Costs of Verification. MintVault bears the routine costs of Verification. Where Verification requires exceptional effort (for example, international document legalisation or multi-party enquiries), MintVault may pass on reasonable costs to the Customer with prior notice.
 
-> **SOLICITOR REVIEW FLAG — Clause 4A:** Please confirm (i) whether MintVault Ltd needs to register as a high-value dealer with HMRC under MLR 2017 reg 14; (ii) whether MintVault is caught by MLR 2017 as an "art market participant" (reg 14(1)(f)) given graded cards can exceed £10,000 in market value; (iii) whether an internal MLR policy, MLRO appointment, and SAR-filing protocols are required; (iv) that the tipping-off carve-out in 4A.6 correctly applies POCA 2002 ss.333A–333E.
+> **SOLICITOR REVIEW FLAG — Clause 4A:** Please confirm (i) whether Mint Vault UK Ltd needs to register as a high-value dealer with HMRC under MLR 2017 reg 14; (ii) whether MintVault is caught by MLR 2017 as an "art market participant" (reg 14(1)(f)) given graded cards can exceed £10,000 in market value; (iii) whether an internal MLR policy, MLRO appointment, and SAR-filing protocols are required; (iv) that the tipping-off carve-out in 4A.6 correctly applies POCA 2002 ss.333A–333E.
 
 ## 5. Declared Value and auto-upcharge
 
@@ -524,8 +524,8 @@ MintVault processes personal data in accordance with the Privacy Policy and appl
 
 ## 26. Contact
 
-MintVault Ltd
+Mint Vault UK Ltd
 **[REGISTERED OFFICE]**
-Company number: **[COMPANY NUMBER]**
+Company number: **17170013**
 support@mintvaultuk.com
 mintvaultuk.com

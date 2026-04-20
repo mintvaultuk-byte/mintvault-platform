@@ -1,13 +1,13 @@
 ---
 title: "Shipping Requirements"
-document: "MintVault Ltd — Shipping Requirements"
+document: "Mint Vault UK Ltd — Shipping Requirements"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor review"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
-# MintVault Ltd — Shipping Requirements
+# Mint Vault UK Ltd — Shipping Requirements
 
 **Version 1.0 — Draft for solicitor review**
 
@@ -181,5 +181,5 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 For shipping queries: support@mintvaultuk.com
 For bespoke arrangements: support@mintvaultuk.com with "BESPOKE SHIPPING" in the subject line
 
-MintVault Ltd, **[REGISTERED OFFICE]**, Company number **[COMPANY NUMBER]**
+Mint Vault UK Ltd, **[REGISTERED OFFICE]**, Company number **17170013**
 mintvaultuk.com/shipping-requirements

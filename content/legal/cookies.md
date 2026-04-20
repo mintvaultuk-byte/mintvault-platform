@@ -1,6 +1,6 @@
 ---
 title: "Cookies Policy"
-document: "MintVault Ltd — Cookies Policy"
+document: "Mint Vault UK Ltd — Cookies Policy"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor content + site analytics audit"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"

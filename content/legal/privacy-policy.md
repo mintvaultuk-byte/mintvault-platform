@@ -1,13 +1,13 @@
 ---
 title: "Privacy Policy"
-document: "MintVault Ltd — Privacy Policy"
+document: "Mint Vault UK Ltd — Privacy Policy"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor review"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
-# MintVault Ltd — Privacy Policy
+# Mint Vault UK Ltd — Privacy Policy
 
 **Version 1.0 — Draft for solicitor review**
 
@@ -15,7 +15,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## Placeholders to complete before publication
 
-- **[COMPANY NUMBER]** — CLIENT to insert from Companies House.
+- **17170013** — CLIENT to insert from Companies House.
 - **[REGISTERED OFFICE]** — CLIENT to insert full registered office address.
 - **[DATE TO BE INSERTED BY SOLICITOR]** — Last updated / Effective from.
 - Data Protection Officer (DPO) — CLIENT / SOLICITOR to confirm whether a DPO is appointed.
@@ -36,14 +36,14 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## 1. Who we are and how to contact us
 
-**1.1** This Privacy Policy explains how MintVault Ltd ("MintVault", "we", "us", "our") processes your personal data when you use our website mintvaultuk.com, submit Cards for grading, hold a MintVault account, or otherwise interact with our services.
+**1.1** This Privacy Policy explains how Mint Vault UK Ltd ("MintVault", "we", "us", "our") processes your personal data when you use our website mintvaultuk.com, submit Cards for grading, hold a MintVault account, or otherwise interact with our services.
 
-**1.2** MintVault Ltd is the data controller for the personal data described in this Policy.
+**1.2** Mint Vault UK Ltd is the data controller for the personal data described in this Policy.
 
 | | |
 |---|---|
-| Company name | MintVault Ltd |
-| Company number | **[COMPANY NUMBER]** |
+| Company name | Mint Vault UK Ltd |
+| Company number | **17170013** |
 | Registered office | **[REGISTERED OFFICE]** |
 | ICO registration number | **[ICO REGISTRATION NUMBER]** |
 | Privacy contact | support@mintvaultuk.com |
@@ -347,6 +347,6 @@ We rely on these contractual commitments as part of our transfer risk assessment
 
 **13.5** Postal address:
 
-MintVault Ltd
+Mint Vault UK Ltd
 **[REGISTERED OFFICE]**
-Company number: **[COMPANY NUMBER]**
+Company number: **17170013**

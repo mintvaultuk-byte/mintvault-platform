@@ -1,13 +1,13 @@
 ---
 title: "Guarantee & Correction Policy"
-document: "MintVault Ltd — Guarantee & Correction Policy"
+document: "Mint Vault UK Ltd — Guarantee & Correction Policy"
 version: "v1.0-draft-pre-solicitor"
 status: "Draft — pending solicitor review"
 lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
-# MintVault Ltd — Guarantee & Correction Policy
+# Mint Vault UK Ltd — Guarantee & Correction Policy
 
 **Version 1.1 — Final draft for solicitor review**
 
@@ -15,7 +15,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 ## Placeholders to complete before publication
 
-- **[COMPANY NUMBER]** — CLIENT to insert from Companies House.
+- **17170013** — CLIENT to insert from Companies House.
 - **[REGISTERED OFFICE]** — CLIENT to insert full registered office address.
 - **[DATE TO BE INSERTED BY SOLICITOR]** — Last updated / Effective from.
 - **[ADR PROVIDER]** — SOLICITOR to identify UK consumer ADR provider or confirm general ADR routes.
@@ -36,7 +36,7 @@ effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 
 **1.1** This Guarantee & Correction Policy ("Policy") explains what MintVault does and does not guarantee in relation to its grading, authentication, and related services, and the process for raising claims and obtaining remedies.
 
-**1.2** This Policy forms part of the contract between you and MintVault Ltd ("MintVault") and applies alongside the Website Terms, the Submission Agreement, the Privacy Policy, and the Shipping Requirements. Defined terms used here have the meanings given in the Submission Agreement.
+**1.2** This Policy forms part of the contract between you and Mint Vault UK Ltd ("MintVault") and applies alongside the Website Terms, the Submission Agreement, the Privacy Policy, and the Shipping Requirements. Defined terms used here have the meanings given in the Submission Agreement.
 
 **1.3** Your statutory rights under UK consumer law — including the Consumer Rights Act 2015, the Consumer Contracts Regulations 2013, and related legislation — are not affected by this Policy. Where this Policy offers remedies that exceed statutory rights, those remedies are given in addition to and do not replace your statutory rights.
 
@@ -200,8 +200,8 @@ Where a freeze is ultimately resolved in the Registered Keeper's favour and exce
 
 ## 17. Contact
 
-MintVault Ltd
+Mint Vault UK Ltd
 **[REGISTERED OFFICE]**
-Company number: **[COMPANY NUMBER]**
+Company number: **17170013**
 support@mintvaultuk.com
 mintvaultuk.com

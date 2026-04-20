@@ -1,6 +1,6 @@
 ---
 title: "Alternative Dispute Resolution"
-document: "MintVault Ltd — ADR"
+document: "Mint Vault UK Ltd — ADR"
 version: "v1.0-draft"
 status: "Draft — pending trader participation confirmation"
 lastUpdated: "[TO BE INSERTED AT GO-LIVE]"
