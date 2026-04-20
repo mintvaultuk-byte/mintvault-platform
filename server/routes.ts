@@ -832,6 +832,12 @@ export async function registerRoutes(
     res.redirect(301, `/vault/${normalizeCertId(req.params.certId)}`);
   });
 
+  // ── Cutover URL redirects → canonical v2 paths (SEO 301s) ─────────────────
+  app.get("/how-it-works", (_req, res) => res.redirect(301, "/technology"));
+  app.get("/about/the-mintvault-slab", (_req, res) => res.redirect(301, "/technology"));
+  app.get("/guides", (_req, res) => res.redirect(301, "/journal"));
+  app.get("/guides/:slug", (req, res) => res.redirect(301, `/journal/${req.params.slug}`));
+
   app.get("/api/version", (_req, res) => {
     res.json({
       build: BUILD_STAMP,
