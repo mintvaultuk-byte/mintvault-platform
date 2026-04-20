@@ -105,7 +105,7 @@ export default function AiPreGradeV2() {
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="/tools/estimate"
+                href="/v2-tools/estimate"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
@@ -434,7 +434,7 @@ export default function AiPreGradeV2() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <Link
-              href="/tools/estimate"
+              href="/v2-tools/estimate"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
               style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
