@@ -46,7 +46,7 @@ function getDateAdjacent(slug: string, count = 3): Guide[] {
 
 const PROSE_CSS = `
   .mv-prose h2 {
-    font-family: var(--v2-font-display), Georgia, serif;
+    font-family: "Fraunces", Georgia, serif;
     font-style: italic;
     font-weight: 500;
     font-size: clamp(1.5rem, 3vw, 2rem);
@@ -57,7 +57,7 @@ const PROSE_CSS = `
   }
   .mv-prose h2:first-child { margin-top: 0; }
   .mv-prose h3 {
-    font-family: var(--v2-font-display), Georgia, serif;
+    font-family: "Fraunces", Georgia, serif;
     font-style: italic;
     font-weight: 500;
     font-size: 1.25rem;
@@ -67,7 +67,7 @@ const PROSE_CSS = `
     margin-bottom: 0.75rem;
   }
   .mv-prose p {
-    font-family: var(--v2-font-body), sans-serif;
+    font-family: "Geist Variable", "Geist", system-ui, sans-serif;
     font-size: 1rem;
     line-height: 1.75;
     color: var(--v2-ink-soft);
@@ -78,7 +78,7 @@ const PROSE_CSS = `
     margin: 1.25rem 0;
     padding-left: 1.5rem;
     color: var(--v2-ink-soft);
-    font-family: var(--v2-font-body), sans-serif;
+    font-family: "Geist Variable", "Geist", system-ui, sans-serif;
     font-size: 1rem;
     line-height: 1.75;
   }

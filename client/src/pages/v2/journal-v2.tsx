@@ -106,41 +106,37 @@ export default function JournalV2() {
 
                 {/* Right: editorial visual block */}
                 <div
-                  className="relative rounded-xl overflow-hidden"
+                  className="relative rounded-xl overflow-hidden aspect-square"
                   style={{
                     backgroundColor: "var(--v2-panel-dark)",
-                    aspectRatio: "1 / 1",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                    backgroundImage:
+                      "radial-gradient(circle at 30% 30%, rgba(212,175,55,0.12), transparent 70%)",
                   }}
                 >
-                  {/* Soft gold overlay to break up the flat panel */}
-                  <div
-                    aria-hidden="true"
-                    className="absolute inset-0"
-                    style={{
-                      background:
-                        "radial-gradient(circle at 30% 30%, rgba(212,175,55,0.14) 0%, rgba(212,175,55,0) 60%)",
-                    }}
-                  />
-                  {/* Flourish numeral */}
-                  <div
-                    className="absolute inset-0 flex items-center justify-center font-display italic font-medium select-none"
-                    aria-hidden="true"
-                    style={{
-                      color: "var(--v2-gold)",
-                      opacity: 0.2,
-                      fontSize: "clamp(6rem, 18vw, 10rem)",
-                      lineHeight: 1,
-                    }}
-                  >
-                    01
+                  {/* Flourish numeral — literal rgba for predictable rendering */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none" aria-hidden="true">
+                    <span
+                      className="font-display italic"
+                      style={{
+                        fontFamily: '"Fraunces", Georgia, serif',
+                        fontStyle: "italic",
+                        fontWeight: 500,
+                        fontSize: "clamp(6rem, 12vw, 10rem)",
+                        color: "rgba(212, 175, 55, 0.35)",
+                        lineHeight: 1,
+                      }}
+                    >
+                      01
+                    </span>
                   </div>
-                  {/* Journal mark, bottom-left */}
-                  <p
-                    className="absolute bottom-5 left-5 font-mono-v2 text-[9px] uppercase tracking-[0.3em]"
-                    style={{ color: "rgba(255,255,255,0.35)" }}
+                  {/* Mono label, bottom-left */}
+                  <span
+                    className="absolute bottom-4 left-4 font-mono-v2 text-[9px] uppercase tracking-widest"
+                    style={{ color: "rgba(255,255,255,0.4)" }}
                   >
-                    Journal No.01
-                  </p>
+                    Featured
+                  </span>
                 </div>
               </div>
             </Link>
