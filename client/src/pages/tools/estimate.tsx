@@ -169,8 +169,8 @@ export default function PreGradeEstimatePage() {
   return (
     <>
       <SeoHead
-        title="AI Pre-Grade Checker — Instant Card Condition Report | MintVault"
-        description="Upload a photo of your trading card and get an instant AI-powered grade estimate. Check if your card is worth professional grading before you submit."
+        title="AI Pre-Grade Checker — Card Condition Report | MintVault"
+        description="Upload a photo of your trading card and get an AI-assisted grade estimate. Check if your card is worth professional grading before you submit."
         canonical="/tools/estimate"
       />
 
@@ -191,7 +191,7 @@ export default function PreGradeEstimatePage() {
         <div className="text-center space-y-3">
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI-Powered Tool</p>
           <h1 className="text-3xl font-sans font-black text-[#1A1A1A] tracking-tight">AI Pre-Grade Checker</h1>
-          <p className="text-[#666666] text-base">Upload a photo of your card and get an instant AI condition report — takes about 10 seconds.</p>
+          <p className="text-[#666666] text-base">Upload a photo of your card and get an AI-assisted condition breakdown — subgrades, card identity, and a grade range.</p>
           {!freeUsed && (
             <p className="text-[#D4AF37] text-xs font-medium">First estimate is free — no account needed.</p>
           )}
