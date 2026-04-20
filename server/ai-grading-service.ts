@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
+import { anthropicFetch } from "./anthropic-fetch";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -625,15 +626,7 @@ async function callClaude(
     }];
   }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
+  const response = await anthropicFetch(body, { apiKey, timeoutMs: 30_000 });
 
   if (!response.ok) {
     const errText = await response.text();

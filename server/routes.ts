@@ -20,6 +20,7 @@ import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsRece
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
 import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
+import { anthropicFetch } from "./anthropic-fetch";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -859,6 +860,27 @@ export async function registerRoutes(
     standardHeaders: true, legacyHeaders: false,
     message: { error: "Too many requests." },
   });
+  // Payment endpoints — generous for legit users retrying declined cards
+  const paymentRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, max: 10,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
+  });
+
+  // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
+  const stolenReportRateLimit = rateLimit({
+    windowMs: 24 * 60 * 60 * 1000, max: 20,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Daily report limit reached. Contact support@mintvaultuk.com if you need to file more." },
+  });
+
+  // Transfer dispute/cancel — same pattern as existing transferV2RateLimit
+  const transferActionRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 5,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many transfer actions — please try again later." },
+  });
+
   // Rate limit for owner-triggered logbook reissue — belt-and-braces behind
   // owner auth. Admin bypass via x-mv-admin-email header (for support cases).
   const reissueRateLimit = rateLimit({
@@ -1158,7 +1180,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/create-payment-intent", async (req, res) => {
+  app.post("/api/create-payment-intent", paymentRateLimit, async (req, res) => {
     try {
       const {
         type, tier, quantity, declaredValue, notes, submissionName,
@@ -1478,7 +1500,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/confirm-payment", async (req, res) => {
+  app.post("/api/confirm-payment", paymentRateLimit, async (req, res) => {
     try {
       const { submissionId, paymentIntentId } = req.body;
 
@@ -1951,19 +1973,22 @@ export async function registerRoutes(
       }
       contentParts.push({ type: "text", text: "Legacy endpoint disabled." });
 
-      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-opus-4-7",
-          max_tokens: 4096,
-          messages: [{ role: "user", content: contentParts }],
-        }),
-      });
+      let anthropicRes;
+      try {
+        anthropicRes = await anthropicFetch(
+          {
+            model: "claude-opus-4-7",
+            max_tokens: 4096,
+            messages: [{ role: "user", content: contentParts }],
+          },
+          { apiKey, timeoutMs: 30_000 },
+        );
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        }
+        throw err;
+      }
 
       if (!anthropicRes.ok) {
         const errBody = await anthropicRes.text();
@@ -2767,7 +2792,7 @@ export async function registerRoutes(
   }
 
   // POST /api/stolen/report — any visitor can file a report; sends verification email
-  app.post("/api/stolen/report", async (req, res) => {
+  app.post("/api/stolen/report", stolenReportRateLimit, async (req, res) => {
     try {
       const { certId, reporterName, reporterEmail, description } = req.body;
       if (!certId || !reporterName || !reporterEmail) {
@@ -4756,7 +4781,7 @@ export async function registerRoutes(
   });
 
   // Dispute a v2 transfer during the 14-day window
-  app.post("/api/v2/transfers/dispute", async (req, res) => {
+  app.post("/api/v2/transfers/dispute", transferActionRateLimit, async (req, res) => {
     try {
       const { certId, email, reason } = req.body;
       if (!certId || !email || !reason) {
@@ -4804,7 +4829,7 @@ export async function registerRoutes(
   });
 
   // Cancel a v2 transfer (outgoing keeper only, before completion)
-  app.post("/api/v2/transfers/cancel", async (req, res) => {
+  app.post("/api/v2/transfers/cancel", transferActionRateLimit, async (req, res) => {
     try {
       const { certId, email } = req.body;
       if (!certId || !email) {
@@ -6490,11 +6515,18 @@ export async function registerRoutes(
 
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
-      });
+      let response;
+      try {
+        response = await anthropicFetch(
+          { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
+          { apiKey, timeoutMs: 30_000 },
+        );
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        }
+        throw err;
+      }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
@@ -6608,11 +6640,18 @@ export async function registerRoutes(
 
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] }),
-      });
+      let response;
+      try {
+        response = await anthropicFetch(
+          { model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] },
+          { apiKey, timeoutMs: 30_000 },
+        );
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        }
+        throw err;
+      }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiData = await response.json() as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
@@ -6700,11 +6739,18 @@ export async function registerRoutes(
 
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
-      });
+      let response;
+      try {
+        response = await anthropicFetch(
+          { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
+          { apiKey, timeoutMs: 30_000 },
+        );
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        }
+        throw err;
+      }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
       const aiResp = await response.json() as { content: { text: string }[] };
       const text = aiResp.content?.[0]?.text || "";
@@ -7326,18 +7372,25 @@ export async function registerRoutes(
       const base64 = resizedBuffer.toString("base64");
       const mt = "image/jpeg";
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 2048,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
-            { type: "text", text: PRE_GRADE_PROMPT },
-          ]}],
-        }),
-      });
+      let response;
+      try {
+        response = await anthropicFetch(
+          {
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 2048,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
+              { type: "text", text: PRE_GRADE_PROMPT },
+            ]}],
+          },
+          { apiKey, timeoutMs: 30_000 },
+        );
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         const errBody = await response.text().catch(() => "");
