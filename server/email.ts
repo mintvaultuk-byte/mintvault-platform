@@ -24,6 +24,30 @@ function getFromEmail(): string {
   return FALLBACK_FROM;
 }
 
+/**
+ * Centralised Resend send wrapper. Checks the SDK error field that v3+ returns
+ * on API failures (401, 422, etc.) instead of throwing. Throws on any failure
+ * so callers know when an email was NOT sent.
+ */
+async function sendViaResend(resend: Resend, payload: {
+  from: string;
+  to: string | string[];
+  replyTo?: string;
+  subject: string;
+  html: string;
+  bcc?: string | string[];
+  attachments?: Array<{ filename: string; content: Buffer | string }>;
+}): Promise<{ id: string }> {
+  const result = await resend.emails.send(payload);
+  if (result.error) {
+    throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
+  }
+  if (!result.data?.id) {
+    throw new Error("Resend returned no message id");
+  }
+  return { id: result.data.id };
+}
+
 function baseHtml(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html>
@@ -114,7 +138,7 @@ ${data.labelToken ? `
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -124,6 +148,76 @@ ${data.labelToken ? `
     console.log(`[email] Submission confirmation sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send confirmation to ${data.email}:`, err.message);
+  }
+}
+
+/** V2 order confirmation — includes legal page links, inspection window, and terms acceptance record. Used when LEGAL_PAGES_LIVE=true. */
+export async function sendSubmissionConfirmationV2(data: {
+  email: string; firstName: string; submissionId: string; cardCount: number;
+  tier: string; total: number; serviceType?: string; labelToken?: string;
+  termsVersion?: string; termsAcceptedAt?: string;
+}) {
+  const resend = getResend();
+  if (!resend) return;
+
+  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || (data.serviceType?.toUpperCase() || "");
+  const body = `
+<p>Hi ${data.firstName},</p>
+<p>Thank you for your submission. Your order has been confirmed and payment received.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Service</td><td style="padding:8px 0;color:#fff;">${serviceLabel}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Tier</td><td style="padding:8px 0;color:#fff;">${data.tier.toUpperCase()}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Total Paid</td><td style="padding:8px 0;color:#fff;">&pound;${(data.total / 100).toFixed(2)}</td></tr>
+</table>
+
+<div style="border:1px solid rgba(212,175,55,0.3);border-radius:8px;padding:16px;margin:20px 0;background:rgba(212,175,55,0.05);">
+<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">14-Day Inspection Window</h4>
+<p style="color:#ccc;font-size:12px;margin:0;">Please inspect your returned Card on arrival and report any issues to support@mintvaultuk.com within 14 days of delivery.</p>
+</div>
+
+<div style="border:1px solid #333;border-radius:8px;padding:16px;margin:20px 0;">
+<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">About Grading</h4>
+<p style="color:#999;font-size:12px;margin:0 0 8px 0;">Grading is a professional opinion, not a guaranteed outcome. Grades may change on re-examination or differ from other grading companies.</p>
+<p style="color:#999;font-size:12px;margin:0;">Your Declared Value and selected Value Protection tier determine the liability cap for loss or damage. Under-declaring limits cover.</p>
+</div>
+
+<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
+<ol style="margin:0;padding-left:20px;color:#ccc;">
+<li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders.</li>
+<li style="margin-bottom:8px;">Include your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
+<li style="margin-bottom:8px;">Post via tracked and insured delivery.</li>
+</ol>
+${data.labelToken ? `
+<p style="margin-top:24px;">
+<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+</p>` : ""}
+
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #333;">
+<p style="color:#666;font-size:11px;margin:0 0 4px 0;">Legal Documents:</p>
+<p style="color:#999;font-size:11px;margin:0;">
+<a href="https://mintvaultuk.com/legal/website-terms" style="color:#D4AF37;">Website Terms</a> ·
+<a href="https://mintvaultuk.com/legal/submission-agreement" style="color:#D4AF37;">Submission Agreement</a> ·
+<a href="https://mintvaultuk.com/legal/guarantee" style="color:#D4AF37;">Guarantee Policy</a> ·
+<a href="https://mintvaultuk.com/legal/privacy-policy" style="color:#D4AF37;">Privacy Policy</a> ·
+<a href="https://mintvaultuk.com/legal/shipping-requirements" style="color:#D4AF37;">Shipping Requirements</a>
+</p>
+${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">You accepted the Submission Agreement (version ${data.termsVersion}) on ${data.termsAcceptedAt || "submission"} UTC.</p>` : ""}
+</div>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `MintVault — Submission Confirmed (${data.submissionId})`,
+      html: baseHtml("Submission Confirmed", body),
+    });
+    console.log(`[email] Submission confirmation v2 sent to ${data.email}`);
+  } catch (err: any) {
+    console.error(`[email] Failed to send v2 confirmation to ${data.email}:`, err.message);
   }
 }
 
@@ -158,7 +252,7 @@ ${photosHtml}
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -193,7 +287,7 @@ export async function sendGradingComplete(data: {
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -245,7 +339,7 @@ ${rmTrackingBtn}
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -280,7 +374,7 @@ export async function sendSubmissionDelivered(data: {
 <a href="${vaultLink}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW VAULT REPORT</a>
 </p>`;
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
       subject: `Your MintVault slab has arrived — ${data.submissionId}`,
       html: baseHtml("Slab Delivered", body),
@@ -411,7 +505,7 @@ ${ctaButton(data.verifyUrl, "Verify &amp; Register Ownership")}
 <p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.verifyUrl}</p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -449,7 +543,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
 <p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.confirmUrl}</p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.fromEmail,
@@ -487,7 +581,7 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
 <p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.confirmUrl}</p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.toEmail,
@@ -497,6 +591,237 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
     console.log(`[email] New owner transfer email sent to ${data.toEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send new owner transfer email to ${data.toEmail}:`, err.message);
+  }
+}
+
+// ── v2 Transfer emails (DVLA-style with ref number + dispute window) ─────────
+
+export async function sendTransferV2OutgoingConfirmation(data: {
+  fromEmail: string; toEmail: string; certId: string; confirmUrl: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED v2 transfer outgoing email to ${data.fromEmail} (no Resend client)`);
+    return;
+  }
+
+  const extraRows = `
+<span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">Transfer Recipient</span>
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.toEmail}</span>`;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">A transfer of registered keepership has been initiated for the certificate below. You are the current Registered Keeper.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;">To authorise this transfer, confirm below. The recipient will then need to verify the Document Reference Number from the Logbook and accept the transfer. A 14-day dispute window applies after both parties confirm.</p>
+${certBlock(data.certId, extraRows)}
+${ctaButton(data.confirmUrl, "Authorise Transfer")}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">This authorisation link expires in <strong style="color:rgba(255,255,255,0.45);">24 hours</strong>. If you did not initiate this transfer, take no action — your keepership record remains unchanged.</p>
+<p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.confirmUrl}</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.fromEmail,
+      subject: `MintVault — Authorise Keepership Transfer for ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer — Your Authorisation Required", body),
+    });
+    console.log(`[email] v2 transfer outgoing email sent to ${data.fromEmail} for ${data.certId}`);
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer outgoing to ${data.fromEmail}:`, err.message);
+  }
+}
+
+export async function sendTransferV2IncomingConfirmation(data: {
+  toEmail: string; fromEmail: string; certId: string; confirmUrl: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED v2 transfer incoming email to ${data.toEmail} (no Resend client)`);
+    return;
+  }
+
+  const extraRows = `
+<span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">Transferred From</span>
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.fromEmail}</span>`;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The current Registered Keeper of the certificate below has authorised a transfer of keepership to you.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;">To accept this transfer, click below and enter the <strong style="color:rgba(255,255,255,0.55);">Document Reference Number</strong> from the Logbook. The previous keeper should have provided this to you with the physical card. A 14-day dispute window begins after you confirm.</p>
+${certBlock(data.certId, extraRows)}
+${ctaButton(data.confirmUrl, "Accept &amp; Verify")}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">You have <strong style="color:rgba(255,255,255,0.45);">14 days</strong> to complete this step. If you did not expect this transfer, no action is required.</p>
+<p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.confirmUrl}</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.toEmail,
+      subject: `MintVault — Accept Keepership of ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer — Verification Required", body),
+    });
+    console.log(`[email] v2 transfer incoming email sent to ${data.toEmail} for ${data.certId}`);
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer incoming to ${data.toEmail}:`, err.message);
+  }
+}
+
+export async function sendTransferV2DisputeWindowStarted(data: {
+  email: string; certId: string; role: "outgoing" | "incoming"; disputeDeadline: Date;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED v2 dispute-window email to ${data.email} (no Resend client)`);
+    return;
+  }
+
+  const deadlineStr = data.disputeDeadline.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const roleLabel = data.role === "outgoing" ? "outgoing (current) Registered Keeper" : "incoming (new) Registered Keeper";
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">Both parties have confirmed the keepership transfer for the certificate below. A 14-day dispute window is now active.</p>
+${certBlock(data.certId)}
+<p style="color:rgba(255,255,255,0.50);font-size:13px;line-height:1.7;margin:12px 0 6px;">You are the <strong style="color:rgba(255,255,255,0.65);">${roleLabel}</strong>.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;">If neither party raises a dispute before <strong style="color:rgba(255,255,255,0.55);">${deadlineStr}</strong>, the transfer will be finalised automatically and the registry will be updated.</p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">To raise a dispute, contact <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong> with the Certificate ID and your concern.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `MintVault — Transfer Dispute Window Open for ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer — Dispute Window", body),
+    });
+    console.log(`[email] v2 dispute-window email sent to ${data.email} (${data.role}) for ${data.certId}`);
+  } catch (err: any) {
+    console.error(`[email] Failed v2 dispute-window email to ${data.email}:`, err.message);
+  }
+}
+
+export async function sendTransferV2Completed(data: {
+  email: string; certId: string; role: "outgoing" | "incoming"; newKeeperName?: string | null;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED v2 transfer complete email to ${data.email} (no Resend client)`);
+    return;
+  }
+
+  const isIncoming = data.role === "incoming";
+  const title = isIncoming ? "Keepership Transfer Complete — You Are the New Registered Keeper" : "Keepership Transfer Complete — Registry Updated";
+  const mainText = isIncoming
+    ? `The keepership transfer for the certificate below has been finalised. You are now the Registered Keeper in the MintVault registry.${data.newKeeperName ? ` Registered as: ${data.newKeeperName}.` : ""}`
+    : "The keepership transfer for the certificate below has been finalised. The registry has been updated and you are no longer the Registered Keeper for this certificate.";
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">${mainText}</p>
+${certBlock(data.certId)}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">If you believe this transfer was made in error, contact <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong> immediately.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `MintVault — Keepership Transfer Complete for ${data.certId}`,
+      html: ownershipBaseHtml(title, body),
+    });
+    console.log(`[email] v2 transfer complete email sent to ${data.email} (${data.role}) for ${data.certId}`);
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer complete to ${data.email}:`, err.message);
+  }
+}
+
+export async function sendTransferV2Cancelled(data: {
+  email: string; certId: string; reason: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The keepership transfer for the certificate below has been cancelled.</p>
+${certBlock(data.certId)}
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:8px 0 4px;">Reason: ${data.reason}</p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">The existing ownership record remains unchanged. If you have questions, contact <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong>.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      subject: `MintVault — Transfer Cancelled for ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer Cancelled", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer cancelled to ${data.email}:`, err.message);
+  }
+}
+
+export async function sendTransferV2Disputed(data: {
+  email: string; certId: string; disputedBy: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">A dispute has been raised on the keepership transfer for the certificate below.</p>
+${certBlock(data.certId)}
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:8px 0 4px;">The dispute was raised by the <strong style="color:rgba(255,255,255,0.55);">${data.disputedBy} keeper</strong>. The transfer has been paused and MintVault will review.</p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">MintVault will contact both parties with next steps. If you have additional information, email <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong>.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      subject: `MintVault — Transfer Disputed for ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer — Dispute Raised", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer disputed to ${data.email}:`, err.message);
+  }
+}
+
+export async function sendTransferV2Expired(data: {
+  email: string; certId: string; reason: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The keepership transfer for the certificate below has expired because a required confirmation was not completed in time.</p>
+${certBlock(data.certId)}
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:8px 0 4px;">${data.reason}</p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">You can initiate a new transfer at any time from the <strong style="color:rgba(255,255,255,0.45);">Transfer Keepership</strong> page.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      subject: `MintVault — Transfer Expired for ${data.certId}`,
+      html: ownershipBaseHtml("Keepership Transfer Expired", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer expired to ${data.email}:`, err.message);
+  }
+}
+
+export async function sendTransferV2IncomingReminder(data: {
+  email: string; certId: string; daysRemaining: number; confirmUrl: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">A keepership transfer is pending your confirmation for the certificate below. You have <strong style="color:rgba(255,255,255,0.55);">${data.daysRemaining} day${data.daysRemaining === 1 ? "" : "s"}</strong> remaining to verify the Document Reference Number.</p>
+${certBlock(data.certId)}
+${ctaButton(data.confirmUrl, "Verify & Accept")}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">If you do not complete verification before the deadline, the transfer will expire automatically.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      subject: `MintVault — Reminder: Accept Keepership of ${data.certId} (${data.daysRemaining} days left)`,
+      html: ownershipBaseHtml("Keepership Transfer — Reminder", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 transfer reminder to ${data.email}:`, err.message);
   }
 }
 
@@ -515,7 +840,7 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
 <p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.loginUrl}</p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -562,7 +887,7 @@ export async function sendCertificatePdf(data: {
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
@@ -615,7 +940,7 @@ export async function sendStolenVerificationEmail(
 </p>`;
 
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: email,
@@ -649,7 +974,7 @@ export async function sendWelcomeVerificationEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">This link expires in 24 hours. If you did not create a MintVault account, ignore this email.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Verify your MintVault account", html: baseHtml("Verify Your Email", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Verify your MintVault account", html: baseHtml("Verify Your Email", body) });
   } catch (err: any) { console.error(`[email] Welcome/verify failed for ${email}:`, err.message); }
 }
 
@@ -669,7 +994,7 @@ export async function sendAccountMagicLinkEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request this, you can safely ignore it. Your account is secure.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault login link", html: baseHtml("Your Login Link", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault login link", html: baseHtml("Your Login Link", body) });
   } catch (err: any) { console.error(`[email] Magic link failed for ${email}:`, err.message); }
 }
 
@@ -689,7 +1014,7 @@ export async function sendPasswordResetEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request a password reset, ignore this email. Your password has not been changed.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Reset your MintVault password", html: baseHtml("Password Reset", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Reset your MintVault password", html: baseHtml("Password Reset", body) });
   } catch (err: any) { console.error(`[email] Password reset failed for ${email}:`, err.message); }
 }
 
@@ -701,7 +1026,7 @@ export async function sendPasswordChangedEmail(email: string): Promise<void> {
 <p style="margin:0 0 16px 0;">If you made this change, no action is needed.</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not change your password, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault password was changed", html: baseHtml("Password Changed", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault password was changed", html: baseHtml("Password Changed", body) });
   } catch (err: any) { console.error(`[email] Password changed notice failed for ${email}:`, err.message); }
 }
 
@@ -717,7 +1042,7 @@ export async function sendEmailChangedNotification(
 <p style="margin:0 0 24px 0;"><strong>New address:</strong> ${newEmail}</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not make this change, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: oldEmail, subject: "Your MintVault email address was changed", html: baseHtml("Email Address Changed", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: oldEmail, subject: "Your MintVault email address was changed", html: baseHtml("Email Address Changed", body) });
   } catch (err: any) { console.error(`[email] Email changed notice failed for ${oldEmail}:`, err.message); }
 }
 
@@ -729,7 +1054,7 @@ export async function sendAccountDeletedEmail(email: string): Promise<void> {
 <p style="margin:0 0 16px 0;">Your submission history and certificate ownership records have been anonymised and retained for our records, as required for the certificate chain-of-custody.</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request account deletion, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await resend.emails.send({ from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault account has been deleted", html: baseHtml("Account Deleted", body) });
+    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault account has been deleted", html: baseHtml("Account Deleted", body) });
   } catch (err: any) { console.error(`[email] Account deleted notice failed for ${email}:`, err.message); }
 }
 
@@ -759,7 +1084,7 @@ export async function sendVaultClubWelcomeEmail(data: {
 </p>
 <p style="color:#888;font-size:12px;margin-top:16px;">Questions? Reply to this email or contact us at mintvaultuk@gmail.com.</p>`;
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
       subject: `Welcome to Vault Club ${tierLabel} — MintVault`,
       html: baseHtml(`Welcome to Vault Club ${tierLabel}`, body),
@@ -784,7 +1109,7 @@ export async function sendVaultClubCancelledEmail(data: {
 <a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
 </p>`;
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
       subject: "Your Vault Club membership has been cancelled — MintVault",
       html: baseHtml("Vault Club Cancelled", body),
@@ -809,7 +1134,7 @@ export async function sendVaultClubPaymentFailedEmail(data: {
 </p>
 <p style="color:#888;font-size:12px;">Your membership will remain active for 7 days while we retry the payment. After that your Showroom will be deactivated until you update your details.</p>`;
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
       subject: "Action required — Vault Club payment failed",
       html: baseHtml("Payment Failed", body),
@@ -833,7 +1158,7 @@ export async function sendVaultClubGraceExpiredEmail(data: {
 <a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
 </p>`;
   try {
-    await resend.emails.send({
+    await sendViaResend(resend, {
       from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
       subject: "We miss you — Vault Club membership ended",
       html: baseHtml("Membership Ended", body),

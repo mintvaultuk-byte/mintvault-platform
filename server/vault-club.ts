@@ -36,9 +36,9 @@ async function getUserVaultClub(userId: string): Promise<Record<string, unknown>
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
-async function countReholderCreditsRemaining(userId: string): Promise<number> {
+async function countMemberCreditsRemaining(userId: string): Promise<number> {
   const rows = await db.execute(sql`
-    SELECT COUNT(*) AS cnt FROM reholder_credits
+    SELECT COUNT(*) AS cnt FROM member_credits
     WHERE user_id = ${userId} AND used_at IS NULL AND expires_at > NOW()
   `);
   return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
@@ -58,7 +58,7 @@ export function registerVaultClubRoutes(app: Express): void {
       const tier = user.vault_club_tier as VaultClubTier | null;
       const status = user.vault_club_status as string | null;
       const perks = tier ? VAULT_CLUB_TIERS[tier] : null;
-      const reholderCredits = tier ? await countReholderCreditsRemaining(userId) : 0;
+      const memberCredits = tier ? await countMemberCreditsRemaining(userId) : 0;
 
       return res.json({
         tier,
@@ -72,7 +72,7 @@ export function registerVaultClubRoutes(app: Express): void {
         ai_credits_balance: user.ai_credits_user_balance ?? 0,
         ai_credits_monthly: tier ? VAULT_CLUB_TIERS[tier].ai_credits_monthly : 0,
         next_refill_at: user.vault_club_renews_at || null,
-        reholder_credits_remaining: reholderCredits,
+        member_credits_remaining: memberCredits,
         stripe_customer_id: user.stripe_customer_id || null,
         username: user.username || null,
       });
@@ -245,22 +245,23 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
   const rows = await db.execute(sql`
     SELECT id, email, display_name, vault_club_tier, vault_club_status,
            ai_credits_user_balance, username, showroom_active,
-           vault_club_billing_interval, ai_credits_last_refilled_at
+           vault_club_billing_interval, ai_credits_last_refilled_at,
+           member_credits_last_granted_at
     FROM users WHERE stripe_customer_id = ${customerId} LIMIT 1
   `);
   return (rows.rows[0] as Record<string, unknown>) || null;
 }
 
 /**
- * Grant initial reholder credits for the given tier at signup/renewal.
+ * Grant member credits for the given tier at signup/renewal.
  *
  * No-op since 2026-04-19 — the quarterly_reholders perk was dropped when the
  * club moved to perks-and-credits. Function retained for webhook call-sites;
  * will be removed when Phase 1B updates webhooks to use the new perk model.
  */
-export async function grantReholderCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
+export async function grantMemberCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
   void userId; void tier; void source;
-  console.log("[vault-club] grantReholderCredits skipped — quarterly_reholders perk deprecated 2026-04-19");
+  console.log("[vault-club] grantMemberCredits skipped — quarterly_reholders perk deprecated 2026-04-19");
   return;
 }
 

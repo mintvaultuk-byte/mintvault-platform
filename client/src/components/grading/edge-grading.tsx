@@ -13,10 +13,10 @@ interface Props {
   onOverride: (val: number | null) => void;
 }
 
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1];
+const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number): string {
-  if (g >= 9.5) return "#D4AF37";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
@@ -27,8 +27,24 @@ function GradeSelect({ value, onChange, isLowest }: { value: number; onChange: (
     <select
       value={value}
       onChange={e => onChange(parseFloat(e.target.value))}
-      className={`text-[10px] rounded px-1 py-0.5 font-bold border ${isLowest ? "border-red-500" : "border-[#333333]"} bg-[#111111]`}
+      className={`text-[10px] rounded px-1 py-0.5 font-bold border ${isLowest ? "border-red-500" : "border-[#D4D0C8]"} bg-[#F7F7F5]`}
       style={{ color: gradeColor(value) }}
+    >
+      {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+    </select>
+  );
+}
+
+export function EdgeSelect({ value, onChange, isLowest = false }: { value: number; onChange: (v: number) => void; isLowest?: boolean }) {
+  return (
+    <select
+      value={value}
+      onChange={e => { e.stopPropagation(); onChange(Number(e.target.value)); }}
+      className={`text-[8px] rounded px-1 py-0.5 font-bold border cursor-pointer shadow-sm ${
+        isLowest ? "border-red-500 bg-white/90" : "border-[#D4D0C8] bg-white/90"
+      } backdrop-blur-sm`}
+      style={{ color: gradeColor(value) }}
+      onClick={e => e.stopPropagation()}
     >
       {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
     </select>
@@ -65,8 +81,8 @@ function EdgePanel({ label, values, allLowest, onChange }: {
         {/* Middle row */}
         <div className="flex items-center gap-2">
           <GradeSelect value={values.left} onChange={v => onChange("left", v)} isLowest={values.left === allLowest} />
-          <div className="border border-[#222222] rounded bg-[#0D0D0D] w-20 h-12 flex items-center justify-center">
-            <span className="text-[#333333] text-[9px] uppercase tracking-widest">{label}</span>
+          <div className="border border-[#E8E4DC] rounded bg-[#F7F7F5] w-20 h-12 flex items-center justify-center">
+            <span className="text-[#D4D0C8] text-[9px] uppercase tracking-widest">{label}</span>
           </div>
           <GradeSelect value={values.right} onChange={v => onChange("right", v)} isLowest={values.right === allLowest} />
         </div>
@@ -111,10 +127,10 @@ export default function EdgeGrading({ values, onChange, overrideGrade, onOverrid
       </div>
 
       <div>
-        <p className="text-[#888888] text-[10px]">
+        <p className="text-[#333333] text-[10px]">
           Edges: <span className="font-bold text-sm" style={{ color: gradeColor(displayGrade) }}>{displayGrade}</span>
           {worstKey && <span className="text-[#555555]"> (limited by {worstKey})</span>}
-          {overrideGrade !== null && <span className="text-[#888888]"> (manual)</span>}
+          {overrideGrade !== null && <span className="text-[#333333]"> (manual)</span>}
         </p>
         {!showOverride && (
           <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override</button>
@@ -124,12 +140,12 @@ export default function EdgeGrading({ values, onChange, overrideGrade, onOverrid
             <select
               value={overrideGrade ?? ""}
               onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-              className="bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1"
+              className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
             >
               <option value="">Auto</option>
               {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
-            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#888888]">clear</button>
+            <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
           </div>
         )}
       </div>

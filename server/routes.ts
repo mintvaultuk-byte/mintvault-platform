@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
-import { storage } from "./storage";
+import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { verifyAdminPassword, verifyAdminPin, requireAdmin, isLoginRateLimited, isPinRateLimited, recordFailedLogin, recordFailedPin, clearLoginAttempts, clearPinAttempts, isPendingAdminValid, clearPendingAdmin, ADMIN_EMAIL, FAILED_LOGIN_DELAY_MS } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
@@ -16,10 +16,10 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, r2KeyForImage, r2KeyForLabel 
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, type ImageKeys } from "./ai-grading-service";
+import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -28,6 +28,7 @@ import {
   countRecentFailedAttempts, logLoginAttempt, writeAuthAudit,
   migrateAccountSchema,
 } from "./account-auth";
+import { migrateMarketplaceSchema } from "./marketplace-schema";
 import {
   sendWelcomeVerificationEmail, sendAccountMagicLinkEmail,
   sendPasswordResetEmail, sendPasswordChangedEmail,
@@ -36,7 +37,65 @@ import {
 import { requireAuth } from "./middleware/auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
+import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
+
+/** Count unused, unexpired credits of a given type */
+async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
+  const rows = await db.execute(sql`
+    SELECT COUNT(*) AS cnt FROM member_credits
+    WHERE user_id = ${userId} AND credit_type = ${creditType}
+      AND used_at IS NULL AND expires_at > NOW()
+  `);
+  return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
+}
+
+/** Consume a single credit of the given type. Returns true if consumed. */
+async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
+  const result = await db.execute(sql`
+    UPDATE member_credits
+    SET used_at = NOW(), used_for_submission_id = ${submissionId}
+    WHERE id = (
+      SELECT id FROM member_credits
+      WHERE user_id = ${userId} AND credit_type = ${creditType}
+        AND used_at IS NULL AND expires_at > NOW()
+      ORDER BY expires_at ASC LIMIT 1
+    ) RETURNING id
+  `);
+  return result.rows.length > 0;
+}
+
+/** Resilient JSON extraction: handles Claude prose preambles, markdown fences, truncation */
+function extractJson<T = any>(raw: string, label: string): T {
+  const cleaned = raw.replace(/```json|```/g, "").trim();
+  // Attempt 1: direct parse
+  try { return JSON.parse(cleaned); } catch {}
+  // Attempt 2: extract outermost JSON object from prose
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch (e2: any) {
+      console.error(`[${label}] regex-extracted JSON failed to parse:`, e2.message);
+      console.error(`[${label}] extracted (first 500):`, match[0].slice(0, 500));
+    }
+  }
+  // Attempt 3: truncated JSON — try to close it
+  const braceMatch = cleaned.match(/\{[\s\S]*/);
+  if (braceMatch) {
+    const partial = braceMatch[0];
+    // Count open vs close braces to auto-close
+    const opens = (partial.match(/\{/g) || []).length;
+    const closes = (partial.match(/\}/g) || []).length;
+    if (opens > closes) {
+      const repaired = partial + "}".repeat(opens - closes);
+      try { return JSON.parse(repaired); } catch (e3: any) {
+        console.error(`[${label}] truncation repair failed:`, e3.message);
+      }
+    }
+  }
+  console.error(`[${label}] could not extract JSON. Length: ${raw.length}, first 500: ${raw.slice(0, 500)}`);
+  console.error(`[${label}] last 200: ${raw.slice(-200)}`);
+  throw new Error(`AI returned invalid response for ${label}`);
+}
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -131,7 +190,7 @@ function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /\.(jpg|jpeg|png|webp)$/i;
     if (allowed.test(path.extname(file.originalname))) {
@@ -148,7 +207,7 @@ function normalizeCertId(raw: string): string {
   return raw;
 }
 
-async function certToPublic(c: any): Promise<PublicCertificate> {
+async function certToPublic(c: any, viewerUserId?: string | null): Promise<PublicCertificate> {
   const gradeType = c.gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
@@ -156,10 +215,10 @@ async function certToPublic(c: any): Promise<PublicCertificate> {
   let frontUrl: string | null = null;
   let backUrl: string | null = null;
   if (c.frontImagePath) {
-    try { frontUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch { frontUrl = null; }
+    try { frontUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (front):", c.frontImagePath, e); frontUrl = null; }
   }
   if (c.backImagePath) {
-    try { backUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch { backUrl = null; }
+    try { backUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (back):", c.backImagePath, e); backUrl = null; }
   }
 
   return {
@@ -194,26 +253,229 @@ async function certToPublic(c: any): Promise<PublicCertificate> {
       ? `MV-REG-${String(c.certId).replace(/^MV-?0*/, "").padStart(10, "0")}`
       : null,
     gradingReport: c.gradingReport && Object.keys(c.gradingReport).length > 0 ? c.gradingReport : null,
+    isOwnedByViewer: !!(viewerUserId && c.currentOwnerUserId && viewerUserId === c.currentOwnerUserId),
   };
 }
 
-async function seedGoldTiers() {
-  const tiers = [
-    { serviceType: "grading",        tierId: "gold",           name: "GOLD",             pricePerCard: 8500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",  maxValueGbp: 2500, sortOrder: 4 },
-    { serviceType: "grading",        tierId: "gold-elite",     name: "GOLD ELITE",       pricePerCard: 12500, turnaroundDays: 3,  turnaroundLabel: "2-3 working days", maxValueGbp: 5000, sortOrder: 5 },
-    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",         pricePerCard: 800,   turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",        pricePerCard: 1500,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",   pricePerCard: 1000,  turnaroundDays: 20, turnaroundLabel: "20 working days",  maxValueGbp: 1000, sortOrder: 1 },
+async function migrateServiceTiersV213() {
+  // ── Phase 1: Add new columns — each in its own try/catch so one failure doesn't block others ──
+  for (const stmt of [
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS display_name TEXT`,
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS tagline TEXT`,
+    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS most_popular BOOLEAN NOT NULL DEFAULT FALSE`,
+  ]) {
+    try { await db.execute(stmt); }
+    catch (e: any) { console.error("[v213-migrate] ALTER service_tiers failed:", e.message); }
+  }
+
+  // ── Phase 2: Seed rows that don't yet exist (ON CONFLICT DO NOTHING) ──────
+  // These only insert if the tier_id doesn't already exist in the table.
+  // On a branched DB with existing data, every INSERT will be skipped — that's expected.
+  const seeds = [
+    { serviceType: "grading",        tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
+    { serviceType: "grading",        tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
+    { serviceType: "grading",        tierId: "express",        name: "EXPRESS",            pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
+    { serviceType: "grading",        tierId: "gold",           name: "BLACK LABEL REVIEW", pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
+    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",           pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",          pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
+    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",     pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
   ];
-  for (const t of tiers) {
+  for (const t of seeds) {
     try {
       await db.execute(sql`
         INSERT INTO service_tiers (service_type, tier_id, name, price_per_card, turnaround_days, turnaround_label, max_value_gbp, is_active, sort_order)
         VALUES (${t.serviceType}, ${t.tierId}, ${t.name}, ${t.pricePerCard}, ${t.turnaroundDays}, ${t.turnaroundLabel}, ${t.maxValueGbp}, true, ${t.sortOrder})
         ON CONFLICT DO NOTHING
       `);
-    } catch {}
+    } catch (e: any) { console.error(`[v213-migrate] seed ${t.tierId} failed:`, e.message); }
   }
+
+  // ── Phase 3a: UPDATE core columns that definitely exist (name, price, turnaround, etc.) ──
+  // These columns have existed since the table was created — no dependency on Phase 1 ALTERs.
+  // Rollback reference (old prices): standard=1200, priority=1500, express=2000, gold=8500, gold-elite=12500
+  // Ancillary old prices: reholder=800, crossover=1500, authentication=1000
+  const coreUpdates = [
+    { tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
+    { tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
+    { tierId: "express",        name: "EXPRESS",             pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
+    { tierId: "gold",           name: "BLACK LABEL REVIEW",  pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
+    { tierId: "reholder",       name: "REHOLDER",            pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    { tierId: "crossover",      name: "CROSSOVER",           pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
+    { tierId: "authentication", name: "AUTHENTICATION",      pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+  ];
+  for (const u of coreUpdates) {
+    try {
+      const result = await db.execute(sql`
+        UPDATE service_tiers SET
+          name = ${u.name},
+          price_per_card = ${u.pricePerCard},
+          turnaround_days = ${u.turnaroundDays},
+          turnaround_label = ${u.turnaroundLabel},
+          max_value_gbp = ${u.maxValueGbp},
+          sort_order = ${u.sortOrder},
+          updated_at = NOW()
+        WHERE tier_id = ${u.tierId}
+      `);
+      console.log(`[v213-migrate] core UPDATE ${u.tierId}: ${result.rowCount} row(s)`);
+    } catch (e: any) { console.error(`[v213-migrate] core UPDATE ${u.tierId} failed:`, e.message); }
+  }
+
+  // ── Phase 3b: UPDATE new columns (display_name, tagline, most_popular) ──
+  // These depend on Phase 1 ALTERs succeeding. If the columns don't exist, each UPDATE
+  // will fail and log the error — but Phase 3a prices are already applied.
+  const metaUpdates = [
+    { tierId: "standard",       displayName: "Vault Queue",        tagline: "For patient collectors. Full Vault treatment, longer queue.",         mostPopular: false },
+    { tierId: "priority",       displayName: "Standard",           tagline: "Our most popular tier. Professional grading, solid turnaround.",     mostPopular: true },
+    { tierId: "express",        displayName: "Express",            tagline: "Fast-tracked grading for time-sensitive submissions.",               mostPopular: false },
+    { tierId: "gold",           displayName: "Black Label Review", tagline: "Premium service for high-value and investment-grade cards.",         mostPopular: false },
+    { tierId: "reholder",       displayName: "Reholder",           tagline: "New MintVault slab with updated NFC and certificate.",              mostPopular: false },
+    { tierId: "crossover",      displayName: "Crossover",          tagline: "Re-grade a card from PSA, BGS, CGC, or another company.",           mostPopular: false },
+    { tierId: "authentication", displayName: "Authentication",     tagline: "Verify authenticity and check for alterations.",                    mostPopular: false },
+  ];
+  for (const u of metaUpdates) {
+    try {
+      await db.execute(sql`
+        UPDATE service_tiers SET
+          display_name = ${u.displayName},
+          tagline = ${u.tagline},
+          most_popular = ${u.mostPopular}
+        WHERE tier_id = ${u.tierId}
+      `);
+    } catch (e: any) { console.error(`[v213-migrate] meta UPDATE ${u.tierId} failed:`, e.message); }
+  }
+
+  // ── Phase 4: Deactivate gold-elite (no longer offered) ─────────────────────
+  try {
+    const r = await db.execute(sql`UPDATE service_tiers SET is_active = false WHERE tier_id = 'gold-elite'`);
+    console.log(`[v213-migrate] deactivate gold-elite: ${r.rowCount} row(s)`);
+  } catch (e: any) { console.error("[v213-migrate] deactivate gold-elite failed:", e.message); }
+
+  // ── Phase 5: Create value_protection_tiers table ────────────────────────────
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS value_protection_tiers (
+        id SERIAL PRIMARY KEY,
+        min_value_pence INTEGER NOT NULL,
+        max_value_pence INTEGER,
+        fee_pence INTEGER NOT NULL,
+        requires_photos BOOLEAN DEFAULT false,
+        display_name TEXT NOT NULL
+      )
+    `);
+    const existing = await db.execute(sql`SELECT COUNT(*) AS cnt FROM value_protection_tiers`);
+    if (parseInt((existing.rows[0] as any)?.cnt ?? "0", 10) === 0) {
+      await db.execute(sql`
+        INSERT INTO value_protection_tiers (min_value_pence, max_value_pence, fee_pence, requires_photos, display_name) VALUES
+        (25000, 99900, 1000, false, '£250 – £999'),
+        (100000, 249900, 2500, false, '£1,000 – £2,499'),
+        (250000, NULL, 5000, true, '£2,500+')
+      `);
+      console.log("[v213-migrate] value_protection_tiers seeded with 3 rows");
+    }
+  } catch (e: any) { console.error("[v213-migrate] value_protection_tiers failed:", e.message); }
+
+  // ── Phase 6: Add credit_type column to member_credits (formerly reholder_credits) ──
+  try {
+    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'member'`);
+    console.log("[v213-migrate] member_credits.credit_type column ensured");
+  } catch (e: any) { console.error("[v213-migrate] ALTER member_credits failed:", e.message); }
+
+  console.log("[startup] migrateServiceTiersV213 complete");
+
+  // ── Phase 7: Ownership schema additions (v229) ─────────────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_name TEXT`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_token_hash TEXT`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_expires_at TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_deadline TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_at TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_reason TEXT`);
+    await db.execute(sql`ALTER TABLE ownership_history ADD COLUMN IF NOT EXISTS public_name BOOLEAN DEFAULT false`);
+    await db.execute(sql`ALTER TABLE submission_items ADD COLUMN IF NOT EXISTS declared_new BOOLEAN DEFAULT false`);
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS reference_number TEXT UNIQUE`);
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_version INTEGER NOT NULL DEFAULT 1`);
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_last_issued_at TIMESTAMPTZ`);
+    console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
+  } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
+
+  // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
+  } catch (e: any) { console.error("[transfer-v2] flow_version:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(30) NOT NULL DEFAULT 'pending_owner'`);
+  } catch (e: any) { console.error("[transfer-v2] transfer_status:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS reference_number_provided TEXT`);
+  } catch (e: any) { console.error("[transfer-v2] reference_number_provided:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS outgoing_keeper_user_id VARCHAR`);
+  } catch (e: any) { console.error("[transfer-v2] outgoing_keeper_user_id:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_keeper_user_id VARCHAR`);
+  } catch (e: any) { console.error("[transfer-v2] incoming_keeper_user_id:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_confirm_deadline TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] incoming_confirm_deadline:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_by VARCHAR(10)`);
+  } catch (e: any) { console.error("[transfer-v2] disputed_by:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] finalised_at:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`);
+  } catch (e: any) { console.error("[transfer-v2] cancelled_at:", e.message); }
+  try {
+    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`);
+  } catch (e: any) { console.error("[transfer-v2] cancellation_reason:", e.message); }
+  // Index for cron jobs: find v2 transfers in dispute window that need finalising
+  try {
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_transfer_v2_status ON transfer_verifications (transfer_status) WHERE flow_version = 'v2'`);
+  } catch (e: any) { console.error("[transfer-v2] index:", e.message); }
+  console.log("[transfer-v2] schema migration complete");
+
+  // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
+  try {
+    // Find graded certs with no ownership_history row
+    const unowned = await db.execute(sql`
+      SELECT c.certificate_number, c.issued_at, c.submission_item_id
+      FROM certificates c
+      WHERE c.grade_approved_at IS NOT NULL
+        AND c.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM ownership_history oh WHERE oh.cert_id = c.certificate_number
+        )
+      LIMIT 200
+    `);
+    let backfilled = 0;
+    for (const row of unowned.rows as any[]) {
+      try {
+        let email: string | null = null;
+        let name: string | null = null;
+        if (row.submission_item_id) {
+          const sub = await db.execute(sql`
+            SELECT s.customer_email, s.customer_first_name, s.customer_last_name
+            FROM submission_items si
+            JOIN submissions s ON s.id = si.submission_id
+            WHERE si.id = ${row.submission_item_id}
+            LIMIT 1
+          `);
+          const sr = sub.rows[0] as any;
+          if (sr) {
+            email = sr.customer_email || null;
+            name = [sr.customer_first_name, sr.customer_last_name].filter(Boolean).join(" ") || null;
+          }
+        }
+        await db.execute(sql`
+          INSERT INTO ownership_history (cert_id, from_user_id, to_user_id, to_email, event_type, notes, created_at)
+          VALUES (${row.certificate_number}, NULL, '', ${email}, 'auto_submission', ${name ? `Original submitter: ${name}` : 'Auto-assigned from submission'}, ${row.issued_at || new Date().toISOString()})
+        `);
+        backfilled++;
+      } catch {}
+    }
+    if (backfilled > 0) console.log(`[v229-migrate] backfilled owner 1 for ${backfilled} certs`);
+  } catch (e: any) { console.error("[v229-migrate] backfill failed:", e.message); }
 }
 
 async function addRevealWrapColumn() {
@@ -323,10 +585,11 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
   const forceOpen: boolean = cap.force_open ?? false;
 
   // Count active submissions for this tier
+  const statusList = `{${ACTIVE_STATUSES.join(",")}}`;
   const countRows = await db.execute(sql`
     SELECT COUNT(*) AS cnt FROM submissions
     WHERE service_tier = ${tierSlug}
-      AND status = ANY(${ACTIVE_STATUSES}::text[])
+      AND status = ANY(${statusList}::text[])
   `);
   const active = parseInt((countRows.rows[0] as any)?.cnt ?? "0", 10);
   const full = !forceOpen && active >= maxActive;
@@ -364,6 +627,30 @@ async function seedTierCapacityTable() {
   } catch {}
 }
 
+async function createAiOverrideAuditTable() {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ai_override_audit (
+        id SERIAL PRIMARY KEY,
+        cert_id INTEGER,
+        field_path TEXT NOT NULL,
+        ai_value JSONB,
+        override_value JSONB,
+        override_reason TEXT,
+        overridden_by TEXT NOT NULL,
+        overridden_at TIMESTAMPTZ DEFAULT NOW(),
+        session_id TEXT
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_cert ON ai_override_audit(cert_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_field ON ai_override_audit(field_path)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_time ON ai_override_audit(overridden_at DESC)`);
+    console.log("[v221-migrate] ai_override_audit table ensured");
+  } catch (e: any) {
+    console.error("[v221-migrate] ai_override_audit failed:", e.message);
+  }
+}
+
 async function createEbayPriceCacheTable() {
   try {
     await db.execute(sql`
@@ -389,16 +676,144 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Seed gold grading tiers, estimate_credits table, admin credits, and run column migrations on startup
-  seedGoldTiers().catch(() => {});
+  // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
+  migrateServiceTiersV213().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});
   addRevealWrapColumn().catch(() => {});
   createAiGradeCorrectionsTable().catch(() => {});
+  createAiOverrideAuditTable().catch(() => {});
   createEstimateFreeUsesTable().catch(() => {});
   createEbayPriceCacheTable().catch(() => {});
   seedTierCapacityTable().catch(() => {});
-  migrateAccountSchema().catch((e: any) => console.error("[account-auth] migration error:", e.message));
+  migrateAccountSchema()
+    .then(() => migrateMarketplaceSchema())
+    .catch((e: any) => console.error("[startup-migration] error:", e.message));
+
+  // Reference number backfill — async, fire-and-forget, never blocks boot
+  if (process.env.SKIP_BACKFILL !== "true") {
+    import("./reference-number").then(({ backfillReferenceNumbers }) =>
+      backfillReferenceNumbers()
+        .then(() => console.log("[startup] reference number backfill complete"))
+        .catch(err => console.error("[startup] reference number backfill failed — will retry on next boot:", err.message))
+    ).catch(() => {});
+  } else {
+    console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
+  }
+
+  // ── Public flags endpoint ──────────────────────────────────────────────────
+  app.get("/api/config/public-flags", (_req, res) => {
+    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    res.json({ legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE });
+  });
+
+  // ── v2 Homepage Stats ──────────────────────────────────────────────────────
+  let homepageStatsCache: { data: any; ts: number } | null = null;
+  app.get("/api/v2/homepage-stats", async (_req, res) => {
+    try {
+      if (homepageStatsCache && Date.now() - homepageStatsCache.ts < 60_000) {
+        return res.json(homepageStatsCache.data);
+      }
+      const statsResult = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS total_graded,
+          COUNT(DISTINCT card_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_cards,
+          COUNT(DISTINCT set_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_sets,
+          ROUND(AVG(grade::numeric) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL), 1) AS avg_grade,
+          COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
+        FROM certificates
+      `);
+      // Hero slab stack shows grade RANGE, not just the 3 most recent.
+      // For each distinct numeric grade, pick the most recent cert; then take
+      // the top 3 grades (highest first). Falls back to <3 rows if DB has
+      // fewer distinct grades — caller degrades gracefully.
+      const recentResult = await db.execute(sql`
+        SELECT DISTINCT ON (grade::numeric)
+               id, card_name, set_name, grade, grade_type,
+               REGEXP_REPLACE(REGEXP_REPLACE(id::text, '^0+', ''), '^', 'MV') AS cert_number,
+               front_image_path
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL
+          AND grade_type = 'numeric'
+          AND card_name IS NOT NULL AND card_name != '' AND card_name != '(untitled)'
+        ORDER BY grade::numeric DESC, issued_at DESC
+        LIMIT 3
+      `);
+      const stats = statsResult.rows[0] as any;
+      const data = {
+        total_graded: parseInt(stats.total_graded || "0"),
+        unique_cards: parseInt(stats.unique_cards || "0"),
+        unique_sets: parseInt(stats.unique_sets || "0"),
+        avg_grade: parseFloat(stats.avg_grade || "0"),
+        claimed_count: parseInt(stats.claimed_count || "0"),
+        recent_certs: (recentResult.rows as any[]).map(r => ({
+          id: r.id,
+          card_name: r.card_name,
+          set_name: r.set_name,
+          grade: r.grade,
+          grade_type: r.grade_type,
+          cert_number: r.cert_number,
+          front_image_path: r.front_image_path,
+        })),
+      };
+      homepageStatsCache = { data, ts: Date.now() };
+      res.json(data);
+    } catch (err: any) {
+      console.error("[v2/homepage-stats] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
+  // ── Legal page API routes ─────────────────────────────────────────────────
+  app.get("/api/legal/:slug", (req, res) => {
+    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
+
+    const { LEGAL_SLUGS } = require("./config/legal");
+    const slug = req.params.slug;
+    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const content = fs.readFileSync(filePath, "utf-8");
+
+      // Extract frontmatter title
+      const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
+      const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const body = content.replace(/^---[\s\S]*?---\s*/m, "");
+
+      res.json({
+        slug,
+        title: titleMatch?.[1] || slug,
+        version: versionMatch?.[1] || "unknown",
+        content: body,
+      });
+    } catch {
+      res.status(404).json({ error: "Document not found" });
+    }
+  });
+
+  // Admin preview — always available regardless of flag
+  app.get("/api/admin/legal/:slug", requireAdmin, (req, res) => {
+    const { LEGAL_SLUGS } = require("./config/legal");
+    const slug = req.params.slug;
+    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const content = fs.readFileSync(filePath, "utf-8");
+      const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
+      const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const body = content.replace(/^---[\s\S]*?---\s*/m, "");
+      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", content: body });
+    } catch {
+      res.status(404).json({ error: "Document not found" });
+    }
+  });
 
   // ── Old cert URL redirects → new DIG URL ──────────────────────────────────
   // These fire for direct URL access (e.g. scanning an old QR code with a legacy URL format)
@@ -484,12 +899,13 @@ export async function registerRoutes(
 
   app.get("/api/cert/:id", async (req, res) => {
     const certId = req.params.id;
+    const viewerUserId = (req.session as any)?.userId as string | undefined;
 
     const dbCert = await findCertByIdFlex(certId);
     if (!dbCert) {
       return res.status(404).json({ error: "Certificate not found" });
     }
-    return res.json(await certToPublic(dbCert));
+    return res.json(await certToPublic(dbCert, viewerUserId));
   });
 
   // ── PUBLIC VERIFICATION API (v1) ──────────────────────────────────────────
@@ -647,10 +1063,41 @@ export async function registerRoutes(
       const serviceType = req.query.serviceType as string | undefined;
       const tiers = await storage.getServiceTiers(serviceType);
       const pricingData = tiers.map(serviceTierToPricingTier);
-      res.json(pricingData);
+
+      // Enrich with capacity status
+      const capacityRows = await db.execute(sql`SELECT tier_id, status, paused_until, paused_message FROM tier_capacity`);
+      const capacityMap = new Map((capacityRows.rows as any[]).map(r => [r.tier_id, r]));
+
+      const enriched = pricingData.map((tier: any) => {
+        const cap = capacityMap.get(tier.tierId) || capacityMap.get(tier.id);
+        return {
+          ...tier,
+          capacityStatus: cap?.status || "open",
+          capacityPausedUntil: cap?.paused_until || null,
+          capacityMessage: cap?.paused_message || null,
+        };
+      });
+
+      res.json(enriched);
     } catch (error: any) {
       console.error("Error fetching service tiers:", error.message);
       res.status(500).json({ error: "Failed to fetch service tiers" });
+    }
+  });
+
+  app.get("/api/value-protection-tiers", async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT id, min_value_pence, max_value_pence, fee_pence,
+               requires_photos, display_name
+        FROM value_protection_tiers
+        ORDER BY min_value_pence ASC
+      `);
+      res.json(result.rows || []);
+    } catch (e: any) {
+      // Table may not exist yet — return empty array
+      console.error("[value-protection-tiers] error:", e.message);
+      res.json([]);
     }
   });
 
@@ -662,11 +1109,21 @@ export async function registerRoutes(
         crossoverCompany, crossoverOriginalGrade, crossoverCertNumber,
         reholderCompany, reholderReason, reholderCondition,
         authReason, authConcerns, revealWrap,
+        applyCredit, creditType: requestedCreditType,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
       if (!type || !VALID_SERVICE_TYPES.includes(type)) {
         return res.status(400).json({ error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}` });
+      }
+
+      // Check tier capacity — block paused tiers
+      if (tier) {
+        const capRow = await db.execute(sql`SELECT status, paused_message FROM tier_capacity WHERE tier_id = ${tier} LIMIT 1`);
+        const cap = capRow.rows[0] as any;
+        if (cap?.status === "paused") {
+          return res.status(403).json({ error: cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.` });
+        }
       }
 
       if (type === "crossover" && !crossoverCompany) {
@@ -721,12 +1178,26 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Declared value is required and must be greater than 0" });
       }
 
-      const { liabilityAccepted, termsAccepted } = req.body;
-      if (!liabilityAccepted) {
-        return res.status(400).json({ error: "You must accept the Liability & Shipping Policy before proceeding." });
-      }
-      if (!termsAccepted) {
-        return res.status(400).json({ error: "Terms & Conditions must be accepted." });
+      const { liabilityAccepted, termsAccepted, termsVersion: clientTermsVersion } = req.body;
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      const { TERMS_VERSION } = await import("./config/legal");
+
+      if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
+        // New combined terms flow — single checkbox sets both
+        if (!termsAccepted) {
+          return res.status(400).json({ error: "Terms acceptance required" });
+        }
+        if (clientTermsVersion && clientTermsVersion !== TERMS_VERSION) {
+          return res.status(400).json({ error: `Terms version mismatch. Expected ${TERMS_VERSION}, got ${clientTermsVersion}` });
+        }
+      } else {
+        // Legacy flow — separate checkboxes
+        if (!liabilityAccepted) {
+          return res.status(400).json({ error: "You must accept the Liability & Shipping Policy before proceeding." });
+        }
+        if (!termsAccepted) {
+          return res.status(400).json({ error: "Terms & Conditions must be accepted." });
+        }
       }
 
       if (Array.isArray(cardItems) && cardItems.length > 0) {
@@ -766,7 +1237,23 @@ export async function registerRoutes(
       const effectiveDiscountAmount = totals.discountAmount;
       const discountType: string | null = totals.discountPercent > 0 ? "bulk" : null;
       const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
-      const total = discountedSubtotal + totals.shipping + totals.totalInsuranceFee;
+
+      // ── Credit application (Vault Club Silver/Gold) ────────────────────────
+      let creditApplied = false;
+      let creditAmountPence = 0;
+      let creditTypeApplied: string | null = null;
+      if (applyCredit && req.session?.userId) {
+        const ct = requestedCreditType === "reholder" ? "reholder" : "standard_grade";
+        const hasCredit = await countCreditsRemaining((req.session as any).userId, ct);
+        if (hasCredit > 0) {
+          // Credit covers the grading/reholder fee for 1 card (not insurance, not shipping)
+          creditAmountPence = tierData.pricePerCard;
+          creditApplied = true;
+          creditTypeApplied = ct;
+        }
+      }
+
+      const total = Math.max(0, discountedSubtotal - creditAmountPence + totals.shipping + totals.totalInsuranceFee);
 
       const declaredValuePerCard = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
@@ -807,7 +1294,7 @@ export async function registerRoutes(
         liabilityAcceptedIp: clientIp,
         termsAccepted: true,
         termsAcceptedAt: new Date(),
-        termsVersion: "Feb-2026",
+        termsVersion: FEATURE_FLAGS.LEGAL_PAGES_LIVE ? TERMS_VERSION : "Feb-2026",
         highValueFlag,
         requiresManualApproval,
         crossoverCompany: crossoverCompany || null,
@@ -820,6 +1307,25 @@ export async function registerRoutes(
         authConcerns: authConcerns || null,
         revealWrap: revealWrap === true,
       });
+
+      // Audit log for terms acceptance
+      if (FEATURE_FLAGS.LEGAL_PAGES_LIVE) {
+        try {
+          const { truncateIp } = await import("./utils/truncate-ip");
+          await db.insert(auditLog).values({
+            entityType: "submission",
+            entityId: String(submission.id),
+            action: "terms_accepted",
+            adminUser: null,
+            details: {
+              termsVersion: TERMS_VERSION,
+              acceptedAt: new Date().toISOString(),
+              userAgent: req.headers["user-agent"]?.slice(0, 200),
+              ip: truncateIp(req.ip),
+            },
+          });
+        } catch {}
+      }
 
       const stripe = await getUncachableStripeClient();
 
@@ -840,6 +1346,7 @@ export async function registerRoutes(
           shippingInsurance: totals.shippingLabel,
           insuranceFee: String(totals.totalInsuranceFee),
           highValue: String(highValueFlag),
+          ...(creditApplied ? { creditApplied: "true", creditType: creditTypeApplied || "", creditAmountPence: String(creditAmountPence) } : {}),
           ...(type === "crossover" && crossoverCompany ? {
             crossoverCompany: crossoverCompany,
             crossoverOriginalGrade: crossoverOriginalGrade || "",
@@ -902,6 +1409,11 @@ export async function registerRoutes(
           percent: effectiveDiscountPercent,
           amount_pence: effectiveDiscountAmount,
         } : null,
+        credit: creditApplied ? {
+          type: creditTypeApplied,
+          amount_pence: creditAmountPence,
+        } : null,
+        freeShipping: false,
       });
     } catch (error: any) {
       console.error("Error creating payment intent:", error.message);
@@ -930,6 +1442,19 @@ export async function registerRoutes(
         await storage.markSubmissionAsPaid(Number(submission.id));
         storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
 
+        // Consume Vault Club credit if one was applied at checkout
+        const piMeta = paymentIntent.metadata || {};
+        if (piMeta.creditApplied === "true" && piMeta.creditType) {
+          if (submission.email) {
+            const creditUser = await storage.getUserByEmail(submission.email);
+            if (creditUser) {
+              await consumeCredit(creditUser.id, piMeta.creditType, Number(submission.id)).catch((e: any) =>
+                console.error("[checkout] credit consume error:", e.message)
+              );
+            }
+          }
+        }
+
         if (submission.email) {
           let user = await storage.getUserByEmail(submission.email);
           if (!user) {
@@ -946,7 +1471,9 @@ export async function registerRoutes(
 
         const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
 
-        sendSubmissionConfirmation({
+        const { FEATURE_FLAGS: FF2 } = await import("./config/feature-flags");
+        const { TERMS_VERSION: TV2 } = await import("./config/legal");
+        const emailData = {
           email: submission.email || "",
           firstName: submission.firstName || "Customer",
           submissionId: submission.submissionId,
@@ -954,11 +1481,22 @@ export async function registerRoutes(
           tier: submission.serviceTier || "standard",
           total: paymentIntent.amount || 0,
           serviceType: submission.serviceType || undefined,
-          crossoverCompany: submission.crossover_company || undefined,
-          crossoverOriginalGrade: submission.crossover_original_grade || undefined,
-          crossoverCertNumber: submission.crossover_cert_number || undefined,
           labelToken: packingSlipToken,
-        }).catch(() => {});
+        };
+        if (FF2.LEGAL_PAGES_LIVE) {
+          sendSubmissionConfirmationV2({
+            ...emailData,
+            termsVersion: TV2,
+            termsAcceptedAt: new Date().toISOString(),
+          }).catch(() => {});
+        } else {
+          sendSubmissionConfirmation({
+            ...emailData,
+            crossoverCompany: submission.crossover_company || undefined,
+            crossoverOriginalGrade: submission.crossover_original_grade || undefined,
+            crossoverCertNumber: submission.crossover_cert_number || undefined,
+          }).catch(() => {});
+        }
 
         return res.json({
           success: true,
@@ -1364,7 +1902,7 @@ export async function registerRoutes(
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           max_tokens: 4096,
           messages: [{ role: "user", content: contentParts }],
         }),
@@ -1485,7 +2023,7 @@ export async function registerRoutes(
       // Signed image URLs — grading variants
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
       }
 
       const [frontUrl, backUrl, fGrey, fHC, fEdge, fInv, bGrey, bHC, bEdge, bInv, angledUrl, closeupUrl] = await Promise.all([
@@ -1786,7 +2324,198 @@ export async function registerRoutes(
     }
   });
 
-  // ── Vault Report endpoint ──────────────────────────────────────────────────
+  // ── Logbook endpoints ──────────────────────────────────────────────────────
+
+  app.get("/api/logbook/:certId", async (req, res) => {
+    try {
+      const { buildLogbookData, toPublicPayload } = await import("./logbook-service");
+      const data = await buildLogbookData(req.params.certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+      res.json(toPublicPayload(data));
+    } catch (err: any) {
+      console.error("[logbook] error:", err.message);
+      res.status(500).json({ error: "Failed to load logbook" });
+    }
+  });
+
+  app.get("/api/logbook/:certId/verify", async (req, res) => {
+    try {
+      const sig = (req.query.sig || req.query.signature) as string | undefined;
+      if (!sig) return res.status(400).json({ error: "signature query parameter required" });
+      const { verifyLogbookSignature } = await import("./logbook-service");
+      const result = await verifyLogbookSignature(req.params.certId, sig);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: "Verification failed" });
+    }
+  });
+
+  app.get("/logbook/:certId.pdf", async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const certId = String(req.params.certId);
+      const forceRegenerate = req.query.regenerate === "true";
+      const cacheKey = `logbooks/${certId}.pdf`;
+
+      // Serve from R2 cache unless ?regenerate=true
+      if (!forceRegenerate) {
+        try {
+          const cachedUrl = await getR2SignedUrl(cacheKey, 300);
+          const cached = await fetch(cachedUrl);
+          if (cached.ok) {
+            const buf = Buffer.from(await cached.arrayBuffer());
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+            return res.send(buf);
+          }
+        } catch {} // cache miss
+      }
+
+      const pdf = await generateLogbookPdf(certId, {});
+      if (!pdf) return res.status(404).json({ error: "Certificate not found" });
+
+      // Cache to R2 (overwrites if regenerating)
+      try { await uploadToR2(cacheKey, pdf, "application/pdf"); } catch {}
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+      res.send(pdf);
+    } catch (err: any) {
+      console.error(`[logbook-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
+      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
+    }
+  });
+
+  // Owner-only PDF with Document Reference Number
+  app.get("/logbook/:certId/owner.pdf", async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const { buildLogbookData } = await import("./logbook-service");
+      const certId = String(req.params.certId);
+
+      const data = await buildLogbookData(certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+
+      // Hardened dual-path owner auth:
+      // 1. Cert must be claimed — unclaimed certs never expose owner copy
+      // 2. ownerEmail must exist (non-null, non-empty)
+      // 3. Either session.userId matches cert owner OR session.customerEmail matches cert ownerEmail
+      const certOwnerStatus = (data as any).provenance?.ownershipStatus;
+      const certOwnerUserId = (data as any).currentOwnerUserId;
+      const certOwnerEmail = (data as any).ownerEmail;
+
+      const isOwner =
+        certOwnerStatus === "claimed" &&
+        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
+        (
+          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
+           (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
+           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
+        );
+
+      if (!isOwner) {
+        return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
+      }
+
+      // Version stays at current value on download — only increments on explicit reissue
+      const pdf = await generateLogbookPdf(certId, { includeReferenceNumber: true });
+      if (!pdf) return res.status(500).json({ error: "PDF generation failed" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="MintVault-OwnerCopy-${certId}.pdf"`);
+      res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      console.log(`[logbook-owner-pdf] served owner copy for ${certId}, referenceNumberPresent=${!!(data as any).referenceNumber}`);
+      res.send(pdf);
+    } catch (err: any) {
+      console.error(`[logbook-owner-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
+      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
+    }
+  });
+
+  // Reissue logbook — generates new reference number, increments version (V5C replacement)
+  app.post("/api/logbook/:certId/reissue", async (req, res) => {
+    try {
+      const { buildLogbookData } = await import("./logbook-service");
+      const { generateReferenceNumber } = await import("./reference-number");
+      const certId = String(req.params.certId);
+
+      const data = await buildLogbookData(certId);
+      if (!data) return res.status(404).json({ error: "Certificate not found" });
+
+      // Same dual-path owner auth as owner PDF
+      const certOwnerStatus = (data as any).provenance?.ownershipStatus;
+      const certOwnerUserId = (data as any).currentOwnerUserId;
+      const certOwnerEmail = (data as any).ownerEmail;
+      const isOwner =
+        certOwnerStatus === "claimed" &&
+        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
+        (
+          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
+           (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
+           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
+        );
+      if (!isOwner) return res.status(403).json({ error: "Only the current registered keeper can reissue the logbook" });
+
+      const { confirm, reason } = req.body || {};
+      if (confirm !== true || !reason || typeof reason !== "string" || reason.trim().length < 5) {
+        return res.status(400).json({ error: "Body must include {confirm: true, reason: string (min 5 chars)}" });
+      }
+
+      const rawCertId = (data as any).rawCertId || certId;
+      const oldVersion = (data as any).logbookVersion || 1;
+      const newVersion = oldVersion + 1;
+      const newRefNum = generateReferenceNumber();
+      const actorEmail = (req.session as any)?.customerEmail || (req.session as any)?.userId || "unknown";
+
+      // Single transaction: new ref number + increment version + audit log
+      await db.execute(sql`
+        UPDATE certificates SET
+          reference_number = ${newRefNum},
+          logbook_version = ${newVersion},
+          logbook_last_issued_at = NOW(),
+          updated_at = NOW()
+        WHERE certificate_number = ${rawCertId}
+      `);
+
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('certificate', ${rawCertId}, 'logbook_reissue', ${actorEmail},
+          ${JSON.stringify({ oldVersion, newVersion, reason: reason.trim() })}::jsonb, NOW())
+      `);
+
+      console.log(`[logbook-reissue] ${certId}: v${oldVersion} -> v${newVersion}, referenceNumberPresent=true, reason="${reason.trim().slice(0, 50)}"`);
+      res.json({ newVersion, issuedAt: new Date().toISOString() });
+    } catch (err: any) {
+      console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
+      res.status(500).json({ error: "Reissue failed" });
+    }
+  });
+
+  // Alias: /cert/:certId.pdf → passes through to /logbook/ with query params
+  app.get("/cert/:certId.pdf", (req, res) => {
+    const qs = req.query.regenerate === "true" ? "?regenerate=true" : "";
+    res.redirect(301, `/logbook/${req.params.certId}.pdf${qs}`);
+  });
+
+  app.post("/api/admin/logbook/:certId/regenerate", requireAdmin, async (req, res) => {
+    try {
+      const { generateLogbookPdf } = await import("./logbook-pdf");
+      const certId = String(req.params.certId);
+      const pdf = await generateLogbookPdf(certId, {});
+      if (!pdf) return res.status(404).json({ error: "Certificate not found" });
+      const cacheKey = `logbooks/${certId}.pdf`;
+      await uploadToR2(cacheKey, pdf, "application/pdf");
+      res.json({ ok: true, key: cacheKey });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Vault Report endpoint (kept for backward compat) ──────────────────────
   app.get("/api/vault/:certId", async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     try {
@@ -1803,7 +2532,7 @@ export async function registerRoutes(
 
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
       }
 
       const [frontUrl, backUrl] = await Promise.all([
@@ -2857,15 +3586,23 @@ export async function registerRoutes(
       if (req.query.status && req.query.status !== "all") filters.status = req.query.status as string;
       if (req.query.ownershipStatus && req.query.ownershipStatus !== "all") filters.ownershipStatus = req.query.ownershipStatus as string;
 
-      const certs = await storage.listCertificates(Object.keys(filters).length > 0 ? filters : undefined);
+      const allCerts = await storage.listCertificates(Object.keys(filters).length > 0 ? filters : undefined);
+      // Hide empty drafts (no card name, no images, no grade) unless a specific ID is requested
+      const includeId = req.query.includeId ? Number(req.query.includeId) : null;
+      const certs = allCerts.filter((c: any) => {
+        if (includeId && c.id === includeId) return true;
+        // Hide empty draft certs from the list
+        if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
+        return true;
+      });
       const certsWithUrls = await Promise.all(certs.map(async (c: any) => {
         let frontImageUrl: string | null = null;
         let backImageUrl: string | null = null;
         if (c.frontImagePath) {
-          try { frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch {}
+          try { frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin front):", c.frontImagePath, e); }
         }
         if (c.backImagePath) {
-          try { backImageUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch {}
+          try { backImageUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin back):", c.backImagePath, e); }
         }
         return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
       }));
@@ -2873,6 +3610,46 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("List certs error:", error.message, error.stack);
       res.status(500).json({ error: `Failed to list certificates: ${error.message}` });
+    }
+  });
+
+  // ── Create a new cert immediately with a real MV### number ─────────────────
+  app.post("/api/admin/certificates/new", requireAdmin, async (_req, res) => {
+    try {
+      const { generateReferenceNumber } = await import("./reference-number");
+      const certNumber = await storage.getNextCertId();
+      const refNum = generateReferenceNumber();
+      const result = await db.execute(sql`
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number)
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum})
+        RETURNING *
+      `);
+      const row = result.rows[0] as any;
+      // Build full camelCase cert object for frontend
+      const cert = {
+        ...row,
+        certId: normalizeCertId(row.certificate_number),
+        cardName: row.card_name || "",
+        setName: row.set_name || "",
+        cardNumber: row.card_number_display || "",
+        cardGame: row.card_game || "",
+        language: row.language || "English",
+        year: row.year_text || "",
+        notes: row.notes || "",
+        gradeOverall: row.grade || "",
+        gradeType: row.grade_type || "numeric",
+        labelType: row.label_type || "Standard",
+        frontImagePath: row.front_image_path || null,
+        backImagePath: row.back_image_path || null,
+        rarity: row.rarity || "",
+        variant: row.variant || "",
+        designations: row.designations || [],
+      };
+      console.log(`[admin] created new cert: ${certNumber} (id=${row.id})`);
+      res.json(cert);
+    } catch (err: any) {
+      console.error("[admin] new cert error:", err.message);
+      res.status(500).json({ error: "Failed to create certificate" });
     }
   });
 
@@ -3368,7 +4145,7 @@ export async function registerRoutes(
   });
 
   // ── REPRINT SINGLE LABEL ───────────────────────────────────────────────────
-  // Generates a 70×20mm PDF, logs the reprint. Does NOT affect the printed flag.
+  // Generates a 72×22mm PDF, logs the reprint. Does NOT affect the printed flag.
   app.post("/api/admin/printing/reprint/:certId", requireAdmin, async (req, res) => {
     try {
       const certId = String(req.params.certId);
@@ -3477,7 +4254,7 @@ export async function registerRoutes(
         gradeOverall: cert.gradeOverall,
         status: cert.status,
         nfcEnabled: !!cert.nfcUid,
-        redirectTo: `/cert/${cert.certId}`,
+        redirectTo: `/cert/${normalizeCertId(cert.certId)}`,
       });
     } catch (err: any) {
       console.error("NFC scan error:", err.message);
@@ -3708,6 +4485,345 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[transfer] Error completing transfer:", err);
       return res.redirect("/transfer?error=server_error");
+    }
+  });
+
+  // ── V2 TRANSFER FLOW (DVLA-style: ref number + 14-day dispute window) ────
+  // Rate limiter: max 5 attempts per IP per 15 minutes (shared concept, separate instance)
+  const transferV2RateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many transfer attempts. Please wait 15 minutes before trying again." },
+  });
+
+  // Stricter rate limit for ref number verification — 3 attempts per hour per IP
+  const refNumberRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many verification attempts. Please wait before trying again." },
+  });
+
+  // Step 1: outgoing keeper initiates transfer
+  app.post("/api/v2/transfers/initiate", transferV2RateLimit, async (req, res) => {
+    try {
+      const { certId, fromEmail, toEmail, newOwnerName } = req.body;
+      if (!certId || !fromEmail || !toEmail) {
+        return res.status(400).json({ error: "Certificate number, your email, and new keeper email are all required." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(fromEmail) || !emailRegex.test(toEmail)) {
+        return res.status(400).json({ error: "Please provide valid email addresses." });
+      }
+
+      if (fromEmail.toLowerCase().trim() === toEmail.toLowerCase().trim()) {
+        return res.status(400).json({ error: "The current and new keeper email addresses must be different." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const cert = await storage.getCertificateByCertId(normalizedId);
+      if (!cert) {
+        return res.status(404).json({ error: "Certificate not found." });
+      }
+      if (cert.ownershipStatus === "transfer_pending") {
+        return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
+      }
+      if (cert.ownershipStatus !== "claimed") {
+        return res.status(400).json({ error: "This certificate does not have a registered keeper. Please use Register Ownership first." });
+      }
+
+      // Verify fromEmail matches the current owner
+      if (!cert.currentOwnerUserId) {
+        return res.status(400).json({ error: "This certificate does not have a verified keeper on record." });
+      }
+      const owner = await storage.getUser(cert.currentOwnerUserId);
+      if (!owner || (owner.email ?? "").toLowerCase() !== fromEmail.toLowerCase().trim()) {
+        return res.status(400).json({ error: "The email address does not match the registered keeper." });
+      }
+
+      // Check reference number exists (required for v2)
+      const certRefNumber = (cert as any).referenceNumber as string | null;
+      if (!certRefNumber) {
+        return res.status(400).json({ error: "This certificate does not have a Document Reference Number yet. Please contact support." });
+      }
+
+      // Check for existing active v2 transfer
+      const existing = await storage.getTransferV2ByCertId(normalizedId);
+      if (existing) {
+        return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
+      }
+
+      const ownerToken = await storage.createTransferV2({
+        certId: normalizedId,
+        fromEmail: fromEmail.trim(),
+        toEmail: toEmail.trim(),
+        newOwnerName: newOwnerName?.trim() || undefined,
+        outgoingKeeperUserId: cert.currentOwnerUserId,
+        referenceNumber: certRefNumber,
+      });
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const confirmUrl = `${baseUrl}/api/v2/transfers/outgoing-confirm?token=${ownerToken}`;
+
+      await sendTransferV2OutgoingConfirmation({
+        fromEmail: fromEmail.trim(),
+        toEmail: toEmail.trim(),
+        certId: normalizedId,
+        confirmUrl,
+      });
+
+      await storage.writeAuditLog("transfer", normalizedId, "transfer_v2.initiated", null, {
+        fromEmail: fromEmail.trim().toLowerCase(), toEmail: toEmail.trim().toLowerCase(),
+      });
+
+      return res.json({ success: true, message: "Transfer initiated. Check your inbox for the confirmation link." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error initiating:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Step 2: outgoing keeper clicks email link → generates incoming keeper token
+  app.get("/api/v2/transfers/outgoing-confirm", async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token&v=2");
+
+      const result = await storage.confirmOutgoingKeeperV2(token);
+      if (!result.success || !result.newOwnerToken) {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2`);
+      }
+
+      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const incomingConfirmUrl = `${baseUrl}/transfer/accept?token=${result.newOwnerToken}&v=2`;
+
+      await sendTransferV2IncomingConfirmation({
+        toEmail: result.toEmail || "",
+        fromEmail: result.fromEmail || "",
+        certId: result.certId || "",
+        confirmUrl: incomingConfirmUrl,
+      });
+
+      return res.redirect(`/transfer?step=outgoing_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+    } catch (err: any) {
+      console.error("[transfer-v2] Error outgoing confirm:", err);
+      return res.redirect("/transfer?error=server_error&v=2");
+    }
+  });
+
+  // Step 3: incoming keeper submits ref number + token → enters dispute window
+  app.post("/api/v2/transfers/incoming-confirm", transferV2RateLimit, refNumberRateLimit, async (req, res) => {
+    try {
+      const { token, referenceNumber } = req.body;
+      if (!token || !referenceNumber) {
+        return res.status(400).json({ error: "Token and Document Reference Number are required." });
+      }
+
+      if (typeof referenceNumber !== "string" || referenceNumber.replace(/-/g, "").length < 8) {
+        return res.status(400).json({ error: "Please enter a valid Document Reference Number (format: XXXX-XXXX-XXXX)." });
+      }
+
+      const result = await storage.confirmIncomingKeeperV2(token, referenceNumber);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Send dispute-window emails to both parties
+      try {
+        // Look up the transfer to get details
+        const cert = await storage.getCertificateByCertId(result.certId!);
+        if (cert) {
+          const ownerUser = cert.currentOwnerUserId ? await storage.getUser(cert.currentOwnerUserId) : null;
+          const transfer = await storage.getTransferV2ByCertId(result.certId!);
+          const disputeDeadline = transfer?.disputeDeadline || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+          if (ownerUser?.email) {
+            await sendTransferV2DisputeWindowStarted({
+              email: ownerUser.email,
+              certId: result.certId!,
+              role: "outgoing",
+              disputeDeadline,
+            });
+          }
+          await sendTransferV2DisputeWindowStarted({
+            email: result.toEmail!,
+            certId: result.certId!,
+            role: "incoming",
+            disputeDeadline,
+          });
+        }
+      } catch (emailErr: any) {
+        console.error("[transfer-v2] Dispute window emails failed (non-fatal):", emailErr.message);
+      }
+
+      await storage.writeAuditLog("transfer", result.certId!, "transfer_v2.incoming_confirmed", null, {
+        toEmail: result.toEmail, referenceNumberPresent: true,
+      });
+
+      return res.json({ success: true, message: "Transfer verified. A 14-day dispute window is now active." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error incoming confirm:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Status check for a v2 transfer
+  app.get("/api/v2/transfers/status/:certId", async (req, res) => {
+    try {
+      const normalizedId = normalizeCertId(String(req.params.certId));
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found for this certificate." });
+      }
+
+      return res.json({
+        certId: transfer.certId,
+        status: transfer.status,
+        flowVersion: transfer.flowVersion,
+        fromEmail: transfer.fromEmail.replace(/(.{2}).*(@.*)/, "$1***$2"), // mask email
+        toEmail: transfer.toEmail.replace(/(.{2}).*(@.*)/, "$1***$2"),
+        ownerConfirmed: !!transfer.ownerConfirmedAt,
+        incomingConfirmed: transfer.status === "pending_dispute" || transfer.status === "completed",
+        disputeDeadline: transfer.disputeDeadline,
+        finalisedAt: transfer.finalisedAt,
+        createdAt: transfer.createdAt,
+      });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error fetching status:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // Dispute a v2 transfer during the 14-day window
+  app.post("/api/v2/transfers/dispute", async (req, res) => {
+    try {
+      const { certId, email, reason } = req.body;
+      if (!certId || !email || !reason) {
+        return res.status(400).json({ error: "Certificate ID, your email, and a reason are required." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found." });
+      }
+
+      // Determine role
+      const normEmail = email.toLowerCase().trim();
+      let role: "outgoing" | "incoming";
+      if (normEmail === transfer.fromEmail.toLowerCase()) {
+        role = "outgoing";
+      } else if (normEmail === transfer.toEmail.toLowerCase()) {
+        role = "incoming";
+      } else {
+        return res.status(403).json({ error: "You are not a party to this transfer." });
+      }
+
+      const result = await storage.disputeTransferV2(transfer.id, role, reason);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Audit
+      await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.disputed", null, {
+        certId: normalizedId, disputedBy: role, reason: reason.trim().slice(0, 200),
+      });
+
+      // Notify the other party
+      try {
+        const otherEmail = role === "outgoing" ? transfer.toEmail : transfer.fromEmail;
+        await sendTransferV2Disputed({ email: otherEmail, certId: normalizedId, disputedBy: role });
+      } catch {}
+
+      return res.json({ success: true, message: "Dispute raised. The transfer has been paused and MintVault will review." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error disputing:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // Cancel a v2 transfer (outgoing keeper only, before completion)
+  app.post("/api/v2/transfers/cancel", async (req, res) => {
+    try {
+      const { certId, email } = req.body;
+      if (!certId || !email) {
+        return res.status(400).json({ error: "Certificate ID and your email are required." });
+      }
+
+      const normalizedId = normalizeCertId(certId.trim());
+      const transfer = await storage.getTransferV2ByCertId(normalizedId);
+      if (!transfer) {
+        return res.status(404).json({ error: "No active transfer found." });
+      }
+
+      // Only the outgoing keeper can cancel
+      if (email.toLowerCase().trim() !== transfer.fromEmail.toLowerCase()) {
+        return res.status(403).json({ error: "Only the current registered keeper can cancel a transfer." });
+      }
+
+      const result = await storage.cancelTransferV2(transfer.id, "Cancelled by outgoing keeper");
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.cancelled", null, {
+        certId: normalizedId, cancelledBy: "outgoing",
+      });
+
+      // Notify both parties
+      try {
+        await sendTransferV2Cancelled({ email: transfer.fromEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
+        await sendTransferV2Cancelled({ email: transfer.toEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
+      } catch {}
+
+      return res.json({ success: true, message: "Transfer cancelled. Your keepership record is unchanged." });
+    } catch (err: any) {
+      console.error("[transfer-v2] Error cancelling:", err);
+      return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // ── ADMIN TRANSFERS LIST ───────────────────────────────────────────────
+  app.get("/api/admin/transfers", requireAdmin, async (_req, res) => {
+    try {
+      // Fetch all transfers (both v1 and v2), most recent first
+      const result = await db.execute(sql`
+        SELECT id, cert_id, from_email, to_email, flow_version,
+               transfer_status, owner_confirmed_at, dispute_deadline,
+               disputed_at, dispute_reason, disputed_by,
+               finalised_at, cancelled_at, cancellation_reason,
+               used_at, created_at
+        FROM transfer_verifications
+        ORDER BY created_at DESC
+        LIMIT 200
+      `);
+
+      const rows = (result.rows as any[]).map(r => ({
+        id: r.id,
+        certId: r.cert_id,
+        fromEmail: r.from_email,
+        toEmail: r.to_email,
+        flowVersion: r.flow_version || "v1",
+        status: r.transfer_status || (r.used_at ? "completed" : "pending_owner"),
+        ownerConfirmedAt: r.owner_confirmed_at,
+        disputeDeadline: r.dispute_deadline,
+        disputedAt: r.disputed_at,
+        disputeReason: r.dispute_reason,
+        disputedBy: r.disputed_by,
+        finalisedAt: r.finalised_at,
+        cancelledAt: r.cancelled_at,
+        cancellationReason: r.cancellation_reason,
+        createdAt: r.created_at,
+      }));
+
+      return res.json(rows);
+    } catch (err: any) {
+      console.error("[admin] Error listing transfers:", err);
+      return res.status(500).json({ error: "Failed to load transfers" });
     }
   });
 
@@ -4198,7 +5314,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { autoCrop, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -4220,17 +5336,25 @@ export async function registerRoutes(
           await uploadToR2(origKey, buffer, "image/jpeg");
           updates[`grading_${angle}_original`] = origKey;
 
-          // 2. Auto-crop
-          const { buffer: croppedBuf, cropped } = await autoCrop(buffer);
-          const cropKey = `grading/${certId}/${angle}_cropped.${ext}`;
-          await uploadToR2(cropKey, croppedBuf, "image/jpeg");
+          // 2. Deskew (straighten slight rotation before cropping)
+          const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
+
+          // 3. Yellow border crop (precise), then fallback to autoCrop
+          const yellowResult = await cropToYellowBorder(deskewedBuf);
+          const { buffer: rectCropped, cropped } = yellowResult || await autoCrop(deskewedBuf);
+
+          // 4. Rounded corner mask (card-shaped output with transparent corners)
+          const croppedBuf = await maskRoundedCorners(rectCropped);
+          const ext2 = "png"; // PNG for transparency support
+          const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
+          await uploadToR2(cropKey, croppedBuf, "image/png");
           updates[`grading_${angle}_cropped`] = cropKey;
 
-          // 3. Quality check on cropped image
+          // 4. Quality check on cropped image
           const quality = await checkImageQuality(croppedBuf);
-          qualityResults[angle] = { ...quality, cropped };
+          qualityResults[angle] = { ...quality, cropped, deskewAngle };
 
-          // 4. Also update the primary front/back image paths used for display + AI
+          // 5. Also update the primary front/back image paths used for display + AI
           if (angle === "front") {
             updates["front_image_path"] = r2KeyForImage(certId, "front", ext);
             await uploadToR2(r2KeyForImage(certId, "front", ext), croppedBuf, "image/jpeg");
@@ -4239,7 +5363,7 @@ export async function registerRoutes(
             await uploadToR2(r2KeyForImage(certId, "back", ext), croppedBuf, "image/jpeg");
           }
 
-          // 5. Variants — fire-and-forget (don't block the response)
+          // 6. Variants — fire-and-forget (don't block the response)
           setImmediate(async () => {
             try {
               const { greyscale, highcontrast, edgeenhanced, inverted } = await generateVariants(croppedBuf);
@@ -4334,6 +5458,279 @@ export async function registerRoutes(
     }
   );
 
+  // ── Reprocess images: re-run deskew + crop + variants on existing originals
+  app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
+    try {
+      const { deskewCard: dsk, cropToYellowBorder: cyb, autoCrop: ac, generateVariants: gv } = await import("./image-processing");
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+      const results: Record<string, any> = {};
+
+      for (const side of ["front", "back"] as const) {
+        // ALWAYS fetch from the ORIGINAL (pre-processed) image, never the cropped version
+        const origKey = side === "front"
+          ? (c.gradingFrontOriginal || c.frontImagePath)
+          : (c.gradingBackOriginal || c.backImagePath);
+        if (!origKey) {
+          console.log(`[reprocess] ${certIdStr} ${side}: no original image path found, skipping`);
+          continue;
+        }
+
+        let origBuf: Buffer;
+        try {
+          const url = await getR2SignedUrl(origKey, 300);
+          const resp = await fetch(url);
+          origBuf = Buffer.from(await resp.arrayBuffer());
+        } catch (err: any) {
+          console.error(`[reprocess] ${certIdStr} ${side}: failed to fetch original: ${err.message}`);
+          continue;
+        }
+
+        console.log(`[reprocess] ${certIdStr} ${side}: fetched original ${(origBuf.length / 1024).toFixed(0)}KB from ${origKey}`);
+
+        // Run pipeline: deskew → yellow crop → fallback autoCrop → save
+        const { buffer: deskewed, angle } = await dsk(origBuf);
+        const yellowResult = await cyb(deskewed);
+        const { buffer: cropped } = yellowResult || await ac(deskewed);
+
+        const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
+        await uploadToR2(cropKey, cropped, "image/jpeg");
+
+        // Update display path
+        if (side === "front") {
+          const displayKey = r2KeyForImage(certIdStr, "front", "jpg");
+          await uploadToR2(displayKey, cropped, "image/jpeg");
+          await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        } else {
+          const displayKey = r2KeyForImage(certIdStr, "back", "jpg");
+          await uploadToR2(displayKey, cropped, "image/jpeg");
+          await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        }
+
+        // Regenerate variants sequentially
+        const variants = await gv(cropped);
+        for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
+          const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
+          await uploadToR2(vKey, vBuf, "image/jpeg");
+          const col = `grading_${side}_${vName}`;
+          await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${id}`);
+          // Update the specific variant column
+          if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+          if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
+          if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
+          if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+        }
+
+        results[side] = { angle, processed: true };
+        console.log(`[reprocess] ${certIdStr} ${side}: deskew=${angle.toFixed(2)}° variants=4`);
+      }
+
+      res.json({ success: true, results });
+    } catch (err: any) {
+      console.error("[reprocess] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/recrop — manual crop override
+  app.post("/api/admin/certificates/:id/recrop", requireAdmin, async (req, res) => {
+    try {
+      const { generateVariants: gv } = await import("./image-processing");
+      const sharpFn = (await import("sharp")).default;
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { side, left_pct, top_pct, width_pct, height_pct, rotation_deg = 0 } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if ([left_pct, top_pct, width_pct, height_pct].some((v: any) => typeof v !== "number" || v < 0 || v > 100)) {
+        return res.status(400).json({ error: "Invalid crop coordinates" });
+      }
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+      const origKey = side === "front"
+        ? (c.gradingFrontOriginal || c.frontImagePath)
+        : (c.gradingBackOriginal || c.backImagePath);
+      if (!origKey) return res.status(400).json({ error: `No original ${side} image found` });
+
+      let origBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(origKey, 300);
+        const resp = await fetch(url);
+        origBuf = Buffer.from(await resp.arrayBuffer());
+      } catch (err: any) {
+        return res.status(500).json({ error: `Failed to fetch original: ${err.message}` });
+      }
+
+      // Apply rotation first if specified, then crop from rotated dimensions
+      let workBuf = origBuf;
+      if (typeof rotation_deg === "number" && Math.abs(rotation_deg) > 0.1) {
+        workBuf = await sharpFn(origBuf)
+          .rotate(rotation_deg, { background: { r: 0, g: 0, b: 0, alpha: 1 } })
+          .toBuffer();
+        console.log(`[recrop] ${certIdStr} ${side}: rotated ${rotation_deg.toFixed(1)}°`);
+      }
+
+      const meta = await sharpFn(workBuf).metadata();
+      if (!meta.width || !meta.height) return res.status(500).json({ error: "Cannot read image dimensions" });
+
+      const left = Math.max(0, Math.round(meta.width * left_pct / 100));
+      const top = Math.max(0, Math.round(meta.height * top_pct / 100));
+      const w = Math.min(meta.width - left, Math.round(meta.width * width_pct / 100));
+      const h = Math.min(meta.height - top, Math.round(meta.height * height_pct / 100));
+      if (w < 50 || h < 50) return res.status(400).json({ error: "Crop box too small" });
+
+      console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
+
+      const cropped = await sharpFn(workBuf)
+        .extract({ left, top, width: w, height: h })
+        .jpeg({ quality: 95 })
+        .toBuffer();
+
+      const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
+      await uploadToR2(cropKey, cropped, "image/jpeg");
+      const displayKey = r2KeyForImage(certIdStr, side, "jpg");
+      await uploadToR2(displayKey, cropped, "image/jpeg");
+
+      if (side === "front") {
+        await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+      } else {
+        await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+      }
+
+      const variants = await gv(cropped);
+      for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
+        const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
+        await uploadToR2(vKey, vBuf, "image/jpeg");
+        if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+        if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
+        if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
+        if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+      }
+
+      console.log(`[recrop] ${certIdStr} ${side}: manual crop applied, ${w}x${h}px, variants regenerated`);
+      res.json({ success: true, side, width: w, height: h });
+    } catch (err: any) {
+      console.error("[recrop] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/detect-card-bounds — auto-detect card edges in raw image
+  app.post("/api/admin/certificates/:id/detect-card-bounds", requireAdmin, async (req, res) => {
+    try {
+      const { detectCardBoundary } = await import("./image-processing");
+      const sharpFn = (await import("sharp")).default;
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { side } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+
+      const c = cert as any;
+      const origKey = side === "front"
+        ? (c.gradingFrontOriginal || c.frontImagePath)
+        : (c.gradingBackOriginal || c.backImagePath);
+      if (!origKey) return res.json({ ok: false, message: "No original image" });
+
+      let origBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(origKey, 300);
+        const resp = await fetch(url);
+        origBuf = Buffer.from(await resp.arrayBuffer());
+      } catch {
+        return res.json({ ok: false, message: "Failed to fetch image" });
+      }
+
+      // Downscale for detection (same as cropToCardBoundary)
+      const meta = await sharpFn(origBuf).metadata();
+      if (!meta.width || !meta.height) return res.json({ ok: false, message: "Cannot read dimensions" });
+
+      const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
+      const workW = Math.round(meta.width * scale);
+      const workH = Math.round(meta.height * scale);
+
+      const { data, info } = await sharpFn(origBuf)
+        .resize(workW, workH, { fit: "fill" })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      const boundary = detectCardBoundary(new Uint8Array(data), info.width, info.height, info.channels);
+      if (!boundary) return res.json({ ok: false, message: "Could not detect card edges" });
+
+      res.json({
+        ok: true,
+        bounds: {
+          left_pct: (boundary.minX / info.width) * 100,
+          top_pct: (boundary.minY / info.height) * 100,
+          width_pct: ((boundary.maxX - boundary.minX) / info.width) * 100,
+          height_pct: ((boundary.maxY - boundary.minY) / info.height) * 100,
+        },
+      });
+    } catch (err: any) {
+      console.error("[detect-card-bounds] error:", err.message);
+      res.json({ ok: false, message: err.message });
+    }
+  });
+
+  // DELETE /api/admin/certificates/:id/images/:side — remove front or back image
+  app.delete("/api/admin/certificates/:id/images/:side", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const side = req.params.side as "front" | "back";
+      if (side !== "front" && side !== "back") return res.status(400).json({ error: "Side must be 'front' or 'back'" });
+
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const certIdStr = normalizeCertId(cert.certId);
+
+      // Collect all R2 keys for this side to delete
+      const keysToDelete: string[] = [];
+      const colsToClear: string[] = [];
+
+      if (side === "front") {
+        for (const col of ["frontImagePath", "gradingFrontOriginal", "gradingFrontCropped", "gradingFrontGreyscale", "gradingFrontHighcontrast", "gradingFrontEdgeenhanced", "gradingFrontInverted"]) {
+          if (c[col]) keysToDelete.push(c[col]);
+        }
+        colsToClear.push("front_image_path", "grading_front_original", "grading_front_cropped", "grading_front_greyscale", "grading_front_highcontrast", "grading_front_edgeenhanced", "grading_front_inverted");
+      } else {
+        for (const col of ["backImagePath", "gradingBackOriginal", "gradingBackCropped", "gradingBackGreyscale", "gradingBackHighcontrast", "gradingBackEdgeenhanced", "gradingBackInverted"]) {
+          if (c[col]) keysToDelete.push(c[col]);
+        }
+        colsToClear.push("back_image_path", "grading_back_original", "grading_back_cropped", "grading_back_greyscale", "grading_back_highcontrast", "grading_back_edgeenhanced", "grading_back_inverted");
+      }
+
+      // Delete from R2
+      for (const key of keysToDelete) {
+        try { await deleteFromR2(key); } catch { /* ignore missing keys */ }
+      }
+
+      // Clear DB columns
+      const setClauses = colsToClear.map(col => `${col} = NULL`).join(", ");
+      await db.execute(sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`));
+
+      console.log(`[image-delete] cert ${certIdStr} removed ${side} (${keysToDelete.length} R2 keys)`);
+
+      const updated = await storage.getCertificate(id);
+      res.json({ ok: true, cert: updated ? { ...updated, certId: normalizeCertId(updated.certId) } : null });
+    } catch (err: any) {
+      console.error("[image-delete] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/certificates/:id/images", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
@@ -4342,13 +5739,14 @@ export async function registerRoutes(
 
       const c = cert as any;
       const imageKeys: Record<string, string | null> = {
-        front_original:      c.gradingFrontOriginal   || null,
+        // Grading-specific images (from capture wizard / upload-images endpoint)
+        front_original:      c.gradingFrontOriginal   || c.frontImagePath || null,
         front_cropped:       c.gradingFrontCropped    || null,
         front_greyscale:     c.gradingFrontGreyscale  || null,
         front_highcontrast:  c.gradingFrontHighcontrast || null,
         front_edgeenhanced:  c.gradingFrontEdgeenhanced || null,
         front_inverted:      c.gradingFrontInverted   || null,
-        back_original:       c.gradingBackOriginal    || null,
+        back_original:       c.gradingBackOriginal    || c.backImagePath || null,
         back_cropped:        c.gradingBackCropped     || null,
         back_greyscale:      c.gradingBackGreyscale   || null,
         back_highcontrast:   c.gradingBackHighcontrast || null,
@@ -4391,6 +5789,11 @@ export async function registerRoutes(
         centeringFrontTb: c.centeringFrontTb || c.centering_front_tb || null,
         centeringBackLr:  c.centeringBackLr  || c.centering_back_lr  || null,
         centeringBackTb:  c.centeringBackTb  || c.centering_back_tb  || null,
+        centeringOuterFront: (c as any).centering_outer_front || null,
+        centeringInnerFront: (c as any).centering_inner_front || null,
+        centeringOuterBack:  (c as any).centering_outer_back  || null,
+        centeringInnerBack:  (c as any).centering_inner_back  || null,
+        centeringMethod:     (c as any).centering_method      || null,
         corners: c.cornerValues  || null,
         edges:   c.edgeValues    || null,
         surface: c.surfaceValues || null,
@@ -4401,6 +5804,14 @@ export async function registerRoutes(
         privateNotes:     c.privateNotes     || "",
         gradeApprovedBy:  c.gradeApprovedBy  || null,
         gradeApprovedAt:  c.gradeApprovedAt  || null,
+        gradeStrengthScore: c.gradeStrengthScore ?? (c as any).grade_strength_score ?? null,
+        // Saved aggregate subgrades for hydration on reload
+        centeringScore: c.centeringScore ?? (c as any).centering_score ?? null,
+        cornersScore:   c.cornersScore   ?? (c as any).corners_score   ?? null,
+        edgesScore:     c.edgesScore     ?? (c as any).edges_score     ?? null,
+        surfaceScore:   c.surfaceScore   ?? (c as any).surface_score   ?? null,
+        grade:          c.gradeOverall   ?? (c as any).grade           ?? null,
+        aiDraftGrade:   c.aiDraftGrade   ?? (c as any).ai_draft_grade  ?? null,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -4503,14 +5914,15 @@ export async function registerRoutes(
       // Log to grading_sessions
       try {
         await db.execute(sql`
-          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes)
+          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes, model_version)
           VALUES (
             ${cert.certId},
             NOW(),
             ${"Cornelius Oliver"},
             ${gradeNum},
             ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
-            ${b.private_notes || null}
+            ${b.private_notes || null},
+            'claude-opus-4-7'
           )
         `);
       } catch (sessionErr) {
@@ -4559,14 +5971,88 @@ export async function registerRoutes(
     }
   });
 
+  // ── AI Override Audit ─────────────────────────────────────────────────────
+
+  // POST single override audit entry
+  app.post("/api/admin/certificates/:id/override-audit", requireAdmin, async (req, res) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const { field_path, ai_value, override_value, override_reason } = req.body;
+      if (!field_path) return res.status(400).json({ error: "field_path is required" });
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      const result = await db.execute(sql`
+        INSERT INTO ai_override_audit (cert_id, field_path, ai_value, override_value, override_reason, overridden_by)
+        VALUES (${certId}, ${field_path}, ${JSON.stringify(ai_value ?? null)}::jsonb, ${JSON.stringify(override_value ?? null)}::jsonb, ${override_reason || null}, ${adminEmail})
+        RETURNING id
+      `);
+      res.json({ ok: true, id: (result.rows[0] as any)?.id });
+    } catch (err: any) {
+      console.error("[override-audit] insert error:", err.message);
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // POST batch override audit entries
+  app.post("/api/admin/certificates/:id/override-audit/batch", requireAdmin, async (req, res) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const { overrides } = req.body;
+      if (!Array.isArray(overrides) || overrides.length === 0) return res.json({ ok: true, inserted: 0 });
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      let inserted = 0;
+      for (const o of overrides) {
+        if (!o.field_path) continue;
+        try {
+          await db.execute(sql`
+            INSERT INTO ai_override_audit (cert_id, field_path, ai_value, override_value, override_reason, overridden_by)
+            VALUES (${certId}, ${o.field_path}, ${JSON.stringify(o.ai_value ?? null)}::jsonb, ${JSON.stringify(o.override_value ?? null)}::jsonb, ${o.reason || null}, ${adminEmail})
+          `);
+          inserted++;
+        } catch {}
+      }
+      console.log(`[override-audit] cert=${certId} logged ${inserted}/${overrides.length} overrides by ${adminEmail}`);
+      res.json({ ok: true, inserted });
+    } catch (err: any) {
+      console.error("[override-audit] batch error:", err.message);
+      res.json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET audit log entries
+  app.get("/api/admin/override-audit", requireAdmin, async (req, res) => {
+    try {
+      const certId = req.query.cert_id ? parseInt(String(req.query.cert_id), 10) : null;
+      const fieldPrefix = req.query.field_prefix as string | undefined;
+      const limit = Math.min(200, parseInt(String(req.query.limit || "50"), 10));
+
+      let query;
+      if (certId) {
+        query = fieldPrefix
+          ? sql`SELECT * FROM ai_override_audit WHERE cert_id = ${certId} AND field_path LIKE ${fieldPrefix + "%"} ORDER BY overridden_at DESC LIMIT ${limit}`
+          : sql`SELECT * FROM ai_override_audit WHERE cert_id = ${certId} ORDER BY overridden_at DESC LIMIT ${limit}`;
+      } else {
+        query = fieldPrefix
+          ? sql`SELECT * FROM ai_override_audit WHERE field_path LIKE ${fieldPrefix + "%"} ORDER BY overridden_at DESC LIMIT ${limit}`
+          : sql`SELECT * FROM ai_override_audit ORDER BY overridden_at DESC LIMIT ${limit}`;
+      }
+      const result = await db.execute(query);
+      res.json(result.rows);
+    } catch (err: any) {
+      console.error("[override-audit] query error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Build 1: Card database lookup ──────────────────────────────────────────
   app.get("/api/admin/card-lookup", requireAdmin, async (req, res) => {
     try {
       const { lookupCard } = await import("./card-database");
       const game  = typeof req.query.game  === "string" ? req.query.game.trim()  : "";
       const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+      const mode  = req.query.mode === "wildcard" ? "wildcard" as const : "exact" as const;
+      console.log(`[card-lookup] game=${game} query=${query} mode=${mode}`);
       if (!query) return res.status(400).json({ error: "query is required" });
-      const results = await lookupCard(game, query);
+      const results = await lookupCard(game, query, mode);
       res.json(results);
     } catch (error: any) {
       console.error("[card-lookup] error:", error.message);
@@ -4793,6 +6279,407 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/certificates/:id/identify-only — cheap Haiku + TCG API, no grading
+  app.post("/api/admin/certificates/:id/identify-only", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image — upload images first" });
+
+      // Fetch front image from R2
+      let frontBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(frontKey, 300);
+        const resp = await fetch(url);
+        frontBuf = Buffer.from(await resp.arrayBuffer());
+      } catch { return res.status(400).json({ error: "Could not fetch front image" }); }
+
+      // Identify with Claude Haiku
+      const rawId = await identifyCardFromBuffer(frontBuf, "image/jpeg");
+
+      // Verify with Pokemon TCG API
+      let enrichedId = await verifyAndEnrichCardData(rawId);
+      const game = rawId.detected_game?.toLowerCase();
+      const tcgVerified = game === "pokemon";
+      let tcgResult: any = { verified: false };
+      if (game === "pokemon") {
+        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
+        if (tcgResult.verified) {
+          // Only override enrichedId if it wasn't already verified with a different card name
+          const enrichedAlreadyVerified = enrichedId.verified === true;
+          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+            normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
+          if (!enrichedAlreadyVerified || namesAgree) {
+            enrichedId = {
+              ...enrichedId, verified: true,
+              officialName: tcgResult.officialCardName || enrichedId.officialName,
+              officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+              officialNumber: rawId.detected_number,
+              referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+              dbSource: "pokemon-tcg-api",
+              detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+              detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+              detected_year: tcgResult.officialYear || enrichedId.detected_year,
+            };
+          } else {
+            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+          }
+        }
+      }
+
+      // Confidence guard
+      const aiConfidence = rawId.confidence || "low";
+      const verified = enrichedId.verified === true || tcgResult.verified === true;
+      const trustAi = tcgResult.trustAi === true;
+      const shouldWrite = verified || aiConfidence === "high" || trustAi;
+
+      if (shouldWrite) {
+        const cardName = enrichedId.officialName || enrichedId.detected_name;
+        // When trusting AI without TCG verification, leave set_name null for manual entry
+        const setName = verified ? (enrichedId.officialSet || enrichedId.detected_set) : null;
+        const cardNumber = enrichedId.detected_number;
+        const cardGame = enrichedId.detected_game || "pokemon";
+        const rarity = enrichedId.detected_rarity;
+        // Prefer copyright_year from Claude for better accuracy
+        const rawYear = rawId.copyright_year || enrichedId.detected_year;
+        const yearMatch = String(rawYear || "").match(/\d{4}/);
+        const yearText = yearMatch ? yearMatch[0] : null;
+
+        // Overwrite existing fields when verified or high-confidence;
+        // otherwise only fill empty fields (protects manual entries from uncertain guesses)
+        const overwrite = verified || aiConfidence === "high";
+
+        if (overwrite) {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name = COALESCE(${cardName}, card_name),
+              set_name = COALESCE(${setName}, set_name),
+              card_number_display = COALESCE(${cardNumber}, card_number_display),
+              year_text = COALESCE(${yearText}, year_text),
+              card_game = COALESCE(${cardGame}, card_game),
+              rarity = COALESCE(${rarity}, rarity),
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        } else {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+              set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+              card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+              year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+              card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+              rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        }
+        console.log(`[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText} overwrite=${overwrite}`);
+      } else {
+        console.log(`[identify-only] cert ${id}: confidence=${aiConfidence} tcg=${verified} — NOT writing details`);
+      }
+
+      const updatedCert = await storage.getCertificate(id);
+      res.json({
+        identification: enrichedId,
+        confidence: aiConfidence,
+        tcgVerified: verified,
+        detailsWritten: shouldWrite,
+        rejectReason: !shouldWrite ? (tcgResult.rejectReason || "Low confidence — manual entry needed") : undefined,
+        cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
+      });
+    } catch (err: any) {
+      console.error("[identify-only] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/measure-centering — Sonnet centering-only
+  app.post("/api/admin/certificates/:id/measure-centering", requireAdmin, async (req, res) => {
+    try {
+      const { CENTERING_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available" });
+
+      // Fetch images
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+      if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
+      const backBuf = await fetchBuf(backKey);
+
+      const { resizeForClaude } = await import("./ai-grading-service");
+      const { buffer: frontResized } = await resizeForClaude(frontBuf);
+      const content: object[] = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontResized.toString("base64") } },
+      ];
+      if (backBuf) {
+        const { buffer: backResized } = await resizeForClaude(backBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+      }
+      content.push({ type: "text", text: CENTERING_ONLY_PROMPT });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiData = await response.json() as { content: { text: string }[] };
+      const text = aiData.content?.[0]?.text || "";
+      console.log(`[measure-centering] raw response (200 chars): ${text.slice(0, 200)}`);
+      const centering = extractJson(text, "measure-centering");
+
+      // Save to cert
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{centering_measured}', ${JSON.stringify(centering)}::jsonb),
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[measure-centering] cert=${id} front=${centering.front_left_right} back=${centering.back_left_right}`);
+      res.json({ centering });
+    } catch (err: any) {
+      console.error("[measure-centering] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/manual-centering — save two-rect manual measurement
+  app.post("/api/admin/certificates/:id/manual-centering", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const { side, outer, inner } = req.body;
+      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (!outer || !inner) return res.status(400).json({ error: "outer and inner rects required" });
+
+      // Calculate centering from the two rectangles
+      const leftB = inner.left - outer.left;
+      const rightB = outer.right - inner.right;
+      const topB = inner.top - outer.top;
+      const bottomB = outer.bottom - inner.bottom;
+      const totalH = leftB + rightB;
+      const totalV = topB + bottomB;
+
+      // Float for accurate subgrade, rounded for display/save
+      const lFloat = totalH > 0 ? (leftB / totalH) * 100 : 50;
+      const tFloat = totalV > 0 ? (topB / totalV) * 100 : 50;
+      const lRound = Math.round(lFloat);
+      const tRound = Math.round(tFloat);
+      const lr = lRound >= (100 - lRound) ? `${lRound}/${100 - lRound}` : `${100 - lRound}/${lRound}`;
+      const tb = tRound >= (100 - tRound) ? `${tRound}/${100 - tRound}` : `${100 - tRound}/${tRound}`;
+
+      const worstDev = Math.max(Math.abs(lFloat - 50), Math.abs(tFloat - 50));
+      const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
+
+      const outerCol = side === "front" ? "centering_outer_front" : "centering_outer_back";
+      const innerCol = side === "front" ? "centering_inner_front" : "centering_inner_back";
+      const lrCol = side === "front" ? "centering_front_lr" : "centering_back_lr";
+      const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
+
+      // Add new columns if they don't exist yet
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`); } catch {}
+      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`); } catch {}
+
+      await db.execute(sql.raw(`
+        UPDATE certificates SET
+          ${outerCol} = '${JSON.stringify(outer)}'::jsonb,
+          ${innerCol} = '${JSON.stringify(inner)}'::jsonb,
+          ${lrCol} = '${lr}',
+          ${tbCol} = '${tb}',
+          centering_method = 'manual',
+          updated_at = NOW()
+        WHERE id = ${id}
+      `));
+
+      console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
+      res.json({ lr, tb, subgrade, outer, inner });
+    } catch (err: any) {
+      console.error("[manual-centering] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/detect-defects — Sonnet defect-only
+  app.post("/api/admin/certificates/:id/detect-defects", requireAdmin, async (req, res) => {
+    try {
+      const { DEFECTS_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available" });
+
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+      if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
+      const backBuf = await fetchBuf(backKey);
+
+      const { resizeForClaude } = await import("./ai-grading-service");
+      const { buffer: frontResized } = await resizeForClaude(frontBuf);
+      const content: object[] = [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: frontResized.toString("base64") } },
+      ];
+      if (backBuf) {
+        const { buffer: backResized } = await resizeForClaude(backBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+      }
+      content.push({ type: "text", text: DEFECTS_ONLY_PROMPT });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiData = await response.json() as { content: { text: string }[] };
+      const text = aiData.content?.[0]?.text || "";
+      console.log(`[detect-defects] raw length: ${text.length}`);
+      console.log(`[detect-defects] first 500: ${text.slice(0, 500)}`);
+      console.log(`[detect-defects] last 200: ${text.slice(-200)}`);
+      let parsed: any;
+      try {
+        parsed = extractJson(text, "detect-defects");
+      } catch (parseErr: any) {
+        console.error(`[detect-defects] JSON extraction failed, returning empty:`, parseErr.message);
+        return res.json({ defects: [] });
+      }
+
+      // Unwrap: Claude returns {defects: [...], surface_front_grade, ...} — extract the array
+      const defectArray: any[] = Array.isArray(parsed.defects) ? parsed.defects : Array.isArray(parsed) ? parsed : [];
+
+      // Filter out defects that are in the background (outside card boundary)
+      const rawCount = defectArray.length;
+      const filtered = defectArray.filter((d: any) => {
+        const x = d.position_x_percent ?? d.x_percent ?? 50;
+        const y = d.position_y_percent ?? d.y_percent ?? 50;
+        if (x < 3 || x > 97 || y < 3 || y > 97) {
+          console.log(`[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`);
+          return false;
+        }
+        return true;
+      });
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{defects_detected}', ${JSON.stringify({ defects: filtered })}::jsonb),
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[detect-defects] cert=${id} defects=${filtered.length} (${rawCount - filtered.length} filtered out)`);
+      res.json({ defects: filtered });
+    } catch (err: any) {
+      console.error("[detect-defects] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/grade-card — Sonnet grade-only using context from previous steps
+  app.post("/api/admin/certificates/:id/grade-card", requireAdmin, async (req, res) => {
+    try {
+      const { GRADE_ONLY_PROMPT } = await import("./grading-prompt");
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const aiData = c.aiAnalysis || {};
+
+      // Build context from previous steps
+      const cardContext = `${c.cardName || "Unknown"} from ${c.setName || "Unknown"} #${c.cardNumber || "?"} (${c.year || "?"})`;
+      const centeringContext = aiData.centering_measured
+        ? `Front: ${aiData.centering_measured.front_left_right}, Back: ${aiData.centering_measured.back_left_right}, Subgrade: ${aiData.centering_measured.centering_subgrade}`
+        : "Not measured yet";
+      const defectsContext = aiData.defects_detected?.defects
+        ? `${aiData.defects_detected.defects.length} defects: ${aiData.defects_detected.defects.map((d: any) => `${d.type} (${d.severity})`).join(", ")}`
+        : "Not detected yet";
+
+      const prompt = GRADE_ONLY_PROMPT
+        .replace("{CARD_CONTEXT}", cardContext)
+        .replace("{CENTERING_CONTEXT}", centeringContext)
+        .replace("{DEFECTS_CONTEXT}", defectsContext);
+
+      // Also send images for visual context
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+      };
+      const frontBuf = await fetchBuf(frontKey);
+
+      const content: object[] = [];
+      if (frontBuf) {
+        const { resizeForClaude } = await import("./ai-grading-service");
+        const { buffer: resized } = await resizeForClaude(frontBuf);
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") } });
+      }
+      content.push({ type: "text", text: prompt });
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "ANTHROPIC_API_KEY not set" });
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] }),
+      });
+      if (!response.ok) throw new Error(`Claude API error ${response.status}`);
+      const aiResp = await response.json() as { content: { text: string }[] };
+      const text = aiResp.content?.[0]?.text || "";
+      console.log(`[grade-card] raw response (200 chars): ${text.slice(0, 200)}`);
+      const gradeResult = extractJson(text, "grade-card");
+
+      // Clamp grades to whole numbers
+      const clamp = (v: any) => { const n = typeof v === "number" ? v : parseFloat(v); return isNaN(n) ? 1 : Math.max(1, Math.min(10, Math.floor(n))); };
+      if (typeof gradeResult.overall_grade === "number") gradeResult.overall_grade = clamp(gradeResult.overall_grade);
+      if (gradeResult.centering_subgrade) gradeResult.centering_subgrade = clamp(gradeResult.centering_subgrade);
+      if (gradeResult.corners_subgrade) gradeResult.corners_subgrade = clamp(gradeResult.corners_subgrade);
+      if (gradeResult.edges_subgrade) gradeResult.edges_subgrade = clamp(gradeResult.edges_subgrade);
+      if (gradeResult.surface_subgrade) gradeResult.surface_subgrade = clamp(gradeResult.surface_subgrade);
+      const strength = typeof gradeResult.grade_strength_score === "number" ? Math.max(0, Math.min(100, Math.round(gradeResult.grade_strength_score))) : null;
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{grade_result}', ${JSON.stringify(gradeResult)}::jsonb),
+          ai_draft_grade = ${gradeResult.overall_grade},
+          grade_strength_score = ${strength},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      console.log(`[grade-card] cert=${id} grade=${gradeResult.overall_grade} strength=${strength}`);
+      res.json({ grade: gradeResult });
+    } catch (err: any) {
+      console.error("[grade-card] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/admin/certificates/:id/analyze
   app.post("/api/admin/certificates/:id/analyze", requireAdmin, async (req, res) => {
     try {
@@ -4824,6 +6711,7 @@ export async function registerRoutes(
   });
 
   // POST /api/admin/certificates/:id/identify-and-analyze
+  // Full pipeline: auto-crop → generate 5 views → save to R2 → identify → verify → grade → save
   app.post("/api/admin/certificates/:id/identify-and-analyze", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
@@ -4831,31 +6719,339 @@ export async function registerRoutes(
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
       const c = cert as any;
-      const keys = getCertImageKeys(c);
-      if (!keys.frontOriginal && !c.frontImagePath) {
-        return res.status(400).json({ error: "No images available for AI analysis" });
+      const frontKey = c.gradingFrontOriginal || c.frontImagePath;
+      const backKey = c.gradingBackOriginal || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image available for AI analysis" });
+
+      console.log(`[ai/identify-and-analyze] starting for cert ${id}`);
+
+      // Step 1: Fetch raw images from R2
+      const { default: sharpImport } = await import("sharp");
+      const fetchR2 = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const resp = await fetch(url);
+          return Buffer.from(await resp.arrayBuffer());
+        } catch { return null; }
+      };
+
+      const frontRaw = await fetchR2(frontKey);
+      if (!frontRaw) return res.status(400).json({ error: "Could not fetch front image from storage" });
+      const backRaw = await fetchR2(backKey);
+
+      // Step 2: Generate 5 image variants for front (and back if available)
+      const frontVariants = await generateImageVariants(frontRaw);
+      const backVariants = backRaw ? await generateImageVariants(backRaw) : null;
+
+      // Step 3: Upload all variants to R2
+      const prefix = `images/grading/${id}`;
+      const uploadKeys: Record<string, string> = {};
+      const uploads: Promise<void>[] = [];
+
+      for (const [vName, buf] of Object.entries(frontVariants) as [string, Buffer][]) {
+        const k = `${prefix}/front_${vName}.jpg`;
+        uploadKeys[`front_${vName}`] = k;
+        uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
       }
-      if (!keys.frontOriginal) keys.frontOriginal = c.frontImagePath;
-      if (!keys.backOriginal)  keys.backOriginal  = c.backImagePath;
+      if (backVariants) {
+        for (const [vName, buf] of Object.entries(backVariants) as [string, Buffer][]) {
+          const k = `${prefix}/back_${vName}.jpg`;
+          uploadKeys[`back_${vName}`] = k;
+          uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
+        }
+      }
+      await Promise.all(uploads);
+      console.log(`[ai/identify-and-analyze] uploaded ${uploads.length} image variants to R2`);
 
-      const cardGame = req.body?.card_game || c.gameType || undefined;
-      const result = await identifyAndAnalyze(keys, cardGame);
+      // Step 4: Save image keys to certificate
+      await db.execute(sql`
+        UPDATE certificates SET
+          grading_front_original = ${uploadKeys.front_original || null},
+          grading_front_cropped = ${uploadKeys.front_cropped || null},
+          grading_front_greyscale = ${uploadKeys.front_greyscale || null},
+          grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
+          grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
+          grading_front_inverted = ${uploadKeys.front_inverted || null},
+          grading_back_original = ${uploadKeys.back_original || null},
+          grading_back_cropped = ${uploadKeys.back_cropped || null},
+          grading_back_greyscale = ${uploadKeys.back_greyscale || null},
+          grading_back_highcontrast = ${uploadKeys.back_highcontrast || null},
+          grading_back_edgeenhanced = ${uploadKeys.back_edgeenhanced || null},
+          grading_back_inverted = ${uploadKeys.back_inverted || null},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
 
-      // Persist both
-      await storage.updateCertificate(id, {
-        aiAnalysis: { identification: result.identification, grading: result.analysis } as any,
+      // Step 5: Identify the card (uses cropped front)
+      const identification = await identifyCardFromBuffer(frontVariants.cropped, "image/jpeg");
+
+      // Step 6: Pokémon TCG API verification
+      const game = identification.detected_game?.toLowerCase();
+      let enrichedId = await verifyAndEnrichCardData(identification);
+      let tcgTrustAiFlag = false;
+      if (game === "pokemon") {
+        const tcgResult = await verifyPokemonCardWithTcgApi(
+          identification.detected_name,
+          identification.detected_number,
+          identification.detected_rarity,
+          identification.set_code,
+          identification.copyright_year
+        );
+        if (tcgResult.verified) {
+          // Only override enrichedId if it wasn't already verified with a different card name
+          const enrichedAlreadyVerified = enrichedId.verified === true;
+          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+            normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
+          if (!enrichedAlreadyVerified || namesAgree) {
+            console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);
+            enrichedId = {
+              ...enrichedId,
+              verified: true,
+              officialName: tcgResult.officialCardName || enrichedId.officialName,
+              officialSet: tcgResult.officialSetName || enrichedId.officialSet,
+              officialNumber: identification.detected_number,
+              referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+              dbSource: "pokemon-tcg-api",
+              detected_set: tcgResult.officialSetName || enrichedId.detected_set,
+              detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+              detected_year: tcgResult.officialYear || enrichedId.detected_year,
+            };
+          } else {
+            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+          }
+        }
+        if (tcgResult.trustAi) tcgTrustAiFlag = true;
+      }
+
+      // Step 7: Full grading analysis (uses cropped front + back + greyscale + hicontrast)
+      const analysis = await analyzeCardFromBuffers(
+        frontVariants.cropped,
+        backVariants?.cropped || null,
+        game
+      );
+
+      // Step 8: Extract and log grade strength score
+      const strengthScore = typeof (analysis as any).grade_strength_score === "number"
+        ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
+        : null;
+      if (strengthScore !== null) {
+        console.log(`[grade-strength] cert=${id} grade=${analysis.overall_grade} strength=${strengthScore}`);
+        await db.execute(sql`
+          UPDATE certificates SET grade_strength_score = ${strengthScore} WHERE id = ${id}
+        `);
+      }
+
+      // Step 9: Confidence check — trust AI when TCG has zero results
+      const aiConfidence = identification.confidence || "low";
+      const tcgVerified = enrichedId.verified === true;
+      const shouldWriteDetails = tcgVerified || aiConfidence === "high" || tcgTrustAiFlag;
+
+      const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
+      // When trusting AI without TCG verification, leave set_name null for manual entry
+      const setName = tcgVerified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
+      const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
+      const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
+      const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
+
+      // Year normalisation: prefer copyright_year from Claude
+      const currentYear = new Date().getFullYear();
+      let yearText: string | null = null;
+      if (shouldWriteDetails) {
+        const rawYear = identification.copyright_year || enrichedId.detected_year || null;
+        const match = rawYear ? String(rawYear).match(/\d{4}/) : null;
+        yearText = match ? match[0] : null;
+      }
+      // Year guard: reject years >5 years off current unless TCG API confirmed
+      if (yearText && !tcgVerified) {
+        const y = parseInt(yearText, 10);
+        if (isNaN(y) || Math.abs(y - currentYear) > 5) {
+          console.warn(`[ai-identify] year guard: AI guessed ${yearText} but TCG API didn't verify — clearing`);
+          yearText = null;
+        }
+      }
+
+      // Overwrite existing fields when verified or high-confidence;
+      // otherwise only fill empty fields (protects manual entries from uncertain guesses)
+      const overwrite = tcgVerified || aiConfidence === "high";
+
+      console.log(`[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} overwrite=${overwrite} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`);
+
+      const aiAnalysisJson = JSON.stringify({ identification: enrichedId, grading: analysis });
+      const aiDraftGrade = typeof analysis.overall_grade === "number" ? analysis.overall_grade : null;
+
+      if (overwrite) {
+        await db.execute(sql`
+          UPDATE certificates SET
+            ai_analysis = ${aiAnalysisJson}::jsonb,
+            ai_draft_grade = ${aiDraftGrade},
+            card_name = COALESCE(${cardName}, card_name),
+            set_name = COALESCE(${setName}, set_name),
+            card_number_display = COALESCE(${cardNumber}, card_number_display),
+            year_text = COALESCE(${yearText}, year_text),
+            card_game = COALESCE(${cardGame}, card_game),
+            rarity = COALESCE(${rarity}, rarity),
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+      } else {
+        await db.execute(sql`
+          UPDATE certificates SET
+            ai_analysis = ${aiAnalysisJson}::jsonb,
+            ai_draft_grade = ${aiDraftGrade},
+            card_name = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+            set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+            card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+            year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+            card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+            rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+      }
+
+      console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${cardName}" set="${setName}" grade=${analysis.overall_grade} strength=${strengthScore}`);
+
+      // Return the updated cert so the frontend can refresh form fields
+      const updatedCert = await storage.getCertificate(id);
+      res.json({
+        identification: enrichedId,
+        analysis,
+        cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
+        identificationConfidence: aiConfidence,
+        identificationVerified: tcgVerified,
+        detailsWritten: shouldWriteDetails,
       });
-
-      res.json(result);
     } catch (err: any) {
       console.error("[ai/identify-and-analyze] error:", err.message);
       res.status(500).json({ error: err.message });
     }
   });
 
+  // ── Unified "Grade with AI" endpoint — auto-crop, identify, grade in one call ──
+
+  const gradeWithAiUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 100 * 1024 * 1024 },
+  });
+
+  app.post(
+    "/api/admin/certificates/grade-with-ai",
+    requireAdmin,
+    gradeWithAiUpload.fields([
+      { name: "front_image", maxCount: 1 },
+      { name: "back_image", maxCount: 1 },
+    ]),
+    async (req, res) => {
+      try {
+        const files = req.files as {
+          front_image?: Express.Multer.File[];
+          back_image?: Express.Multer.File[];
+        };
+        const frontFile = files.front_image?.[0];
+        if (!frontFile) return res.status(400).json({ error: "front_image is required" });
+        const backFile = files.back_image?.[0];
+        const certId = req.body.cert_id ? parseInt(req.body.cert_id) : null;
+
+        console.log("[grade-with-ai] starting workflow", {
+          certId,
+          frontSize: `${(frontFile.size / 1024 / 1024).toFixed(1)}MB`,
+          backSize: backFile ? `${(backFile.size / 1024 / 1024).toFixed(1)}MB` : "none",
+        });
+
+        // Step 1: Auto-crop both images
+        const frontCropped = await autoCropCard(frontFile.buffer);
+        const backCropped = backFile ? await autoCropCard(backFile.buffer) : null;
+
+        // Step 2: Upload cropped images to R2
+        const ts = Date.now();
+        const frontKey = `images/grade-ai/${ts}_front.jpg`;
+        const backKey = backCropped ? `images/grade-ai/${ts}_back.jpg` : null;
+        await uploadToR2(frontKey, frontCropped, "image/jpeg");
+        if (backCropped && backKey) await uploadToR2(backKey, backCropped, "image/jpeg");
+
+        // Step 3: Identify the card from front image
+        const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg");
+
+        // Step 4: Run full grading analysis
+        const cardGame = identification.detected_game || undefined;
+        const grading = await analyzeCardFromBuffers(frontCropped, backCropped, cardGame);
+
+        // Step 5: Get signed URLs for the cropped images
+        const frontUrl = await getR2SignedUrl(frontKey, 3600);
+        const backUrl = backKey ? await getR2SignedUrl(backKey, 3600) : null;
+
+        // Step 6: If cert_id provided, save AI analysis to existing cert
+        if (certId) {
+          await db.execute(sql`
+            UPDATE certificates SET
+              ai_analysis = ${JSON.stringify({ identification, grading })}::jsonb,
+              ai_draft_grade = ${typeof grading.overall_grade === "number" ? grading.overall_grade : null},
+              updated_at = NOW()
+            WHERE id = ${certId}
+          `);
+        }
+
+        console.log("[grade-with-ai] complete", {
+          certId,
+          card: identification.detected_name,
+          grade: grading.overall_grade,
+          defects: grading.defects?.length ?? 0,
+        });
+
+        res.json({
+          success: true,
+          cert_id: certId,
+          identification: {
+            card_name: identification.detected_name,
+            set_name: identification.detected_set,
+            card_number: identification.detected_number,
+            year: identification.detected_year,
+            language: identification.detected_language,
+            card_game: identification.detected_game,
+            rarity: identification.detected_rarity,
+            is_holo: identification.is_holo,
+            is_foil: identification.is_foil,
+            confidence: identification.confidence,
+          },
+          grading: {
+            overall_grade: grading.overall_grade,
+            grade_label: grading.grade_label,
+            subgrades: {
+              centering: grading.centering?.subgrade,
+              corners: grading.corners?.subgrade,
+              edges: grading.edges?.subgrade,
+              surface: grading.surface?.subgrade,
+            },
+            centering_measurements: {
+              front_left_right: grading.centering?.front_left_right,
+              front_top_bottom: grading.centering?.front_top_bottom,
+              back_left_right: grading.centering?.back_left_right,
+              back_top_bottom: grading.centering?.back_top_bottom,
+            },
+            defects: grading.defects || [],
+            confidence: grading.confidence,
+            grade_explanation: grading.grade_explanation,
+            is_authentic: grading.is_authentic,
+            is_altered: grading.is_altered,
+            authentication_notes: grading.authentication_notes,
+            recommendations: grading.recommendations,
+          },
+          image_urls: {
+            front_cropped: frontUrl,
+            back_cropped: backUrl,
+          },
+        });
+      } catch (err: any) {
+        console.error("[grade-with-ai] error:", err.message);
+        res.status(500).json({ error: "Grading failed", details: err.message });
+      }
+    }
+  );
+
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 
-  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image file provided" });
@@ -4975,17 +7171,12 @@ export async function registerRoutes(
 
       if (!isAdminFree) {
         if (sessionUserId) {
-          // Check user-level balance
-          const userRows = await db.execute(sql`
-            SELECT ai_credits_user_balance FROM users WHERE id = ${sessionUserId} AND deleted_at IS NULL LIMIT 1
-          `);
-          const userBalance = (userRows.rows[0] as any)?.ai_credits_user_balance ?? 0;
-          if (userBalance > 0) {
-            await db.execute(sql`
-              UPDATE users SET ai_credits_user_balance = ai_credits_user_balance - 1
-              WHERE id = ${sessionUserId} AND ai_credits_user_balance > 0
-            `);
+          // Try user-level AI credit balance first
+          const deduction = await deductAiCredits(sessionUserId, 1, 'ai_grading_estimate');
+          if (deduction.ok) {
             usedUserBalance = true;
+          } else if (deduction.reason === 'no_user') {
+            return res.status(401).json({ error: "User account not found." });
           } else if (email) {
             // Fall back to email-based credits (e.g. pre-account purchases)
             const rows = await db.execute(sql`
@@ -5083,7 +7274,7 @@ export async function registerRoutes(
         headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 1024,
+          max_tokens: 2048,
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
             { type: "text", text: PRE_GRADE_PROMPT },
@@ -5100,6 +7291,26 @@ export async function registerRoutes(
       const text = aiData.content?.[0]?.text || "";
       const cleaned = text.replace(/```json|```/g, "").trim();
       const estimate = JSON.parse(cleaned);
+
+      // Backwards-compatible fields for existing client UI
+      const sub = estimate.subgrades || {};
+      const overall = estimate.overall_grade_estimate || {};
+      const compat = {
+        estimated_grade_low: overall.low ?? estimate.estimated_grade_low ?? 5,
+        estimated_grade_high: overall.high ?? estimate.estimated_grade_high ?? 5,
+        grade_label_low: overall.label ?? estimate.grade_label_low ?? "",
+        grade_label_high: overall.label ?? estimate.grade_label_high ?? "",
+        centering_notes: sub.centering?.note ?? estimate.centering_notes ?? "",
+        corners_notes: sub.corners?.note ?? estimate.corners_notes ?? "",
+        edges_notes: sub.edges?.note ?? estimate.edges_notes ?? "",
+        surface_notes: sub.surface?.note ?? estimate.surface_notes ?? "",
+        potential_issues: Array.isArray(estimate.potential_issues)
+          ? estimate.potential_issues.map((p: any) => typeof p === "string" ? p : p.description || "")
+          : [],
+        recommendation: estimate.recommendation ?? "",
+        confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
+      };
+
       // Return remaining credits with response
       let creditsLeft: number | undefined;
       if (usedUserBalance && sessionUserId) {
@@ -5109,10 +7320,154 @@ export async function registerRoutes(
         const cr = await db.execute(sql`SELECT credits_remaining FROM estimate_credits WHERE email = ${email}`);
         creditsLeft = cr.rows.length ? (cr.rows[0] as any).credits_remaining : 0;
       }
-      res.json({ ...estimate, credits_remaining: creditsLeft });
+      // Merge: new structured fields + compat fields + credits
+      res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
     } catch (err: any) {
       console.error("[tools/estimate] error:", err.message);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
+
+  const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+  app.post(
+    "/api/admin/scan-ingest",
+    requireAdmin,
+    scanUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
+    async (req, res) => {
+      const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
+      let certInfo: { id: number; certId: string } | null = null;
+
+      try {
+        const files = req.files as Record<string, Express.Multer.File[]>;
+        if (!files?.front?.[0]) return res.status(400).json({ error: "Front image is required" });
+
+        const frontBuf = files.front[0].buffer;
+        const backBuf = files.back?.[0]?.buffer || null;
+        const notes = (req.body?.notes || "").trim();
+        const clientSource = (req.body?.client_source || "admin_ui").trim();
+
+        console.log(`[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`);
+
+        // Step 1: Create cert
+        certInfo = await createCertForScan();
+        console.log(`[scan-ingest] cert created: ${certInfo.certId} (id=${certInfo.id})`);
+
+        // Step 2: Upload + process images
+        const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
+        console.log(`[scan-ingest] images processed for cert ${certInfo.certId}`);
+
+        // Save notes if provided
+        if (notes) {
+          await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
+        }
+
+        // Step 3: Run AI — sync if client_source is scanner_app, async otherwise
+        const isSync = clientSource === "scanner_app";
+
+        if (isSync) {
+          // Scanner desktop app needs result inline for display
+          try {
+            const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
+            console.log(`[scan-ingest] AI done for ${certInfo.certId}: grade=${aiResult.grade}`);
+            res.json({
+              certId: certInfo.certId,
+              dbId: certInfo.id,
+              workstationUrl: `/admin#grading-${certInfo.id}`,
+              aiStatus: "complete",
+              aiResult,
+              message: `Certificate ${certInfo.certId} graded.`,
+            });
+          } catch (aiErr: any) {
+            console.error(`[scan-ingest] AI failed for ${certInfo.certId}: ${aiErr.message}`);
+            res.json({
+              certId: certInfo.certId,
+              dbId: certInfo.id,
+              workstationUrl: `/admin#grading-${certInfo.id}`,
+              aiStatus: "failed",
+              aiError: aiErr.message,
+              message: `Certificate ${certInfo.certId} created but AI grading failed. Retry from workstation.`,
+            });
+          }
+        } else {
+          // Watcher script / admin UI — respond immediately, AI runs in background
+          const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
+            .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
+            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
+
+          res.json({
+            certId: certInfo.certId,
+            dbId: certInfo.id,
+            workstationUrl: `/admin#grading-${certInfo.id}`,
+            aiStatus: "processing",
+            message: `Certificate ${certInfo.certId} created. AI grading in progress.`,
+          });
+
+          await aiPromise;
+        }
+      } catch (err: any) {
+        console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
+        res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });
+      }
+    }
+  );
+
+  // ── Admin scan-history: list certs from scanner ───────────────────────────
+
+  app.get("/api/admin/scan-history", requireAdmin, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page || "1"), 10));
+      const limit = 50;
+      const offset = (page - 1) * limit;
+      const status = (req.query.status as string) || null;
+
+      let whereClause = sql`source = 'admin_scan' AND deleted_at IS NULL`;
+      if (status === "graded") whereClause = sql`${whereClause} AND grade IS NOT NULL`;
+      else if (status === "pending") whereClause = sql`${whereClause} AND grade IS NULL`;
+
+      const countResult = await db.execute(sql`SELECT COUNT(*)::int as total FROM certificates WHERE ${whereClause}`);
+      const total = (countResult.rows[0] as any).total;
+
+      const rows = await db.execute(sql`
+        SELECT id, certificate_number, card_name, card_game, grade, grade_type, label_type,
+               centering_score, corners_score, edges_score, surface_score,
+               ai_draft_grade, grade_strength_score, grade_approved_by,
+               front_image_path, issued_at, updated_at, source
+        FROM certificates
+        WHERE ${whereClause}
+        ORDER BY issued_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+
+      res.json({
+        scans: (rows.rows as any[]).map(r => ({
+          id: r.id,
+          certId: r.certificate_number?.replace(/^MV-?0+/, "MV") || "",
+          cardName: r.card_name || null,
+          cardGame: r.card_game || null,
+          grade: r.grade ? parseFloat(r.grade) : null,
+          gradeType: r.grade_type || "numeric",
+          labelType: r.label_type || "Standard",
+          centering: r.centering_score ? parseFloat(r.centering_score) : null,
+          corners: r.corners_score ? parseFloat(r.corners_score) : null,
+          edges: r.edges_score ? parseFloat(r.edges_score) : null,
+          surface: r.surface_score ? parseFloat(r.surface_score) : null,
+          aiDraftGrade: r.ai_draft_grade ? parseFloat(r.ai_draft_grade) : null,
+          strengthScore: r.grade_strength_score || null,
+          grader: r.grade_approved_by || null,
+          frontImagePath: r.front_image_path || null,
+          createdAt: r.issued_at,
+          updatedAt: r.updated_at,
+        })),
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err: any) {
+      console.error("[scan-history] error:", err.message);
+      res.status(500).json({ error: "Failed to load scan history" });
     }
   });
 
@@ -5267,7 +7622,56 @@ export async function registerRoutes(
         set:  set  || undefined,
         card: card || undefined,
       });
-      res.json(rows);
+
+      // Counters + recent certs for the showcase hero
+      const countersResult = await db.execute(sql`
+        SELECT
+          COUNT(*)::int as total_graded,
+          COUNT(DISTINCT card_name)::int as unique_cards,
+          COUNT(DISTINCT set_name)::int as unique_sets,
+          COUNT(CASE WHEN ownership_status = 'claimed' THEN 1 END)::int as claimed_count,
+          ROUND(AVG(grade::numeric), 1) as avg_grade
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL
+      `);
+      const counters = countersResult.rows[0] as any;
+
+      const recentResult = await db.execute(sql`
+        SELECT certificate_number, card_name, set_name, grade, label_type, front_image_path, grade_approved_at
+        FROM certificates
+        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
+        ORDER BY grade_approved_at DESC
+        LIMIT 12
+      `);
+      const recent = await Promise.all((recentResult.rows as any[]).map(async (r) => {
+        let imageUrl: string | null = null;
+        const imgKey = r.front_image_path;
+        if (imgKey) {
+          try { imageUrl = await getR2SignedUrl(imgKey, 3600); } catch {}
+        }
+        const certNum = String(r.certificate_number).replace(/^MV-?0+/, "MV");
+        return {
+          certificate_number: certNum,
+          card_name: r.card_name || null,
+          card_set: r.set_name || null,
+          grade: r.grade ? parseFloat(r.grade) : null,
+          label_type: r.label_type || "Standard",
+          card_image_front_url: imageUrl,
+          approved_at: r.grade_approved_at,
+        };
+      }));
+
+      res.json({
+        counters: {
+          total_graded: counters.total_graded || 0,
+          unique_cards: counters.unique_cards || 0,
+          unique_sets: counters.unique_sets || 0,
+          claimed_count: counters.claimed_count || 0,
+          avg_grade: counters.avg_grade ? parseFloat(counters.avg_grade) : 0,
+        },
+        recent,
+        population: rows,
+      });
     } catch (err) {
       console.error("[population] error:", err);
       res.status(500).json({ error: "Failed to load population data." });
@@ -5679,11 +8083,178 @@ export async function registerRoutes(
     }
   });
 
+  // ── Tier capacity management ──────────────────────────────────────────────
+
+  // GET all tier capacities (admin)
+  app.get("/api/admin/capacity", requireAdmin, async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT tc.*,
+          (SELECT COUNT(*) FROM submissions s
+           WHERE s.service_tier = tc.tier_id
+             AND s.status IN ('new', 'received', 'in_grading')
+             AND s.deleted_at IS NULL
+          ) AS current_queue_count
+        FROM tier_capacity tc
+        ORDER BY tc.tier_id
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT update a single tier's capacity (admin)
+  app.put("/api/admin/capacity/:tierId", requireAdmin, async (req, res) => {
+    try {
+      const { tierId } = req.params;
+      const { status, paused_until, paused_message, max_concurrent } = req.body;
+
+      if (status && !["open", "paused", "waitlist"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status. Must be open, paused, or waitlist." });
+      }
+
+      await db.execute(sql`
+        UPDATE tier_capacity SET
+          status = COALESCE(${status || null}, status),
+          paused_until = ${paused_until || null},
+          paused_message = ${paused_message || null},
+          max_concurrent = COALESCE(${max_concurrent ? Number(max_concurrent) : null}, max_concurrent),
+          paused_at = ${status === "paused" || status === "waitlist" ? sql`NOW()` : sql`paused_at`},
+          paused_by = ${status === "paused" || status === "waitlist" ? (req.session as any)?.adminEmail || "admin" : sql`paused_by`},
+          updated_at = NOW()
+        WHERE tier_id = ${tierId}
+      `);
+
+      console.log(`[capacity] tier ${tierId} → ${status || "updated"} by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST pause ALL tiers (emergency)
+  app.post("/api/admin/capacity/pause-all", requireAdmin, async (req, res) => {
+    try {
+      const message = req.body.message || "Submissions temporarily paused";
+      await db.execute(sql`
+        UPDATE tier_capacity SET
+          status = 'paused',
+          paused_message = ${message},
+          paused_at = NOW(),
+          paused_by = ${(req.session as any)?.adminEmail || "admin"},
+          updated_at = NOW()
+      `);
+      console.log(`[capacity] ALL TIERS PAUSED by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST resume ALL tiers
+  app.post("/api/admin/capacity/resume-all", requireAdmin, async (req, res) => {
+    try {
+      await db.execute(sql`
+        UPDATE tier_capacity SET status = 'open', paused_until = NULL, paused_message = NULL, updated_at = NOW()
+      `);
+      console.log(`[capacity] ALL TIERS RESUMED by ${(req.session as any)?.adminEmail || "admin"}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET public tier capacity status (for pricing page + submit flow)
+  app.get("/api/tier-capacity", async (_req, res) => {
+    try {
+      const result = await db.execute(sql`
+        SELECT tier_id, status, paused_until, paused_message
+        FROM tier_capacity
+        ORDER BY tier_id
+      `);
+      res.json(result.rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Pokemon TCG sets list (cached 24h, merged with custom sets) ──────────
+  let cachedTcgSets: any[] | null = null;
+  let tcgCacheTime = 0;
+
+  app.get("/api/pokemon-sets", async (_req, res) => {
+    try {
+      // Fetch TCG API sets (cached 24h)
+      if (!cachedTcgSets || Date.now() - tcgCacheTime > 24 * 60 * 60 * 1000) {
+        const apiKey = process.env.POKEMON_TCG_API_KEY;
+        const headers: Record<string, string> = {};
+        if (apiKey) headers["X-Api-Key"] = apiKey;
+        const r = await fetch("https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate&pageSize=250", { headers });
+        if (r.ok) {
+          const data = await r.json();
+          cachedTcgSets = (data.data || []).map((s: any) => ({
+            id: s.id, name: s.name, series: s.series, ptcgoCode: s.ptcgoCode || null,
+            releaseDate: s.releaseDate, total: s.total, source: "tcg",
+          }));
+          tcgCacheTime = Date.now();
+        }
+      }
+
+      // Fetch custom sets from DB
+      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
+      const customSets = (customRows.rows as any[]).map(s => ({
+        id: s.set_id, name: s.set_name, series: s.series || "Custom", ptcgoCode: s.ptcgo_code || null,
+        releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
+        total: s.total_cards || 0, source: "custom",
+      }));
+
+      // Merge: custom sets first, then TCG API sets (dedup by id)
+      const tcg = cachedTcgSets || [];
+      const customIds = new Set(customSets.map(s => s.id));
+      const merged = [...customSets, ...tcg.filter(s => !customIds.has(s.id))];
+
+      res.json(merged);
+    } catch (err: any) {
+      console.error("[pokemon-sets] error:", err.message);
+      res.json(cachedTcgSets || []);
+    }
+  });
+
+  // ── Custom sets CRUD ────────────────────────────────────────────────────────
+  app.post("/api/admin/custom-sets", requireAdmin, async (req, res) => {
+    try {
+      const { setId, setName, series, ptcgoCode, releaseDate, totalCards, notes } = req.body;
+      if (!setId || !setName) return res.status(400).json({ error: "setId and setName required" });
+      await db.execute(sql`
+        INSERT INTO custom_sets (set_id, set_name, series, ptcgo_code, release_date, total_cards, notes, created_by)
+        VALUES (${setId}, ${setName}, ${series || null}, ${ptcgoCode || null}, ${releaseDate || null}, ${totalCards || null}, ${notes || null}, ${(req.session as any)?.adminEmail || "admin"})
+      `);
+      console.log(`[custom-set] added "${setId}" — ${setName}`);
+      res.json({ ok: true, setId, setName });
+    } catch (err: any) {
+      if (err.code === "23505") return res.status(409).json({ error: `Set ID "${req.body.setId}" already exists` });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/custom-sets/:setId", requireAdmin, async (req, res) => {
+    try {
+      await db.execute(sql`DELETE FROM custom_sets WHERE set_id = ${req.params.setId}`);
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Showroom routes ──────────────────────────────────────────────────────────
   registerShowroomRoutes(app);
 
   // ── Vault Club routes ────────────────────────────────────────────────────────
   registerVaultClubRoutes(app);
+
+  // ── Marketplace seller routes ──────────────────────────────────────────────
+  registerSellerRoutes(app);
 
   return httpServer;
 }

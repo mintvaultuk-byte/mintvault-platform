@@ -2,10 +2,10 @@ import { useEffect } from "react";
 import { Zap, CheckCircle2, Loader2 } from "lucide-react";
 import { calculateOverallGrade, getGradeLabel } from "./grade-logic";
 
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1];
+const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number): string {
-  if (g >= 9.5) return "#D4AF37";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
@@ -67,7 +67,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
   }, [focusField, subgrades, onChange, onFocusField]);
 
   return (
-    <div className="bg-[#0A0A0A] border border-[#D4AF37]/30 rounded-xl p-4 space-y-4">
+    <div className="bg-white border border-[#D4AF37]/30 rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Zap size={14} className="text-[#D4AF37]" />
@@ -77,7 +77,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
       </div>
 
       {/* Grade display */}
-      <div className="text-center py-3 rounded-xl bg-[#111111] border border-[#222222]">
+      <div className="text-center py-3 rounded-xl bg-[#F7F7F5] border border-[#E8E4DC]">
         <p className="text-5xl font-black" style={{ color: "#D4AF37" }}>{overall}</p>
         <p className="text-[#D4AF37] text-sm font-bold uppercase tracking-widest mt-1">{label}</p>
       </div>
@@ -86,14 +86,14 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
       <div className="flex gap-2">
         {FIELDS.map(f => (
           <div key={f.key} className="flex-1">
-            <p className="text-[#555555] text-[9px] uppercase tracking-wider text-center mb-1">{f.shortLabel}</p>
+            <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider text-center mb-1">{f.label}</p>
             <button
               type="button"
               onClick={() => onFocusField(focusField === f.key ? null : f.key)}
               className={`w-full text-center py-2 rounded-lg border text-sm font-black transition-all ${
                 focusField === f.key
                   ? "border-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/40"
-                  : "border-[#333333] bg-[#111111] hover:border-[#555555]"
+                  : "border-[#D4D0C8] bg-[#F7F7F5] hover:border-[#D4AF37]/40"
               }`}
               style={{ color: gradeColor(subgrades[f.key]) }}
             >
@@ -103,7 +103,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
               <select
                 value={subgrades[f.key]}
                 onChange={e => onChange({ ...subgrades, [f.key]: parseFloat(e.target.value) })}
-                className="w-full mt-1 bg-[#111111] border border-[#D4AF37]/40 text-[#CCCCCC] text-xs rounded px-1 py-1"
+                className="w-full mt-1 bg-[#F7F7F5] border border-[#D4AF37]/40 text-[#1A1A1A] text-xs rounded px-1 py-1"
                 autoFocus
               >
                 {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -129,7 +129,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
           Approve Grade
         </button>
       </div>
-      <p className="text-[#444444] text-[9px] text-center">Cmd+Enter to approve · Cmd+S to save</p>
+      <p className="text-[#888888] text-[9px] text-center">Cmd+Enter to approve · Cmd+S to save</p>
     </div>
   );
 }

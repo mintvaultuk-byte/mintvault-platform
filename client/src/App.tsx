@@ -5,6 +5,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
+import { FeatureFlagsContext, useFeatureFlagsQuery } from "@/hooks/use-feature-flags";
+import LegalPage from "@/pages/legal-page";
 
 /* ─── Gold press burst — fires on every button/link press ───────────────────
  * Uses a global pointerdown listener so it covers all buttons automatically.
@@ -96,8 +98,6 @@ function ScrollToTop() {
   return null;
 }
 
-import HomePage from "@/pages/home";
-import PricingPage from "@/pages/pricing";
 import CertLookupPage from "@/pages/cert-lookup";
 import CertDetailPage from "@/pages/cert-detail";
 import WhyMintVaultPage from "@/pages/why-mintvault";
@@ -111,8 +111,6 @@ import TermsPage from "@/pages/terms";
 import LiabilityPage from "@/pages/liability";
 import AdminPage from "@/pages/admin";
 import NotFound from "@/pages/not-found";
-import GuidesPage from "@/pages/guides";
-import GuideDetailPage from "@/pages/guide-detail";
 import PokemonCardGradingUkPage from "@/pages/seo/pokemon-card-grading-uk";
 import TradingCardGradingUkPage from "@/pages/seo/trading-card-grading-uk";
 import CardGradingServiceUkPage from "@/pages/seo/card-grading-service-uk";
@@ -130,6 +128,7 @@ import NfcRedirectPage from "@/pages/nfc-redirect";
 import StolenCardProtectionPage from "@/pages/stolen-card-protection";
 import ClaimPage from "@/pages/claim";
 import TransferPage from "@/pages/transfer";
+import TransferAcceptPage from "@/pages/transfer-accept";
 import OwnershipPage from "@/pages/ownership";
 import DashboardPage from "@/pages/dashboard";
 import PopulationPage from "@/pages/population";
@@ -139,11 +138,9 @@ import GradingScalePage from "@/pages/grading-scale";
 import GradingGlossaryPage from "@/pages/grading-glossary";
 import GradingReportPage from "@/pages/grading-report";
 import MobileUploadPage from "@/pages/mobile-upload";
-import PreGradeEstimatePage from "@/pages/tools/estimate";
-import HowItWorksPage from "@/pages/how-it-works";
 import VaultReportPage from "@/pages/vault-report";
+import LogbookPage from "@/pages/logbook";
 import OurStoryPage from "@/pages/about/our-story";
-import TheMintVaultSlabPage from "@/pages/about/the-mintvault-slab";
 import EligibleCardsPage from "@/pages/grading/eligible-cards";
 import VaultReportsAboutPage from "@/pages/vault-reports/about";
 import HowToReadVaultPage from "@/pages/vault-reports/how-to-read";
@@ -157,7 +154,24 @@ import VerifyEmailPage from "@/pages/verify-email";
 import AccountSettingsPage from "@/pages/account-settings";
 import ShowroomPage from "@/pages/showroom";
 import ShowroomsListPage from "@/pages/showrooms";
-import ClubPage from "@/pages/club";
+import Home from "@/pages/home";
+import Pricing from "@/pages/pricing";
+import VaultClub from "@/pages/vault-club";
+import Verify from "@/pages/verify";
+import AiPreGrade from "@/pages/ai-pre-grade";
+import ToolsEstimate from "@/pages/tools-estimate";
+import Journal from "@/pages/journal";
+import JournalDetail from "@/pages/journal-detail";
+import Technology from "@/pages/technology";
+import Registry from "@/pages/registry";
+
+// Redirect helper — wouter has no built-in redirect, so we replace the URL
+// on mount and render nothing. Used for legacy URLs that moved during cutover.
+function Redirect({ to }: { to: string }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => { setLocation(to, { replace: true }); }, [to, setLocation]);
+  return null;
+}
 
 function Router() {
   return (
@@ -170,14 +184,23 @@ function Router() {
         </Route>
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
-        <Route path="/" component={HomePage} />
+        <Route path="/cert/:id/report" component={GradingReportPage} />
+        <Route path="/cert/:id" component={LogbookPage} />
+        <Route path="/vault/:certId" component={LogbookPage} />
+        <Route path="/" component={Home} />
+        <Route path="/pricing" component={Pricing} />
+        <Route path="/vault-club" component={VaultClub} />
+        <Route path="/verify" component={Verify} />
+        <Route path="/ai-pre-grade" component={AiPreGrade} />
+        <Route path="/tools/estimate" component={ToolsEstimate} />
+        <Route path="/journal" component={Journal} />
+        <Route path="/journal/:slug" component={JournalDetail} />
+        <Route path="/technology" component={Technology} />
+        <Route path="/registry" component={Registry} />
         <Route>
           <Layout>
             <Switch>
-              <Route path="/pricing" component={PricingPage} />
               <Route path="/cert" component={CertLookupPage} />
-              <Route path="/cert/:id/report" component={GradingReportPage} />
-              <Route path="/cert/:id" component={CertDetailPage} />
               <Route path="/why-mintvault" component={WhyMintVaultPage} />
               <Route path="/labels" component={LabelsPage} />
               <Route path="/reports" component={ReportsPage} />
@@ -187,8 +210,8 @@ function Router() {
               <Route path="/track" component={TrackPage} />
               <Route path="/terms-and-conditions" component={TermsPage} />
               <Route path="/liability-and-insurance" component={LiabilityPage} />
-              <Route path="/guides" component={GuidesPage} />
-              <Route path="/guides/:slug" component={GuideDetailPage} />
+              <Route path="/guides"><Redirect to="/journal" /></Route>
+              <Route path="/guides/:slug">{(params) => <Redirect to={`/journal/${(params as { slug: string }).slug}`} />}</Route>
               <Route path="/pokemon-card-grading-uk" component={PokemonCardGradingUkPage} />
               <Route path="/trading-card-grading-uk" component={TradingCardGradingUkPage} />
               <Route path="/card-grading-service-uk" component={CardGradingServiceUkPage} />
@@ -206,17 +229,17 @@ function Router() {
               <Route path="/ownership" component={OwnershipPage} />
               <Route path="/claim" component={ClaimPage} />
               <Route path="/transfer" component={TransferPage} />
+              <Route path="/transfer/accept" component={TransferAcceptPage} />
               <Route path="/dashboard" component={DashboardPage} />
               <Route path="/population" component={PopulationPage} />
               <Route path="/population/certs" component={PopCertsPage} />
               <Route path="/api-docs" component={ApiDocsPage} />
               <Route path="/grading-scale" component={GradingScalePage} />
               <Route path="/grading-glossary" component={GradingGlossaryPage} />
-              <Route path="/tools/estimate" component={PreGradeEstimatePage} />
-              <Route path="/how-it-works" component={HowItWorksPage} />
-              <Route path="/vault/:certId" component={VaultReportPage} />
+              <Route path="/how-it-works"><Redirect to="/technology" /></Route>
+              <Route path="/legal/:slug" component={LegalPage} />
               <Route path="/about/our-story" component={OurStoryPage} />
-              <Route path="/about/the-mintvault-slab" component={TheMintVaultSlabPage} />
+              <Route path="/about/the-mintvault-slab"><Redirect to="/technology" /></Route>
               <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
               <Route path="/vault-reports/about" component={VaultReportsAboutPage} />
               <Route path="/vault-reports/how-to-read" component={HowToReadVaultPage} />
@@ -230,7 +253,6 @@ function Router() {
               <Route path="/account/settings" component={AccountSettingsPage} />
               <Route path="/showrooms" component={ShowroomsListPage} />
               <Route path="/showroom/:username" component={ShowroomPage} />
-              <Route path="/club" component={ClubPage} />
               <Route component={NotFound} />
             </Switch>
           </Layout>
@@ -240,14 +262,25 @@ function Router() {
   );
 }
 
+function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
+  const { data } = useFeatureFlagsQuery();
+  return (
+    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false }}>
+      {children}
+    </FeatureFlagsContext.Provider>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <GoldBurstEffect />
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <FeatureFlagsProvider>
+        <TooltipProvider>
+          <GoldBurstEffect />
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </FeatureFlagsProvider>
     </QueryClientProvider>
   );
 }

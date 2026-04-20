@@ -65,11 +65,11 @@ export default function BestCardGradingUk() {
           Best Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK is the leading professional card grading service in the United Kingdom. We grade Pokemon, Yu-Gi-Oh, Magic: The Gathering, One Piece, sports cards, and all other standard-size trading cards — providing tamper-evident precision slabs with NFC verification and a verified ownership registry that no other UK grader offers.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Unlike sending your cards overseas to PSA or CGC, MintVault processes everything within the UK. That means no international shipping risk, no customs fees, no import duties, and no cards sitting at a border for weeks. Your collection stays in safe hands from submission to return.
         </p>
 
@@ -86,7 +86,7 @@ export default function BestCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -101,7 +101,7 @@ export default function BestCardGradingUk() {
                 <tr className="border-b border-[#E8E4DC]">
                   <th className="text-left py-2 pr-4 text-[#1A1A1A] font-semibold">Feature</th>
                   <th className="text-center py-2 px-4 text-[#D4AF37] font-semibold">MintVault UK</th>
-                  <th className="text-center py-2 pl-4 text-[#666666] font-semibold">Overseas (PSA etc.)</th>
+                  <th className="text-center py-2 pl-4 text-[#555555] font-semibold">Overseas (PSA etc.)</th>
                 </tr>
               </thead>
               <tbody>
@@ -114,9 +114,9 @@ export default function BestCardGradingUk() {
                   ["Insured return shipping", "✓", "✓"],
                 ].map(([feature, mv, overseas]) => (
                   <tr key={feature} className="border-b border-[#E8E4DC]">
-                    <td className="py-2.5 pr-4 text-[#444444]">{feature}</td>
+                    <td className="py-2.5 pr-4 text-[#555555]">{feature}</td>
                     <td className="py-2.5 px-4 text-center text-emerald-600 font-medium">{mv}</td>
-                    <td className="py-2.5 pl-4 text-center text-[#999999]">{overseas}</td>
+                    <td className="py-2.5 pl-4 text-center text-[#888888]">{overseas}</td>
                   </tr>
                 ))}
               </tbody>
@@ -134,12 +134,12 @@ export default function BestCardGradingUk() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+                <span className="text-[#555555] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>

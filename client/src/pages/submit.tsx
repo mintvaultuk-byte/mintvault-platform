@@ -8,6 +8,7 @@ import { pricingTiers, submissionTypes, calculateOrderTotals, getInsuranceTier, 
 import type { PricingTier } from "@shared/schema";
 import { ArrowLeft, ArrowRight, Check, Shield, CreditCard, AlertTriangle, Info, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { Link } from "wouter";
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import SeoHead from "@/components/seo-head";
 
 interface CardItem {
@@ -70,19 +71,21 @@ interface WizardState {
 const WIZARD_STATE_VERSION = "mv-wizard-v4";
 const WIZARD_LS_KEY = "mv-submit-wizard";
 
-function saveWizardState(state: WizardState) {
+function saveWizardState(state: WizardState, step?: number) {
   try {
-    localStorage.setItem(WIZARD_LS_KEY, JSON.stringify({ v: WIZARD_STATE_VERSION, state }));
+    localStorage.setItem(WIZARD_LS_KEY, JSON.stringify({ v: WIZARD_STATE_VERSION, state, step: step || 1, savedAt: Date.now() }));
   } catch {}
 }
 
-function loadWizardState(): WizardState | null {
+function loadWizardState(): { state: WizardState; step: number } | null {
   try {
     const raw = localStorage.getItem(WIZARD_LS_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed.v !== WIZARD_STATE_VERSION) return null;
-    return parsed.state as WizardState;
+    // Expire after 24 hours
+    if (parsed.savedAt && Date.now() - parsed.savedAt > 24 * 60 * 60 * 1000) return null;
+    return { state: parsed.state as WizardState, step: parsed.step || 1 };
   } catch {
     return null;
   }
@@ -150,9 +153,9 @@ function getEstimatedReturnDate(turnaroundDays: number): string {
 }
 
 const OTHER_SERVICES_INFO = [
-  { id: "reholder", name: "Reholder", price: "£8 / card", turnaround: "20 working days", desc: "New slab + VaultLock NFC chip for an existing graded card" },
-  { id: "crossover", name: "Crossover", price: "£15 / card", turnaround: "20 working days", desc: "Grade a card from another company (PSA, BGS, etc.)" },
-  { id: "authentication", name: "Authentication", price: "£10 / card", turnaround: "20 working days", desc: "Verify authenticity — no grade assigned" },
+  { id: "reholder", name: "Reholder", price: "£15 / card", turnaround: "15 working days", desc: "New slab + VaultLock NFC chip for an existing graded card" },
+  { id: "crossover", name: "Crossover", price: "£35 / card", turnaround: "15 working days", desc: "Grade a card from another company (PSA, BGS, etc.)" },
+  { id: "authentication", name: "Authentication", price: "£15 / card", turnaround: "15 working days", desc: "Verify authenticity — no grade assigned" },
 ];
 
 function Step1Tier({ state, setState, tiers, capacity }: {
@@ -168,7 +171,7 @@ function Step1Tier({ state, setState, tiers, capacity }: {
       <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step1-title">
         Choose Service Level
       </h2>
-      <p className="text-[#999999] text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
+      <p className="text-[#888888] text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
 
       <div className="space-y-3">
         {tiers.map((tier) => {
@@ -200,7 +203,7 @@ function Step1Tier({ state, setState, tiers, capacity }: {
                       </span>
                     )}
                   </div>
-                  <p className="text-[#999999] text-sm mt-1">{tier.turnaround} from receipt</p>
+                  <p className="text-[#888888] text-sm mt-1">{tier.turnaround} from receipt</p>
                   {isSelected && estimatedReturn && (
                     <p className="text-[#D4AF37]/70 text-xs mt-1.5 flex items-center gap-1" data-testid={`text-estimated-return-${tier.id}`}>
                       <Check size={11} />
@@ -216,7 +219,7 @@ function Step1Tier({ state, setState, tiers, capacity }: {
       </div>
 
       {/* Turnaround note */}
-      <p className="text-[#999999] text-xs text-center mt-4">
+      <p className="text-[#888888] text-xs text-center mt-4">
         All turnaround times begin when we receive your cards, not when you post them.
       </p>
 
@@ -239,8 +242,8 @@ function Step1Tier({ state, setState, tiers, capacity }: {
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="text-[#D4AF37]/80 font-bold text-sm tracking-wider">{svc.name}</h3>
-                    <p className="text-[#999999] text-xs mt-0.5">{svc.desc}</p>
-                    <p className="text-[#BBBBBB] text-xs mt-0.5">{svc.turnaround} from receipt</p>
+                    <p className="text-[#888888] text-xs mt-0.5">{svc.desc}</p>
+                    <p className="text-[#AAAAAA] text-xs mt-0.5">{svc.turnaround} from receipt</p>
                   </div>
                   <span className="text-[#888888] font-bold text-sm">{svc.price}</span>
                 </div>
@@ -260,7 +263,7 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
     <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/30 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
         <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Crossover Details</h3>
-        <p className="text-[#999999] text-xs mb-3">Tell us about the existing slab you're crossing over.</p>
+        <p className="text-[#888888] text-xs mb-3">Tell us about the existing slab you're crossing over.</p>
       </div>
 
       <div>
@@ -288,7 +291,7 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
             value={state.crossoverCompanyOther}
             onChange={(e) => setState({ ...state, crossoverCompanyOther: e.target.value })}
             placeholder="e.g. Beckett"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
             data-testid="input-crossover-company-other"
           />
         </div>
@@ -301,7 +304,7 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
           value={state.crossoverOriginalGrade}
           onChange={(e) => setState({ ...state, crossoverOriginalGrade: e.target.value })}
           placeholder="e.g. 9.5 or NM-MT"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="input-crossover-grade"
         />
       </div>
@@ -313,12 +316,12 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
           value={state.crossoverCertNumber}
           onChange={(e) => setState({ ...state, crossoverCertNumber: e.target.value })}
           placeholder="e.g. 12345678"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="input-crossover-cert"
         />
       </div>
 
-      <p className="text-[#999999] text-xs leading-relaxed border-t border-[#D4AF37]/20 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/20 pt-3">
         Crossover is subject to review. MintVault reserves the right to return cards that do not meet crossover standards.
       </p>
     </div>
@@ -333,7 +336,7 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
     <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
         <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Reholder Details</h3>
-        <p className="text-[#999999] text-xs mb-3">Tell us about the existing slab you need reheld.</p>
+        <p className="text-[#888888] text-xs mb-3">Tell us about the existing slab you need reheld.</p>
       </div>
 
       <div>
@@ -377,7 +380,7 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           value={state.reholderCertNumber}
           onChange={(e) => setState({ ...state, reholderCertNumber: e.target.value })}
           placeholder="e.g. 12345678 or PSA-9"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="input-reholder-cert"
         />
       </div>
@@ -389,12 +392,12 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           value={state.reholderCondition}
           onChange={(e) => setState({ ...state, reholderCondition: e.target.value })}
           placeholder="e.g. Cracked corner, yellowing, label damage..."
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="input-reholder-condition"
         />
       </div>
 
-      <p className="text-[#999999] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
         Reholdering applies to MintVault slabs only. Cards from other grading companies are subject to review. The original grade is retained unless a new grading service is also requested.
       </p>
     </div>
@@ -408,7 +411,7 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
     <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
         <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Authentication Details</h3>
-        <p className="text-[#999999] text-xs mb-3">Help us understand why you're requesting authentication.</p>
+        <p className="text-[#888888] text-xs mb-3">Help us understand why you're requesting authentication.</p>
       </div>
 
       <div>
@@ -435,12 +438,12 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
           onChange={(e) => setState({ ...state, authConcerns: e.target.value })}
           placeholder="Describe any specific concerns about the card's authenticity..."
           rows={3}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
+          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
           data-testid="textarea-auth-concerns"
         />
       </div>
 
-      <p className="text-[#999999] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
         Authentication results in a certificate confirming the card is genuine. No condition grade is assigned. Cards found to be counterfeit will not be returned without prior arrangement.
       </p>
     </div>
@@ -491,7 +494,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
       <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step2-title">
         How Many Cards?
       </h2>
-      <p className="text-[#999999] text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
+      <p className="text-[#888888] text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
 
       {state.type === "crossover" && <CrossoverFields state={state} setState={setState} />}
       {state.type === "reholder" && <ReholderFields state={state} setState={setState} />}
@@ -530,7 +533,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
               data-testid="input-declared-value"
             />
           </div>
-          <p className="text-[#999999] text-xs mt-1.5">Combined estimated value of all cards in this submission</p>
+          <p className="text-[#888888] text-xs mt-1.5">Combined estimated value of all cards in this submission</p>
           {state.declaredValue > 0 && (
             <div className="mt-2 space-y-1.5">
               <div className="flex items-center gap-2 text-sm">
@@ -559,7 +562,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             value={state.submissionName}
             onChange={(e) => setState({ ...state, submissionName: e.target.value })}
             placeholder="e.g. My Charizard Collection"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
             data-testid="input-submission-name"
           />
         </div>
@@ -581,7 +584,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
         {showCardDetails && (
           <div className="mt-4 space-y-4">
-            <p className="text-[#999999] text-xs">Pre-fill card details to speed up processing. All fields are optional.</p>
+            <p className="text-[#888888] text-xs">Pre-fill card details to speed up processing. All fields are optional.</p>
 
             {hasMismatch && (
               <div className="flex items-center gap-2 border border-yellow-500/30 rounded p-3 bg-yellow-500/5" data-testid="text-declared-value-mismatch">
@@ -624,7 +627,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                       value={item.cardName}
                       onChange={(e) => updateCardItem(index, "cardName", e.target.value)}
                       placeholder="e.g. Charizard"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                       data-testid={`input-card-name-${index}`}
                     />
                   </div>
@@ -635,7 +638,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                       value={item.setName}
                       onChange={(e) => updateCardItem(index, "setName", e.target.value)}
                       placeholder="e.g. Base Set"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                       data-testid={`input-set-name-${index}`}
                     />
                   </div>
@@ -646,7 +649,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                       value={item.cardNumber}
                       onChange={(e) => updateCardItem(index, "cardNumber", e.target.value)}
                       placeholder="e.g. 4/102"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                       data-testid={`input-card-number-${index}`}
                     />
                   </div>
@@ -657,7 +660,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                       value={item.year}
                       onChange={(e) => updateCardItem(index, "year", e.target.value)}
                       placeholder="e.g. 1999"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                       data-testid={`input-year-${index}`}
                     />
                   </div>
@@ -686,7 +689,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                     value={item.notes}
                     onChange={(e) => updateCardItem(index, "notes", e.target.value)}
                     placeholder="Any special notes for this card..."
-                    className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                    className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                     data-testid={`input-card-notes-${index}`}
                   />
                 </div>
@@ -699,16 +702,25 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   );
 }
 
-function Step3Review({ state, setState, tier }: { state: WizardState; setState: (s: WizardState) => void; tier: PricingTier | undefined }) {
+function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { state: WizardState; setState: (s: WizardState) => void; tier: PricingTier | undefined; vcPercent?: number; vcTier?: string | null }) {
   const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
+
+  const bulkPercent = totals.discountPercent;
+  const effectivePercent = Math.max(vcPercent, bulkPercent);
+  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
+  const vcWins = vcPercent > bulkPercent && vcPercent > 0;
+  const discountLabel = vcWins
+    ? `${vcTier ? vcTier.charAt(0).toUpperCase() + vcTier.slice(1) : ""} Vault Club discount (${vcPercent}%)`
+    : `Bulk discount (${bulkPercent}%)`;
+  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   return (
     <div>
       <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step3-title">
         Order Summary
       </h2>
-      <p className="text-[#999999] text-center mb-8 text-sm">Review your submission before proceeding</p>
+      <p className="text-[#888888] text-center mb-8 text-sm">Review your submission before proceeding</p>
 
       <div className="max-w-md mx-auto border border-[#D4AF37]/30 rounded-2xl overflow-hidden">
         <div className="bg-[#D4AF37]/5 p-4 border-b border-[#D4AF37]/20">
@@ -741,7 +753,7 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
               {state.crossoverCertNumber && (
                 <SummaryRow label="Certificate No." value={state.crossoverCertNumber} testId="text-summary-crossover-cert" />
               )}
-              <p className="text-[#999999] text-xs mt-2">Subject to review before crossover is accepted.</p>
+              <p className="text-[#888888] text-xs mt-2">Subject to review before crossover is accepted.</p>
             </div>
           )}
 
@@ -768,19 +780,22 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
               {state.authConcerns && (
                 <SummaryRow label="Concerns" value={state.authConcerns} testId="text-summary-auth-concerns" />
               )}
-              <p className="text-[#999999] text-xs mt-2">Authentication certificate only — no condition grade assigned.</p>
+              <p className="text-[#888888] text-xs mt-2">Authentication certificate only — no condition grade assigned.</p>
             </div>
           )}
 
           <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
             <SummaryRow label="Service Fees" value={`£${(totals.subtotal / 100).toFixed(2)}`} testId="text-summary-subtotal" />
-            {totals.discountPercent > 0 && (
+            {effectivePercent > 0 && (
               <div className="flex justify-between items-center">
-                <span className="text-[#D4AF37]/80 text-sm">Bulk discount ({totals.discountPercent}%)</span>
+                <span className="text-[#D4AF37]/80 text-sm">{discountLabel}</span>
                 <span className="text-[#D4AF37] font-medium text-sm" data-testid="text-summary-discount">
-                  -£{(totals.discountAmount / 100).toFixed(2)}
+                  -£{(effectiveAmount / 100).toFixed(2)}
                 </span>
               </div>
+            )}
+            {vcWins && (
+              <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>
             )}
             <div className="flex justify-between items-start">
               <div className="flex-1">
@@ -827,7 +842,7 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
             <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]/20">
               <span className="text-[#D4AF37] font-bold uppercase tracking-wider">Total</span>
               <span className="text-[#1A1A1A] font-bold text-xl" data-testid="text-summary-total">
-                £{(totals.total / 100).toFixed(2)}
+                £{(effectiveTotal / 100).toFixed(2)}
               </span>
             </div>
           </div>
@@ -858,7 +873,7 @@ function Step3Review({ state, setState, tier }: { state: WizardState; setState: 
               🎁 MintVault Reveal Wrap{" "}
               <span className="text-[#D4AF37] font-bold text-xs uppercase tracking-widest ml-1">Free</span>
             </p>
-            <p className="text-[#666666] text-xs mt-1 leading-relaxed">
+            <p className="text-[#555555] text-xs mt-1 leading-relaxed">
               Receive your slabs sealed in gold holographic foil — tear them open to reveal your grade like opening a pack. Perfect for filming unboxing content.
             </p>
           </div>
@@ -874,11 +889,11 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
       <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step4-title">
         Return Shipping & Details
       </h2>
-      <p className="text-[#999999] text-center mb-6 text-sm">Where should we return your cards?</p>
+      <p className="text-[#888888] text-center mb-6 text-sm">Where should we return your cards?</p>
 
       <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5" data-testid="text-shipping-notice">
         <Info size={14} className="text-[#D4AF37] flex-shrink-0 mt-0.5" />
-        <span className="text-[#444444] text-xs leading-relaxed">
+        <span className="text-[#555555] text-xs leading-relaxed">
           Important: You are responsible for insured shipping to MintVault. Please use tracked and insured delivery appropriate to your declared item value.
         </span>
       </div>
@@ -925,7 +940,7 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
             value={state.phone}
             onChange={(e) => setState({ ...state, phone: e.target.value })}
             placeholder="e.g. 07700 900000"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
             data-testid="input-phone"
           />
         </div>
@@ -993,7 +1008,7 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
             onChange={(e) => setState({ ...state, notes: e.target.value })}
             placeholder="Special instructions, handling notes, or anything else we should know..."
             rows={3}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
             data-testid="input-notes"
           />
         </div>
@@ -1011,18 +1026,25 @@ function SummaryRow({ label, value, testId }: { label: string; value: string; te
   );
 }
 
-function Step5Payment({ state, tier, onSuccess }: {
+function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: {
   state: WizardState;
   tier: PricingTier | undefined;
   onSuccess: (submissionId: string, packingSlipToken?: string) => void;
+  vcPercent?: number;
+  vcTier?: string | null;
 }) {
   const stripe = useStripe();
   const elements = useElements();
   const [error, setError] = useState("");
   const [liabilityAccepted, setLiabilityAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const flags = useFeatureFlags();
 
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
+  const bulkPercent = totals.discountPercent;
+  const effectivePercent = Math.max(vcPercent, bulkPercent);
+  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
+  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   const createPaymentMutation = useMutation({
     mutationFn: async () => {
@@ -1043,6 +1065,7 @@ function Step5Payment({ state, tier, onSuccess }: {
         cardItems: state.cardItems.length > 0 ? state.cardItems : undefined,
         liabilityAccepted: liabilityAccepted,
         termsAccepted: termsAccepted,
+        termsVersion: flags.legalPagesLive ? "v1.0-draft-pre-solicitor" : undefined,
         shippingAddress: {
           line1: state.addressLine1,
           line2: state.addressLine2,
@@ -1149,22 +1172,56 @@ function Step5Payment({ state, tier, onSuccess }: {
           </label>
         </div>
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-          <input
-            type="checkbox"
-            id="liability-accept"
-            checked={liabilityAccepted}
-            onChange={(e) => setLiabilityAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
-            data-testid="checkbox-liability"
-          />
-          <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
-            I confirm I have read and agree to the{" "}
-            <Link href="/terms-and-conditions">
-              <span className="text-[#D4AF37] underline">Liability & Shipping Policy</span>
-            </Link>. I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
-          </label>
-        </div>
+        {/* Terms acceptance — flag-gated: new combined flow vs legacy */}
+        {flags.legalPagesLive ? (
+          <>
+            {/* Key points panel */}
+            <div className="border border-[#D4AF37]/20 rounded-lg p-4 bg-[#FFFDF5] space-y-2">
+              <p className="text-[#1A1A1A] text-sm font-semibold mb-2">Before you continue</p>
+              <p className="text-[#555555] text-xs leading-relaxed">A few important points about MintVault grading:</p>
+              <ul className="text-[#555555] text-xs leading-relaxed space-y-1.5 list-disc pl-4">
+                <li>Grading is a professional opinion, not a guaranteed outcome.</li>
+                <li>Declared Value must be honest and accurate. Under-declaring limits your cover.</li>
+                <li>Our liability for loss or damage is capped by your Declared Value and selected Value Protection tier.</li>
+                <li>You have 14 days from delivery to inspect and report any issues.</li>
+                <li>We may refuse to grade, return raw, or retain for investigation if a Card appears altered, counterfeit, or subject to a dispute.</li>
+              </ul>
+            </div>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="legal-accept" checked={termsAccepted && liabilityAccepted}
+                onChange={(e) => { setTermsAccepted(e.target.checked); setLiabilityAccepted(e.target.checked); }}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-legal-combined" />
+              <label htmlFor="legal-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I have read and accept the{" "}
+                <a href="/legal/website-terms" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Website Terms</a>,{" "}
+                <a href="/legal/submission-agreement" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Submission Agreement</a>, and{" "}
+                <a href="/legal/guarantee" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Guarantee &amp; Correction Policy</a>.
+              </label>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="liability-accept" checked={liabilityAccepted}
+                onChange={(e) => setLiabilityAccepted(e.target.checked)}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-liability" />
+              <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I confirm I have read and agree to the{" "}
+                <Link href="/terms-and-conditions"><span className="text-[#D4AF37] underline">Liability & Shipping Policy</span></Link>.
+                I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
+              </label>
+            </div>
+            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+              <input type="checkbox" id="terms-accept" checked={termsAccepted}
+                onChange={(e) => setTermsAccepted(e.target.checked)}
+                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-terms" />
+              <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+                I confirm I have read and agree to the MintVault UK Ltd{" "}
+                <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
+              </label>
+            </div>
+          </>
+        )}
 
         <div>
           <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
@@ -1188,21 +1245,6 @@ function Step5Payment({ state, tier, onSuccess }: {
           <p className="text-red-400 text-sm" data-testid="text-payment-error">{error}</p>
         )}
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-          <input
-            type="checkbox"
-            id="terms-accept"
-            checked={termsAccepted}
-            onChange={(e) => setTermsAccepted(e.target.checked)}
-            className="mt-1 accent-[#D4AF37]"
-            data-testid="checkbox-terms"
-          />
-          <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
-            I confirm I have read and agree to the MintVault UK Ltd{" "}
-            <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
-          </label>
-        </div>
-
         <button
           type="submit"
           disabled={isPending || !stripe || !liabilityAccepted || !termsAccepted}
@@ -1210,7 +1252,7 @@ function Step5Payment({ state, tier, onSuccess }: {
           data-testid="button-pay"
         >
           <CreditCard size={18} />
-          {isPending ? "Processing..." : `Pay £${(totals.total / 100).toFixed(2)} Securely`}
+          {isPending ? "Processing..." : `Pay £${(effectiveTotal / 100).toFixed(2)} Securely`}
         </button>
       </form>
     </div>
@@ -1279,15 +1321,37 @@ function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
 }
 
 function SubmitWizardInner() {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem("mv-submit-wizard");
+      if (!raw) return 1;
+      const parsed = JSON.parse(raw);
+      if (parsed.v !== "mv-wizard-v4") return 1;
+      if (parsed.savedAt && Date.now() - parsed.savedAt > 24 * 60 * 60 * 1000) return 1;
+      return parsed.step || 1;
+    } catch { return 1; }
+  });
   const [, navigate] = useLocation();
+
+  const { data: vaultClubDiscount } = useQuery<{ discount_percent: number; tier: string | null }>({
+    queryKey: ["/api/vault-club/check-discount"],
+    queryFn: async () => {
+      const res = await fetch("/api/vault-club/check-discount", { credentials: "include" });
+      if (!res.ok) return { discount_percent: 0, tier: null };
+      return res.json();
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
+  const vcPercent = vaultClubDiscount?.discount_percent ?? 0;
+  const vcTier = vaultClubDiscount?.tier ?? null;
 
   const searchParams = new URLSearchParams(window.location.search);
   const urlType = searchParams.get("type") || searchParams.get("service") || "";
   const urlTier = searchParams.get("tier") || searchParams.get("service") || "";
 
   const validTypes = ["grading", "reholder", "crossover", "authentication"];
-  const resolvedType = validTypes.includes(urlType) ? urlType : "";
+  const resolvedType = validTypes.includes(urlType) ? urlType : "grading";
   // For ancillary services the tier ID matches the type ID; for grading default to "standard"
   const resolvedTier = urlTier || (resolvedType === "grading" ? "standard" : resolvedType);
 
@@ -1326,19 +1390,19 @@ function SubmitWizardInner() {
     if (saved) {
       return {
         ...defaultState,
-        ...saved,
+        ...saved.state,
         // Never restore type from localStorage — always require the user to choose a service
         // on a fresh visit. Type can still be set via URL param (?type=reholder etc.)
         type: resolvedType,
-        tier: resolvedType ? (urlTier || saved.tier) : resolvedTier,
+        tier: resolvedType ? (urlTier || saved.state.tier) : resolvedTier,
       };
     }
     return defaultState;
   });
 
   useEffect(() => {
-    saveWizardState(state);
-  }, [state]);
+    saveWizardState(state, step);
+  }, [state, step]);
 
   const serviceType = state.type;
   const { data: fetchedTiers } = useQuery<PricingTier[]>({
@@ -1433,9 +1497,9 @@ function SubmitWizardInner() {
 
       {step === 1 && <Step1Tier state={state} setState={setState} tiers={activeTiers} capacity={capacityData} />}
       {step === 2 && <Step2Cards state={state} setState={setState} />}
-      {step === 3 && <Step3Review state={state} setState={setState} tier={selectedTier} />}
+      {step === 3 && <Step3Review state={state} setState={setState} tier={selectedTier} vcPercent={vcPercent} vcTier={vcTier} />}
       {step === 4 && <Step4Shipping state={state} setState={setState} />}
-      {step === 5 && <Step5Payment state={state} tier={selectedTier} onSuccess={handleSuccess} />}
+      {step === 5 && <Step5Payment state={state} tier={selectedTier} onSuccess={handleSuccess} vcPercent={vcPercent} vcTier={vcTier} />}
 
       <div className="flex justify-between mt-8 max-w-md mx-auto">
         {step > 1 && step < 5 && (

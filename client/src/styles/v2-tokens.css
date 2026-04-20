@@ -1,0 +1,62 @@
+/* ── MintVault v2 Design Tokens ─────────────────────────────────────────── */
+
+:root {
+  /* v2 Palette */
+  --v2-ink: #0F0E0B;
+  --v2-ink-soft: #3A362E;
+  --v2-ink-mute: #6B6454;
+  --v2-paper: #FAF7F1;
+  --v2-paper-raised: #FFFFFF;
+  --v2-paper-sunk: #F4F0E6;
+  --v2-line: #E8E1D0;
+  --v2-line-soft: #EFE9DA;
+
+  /* Gold */
+  --v2-gold: #B8960C;
+  --v2-gold-soft: #D4AF37;
+  --v2-gold-dark: #8A6F08;
+
+  /* Dark panel */
+  --v2-panel-dark: #1A1612;
+  --v2-panel-dark-soft: #2A241C;
+
+  /* Hero gradient slab — stops for moody radial (navy → petrol → teal → bronze).
+     Used only by the HeroSlab display field. HSL chosen deliberately to avoid
+     the warm paper palette and read as a "slab window". Widened luminance range
+     for dramatic contrast: deeper navy origin, more vivid bronze edge. */
+  --v2-slab-gradient-navy: hsl(220, 45%, 15%);      /* deep navy · 0%   — darker origin */
+  --v2-slab-gradient-petrol: hsl(200, 50%, 25%);    /* petrol blue · 35% */
+  --v2-slab-gradient-teal: hsl(160, 30%, 35%);      /* muted teal · 70% */
+  --v2-slab-gradient-bronze: hsl(45, 45%, 55%);     /* warm bronze · 100% — vivid edge */
+
+  /* Type scale */
+  --v2-text-7xl: 5rem;
+  --v2-text-6xl: 4rem;
+  --v2-text-5xl: 3rem;
+  --v2-text-4xl: 2.25rem;
+  --v2-text-3xl: 1.875rem;
+  --v2-text-2xl: 1.5rem;
+  --v2-text-xl: 1.25rem;
+  --v2-text-lg: 1.125rem;
+  --v2-text-base: 1rem;
+  --v2-text-sm: 0.875rem;
+  --v2-text-xs: 0.75rem;
+
+  /* Spacing */
+  --v2-space-section: 8rem;
+  --v2-space-section-sm: 5rem;
+
+  /* Font stacks */
+  --v2-font-display: "Fraunces", Georgia, serif;
+  --v2-font-body: "Geist Variable", "Geist", system-ui, sans-serif;
+  --v2-font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* v2 marquee ticker animation */
+@keyframes v2-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: v2-marquee 30s linear infinite;
+}

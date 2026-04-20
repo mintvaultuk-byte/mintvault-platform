@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
-import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw } from "lucide-react";
+import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw, Database, Pencil } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
@@ -12,7 +13,11 @@ import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptio
 
 interface Props {
   certificate: CertificateRecord | null;
-  onSuccess: () => void;
+  onSuccess: (newCert?: any) => void;
+  onIdentifyAndGrade?: (result: { analysis: any; identification: any }) => void;
+  /** External identification pushed from AI panel's "Change card" button */
+  externalIdentification?: Record<string, unknown> | null;
+  onExternalIdentificationConsumed?: () => void;
 }
 
 const cardGames = [
@@ -57,7 +62,7 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
 type AutofillField = typeof AUTOFILL_FIELDS[number];
 type ProtectedField = AutofillField | "designations";
 
-export default function CertificateForm({ certificate, onSuccess }: Props) {
+export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade, externalIdentification, onExternalIdentificationConsumed }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
 
@@ -74,7 +79,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     submissionItemId: (certificate as any)?.submissionItemId || "",
     cardGame: certificate?.cardGame || "",
     setName: certificate?.setName || "",
-    cardName: certificate?.cardName || "",
+    cardName: (certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)") ? "" : (certificate?.cardName || ""),
     cardNumber: certificate?.cardNumber || "",
     rarity: initRarity,
     rarityOther: initRarityOther,
@@ -96,6 +101,38 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     () => (certificate?.designations as string[]) || []
   );
 
+  // Sync form state when the cert prop changes (e.g. after AI autofill refetches the cert)
+  // Only overwrite fields that are currently empty — never stomp manual edits
+  useEffect(() => {
+    if (!certificate) return;
+    const isEmpty = (v: any) => v === null || v === undefined || v === "" || v === "(pending)" || v === "(untitled)";
+    const normalizeYear = (v: any): string => {
+      if (!v) return "";
+      const m = String(v).match(/\d{4}/);
+      return m ? m[0] : "";
+    };
+    const clean = (v: any) => isEmpty(v) ? "" : String(v);
+
+    setForm(prev => {
+      let changed = false;
+      const next = { ...prev };
+      const cn = clean(certificate.cardName);
+      const yr = normalizeYear(certificate.year);
+      if (isEmpty(prev.cardName) && cn)             { next.cardName = cn; changed = true; }
+      if (isEmpty(prev.setName) && clean(certificate.setName))  { next.setName = clean(certificate.setName); changed = true; }
+      if (isEmpty(prev.cardNumber) && clean(certificate.cardNumber)) { next.cardNumber = clean(certificate.cardNumber); changed = true; }
+      if (isEmpty(prev.year) && yr)                  { next.year = yr; changed = true; }
+      if (isEmpty(prev.cardGame) && clean(certificate.cardGame)) { next.cardGame = clean(certificate.cardGame); changed = true; }
+      if (isEmpty(prev.language) && clean(certificate.language)) { next.language = clean(certificate.language); changed = true; }
+      if (isEmpty(prev.rarity) && clean((certificate as any)?.rarity)) { next.rarity = clean((certificate as any).rarity); changed = true; }
+      if (isEmpty(prev.variant) && clean((certificate as any)?.variant)) { next.variant = clean((certificate as any).variant); changed = true; }
+      if (isEmpty(prev.gradeOverall) && certificate.gradeOverall) { next.gradeOverall = certificate.gradeOverall; changed = true; }
+      if (changed) toast({ title: "Card details auto-filled from AI" });
+      return changed ? next : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [certificate?.cardName, certificate?.setName, certificate?.cardNumber, certificate?.year]);
+
   const isNonNum = isNonNumericGrade(form.gradeType);
 
   const [frontImage, setFrontImage] = useState<File | null>(null);
@@ -104,6 +141,167 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
   const [autofillLoading, setAutofillLoading] = useState(false);
   const [autofillRan, setAutofillRan] = useState(false);
+
+  // AI Identify & Grade state
+  const [identifyLoading, setIdentifyLoading] = useState(false);
+  const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
+  const [identifyVerified, setIdentifyVerified] = useState(false);
+
+  // TCG manual search state
+  const [tcgSearchOpen, setTcgSearchOpen] = useState(false);
+  const [tcgQuery, setTcgQuery] = useState("");
+  const [tcgResults, setTcgResults] = useState<{ id: string; name: string; setName: string; number: string | null; rarity: string | null; year: string | null; imageUrl: string | null }[]>([]);
+  const [tcgLoading, setTcgLoading] = useState(false);
+  const [tcgCache] = useState(() => new Map<string, typeof tcgResults>());
+  const [manuallyVerified, setManuallyVerified] = useState(false);
+  const tcgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Accept identification from AI panel's "Change card" button
+  useEffect(() => {
+    if (externalIdentification) {
+      const id = externalIdentification as any;
+      setForm(prev => ({
+        ...prev,
+        cardName: id.officialName || id.detected_name || prev.cardName,
+        setName: id.officialSet || id.detected_set || prev.setName,
+        cardNumber: id.officialNumber || id.detected_number || prev.cardNumber,
+        year: id.detected_year || prev.year,
+        rarity: id.detected_rarity || prev.rarity,
+      }));
+      setManuallyVerified(true);
+      onExternalIdentificationConsumed?.();
+    }
+  }, [externalIdentification]);
+
+  function handleTcgSearch(query: string) {
+    setTcgQuery(query);
+    if (tcgDebounceRef.current) clearTimeout(tcgDebounceRef.current);
+    if (query.trim().length < 3) { setTcgResults([]); setTcgLoading(false); return; }
+
+    const cacheKey = `${form.cardGame || "pokemon"}:${query.trim().toLowerCase()}`;
+    if (tcgCache.has(cacheKey)) { setTcgResults(tcgCache.get(cacheKey)!); return; }
+
+    setTcgLoading(true);
+    tcgDebounceRef.current = setTimeout(async () => {
+      try {
+        const gameSlug = (form.cardGame || "pokemon").toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+        const fetchUrl = `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`;
+        console.log("[tcg-search] fetching:", fetchUrl);
+        const res = await fetch(fetchUrl, { credentials: "include" });
+        if (!res.ok) throw new Error("Search failed");
+        const data = await res.json();
+        const results = Array.isArray(data) ? data : [];
+        tcgCache.set(cacheKey, results);
+        setTcgResults(results);
+      } catch {
+        setTcgResults([]);
+      } finally {
+        setTcgLoading(false);
+      }
+    }, 400);
+  }
+
+  function selectTcgCard(card: typeof tcgResults[number]) {
+    setForm(prev => ({
+      ...prev,
+      cardName: card.name || prev.cardName,
+      setName: card.setName || prev.setName,
+      cardNumber: card.number || prev.cardNumber,
+      year: card.year || prev.year,
+      rarity: card.rarity || prev.rarity,
+    }));
+    setManuallyVerified(true);
+    setTcgSearchOpen(false);
+    setTcgQuery("");
+    setTcgResults([]);
+    toast({ title: "Card selected", description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}` });
+
+    // Sync manual verification to AI panel via the existing pipeline
+    const manualId = {
+      detected_name: card.name || "",
+      detected_set: card.setName || "",
+      detected_number: card.number || null,
+      detected_year: card.year || null,
+      detected_game: form.cardGame || "pokemon",
+      detected_language: form.language || "English",
+      detected_rarity: card.rarity || null,
+      is_holo: false,
+      confidence: "high",
+      verified: true,
+      officialName: card.name || "",
+      officialSet: card.setName || "",
+      officialNumber: card.number || null,
+      referenceImageUrl: card.imageUrl || null,
+      dbSource: "manual-tcg-search",
+      manuallyVerified: true,
+    };
+    onIdentifyAndGrade?.({ analysis: null, identification: manualId });
+  }
+
+  async function runIdentifyAndGrade() {
+    if (!isEdit || !certificate?.id) return;
+    setIdentifyLoading(true);
+    setIdentifyConfidence(null);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify-and-analyze`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Identify & Grade failed");
+
+      setIdentifyConfidence(data.identificationConfidence);
+      setIdentifyVerified(data.identificationVerified);
+
+      if (data.detailsWritten) {
+        const id = data.identification;
+        const c = data.cert;
+        const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
+
+        // Use identification object (source of truth) with cert as fallback
+        const newName = id?.officialName || id?.detected_name || c?.cardName || null;
+        const newSet = id?.officialSet || id?.detected_set || c?.setName || null;
+        const newNumber = id?.officialNumber || id?.detected_number || c?.cardNumber || null;
+        const rawYear = id?.detected_year || id?.copyright_year || c?.year || null;
+        const newYear = String(rawYear || "").match(/\d{4}/)?.[0] || null;
+        const newGame = id?.detected_game || c?.cardGame || null;
+        const newRarity = id?.detected_rarity || c?.rarity || null;
+        const newLanguage = id?.detected_language || c?.language || null;
+
+        // Overwrite unconditionally when verified or high-confidence;
+        // only fill empty fields for uncertain results
+        const overwrite = data.identificationVerified || data.identificationConfidence === "high";
+
+        setForm(prev => ({
+          ...prev,
+          cardName:   overwrite ? (newName || prev.cardName)     : (isEmpty(prev.cardName)   ? (newName || prev.cardName)     : prev.cardName),
+          setName:    overwrite ? (newSet || prev.setName)        : (isEmpty(prev.setName)    ? (newSet || prev.setName)        : prev.setName),
+          cardNumber: overwrite ? (newNumber || prev.cardNumber)  : (isEmpty(prev.cardNumber) ? (newNumber || prev.cardNumber)  : prev.cardNumber),
+          year:       overwrite ? (newYear || prev.year)          : (isEmpty(prev.year)       ? (newYear || prev.year)          : prev.year),
+          cardGame:   overwrite ? (newGame || prev.cardGame)      : (isEmpty(prev.cardGame)   ? (newGame || prev.cardGame)      : prev.cardGame),
+          rarity:     overwrite ? (newRarity || prev.rarity)      : (isEmpty(prev.rarity)     ? (newRarity || prev.rarity)      : prev.rarity),
+          language:   overwrite ? (newLanguage || prev.language)  : (isEmpty(prev.language)   ? (newLanguage || prev.language)  : prev.language),
+        }));
+
+        const grade = data.analysis?.overall_grade;
+        const gradeLabel = data.analysis?.grade_label;
+        toast({
+          title: "Card identified & graded",
+          description: `${newName || "Card"} — ${newSet || "Unknown set"}${grade ? ` · Grade ${grade} ${gradeLabel || ""}` : ""}`,
+        });
+      } else {
+        toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
+      }
+
+      // Pass analysis + identification to parent so GradingPanel can populate
+      if (data.analysis && data.identification) {
+        onIdentifyAndGrade?.({ analysis: data.analysis, identification: data.identification });
+      }
+    } catch (e: any) {
+      toast({ title: "Identify & Grade failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIdentifyLoading(false);
+    }
+  }
   const [manuallyEdited, setManuallyEdited] = useState<Set<ProtectedField>>(new Set());
   const [suggestions, setSuggestions] = useState<CardMaster[]>([]);
   const [fallbackMatch, setFallbackMatch] = useState<CardMaster | null>(null);
@@ -187,56 +385,6 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
       toast({ title: "Card lookup failed", description: e.message, variant: "destructive" });
     } finally {
       setCardLookupLoading(false);
-    }
-  }
-
-  // ── AI Card Identify state (from uploaded image) ──────────────────────────
-  const [aiIdentifyLoading, setAiIdentifyLoading] = useState(false);
-  const [aiIdentifyError, setAiIdentifyError] = useState("");
-
-  async function runAiIdentify(imageFile: File) {
-    setAiIdentifyLoading(true);
-    setAiIdentifyError("");
-    try {
-      const fd = new FormData();
-      fd.append("image", imageFile);
-      const res = await fetch("/api/admin/identify-image", {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Identification failed");
-
-      const gameMap: Record<string, string> = {
-        pokemon: "Pokémon", yugioh: "Yu-Gi-Oh!", mtg: "Magic: The Gathering",
-        onepiece: "One Piece", sports: "Sports Card", "dragon ball": "Dragon Ball Super",
-      };
-
-      if (data.detected_name)  updateField("cardName", data.detected_name.toUpperCase());
-      if (data.detected_set)   updateField("setName", data.detected_set);
-      if (data.detected_year)  updateField("year", data.detected_year);
-      if (data.detected_number) updateField("cardNumber", data.detected_number.replace(/^#+/, ""));
-      if (data.detected_language) updateField("language", data.detected_language);
-      if (data.detected_game) {
-        const mapped = gameMap[data.detected_game.toLowerCase()] || data.detected_game;
-        updateField("cardGame", mapped);
-      }
-      if (data.detected_rarity) {
-        const { rarityCode } = mapRarityTextToCode(data.detected_rarity);
-        if (rarityCode && rarityCode !== "OTHER") {
-          applyUnifiedSelection(`RARITY:${rarityCode}`);
-        }
-      }
-      toast({
-        title: "Card identified!",
-        description: `${data.detected_name || "Unknown"} · ${data.detected_set || "Unknown set"} · Confidence: ${data.confidence || "unknown"}`,
-      });
-    } catch (e: any) {
-      setAiIdentifyError(e.message);
-      toast({ title: "Identification failed", description: e.message, variant: "destructive" });
-    } finally {
-      setAiIdentifyLoading(false);
     }
   }
 
@@ -341,7 +489,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
 
       return res.json();
     },
-    onSuccess: () => onSuccess(),
+    onSuccess: (data: any) => onSuccess(isEdit ? undefined : data),
     onError: (err: any) => setError(err.message),
   });
 
@@ -350,15 +498,12 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
     setError("");
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
-      setError("Please fill in all required fields");
+      setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
       return;
     }
 
-    if (!isNonNum) {
-      if (!form.gradeOverall) {
-        setError("Please select an overall grade");
-        return;
-      }
+    // Grade is optional on initial save — can be set later via the workstation
+    if (!isNonNum && form.gradeOverall) {
       const grade = parseFloat(form.gradeOverall);
       if (isNaN(grade) || grade < 1 || grade > 10) {
         setError("Overall grade must be between 1 and 10");
@@ -567,10 +712,14 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
   return (
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
-        {isEdit ? `EDIT ${certificate.certId}` : "NEW CERTIFICATE"}
+        {isEdit
+          ? (!certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
+          : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">
-        {isEdit ? "Update certificate details" : "Certificate ID will be auto-generated"}
+        {isEdit
+          ? "Update certificate details"
+          : "Fill in card details and click Save. A cert number will be assigned automatically."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -590,8 +739,116 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
             }));
           }}
         />}
+        {/* AI Identify & Grade — single button for full pipeline */}
+        {isEdit && certificate?.id && (
+          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Identify & Grade</p>
+                <p className="text-[#888888] text-[10px] mt-0.5">Identify the card and run full AI grading in one step</p>
+              </div>
+              <button
+                type="button"
+                onClick={runIdentifyAndGrade}
+                disabled={identifyLoading}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shrink-0"
+              >
+                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {identifyLoading ? "Identifying & Grading…" : "Identify & Grade"}
+              </button>
+            </div>
+            {identifyConfidence && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
+                <span className={identifyConfidence === "high" ? "text-emerald-600" : identifyConfidence === "medium" ? "text-yellow-600" : "text-red-600"}>
+                  {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                </span>
+                {identifyConfidence !== "high" && !identifyVerified && (
+                  <button type="button" onClick={runIdentifyAndGrade} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
+
+          {/* TCG search + manual entry helpers */}
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="text-[#888888]">Can't find the right card?</span>
+            <button
+              type="button"
+              onClick={() => { setTcgSearchOpen(true); setTcgQuery(""); setTcgResults([]); }}
+              disabled={!form.cardGame}
+              className="flex items-center gap-1 text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <Database size={10} />
+              Search TCG
+            </button>
+            {!form.cardGame && <span className="text-[#AAAAAA] italic">Select card game first</span>}
+            {manuallyVerified && (
+              <span className="flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 size={10} />
+                Manually verified
+              </span>
+            )}
+          </div>
+
+          {/* TCG Search Dialog */}
+          <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
+            <DialogContent className="max-w-lg p-0 overflow-hidden">
+              <div className="p-4 pb-2 border-b border-[#E8E4DC]">
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
+                <div className="flex items-center gap-2 border border-[#D4AF37]/30 rounded-lg px-3 py-2 focus-within:border-[#D4AF37] transition-colors">
+                  <Search size={14} className="text-[#D4AF37]/50 shrink-0" />
+                  <input
+                    type="text"
+                    value={tcgQuery}
+                    onChange={(e) => handleTcgSearch(e.target.value)}
+                    placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
+                    className="flex-1 bg-transparent text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] outline-none"
+                    autoFocus
+                  />
+                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
+                </div>
+                <p className="text-[#AAAAAA] text-[9px] mt-1">Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters</p>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto">
+                {tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
+                  <div className="py-8 text-center">
+                    <p className="text-[#888888] text-sm">No cards found</p>
+                    <p className="text-[#AAAAAA] text-[10px] mt-1">Check spelling or enter details manually</p>
+                  </div>
+                )}
+                {tcgResults.map((card) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => selectTcgCard(card)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#D4AF37]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
+                  >
+                    {card.imageUrl ? (
+                      <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
+                    ) : (
+                      <div className="w-10 h-14 bg-[#F7F7F5] rounded shrink-0 flex items-center justify-center">
+                        <Search size={12} className="text-[#AAAAAA]" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[#1A1A1A] text-sm font-bold truncate">{card.name}</p>
+                      <p className="text-[#555555] text-xs truncate">{card.setName}{card.number ? ` · #${card.number}` : ""}</p>
+                      <p className="text-[#AAAAAA] text-[10px]">
+                        {[card.rarity, card.year].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormSelect
@@ -602,10 +859,9 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
               testId="select-card-game"
             />
             <div>
-              <FormInput
-                label="Set Name *"
+              <PokemonSetPicker
                 value={form.setName}
-                onChange={(v) => updateField("setName", v)}
+                onChange={(name, id) => { updateField("setName", name); if (id) setSetId(id); }}
                 testId="input-set-name"
               />
               <div className="mt-1.5">
@@ -1130,61 +1386,19 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
                   data-testid="select-service-tier"
                 >
                   <option value="" className="bg-white">Standard (default)</option>
-                  <option value="standard" className="bg-white">Standard — £12</option>
-                  <option value="priority" className="bg-white">Priority — £15</option>
-                  <option value="express" className="bg-white">Express — £20</option>
-                  <option value="gold" className="bg-white">Gold — £85 (Black Label if grade 10)</option>
-                  <option value="gold-elite" className="bg-white">Gold Elite — £125 (Black Label if grade 10)</option>
+                  <option value="vault-queue" className="bg-white">Vault Queue — £19</option>
+                  <option value="standard" className="bg-white">Standard — £25</option>
+                  <option value="express" className="bg-white">Express — £45</option>
                 </select>
-                {(form.serviceTier === "gold" || form.serviceTier === "gold-elite") && form.gradeOverall === "10" && (
-                  <p className="text-[#D4AF37] text-xs mt-1.5">⭐ This card will receive a Black Label.</p>
-                )}
               </div>
             </>
           )}
         </fieldset>
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Images</legend>
+        {/* ── Card images and AI grading are handled by the GradingPanel workstation below ── */}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <FileUpload
-              label="Front Image"
-              current={(certificate as any)?.frontImageUrl || certificate?.frontImagePath}
-              onChange={setFrontImage}
-              testId="input-front-image"
-            />
-            <FileUpload
-              label="Back Image"
-              current={(certificate as any)?.backImageUrl || certificate?.backImagePath}
-              onChange={setBackImage}
-              testId="input-back-image"
-            />
-          </div>
-
-          {/* AI Identify button */}
-          {frontImage && (
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => runAiIdentify(frontImage)}
-                disabled={aiIdentifyLoading}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-widest hover:opacity-90 disabled:opacity-50 transition-opacity"
-                data-testid="button-identify-ai"
-              >
-                {aiIdentifyLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
-                {aiIdentifyLoading ? "Identifying card…" : "Identify Card with AI"}
-              </button>
-              <p className="text-[#AAAAAA] text-[10px]">Uses Claude Vision to auto-fill card name, set, year, number, game, language and rarity from the front image.</p>
-              {aiIdentifyError && (
-                <p className="text-red-500 text-xs flex items-center gap-1"><AlertTriangle size={12} />{aiIdentifyError}</p>
-              )}
-            </div>
-          )}
-        </fieldset>
-
-        {/* ── Build 1: Grading Image Upload — only in edit mode ── */}
-        {isEdit && (
+        {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
+        {false && isEdit && (
           <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
             <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Upload size={12} />
@@ -1325,8 +1539,8 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           </fieldset>
         )}
 
-        {/* ── AI Grading Panel — only in edit mode ── */}
-        {isEdit && (
+        {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
+        {false && isEdit && (
           <fieldset className="border border-[#D4AF37]/30 rounded-lg p-4 space-y-4">
             <legend className="text-[#D4AF37] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Cpu size={12} />
@@ -1482,48 +1696,6 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           </fieldset>
         )}
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Status</legend>
-          <div className="flex gap-4 mt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="draft"
-                checked={form.status === "draft"}
-                onChange={() => updateField("status", "draft")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-draft"
-              />
-              <span className="text-[#666666] text-sm">Draft</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="active"
-                checked={form.status === "active" || form.status === "published"}
-                onChange={() => updateField("status", "active")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-active"
-              />
-              <span className="text-emerald-400 text-sm">Active</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="status"
-                value="voided"
-                checked={form.status === "voided"}
-                onChange={() => updateField("status", "voided")}
-                className="accent-[#D4AF37]"
-                data-testid="radio-status-voided"
-              />
-              <span className="text-red-400 text-sm">Voided</span>
-            </label>
-          </div>
-        </fieldset>
-
         {error && (
           <p className="text-red-400 text-sm" data-testid="text-form-error">{error}</p>
         )}
@@ -1535,7 +1707,7 @@ export default function CertificateForm({ certificate, onSuccess }: Props) {
           data-testid="button-save-cert"
         >
           <Save size={16} />
-          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Create Certificate"}
+          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Save Certificate"}
         </button>
       </form>
     </div>
@@ -1707,5 +1879,148 @@ function SubmissionItemLink({
         ))}
       </select>
     </fieldset>
+  );
+}
+
+// ── Pokemon Set Picker — searchable dropdown from TCG API ────────────────
+
+interface PokemonSet { id: string; name: string; series: string; ptcgoCode: string | null; releaseDate: string; total: number; source?: string; }
+
+function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange: (name: string, id?: string) => void; testId?: string }) {
+  const { toast } = useToast();
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [sets, setSets] = useState<PokemonSet[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addForm, setAddForm] = useState({ setId: "", setName: "", series: "Promo", releaseYear: "", totalCards: "" });
+  const [addSaving, setAddSaving] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setQuery(value); }, [value]);
+
+  function fetchSets() {
+    fetch("/api/pokemon-sets").then(r => r.json()).then(d => { if (Array.isArray(d)) setSets(d); }).catch(() => {});
+  }
+  useEffect(() => { fetchSets(); }, []);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowAddForm(false); } }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const q = query.toLowerCase();
+  const filtered = q ? sets.filter(s =>
+    s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.ptcgoCode || "").toLowerCase().includes(q) || s.series.toLowerCase().includes(q)
+  ).slice(0, 12) : sets.slice(0, 12);
+
+  async function saveNewSet() {
+    if (!addForm.setId || !addForm.setName) return;
+    setAddSaving(true);
+    try {
+      const r = await fetch("/api/admin/custom-sets", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          setId: addForm.setId.replace(/\s+/g, "").toLowerCase(),
+          setName: addForm.setName,
+          series: addForm.series || null,
+          releaseDate: addForm.releaseYear ? `${addForm.releaseYear}-01-01` : null,
+          totalCards: addForm.totalCards ? parseInt(addForm.totalCards) : null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      toast({ title: `Custom set added: ${addForm.setId}` });
+      fetchSets();
+      onChange(addForm.setName, addForm.setId.replace(/\s+/g, "").toLowerCase());
+      setQuery(addForm.setName);
+      setShowAddForm(false);
+      setOpen(false);
+    } catch (e: any) {
+      toast({ title: "Failed to add set", description: e.message, variant: "destructive" });
+    } finally {
+      setAddSaving(false);
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <label className="text-[#D4AF37]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
+      <input
+        type="text"
+        value={query}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Type to search sets…"
+        data-testid={testId}
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]"
+      />
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          {filtered.map(s => (
+            <button key={s.id} type="button"
+              onClick={() => { onChange(s.name, s.id); setQuery(s.name); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0"
+            >
+              <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
+              <span className="text-[#1A1A1A] font-medium">{s.name}</span>
+              {(s as any).source === "custom" && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">Custom</span>}
+              <span className="text-[#999999] ml-2">· {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}</span>
+            </button>
+          ))}
+          {/* Add new set button */}
+          <button type="button"
+            onClick={() => { setShowAddForm(true); setAddForm(f => ({ ...f, setId: query, setName: "" })); }}
+            className="w-full text-left px-3 py-2.5 text-xs text-[#D4AF37] font-bold hover:bg-[#D4AF37]/5 border-t border-[#E8E4DC] flex items-center gap-1"
+          >
+            <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
+          </button>
+        </div>
+      )}
+
+      {/* Add set modal */}
+      {showAddForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddForm(false)}>
+          <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
+            <div>
+              <label className="text-[#666666] text-[10px] block mb-0.5">Set Code *</label>
+              <input value={addForm.setId} onChange={e => setAddForm(f => ({ ...f, setId: e.target.value }))}
+                placeholder="e.g. M24 EN" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+            </div>
+            <div>
+              <label className="text-[#666666] text-[10px] block mb-0.5">Set Name *</label>
+              <input value={addForm.setName} onChange={e => setAddForm(f => ({ ...f, setName: e.target.value }))}
+                placeholder="e.g. McDonald's Match Battle 2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Series</label>
+                <input value={addForm.series} onChange={e => setAddForm(f => ({ ...f, series: e.target.value }))}
+                  placeholder="Promo" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Year</label>
+                <input type="number" value={addForm.releaseYear} onChange={e => setAddForm(f => ({ ...f, releaseYear: e.target.value }))}
+                  placeholder="2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="text-[#666666] text-[10px] block mb-0.5">Total Cards</label>
+                <input type="number" value={addForm.totalCards} onChange={e => setAddForm(f => ({ ...f, totalCards: e.target.value }))}
+                  placeholder="15" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setShowAddForm(false)} className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]">Cancel</button>
+              <button type="button" onClick={saveNewSet} disabled={addSaving || !addForm.setId || !addForm.setName}
+                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50">
+                {addSaving ? "Saving…" : "Add Set"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -75,16 +75,16 @@ export default function CardGradingServiceUk() {
           Card Grading Service UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault is a professional card grading service based in the United Kingdom, purpose-built for UK collectors who want to grade their trading cards without the hassle, cost, and risk of sending them overseas. We provide the same rigorous grading standards you would expect from any professional service, combined with the convenience and security of keeping your cards within the UK.
         </p>
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           From Pokemon and Yu-Gi-Oh! to Magic: The Gathering and beyond, MintVault grades cards from all major trading card games. Every card is assessed by trained graders, sealed in a tamper-evident precision slab, and returned with fully insured shipping.
         </p>
 
         <section className="mb-10" data-testid="section-why-local">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why UK Collectors Choose a Local Grading Service</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               For years, UK trading card collectors had limited options for professional grading. Most services were based in the United States, meaning collectors had to navigate international shipping, customs declarations, import duties, and weeks of additional waiting time just for transit alone.
             </p>
@@ -112,7 +112,7 @@ export default function CardGradingServiceUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -121,7 +121,7 @@ export default function CardGradingServiceUk() {
 
         <section className="mb-10" data-testid="section-how-it-works">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How Our Card Grading Service Works</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Using MintVault's card grading service is straightforward. The entire process is managed through our website, from submission to tracking to certificate verification.
             </p>
@@ -145,7 +145,7 @@ export default function CardGradingServiceUk() {
 
         <section className="mb-10" data-testid="section-who-grades">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Who Uses Our Grading Service?</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               MintVault serves a wide range of UK-based trading card enthusiasts:
             </p>
@@ -166,7 +166,7 @@ export default function CardGradingServiceUk() {
 
         <section className="mb-10" data-testid="section-pricing-overview">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Pricing Overview</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#555555] text-sm leading-relaxed mb-4">
             MintVault offers three service tiers. All tiers include the same professional grading process, tamper-evident slab, certificate, and insured return shipping.
           </p>
           <div className="border border-[#D4AF37]/20 rounded-lg overflow-hidden mb-4">
@@ -177,12 +177,12 @@ export default function CardGradingServiceUk() {
             ].map((t, i) => (
               <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#D4AF37]/10" : ""}`} data-testid={`row-tier-${i}`}>
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.turnaround}</span>
+                <span className="text-[#555555] text-sm">{t.turnaround}</span>
                 <span className="text-[#D4AF37] text-sm font-semibold">{t.price}/card</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             Bulk discounts of up to 15% are available for larger submissions. Visit our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for full details.
           </p>
         </section>

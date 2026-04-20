@@ -777,7 +777,7 @@ function SheetPrintingPanel() {
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
           <p className="text-xs text-[#999999] mt-0.5">
-            A4 · 10 certs per sheet · 70 × 20 mm labels · Brother ScanNCut CM300
+            A4 · 9 certs per sheet · 72 × 22 mm labels · Brother ScanNCut CM300
           </p>
         </div>
         <Button

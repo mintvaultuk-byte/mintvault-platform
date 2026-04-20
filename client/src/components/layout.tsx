@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import SiteHeader from "@/components/header";
 import MintVaultWordmark from "@/components/mintvault-wordmark";
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 
 const footerServices = [
   { label: "Pokemon Card Grading UK", href: "/pokemon-card-grading-uk" },
@@ -39,7 +40,20 @@ const footerTools = [
   { label: "Pre-Grade Estimate", href: "/tools/estimate" },
 ];
 
+const footerLegal = [
+  { label: "Website Terms", href: "/legal/website-terms" },
+  { label: "Submission Agreement", href: "/legal/submission-agreement" },
+  { label: "Guarantee Policy", href: "/legal/guarantee" },
+  { label: "Privacy Policy", href: "/legal/privacy-policy" },
+  { label: "Shipping Requirements", href: "/legal/shipping-requirements" },
+];
+
 function Footer() {
+  const flags = useFeatureFlags();
+  // When legal flag is ON, replace old T&Cs links with new legal page links
+  const companyLinks = flags.legalPagesLive
+    ? footerCompany.filter(l => l.href !== "/terms-and-conditions" && l.href !== "/liability-and-insurance")
+    : footerCompany;
   return (
     <footer className="relative z-[3] border-t border-[#E8E4DC] bg-[#FAFAF8] mt-16">
       <div className="max-w-4xl mx-auto px-4 py-12">
@@ -71,7 +85,7 @@ function Footer() {
           <div>
             <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Company</h4>
             <ul className="space-y-2">
-              {footerCompany.map((link) => (
+              {companyLinks.map((link) => (
                 <li key={link.href}>
                   <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
                     {link.label}
@@ -80,6 +94,20 @@ function Footer() {
               ))}
             </ul>
           </div>
+          {flags.legalPagesLive && (
+            <div>
+              <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Legal</h4>
+              <ul className="space-y-2">
+                {footerLegal.map((link) => (
+                  <li key={link.href}>
+                    <Link href={link.href} className="text-[#666666] hover:text-[#B8960C] text-xs transition-colors">
+                      {link.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <h4 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest mb-4">Free Tools</h4>
             <ul className="space-y-2">

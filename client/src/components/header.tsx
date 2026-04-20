@@ -546,9 +546,6 @@ export default function SiteHeader({ heroMode = false }: { heroMode?: boolean })
 
   return (
     <header className="sticky top-0 z-50">
-      {/* Utility bar — desktop only, always dark */}
-      <UtilityBar />
-
       {/* Main nav bar */}
       <div className={`transition-all duration-300 ${navBg}`}>
         <div className="flex items-center px-3 md:px-6 py-2.5 max-w-screen-2xl mx-auto gap-2 md:gap-4">

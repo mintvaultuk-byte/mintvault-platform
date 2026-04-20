@@ -15,24 +15,24 @@ export default function GradingNotes({ privateNotes, gradeExplanation, onChange 
       </div>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Grade Explanation <span className="text-emerald-500">(public — shown on DGR)</span></label>
+        <label className="text-[#333333] text-[10px] block mb-1">Grade Explanation <span className="text-emerald-500">(public — shown on DGR)</span></label>
         <textarea
           value={gradeExplanation}
           onChange={e => onChange("gradeExplanation", e.target.value)}
           placeholder="Explain the grade — what's notable about this card's condition? e.g. Outstanding condition with a faint print line on the holographic area preventing a higher grade."
           rows={4}
-          className="w-full bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-3 py-2 placeholder-[#444444] resize-none"
+          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-3 py-2 placeholder-[#AAAAAA] resize-none"
         />
       </div>
 
       <div>
-        <label className="text-[#888888] text-[10px] block mb-1">Private Notes <span className="text-[#555555]">(internal only — not shown to customer)</span></label>
+        <label className="text-[#333333] text-[10px] block mb-1">Private Notes <span className="text-[#555555]">(internal only — not shown to customer)</span></label>
         <textarea
           value={privateNotes}
           onChange={e => onChange("privateNotes", e.target.value)}
           placeholder="Internal notes — submission context, customer comments, handling instructions, etc."
           rows={3}
-          className="w-full bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-3 py-2 placeholder-[#444444] resize-none"
+          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-3 py-2 placeholder-[#AAAAAA] resize-none"
         />
       </div>
     </div>

@@ -28,7 +28,7 @@ export default function SubmitSuccessPage() {
   if (!submission) {
     return (
       <div className="px-4 py-12 text-center">
-        <h2 className="text-2xl font-bold text-[#D4AF37] mb-4 glow-gold-sm" data-testid="text-not-found">
+        <h2 className="text-2xl font-bold text-[#D4AF37] mb-4" data-testid="text-not-found">
           Submission Not Found
         </h2>
         <Link href="/submit">
@@ -53,10 +53,10 @@ export default function SubmitSuccessPage() {
         <div className="w-16 h-16 rounded-full border-2 border-emerald-400 flex items-center justify-center mx-auto mb-4">
           <CheckCircle className="text-emerald-400" size={36} />
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-[#D4AF37] tracking-wide glow-gold-sm mb-2" data-testid="text-success-title">
+        <h1 className="text-2xl md:text-3xl font-bold text-[#D4AF37] tracking-wide mb-2" data-testid="text-success-title">
           Submission Received!
         </h1>
-        <p className="text-[#666666]" data-testid="text-success-subtitle">
+        <p className="text-[#555555]" data-testid="text-success-subtitle">
           Thank you for your order. Your submission has been confirmed.
         </p>
       </div>
@@ -85,7 +85,7 @@ export default function SubmitSuccessPage() {
             Packing Slip
           </h3>
         </div>
-        <p className="text-[#444444] text-sm mb-4">
+        <p className="text-[#555555] text-sm mb-4">
           Download your packing slip and include it inside your package. This is essential for us to process your submission quickly.
         </p>
         <a
@@ -104,7 +104,7 @@ export default function SubmitSuccessPage() {
             Shipping Label
           </h3>
         </div>
-        <p className="text-[#444444] text-sm mb-4">
+        <p className="text-[#555555] text-sm mb-4">
           Download your pre-addressed shipping label. Print it, attach it to the outside of your package, and send it to us.
         </p>
         <a
@@ -123,10 +123,10 @@ export default function SubmitSuccessPage() {
             Shipping Instructions
           </h3>
         </div>
-        <div className="text-[#444444] text-sm space-y-3">
+        <div className="text-[#555555] text-sm space-y-3">
           <div className="space-y-1.5">
             <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider">Before you ship:</p>
-            <ol className="list-decimal list-inside text-[#666666] text-xs space-y-1">
+            <ol className="list-decimal list-inside text-[#555555] text-xs space-y-1">
               <li>Print the packing slip above and include it inside the box</li>
               <li>Write your Submission ID (<span className="text-[#D4AF37] font-mono font-bold">{subId}</span>) on the outside of the box</li>
               <li>Pack your cards securely with adequate protection</li>

@@ -5,8 +5,9 @@ import { sendSubmissionConfirmation } from './email';
 import { db } from './db';
 import { sql } from 'drizzle-orm';
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, quarterKey } from './vault-club-tiers';
-import { findUserByStripeCustomerId, insertVaultClubEvent, grantReholderCredits } from './vault-club';
+import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } from './vault-club';
 import { writeAuthAudit } from './account-auth';
+import { auditLog } from '@shared/schema';
 import {
   sendVaultClubWelcomeEmail,
   sendVaultClubCancelledEmail,
@@ -154,6 +155,25 @@ export class WebhookHandlers {
     if (event.type === 'invoice.payment_failed') {
       await WebhookHandlers.handleInvoicePaymentFailed(event.id, event.data.object as Stripe.Invoice);
     }
+
+    // ── Stripe Connect marketplace events ────────────────────────────────────
+
+    if (event.type === 'account.updated') {
+      // Connect account event — only handle if we recognise it as ours
+      const account = event.data.object as Stripe.Account;
+      if (account.metadata?.mintvault_purpose === 'marketplace_seller') {
+        await WebhookHandlers.handleConnectAccountUpdated(event, stripe);
+      }
+    }
+
+    if (event.type === 'account.application.deauthorized') {
+      await WebhookHandlers.handleConnectAccountDeauthorized(event);
+    }
+
+    if (event.type === 'capability.updated') {
+      // Log only for now — the account.updated handler will capture the derived state
+      console.log('[webhook] capability.updated for account:', event.account);
+    }
   }
 
   // ── Subscription checkout completed ───────────────────────────────────────
@@ -205,7 +225,10 @@ export class WebhookHandlers {
 
     // Grant reholder credits for silver/gold
     const source = `${tier}_quarterly`;
-    await grantReholderCredits(userId, tier, source).catch(() => {});
+    await grantMemberCredits(userId, tier, source).catch(() => {});
+    await db.execute(sql`
+      UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
+    `);
 
     await insertVaultClubEvent({
       userId, stripeEventId: eventId,
@@ -347,17 +370,18 @@ export class WebhookHandlers {
         WHERE id = ${userId}
       `);
 
-      // Grant quarterly reholders if we've crossed a quarter boundary
+      // Grant quarterly member credits if we've crossed a quarter boundary
+      // Uses dedicated column (not ai_credits_last_refilled_at) — read BEFORE any update
       const now = new Date();
-      const lastRefillRows = await db.execute(sql`
-        SELECT ai_credits_last_refilled_at FROM users WHERE id = ${userId} LIMIT 1
-      `);
-      const lastRefill = (lastRefillRows.rows[0] as any)?.ai_credits_last_refilled_at;
-      const prevQuarter = lastRefill ? quarterKey(new Date(lastRefill)) : null;
+      const lastGranted = user.member_credits_last_granted_at as string | null;
+      const prevQuarter = lastGranted ? quarterKey(new Date(lastGranted)) : null;
       const currentQuarter = quarterKey(now);
-      if (prevQuarter && prevQuarter !== currentQuarter) {
+      if (!prevQuarter || prevQuarter !== currentQuarter) {
         const source = `${tier}_quarterly`;
-        await grantReholderCredits(userId, tier, source).catch(() => {});
+        await grantMemberCredits(userId, tier, source).catch(() => {});
+        await db.execute(sql`
+          UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
+        `);
       }
     } else {
       // First invoice — just ensure status is active
@@ -421,5 +445,125 @@ export class WebhookHandlers {
     }
 
     console.log(`[webhook] Vault Club payment failed: user=${userId} attempt=${attemptCount} grace=${isGrace}`);
+  }
+
+  // ── Stripe Connect: account.updated ──────────────────────────────────────
+
+  private static async handleConnectAccountUpdated(
+    event: Stripe.Event,
+    _stripe: Stripe,
+  ): Promise<void> {
+    const account = event.data.object as Stripe.Account;
+    const mintvaultUserId = account.metadata?.mintvault_user_id;
+    const purpose = account.metadata?.mintvault_purpose;
+
+    if (!mintvaultUserId || purpose !== 'marketplace_seller') {
+      console.warn('[webhook] account.updated: missing or non-marketplace metadata, skipping', account.id);
+      return;
+    }
+
+    const chargesEnabled = account.charges_enabled === true;
+    const payoutsEnabled = account.payouts_enabled === true;
+    const detailsSubmitted = account.details_submitted === true;
+    const disabled = account.requirements?.disabled_reason != null;
+
+    let newStatus: string;
+    if (disabled) {
+      newStatus = 'suspended';
+    } else if (chargesEnabled && payoutsEnabled && detailsSubmitted) {
+      newStatus = 'active';
+    } else if (detailsSubmitted) {
+      newStatus = 'pending'; // submitted but still verifying
+    } else {
+      newStatus = 'pending'; // still onboarding
+    }
+
+    // Read current status to detect activation transition
+    const currentRows = await db.execute(sql`
+      SELECT seller_status FROM users WHERE id = ${mintvaultUserId} LIMIT 1
+    `);
+    const previousStatus = (currentRows.rows[0] as any)?.seller_status;
+
+    // Update all cached seller fields
+    await db.execute(sql`
+      UPDATE users
+      SET seller_status = ${newStatus},
+          seller_charges_enabled = ${chargesEnabled},
+          seller_payouts_enabled = ${payoutsEnabled},
+          seller_kyc_completed_at = CASE
+            WHEN ${detailsSubmitted} AND seller_kyc_completed_at IS NULL THEN NOW()
+            ELSE seller_kyc_completed_at
+          END,
+          seller_kyc_requirements_json = ${JSON.stringify(account.requirements ?? {})}::jsonb,
+          updated_at = NOW()
+      WHERE id = ${mintvaultUserId}
+    `);
+
+    await db.insert(auditLog).values({
+      entityType: 'user',
+      entityId: mintvaultUserId,
+      action: 'marketplace.seller_account_updated',
+      adminUser: null,
+      details: {
+        stripe_account_id: account.id,
+        new_status: newStatus,
+        previous_status: previousStatus,
+        charges_enabled: chargesEnabled,
+        payouts_enabled: payoutsEnabled,
+        details_submitted: detailsSubmitted,
+        requirements: account.requirements ?? null,
+      },
+    });
+
+    // Detect first-time activation
+    if (newStatus === 'active' && previousStatus !== 'active') {
+      // TODO: send "You're ready to sell on MintVault" email
+      console.log('[marketplace] seller activated:', mintvaultUserId);
+    }
+
+    console.log(`[webhook] account.updated: user=${mintvaultUserId} status=${previousStatus}→${newStatus} charges=${chargesEnabled} payouts=${payoutsEnabled}`);
+  }
+
+  // ── Stripe Connect: account.application.deauthorized ─────────────────────
+
+  private static async handleConnectAccountDeauthorized(
+    event: Stripe.Event,
+  ): Promise<void> {
+    const accountId = event.account as string;
+    if (!accountId) {
+      console.warn('[webhook] account.application.deauthorized: no account ID on event');
+      return;
+    }
+
+    const userRows = await db.execute(sql`
+      SELECT id, seller_status FROM users
+      WHERE stripe_connect_account_id = ${accountId} LIMIT 1
+    `);
+    if (userRows.rows.length === 0) {
+      console.warn(`[webhook] account.application.deauthorized: no user found for account ${accountId}`);
+      return;
+    }
+
+    const userId = (userRows.rows[0] as any).id as string;
+
+    await db.execute(sql`
+      UPDATE users
+      SET seller_status = 'rejected',
+          seller_charges_enabled = false,
+          seller_payouts_enabled = false,
+          updated_at = NOW()
+      WHERE id = ${userId}
+    `);
+
+    await db.insert(auditLog).values({
+      entityType: 'user',
+      entityId: userId,
+      action: 'marketplace.seller_deauthorized',
+      adminUser: null,
+      details: { stripe_connect_account_id: accountId },
+    });
+
+    // TODO: send "Your seller account was disconnected" email
+    console.log(`[webhook] account.application.deauthorized: user=${userId} account=${accountId}`);
   }
 }

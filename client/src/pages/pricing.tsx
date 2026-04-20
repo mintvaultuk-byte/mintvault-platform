@@ -1,569 +1,573 @@
-import { useState } from "react";
 import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import type { PricingTier } from "@shared/schema";
+import { ArrowRight, Check } from "lucide-react";
+import HeaderV2 from "@/components/v2/header-v2";
+import FooterV2 from "@/components/v2/footer-v2";
+import SectionEyebrow from "@/components/v2/section-eyebrow";
+import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 import {
-  Check, Clock, Shield, ShieldCheck, Camera, Sparkles, Lock,
-  FileText, Award, Star, Crown, Package, Truck, AlertCircle,
-} from "lucide-react";
-import SeoHead from "@/components/seo-head";
-import FaqSection, { faqSchema } from "@/components/faq-section";
-import CtaSection from "@/components/cta-section";
+  pricingTiers,
+  insuranceTiers,
+  insuranceSurchargeBands,
+} from "@shared/schema";
+import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 
-const SITE = "https://mintvaultuk.com";
+// Silver Vault Club perk values — mirrors server/vault-club-tiers.ts Silver
+// config (verified 2026-04-19 after merge a8e5f8d). Hardcoded here because
+// VAULT_CLUB_TIERS lives under server/ and has no shared import path.
+// If Silver's perks shift, update both this file and server/vault-club-tiers.ts.
+const SILVER = {
+  label: "Silver Vault",
+  monthly_price_pence: 999,
+  annual_price_pence: 9900,
+  ai_credits_monthly: 100,
+  free_authentication_monthly: 2,
+} as const;
 
-const pricingSchema = {
-  "@context": "https://schema.org",
-  "@type": "WebPage",
-  "name": "MintVault UK Pricing — Card Grading from £12",
-  "url": `${SITE}/pricing`,
-  "description": "Simple, transparent card grading pricing. Three speeds, one label type. Standard £12, Priority £15, Express £20. UK-based service with insured return shipping.",
-  "mainEntity": {
-    "@type": "OfferCatalog",
-    "name": "Card Grading Services",
-    "itemListElement": [
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Standard Grading" }, "price": "12.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Priority Grading" }, "price": "15.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Express Grading" }, "price": "20.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Gold Grading" }, "price": "85.00", "priceCurrency": "GBP" },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Gold Elite Grading" }, "price": "125.00", "priceCurrency": "GBP" },
-    ],
+// Display descriptors derived from config — keep all copy/marketing text in
+// this file so pricing-v2 stays self-contained while numbers stay bound to
+// shared config. Tier display order: VAULT_QUEUE → STANDARD (featured) → EXPRESS.
+
+const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured: boolean }> = {
+  standard: { // schema id "standard" = Vault Queue
+    shortName: "Vault Queue",
+    blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
+    featured: false,
+  },
+  priority: { // schema id "priority" = Standard
+    shortName: "Standard",
+    blurb: "The balanced option: fair turnaround, full report, priority you can feel.",
+    featured: true,
+  },
+  express: {
+    shortName: "Express",
+    blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
+    featured: false,
   },
 };
 
-const pricingFaqs = [
-  {
-    question: "What's included in every grading tier?",
-    answer: "Every tier includes the same professional grade assessment on our 1–10 scale, a MintSeal tamper-evident slab with VaultLock NFC, a unique online-verifiable certificate, a claim code for ownership registration, and fully insured Royal Mail return shipping. The only difference between tiers is how fast your cards are graded.",
-  },
-  {
-    question: "How much does card grading cost in the UK?",
-    answer: "MintVault grading starts from £12 per card (Standard tier, 20 working days). Priority is £15 per card (10 working days) and Express is £20 per card (5 working days). Bulk discounts apply automatically for larger submissions — 5% off for 10+ cards, 10% off for 25+ cards, 15% off for 50+ cards.",
-  },
-  {
-    question: "Do you offer bulk discounts?",
-    answer: "Yes. Bulk discounts apply automatically at checkout: 5% off for 10–24 cards, 10% off for 25–49 cards, and 15% off for 50+ cards. Discounts apply to the per-card price across all grading tiers.",
-  },
-  {
-    question: "Is return shipping included?",
-    answer: "Yes — fully insured Royal Mail return shipping is included in the price of every tier. There are no hidden shipping fees.",
-  },
-  {
-    question: "What is the turnaround time for grading?",
-    answer: "Standard is 20 working days, Priority is 10 working days, and Express is 5 working days. These are working-day estimates from the date we receive your cards. You'll receive an estimated return date at checkout.",
-  },
-  {
-    question: "What is Gold Grading and who is it for?",
-    answer: "Gold Grading is our premium service for high-value cards. It includes white glove card care, priority handling, enhanced grading breakdowns, and higher insurance coverage (up to £2,500 for Gold, £5,000 for Gold Elite). Any card that achieves a GEM MINT 10 — on any grading tier — receives our exclusive Black Label slab.",
-  },
-  {
-    question: "What is the Black Label?",
-    answer: "The Black Label is awarded to every card that achieves a GEM MINT 10 — on any grading tier, not just Gold. The label features a black background with gold accents. Cards graded 9 and below receive our standard white and gold label.",
-  },
-  {
-    question: "What's included in a Reholder service?",
-    answer: "Reholdering places your existing graded card into a new MintVault precision slab with a new VaultLock NFC chip and updated certificate. It does not involve re-grading the card. Cost is £8 per card, 20 working days.",
-  },
-  {
-    question: "What is a Crossover and how much does it cost?",
-    answer: "A Crossover is when you submit a card already graded by another company (PSA, BGS, CGC, etc.) to be assessed and graded by MintVault instead. We remove it from the existing slab, grade it fresh, and return it in a MintVault slab with a new certificate. Cost is £15 per card, 20 working days.",
-  },
-];
-
-const BULK_TIERS = [
-  { label: "10–24 cards", discount: "5% off" },
-  { label: "25–49 cards", discount: "10% off" },
-  { label: "50+ cards", discount: "15% off" },
-];
-
-const ANCILLARY_SERVICES = [
-  {
-    id: "reholder",
-    name: "Reholder",
-    price: "£8",
-    turnaround: "20 working days",
-    description: "Place your existing graded card into a new MintVault slab with updated VaultLock NFC and certificate.",
-  },
-  {
-    id: "crossover",
-    name: "Crossover",
-    price: "£15",
-    turnaround: "20 working days",
-    description: "Submit a card graded by another company (PSA, BGS, etc.) and have it graded fresh by MintVault.",
-  },
-  {
-    id: "authentication",
-    name: "Authentication",
-    price: "£10",
-    turnaround: "20 working days",
-    description: "Verify a card's authenticity and determine whether any physical alterations have been made.",
-  },
-];
-
-const GOLD_TIERS = [
-  {
-    id: "gold",
-    name: "GOLD",
-    price: "£85",
-    turnaround: "5 working days",
-    insurance: "£2,500",
-    recommended: false,
-  },
-  {
-    id: "gold-elite",
-    name: "GOLD ELITE",
-    price: "£125",
-    turnaround: "2–3 working days",
-    insurance: "£5,000",
-    recommended: true,
-  },
-];
-
-// ── Shared sub-components ────────────────────────────────────────────────────
-
-function SectionDivider({ label, dark = false }: { label: string; dark?: boolean }) {
+// Format helpers
+const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
+const gbp = (n: number) => `£${n.toLocaleString("en-GB")}`;
+export default function PricingV2() {
   return (
-    <div className="relative flex items-center my-3.5">
-      <div className={`flex-1 h-px ${dark ? "bg-[#2A2A2A]" : "bg-[#EBEBEB]"}`} />
-      <span className={`mx-3 text-[8px] font-bold uppercase tracking-[0.12em] whitespace-nowrap ${dark ? "text-[#444444]" : "text-[#C4C4C0]"}`}>
-        {label}
-      </span>
-      <div className={`flex-1 h-px ${dark ? "bg-[#2A2A2A]" : "bg-[#EBEBEB]"}`} />
-    </div>
-  );
-}
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+      <HeaderV2 />
 
-function FeatureRow({
-  icon,
-  label,
-  value,
-  star = false,
-  dark = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  star?: boolean;
-  dark?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-3 py-2">
-      <div className="text-[#D4AF37] shrink-0 mt-0.5">{icon}</div>
-      <div className="min-w-0 flex-1">
-        <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider mb-0.5 ${dark ? "text-[#555555]" : "text-[#AAAAAA]"}`}>
-          {label}
-          {star && <span className="text-[#D4AF37] text-[9px]">★</span>}
+      {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
+      <section className="relative">
+        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
+          {/* Left — copy */}
+          <div>
+            <p
+              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+              style={{ color: "var(--v2-gold)" }}
+            >
+              Est. Kent &middot; Pricing
+            </p>
+            <h1
+              className="font-display italic font-medium leading-[0.95] mb-6"
+              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+            >
+              Grade it once.<br />Get it right.
+            </h1>
+            <p
+              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Three tiers, 5 to 40 working day turnaround, same four-point inspection on every
+              card. Black Label upgrade when your card earns it &mdash; free, never sold.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mb-5">
+              <Link
+                href="/submit"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
+              >
+                Submit a card <ArrowRight size={14} />
+              </Link>
+              <Link
+                href="/tools/estimate"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
+                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              >
+                Try AI Pre-Grade <ArrowRight size={14} />
+              </Link>
+            </div>
+            <p
+              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              style={{ color: "var(--v2-ink-mute)" }}
+            >
+              From &pound;19 &middot; 3 tiers &middot; Free Black Label upgrade
+            </p>
+          </div>
+
+          {/* Right — tier slab fan. Mirrors home-v2 visually; content swaps
+              cert data for locked tier pricing. Slot 0 (top z) = Standard
+              (featured), slot 1 = Vault Queue, slot 2 = Express. */}
+          {(() => {
+            const tierSlabs: [SlabContent, SlabContent, SlabContent] = [
+              {
+                topBadge: "STANDARD",
+                mainLabel: "\u00a325",
+                rightLabel: "15 DAY",
+                footnote: "MOST CHOSEN",
+                key: "standard",
+              },
+              {
+                topBadge: "VAULT QUEUE",
+                mainLabel: "\u00a319",
+                rightLabel: "40 DAY",
+                footnote: "BEST VALUE",
+                key: "vault-queue",
+              },
+              {
+                topBadge: "EXPRESS",
+                mainLabel: "\u00a345",
+                rightLabel: "5 DAY",
+                footnote: "FASTEST",
+                key: "express",
+              },
+            ];
+            return <HeroSlabFan slabs={tierSlabs} />;
+          })()}
         </div>
-        <div className={`text-[13px] leading-snug ${dark ? "text-[#CCCCCC]" : "text-[#222222]"}`}>{value}</div>
-      </div>
-    </div>
-  );
-}
+      </section>
 
-function GradeIcon({ dark = false }: { dark?: boolean }) {
-  return (
-    <div
-      className={`w-5 h-5 rounded text-[9px] font-black flex items-center justify-center shrink-0 ${
-        dark ? "bg-[#D4AF37] text-[#1A1400]" : "bg-[#1A1A1A] text-white"
-      }`}
-    >
-      10
-    </div>
-  );
-}
+      {/* ── SECTION I: GRADING TIERS (dark) ──────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+        <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="I" label="Grading Tiers" className="mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
+              Three tiers.<br />
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One standard.</span>
+            </h2>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Every card passes the same four-point inspection: centering, corners, edges,
+              surface. Tier only changes how quickly the work comes back.
+            </p>
+          </div>
 
-// ── Main page ────────────────────────────────────────────────────────────────
+          {/* Tier cards */}
+          <div className="flex justify-center">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
+              {pricingTiers.map((tier) => {
+                const d = TIER_DISPLAY[tier.id] ?? { shortName: tier.name, blurb: "", featured: false };
+                const priceDisplay = (tier.pricePerCard / 100).toFixed(0);
+                const days = tier.turnaroundDays ?? 0;
+                return (
+                  <div
+                    key={tier.id}
+                    className="relative rounded-xl flex flex-col"
+                    style={{
+                      padding: "48px 40px",
+                      backgroundColor: "transparent",
+                      border: d.featured
+                        ? "1px solid rgba(212, 175, 55, 0.6)"
+                        : "1px solid rgba(212, 175, 55, 0.25)",
+                    }}
+                  >
+                    {d.featured && (
+                      <span
+                        className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded"
+                        style={{ top: "-14px", backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                      >
+                        Most chosen
+                      </span>
+                    )}
 
-export default function PricingPage() {
-  const [activeTab, setActiveTab] = useState<"standard" | "gold">("standard");
+                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      {d.shortName}
+                    </p>
 
-  const { data: apiTiers } = useQuery<PricingTier[]>({
-    queryKey: ["/api/service-tiers", "grading"],
-    queryFn: async () => {
-      const res = await fetch("/api/service-tiers?serviceType=grading");
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
+                    {/* Price — floating pound, Fraunces non-italic */}
+                    <div className="relative mb-1" style={{ lineHeight: 1 }}>
+                      <span
+                        className="font-display font-semibold absolute"
+                        style={{
+                          color: "rgba(255,255,255,0.4)",
+                          fontSize: "clamp(28px, 3vw, 36px)",
+                          top: "4px",
+                          left: "-2px",
+                          transform: "translateX(-100%)",
+                        }}
+                      >
+                        &pound;
+                      </span>
+                      <span
+                        className="font-display font-semibold"
+                        style={{
+                          color: "#FFFFFF",
+                          fontSize: "clamp(72px, 6vw, 96px)",
+                          marginLeft: "20px",
+                        }}
+                      >
+                        {priceDisplay}
+                      </span>
+                    </div>
 
-  const standardApiTiers = apiTiers?.filter(t => t.id !== "gold" && t.id !== "gold-elite");
-  const tiers: PricingTier[] = standardApiTiers && standardApiTiers.length > 0 ? standardApiTiers : [
-    { id: "standard", name: "STANDARD", price: "£12 per card", pricePerCard: 1200, recommendedCardValue: "Any value", turnaround: "20 working days", turnaroundDays: 20, features: [] },
-    { id: "priority",  name: "PRIORITY",  price: "£15 per card", pricePerCard: 1500, recommendedCardValue: "Any value", turnaround: "10 working days", turnaroundDays: 10, features: [] },
-    { id: "express",  name: "EXPRESS",  price: "£20 per card", pricePerCard: 2000, recommendedCardValue: "Any value", turnaround: "5 working days",  turnaroundDays: 5,  features: [] },
-  ];
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase mb-6"
+                      style={{ color: "#888888", letterSpacing: "0.15em" }}
+                    >
+                      {days} day turnaround
+                    </p>
 
-  const tierInsurance = ["£150", "£350", "£750"];
-  const tierImaging = [
-    "Hi-res card imaging, Front/Back",
-    "Hi-res card imaging, Front/Back + enhanced",
-    "Hi-res card imaging, Front/Back + enhanced",
-  ];
-  const tierBestFor = [
-    "Bulk submissions & new collectors",
-    "Regular collectors",
-    "High-value or time-sensitive cards",
-  ];
+                    {d.blurb && (
+                      <p className="font-body text-sm leading-relaxed mb-8" style={{ color: "rgba(255,255,255,0.7)" }}>
+                        {d.blurb}
+                      </p>
+                    )}
 
-  return (
-    <>
-      <SeoHead
-        title="Card Grading Pricing UK — From £12 | MintVault"
-        description="Simple, transparent card grading pricing. Standard £12/20 days, Priority £15/10 days, Express £20/5 days. Every tier includes the same precision slab and insured return shipping."
-        canonical="/pricing"
-        schema={[pricingSchema, faqSchema(pricingFaqs)]}
-      />
+                    <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      {tier.features.slice(0, 5).map((f) => (
+                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "#E8E4DC" }}>
+                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="bg-white border-b border-[#E8E4DC] py-14 md:py-20 text-center">
-        <div className="max-w-2xl mx-auto px-4">
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-widest mb-3">Pricing</p>
-          <h1 className="text-3xl md:text-4xl font-sans font-black text-[#1A1A1A] tracking-tight mb-4 leading-tight">
-            One label. One price.<br />Pick your speed.
-          </h1>
-          <p className="text-[#666666] text-base leading-relaxed">
-            Professional UK card grading from £12. Every tier includes the same precision slab, VaultLock NFC verification, and insured return shipping.
+                    <Link
+                      href="/submit"
+                      className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] w-full"
+                      style={
+                        d.featured
+                          ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
+                          : { border: "1px solid var(--v2-gold)", color: "var(--v2-gold)" }
+                      }
+                    >
+                      Start a submission <ArrowRight size={14} />
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Black Label editorial callout — not a 4th tier card */}
+          <div className="mt-16 max-w-3xl mx-auto text-center">
+            <p
+              className="font-mono-v2 text-[9px] uppercase tracking-[0.3em] mb-3"
+              style={{ color: "var(--v2-gold-soft)" }}
+            >
+              Black Label &middot; Earned, not sold
+            </p>
+            <p className="font-display italic font-medium text-2xl md:text-3xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
+              When every subgrade scores a 10, the slab upgrades automatically.
+            </p>
+            <p className="font-body text-sm md:text-base" style={{ color: "rgba(255,255,255,0.6)" }}>
+              Black Label is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit
+              perfect across centering, corners, edges, and surface. There&rsquo;s no separate fee,
+              no form to tick. If it earns it, you get it.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION II: VALUE PROTECTION ─────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+        <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="II" label="Value Protection" className="mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              Declare what it&rsquo;s worth.
+            </h2>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+              Declared value is what your card is worth if lost or damaged in our custody.
+              Higher tiers raise our insurance cover with a small per-card surcharge.
+            </p>
+          </div>
+
+          <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid var(--v2-line)" }}>
+            <table className="w-full text-left">
+              <thead>
+                <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Tier</th>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Declared value</th>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Per-card surcharge</th>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insuranceSurchargeBands.map((band, i) => {
+                  const tierName = ["Standard", "Enhanced", "Premium", "Max"][i];
+                  const ceiling = gbp(band.maxValue);
+                  const fee = band.surchargePence === 0 ? "Included" : `+${poundsFromPence(band.surchargePence)}`;
+                  const note =
+                    i === 0 ? "Built into every submission" :
+                    i === 1 ? "Mid-value cards" :
+                    i === 2 ? "High-value grails" :
+                              "Cap — contact us above £7.5k";
+                  return (
+                    <tr key={band.maxValue} style={{ borderBottom: i < insuranceSurchargeBands.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
+                      <td className="font-body text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{tierName}</td>
+                      <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>Up to {ceiling}</td>
+                      <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: band.surchargePence === 0 ? "var(--v2-gold)" : "var(--v2-ink)" }}>{fee}</td>
+                      <td className="font-body text-xs py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>{note}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION III: ADD-ONS ─────────────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+        <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="III" label="Add-ons" className="mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              Optional extras.
+            </h2>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+              Three services you can stack onto a submission. Add only what you need &mdash;
+              nothing hidden, nothing default-on.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10">
+            {ADDON_ORDER.map((id) => {
+              const addon = ADDON_PRICES[id];
+              return (
+                <div key={id}>
+                  <div className="flex items-baseline justify-between mb-3" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "10px" }}>
+                    <h3 className="font-display italic font-medium text-xl md:text-2xl" style={{ color: "var(--v2-ink)" }}>
+                      {addon.name}
+                    </h3>
+                    <span className="font-mono-v2 text-lg font-semibold" style={{ color: "var(--v2-gold)" }}>
+                      {addon.display}
+                    </span>
+                  </div>
+                  <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                    {addon.description}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION IV: RETURN SHIPPING ──────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper-sunk)" }}>
+        <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="IV" label="Return Shipping" className="mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              Insured, tracked, UK only.
+            </h2>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+              Every slab returns via Royal Mail Special Delivery with insurance matched to
+              your declared value tier.
+            </p>
+          </div>
+
+          <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid var(--v2-line)" }}>
+            <table className="w-full text-left">
+              <thead>
+                <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Declared value</th>
+                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Return shipping</th>
+                </tr>
+              </thead>
+              <tbody>
+                {insuranceTiers.map((tier, i) => (
+                  <tr key={tier.maxValue} style={{ borderBottom: i < insuranceTiers.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
+                    <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>Up to {gbp(tier.maxValue)}</td>
+                    <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{poundsFromPence(tier.shippingPence)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="font-body text-xs mt-6" style={{ color: "var(--v2-ink-mute)" }}>
+            Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value,
+            please contact us for bespoke carriage.
           </p>
         </div>
       </section>
 
-      {/* ── Grading tiers ─────────────────────────────────────────────────── */}
-      <section className="bg-[#FAFAF8] py-14 md:py-20">
-        <div className="max-w-5xl mx-auto px-4">
-
-          {/* Pill tabs */}
-          <div className="flex gap-2 justify-center mb-4">
-            <button
-              onClick={() => setActiveTab("standard")}
-              data-testid="tab-standard-grading"
-              className={`px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest transition-all border ${
-                activeTab === "standard"
-                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                  : "border-[#D4AF37]/50 text-[#888888] hover:border-[#D4AF37] hover:text-[#B8960C] bg-transparent"
-              }`}
-            >
-              Standard Grading
-            </button>
-            <button
-              onClick={() => setActiveTab("gold")}
-              data-testid="tab-gold-grading"
-              className={`px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-widest transition-all border flex items-center gap-1.5 ${
-                activeTab === "gold"
-                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                  : "border-[#D4AF37]/50 text-[#888888] hover:border-[#D4AF37] hover:text-[#B8960C] bg-transparent"
-              }`}
-            >
-              <Star className="h-3.5 w-3.5" />
-              Gold Grading
-            </button>
-          </div>
-
-          {/* Subtitle banner */}
-          <div className="text-center mb-10">
-            {activeTab === "standard" ? (
-              <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FFFAE8] to-[#FFF4CC] border border-[#D4AF37]/40 rounded-full px-5 py-2 text-xs font-bold uppercase tracking-widest text-[#B8960C]">
-                <Check className="h-3.5 w-3.5" />
-                Standard is recommended for most cards
-              </div>
-            ) : (
-              <div className="inline-flex items-center gap-2 bg-[#1A1A1A] border border-[#D4AF37]/30 rounded-full px-5 py-2 text-xs font-bold uppercase tracking-widest text-[#D4AF37]">
-                <Star className="h-3.5 w-3.5" />
-                For high-value &amp; investment-grade cards
-              </div>
-            )}
-          </div>
-
-          {/* ── TAB 1: Standard Grading ──────────────────────────────────── */}
-          {activeTab === "standard" && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
-                {tiers.map((tier, idx) => {
-                  const isDark = idx === 2;
-                  const isMid  = idx === 1;
-                  const isPremium = idx > 0;
-
-                  return (
-                    <div
-                      key={tier.id}
-                      className={`rounded-2xl border flex flex-col overflow-hidden ${
-                        isDark ? "bg-[#141414] border-[#D4AF37]/40 shadow-lg"
-                        : isMid  ? "bg-white border-[#D4AF37] shadow-lg"
-                        :          "bg-white border-[#E8E4DC]"
-                      }`}
-                      data-testid={`card-tier-${tier.id}`}
-                    >
-                      {/* Card header */}
-                      <div className={`px-6 pt-6 pb-5 ${
-                        isDark ? "bg-[#0E0E0E] border-b border-[#242424]"
-                        : isMid  ? "bg-[#FFFDF5] border-b border-[#F0ECE4]"
-                        :          "bg-[#F7F7F5] border-b border-[#EBEBEA]"
-                      }`}>
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                            isDark ? "text-[#D4AF37]" : isMid ? "text-[#B8960C]" : "text-[#888888]"
-                          }`}>
-                            {tier.name}
-                          </span>
-                          {isMid && (
-                            <span className="text-[8px] font-bold uppercase tracking-widest text-[#B8960C] bg-[#FFF9E6] border border-[#D4AF37]/40 rounded-full px-2 py-0.5 leading-none">
-                              Most Popular
-                            </span>
-                          )}
-                        </div>
-                        <div className={`text-4xl font-black mb-1 ${isDark ? "text-white" : "text-[#1A1A1A]"}`}>
-                          {tier.price.replace(" per card", "")}
-                        </div>
-                        <div className={`text-xs mb-1 ${isDark ? "text-[#555555]" : "text-[#AAAAAA]"}`}>per card</div>
-                        <div className={`text-xs mt-2 ${isDark ? "text-[#666666]" : "text-[#888888]"}`}>
-                          {tierBestFor[idx]}
-                        </div>
-                      </div>
-
-                      {/* Card body */}
-                      <div className="px-6 pb-6 flex-1 flex flex-col">
-                        <Link href={`/submit?tier=${tier.id}`}>
-                          <button className="gold-shimmer w-full py-2.5 rounded-lg text-sm font-bold uppercase tracking-wider mt-5 mb-0.5">
-                            Submit Cards
-                          </button>
-                        </Link>
-
-                        <SectionDivider label="GRADING" dark={isDark} />
-                        <FeatureRow icon={<GradeIcon dark={isDark} />} label="GRADE" value="Standard 1–10 pt." star={isPremium} dark={isDark} />
-                        <FeatureRow icon={<ShieldCheck className="h-4 w-4" />} label="DIGITAL REPORT" value="Full subgrade breakdown with defect analysis" star={isPremium} dark={isDark} />
-
-                        <SectionDivider label="SPEED & PROTECTION" dark={isDark} />
-                        <FeatureRow
-                          icon={<Clock className="h-4 w-4" />}
-                          label="TIMING"
-                          value={`${tier.turnaround} from receipt`}
-                          star={isPremium}
-                          dark={isDark}
-                        />
-                        <FeatureRow
-                          icon={<Shield className="h-4 w-4" />}
-                          label="INSURANCE"
-                          value={`${tierInsurance[idx]} per card · No Value Upcharge`}
-                          star={isPremium}
-                          dark={isDark}
-                        />
-
-                        <SectionDivider label="REPORTING" dark={isDark} />
-                        <FeatureRow icon={<FileText className="h-4 w-4" />} label="GRADING REPORT" value="Corners / Edges / Surface / Centering analysis" dark={isDark} />
-                        <FeatureRow icon={<Camera className="h-4 w-4" />} label="IMAGING" value={tierImaging[idx]} star={isPremium} dark={isDark} />
-
-                        <SectionDivider label="SERVICE DETAILS" dark={isDark} />
-                        <FeatureRow icon={<Sparkles className="h-4 w-4" />} label="CARD CARE" value="Fingerprint removal, Protective sleeving" dark={isDark} />
-                        <FeatureRow icon={<Lock className="h-4 w-4" />} label="ENCASING" value="VaultGlass UV protection, VaultLock NFC slab" dark={isDark} />
-                        <FeatureRow icon={<Shield className="h-4 w-4" />} label="OWNERSHIP" value="Verified ownership registry, VaultLink QR verification" dark={isDark} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Insurance note */}
-              <div className="bg-[#FFF9E6] border border-[#D4AF37]/30 rounded-xl p-4 mb-10 flex items-start gap-3">
-                <ShieldCheck className="h-5 w-5 text-[#D4AF37] shrink-0 mt-0.5" />
-                <p className="text-[#666666] text-xs leading-relaxed">
-                  <span className="font-semibold text-[#444444]">Insurance is included at no extra cost</span> with every submission. No declared value upcharges. For cards valued above the tier limit,{" "}
-                  <a href="mailto:mintvaultuk@gmail.com" className="text-[#B8960C] hover:underline">contact us</a> for additional coverage or consider our Gold Grading tiers.
-                </p>
-              </div>
-            </>
-          )}
-
-          {/* ── TAB 2: Gold Grading ───────────────────────────────────────── */}
-          {activeTab === "gold" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-                {GOLD_TIERS.map((tier) => (
-                  <div
-                    key={tier.id}
-                    className="bg-[#141414] border border-[#D4AF37]/40 rounded-2xl overflow-hidden flex flex-col relative"
-                    data-testid={`card-gold-tier-${tier.id}`}
-                  >
-                    {/* Diagonal RECOMMENDED ribbon */}
-                    {tier.recommended && (
-                      <div className="absolute top-[22px] right-[-34px] rotate-45 w-36 text-center py-1.5 text-[8px] font-bold uppercase tracking-widest text-[#1A1400] z-10"
-                        style={{ background: "linear-gradient(90deg,#D4AF37,#B8960C)" }}>
-                        RECOMMENDED
-                      </div>
-                    )}
-
-                    {/* Card header */}
-                    <div className="px-6 pt-6 pb-5 bg-[#0E0E0E] border-b border-[#242424]">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Crown className="h-4 w-4 text-[#D4AF37]" />
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-[#D4AF37]">{tier.name}</span>
-                      </div>
-                      <div className="text-4xl font-black text-white mb-1">{tier.price}</div>
-                      <div className="text-[#555555] text-xs mb-1">per card</div>
-                      <div className="text-[#666666] text-xs mt-2">
-                        {tier.id === "gold" ? "High-value collections" : "Investment-grade cards"}
-                      </div>
-                    </div>
-
-                    {/* Card body */}
-                    <div className="px-6 pb-6 flex-1 flex flex-col">
-                      <a href="mailto:mintvaultuk@gmail.com">
-                        <button className="gold-shimmer w-full py-2.5 rounded-lg text-sm font-bold uppercase tracking-wider mt-5 mb-0.5">
-                          Enquire Now
-                        </button>
-                      </a>
-
-                      <SectionDivider label="GRADING" dark />
-                      <FeatureRow icon={<GradeIcon dark />} label="GRADE" value="Standard 1–10 pt." star dark />
-                      <FeatureRow icon={<ShieldCheck className="h-4 w-4" />} label="DIGITAL REPORT" value="Full subgrade breakdown with defect analysis" star dark />
-
-                      <SectionDivider label="SPEED & PROTECTION" dark />
-                      <FeatureRow icon={<Clock className="h-4 w-4" />} label="TIMING" value={`${tier.turnaround} from receipt`} star dark />
-                      <FeatureRow icon={<Shield className="h-4 w-4" />} label="INSURANCE" value={`${tier.insurance} per card · No Value Upcharge`} star dark />
-
-                      <SectionDivider label="REPORTING" dark />
-                      <FeatureRow icon={<FileText className="h-4 w-4" />} label="GRADING REPORT" value="Corners / Edges / Surface / Centering analysis" star dark />
-                      <FeatureRow icon={<Camera className="h-4 w-4" />} label="IMAGING" value="Hi-res card imaging, Front/Back + enhanced" star dark />
-
-                      <SectionDivider label="SERVICE DETAILS" dark />
-                      <FeatureRow icon={<Sparkles className="h-4 w-4" />} label="CARD CARE" value="White glove handling, Fingerprint removal, Protective sleeving" star dark />
-                      <FeatureRow icon={<Lock className="h-4 w-4" />} label="ENCASING" value="VaultGlass UV protection, VaultLock NFC slab" star dark />
-                      <FeatureRow icon={<Shield className="h-4 w-4" />} label="OWNERSHIP" value="Verified ownership registry, VaultLink QR verification" star dark />
-                      <FeatureRow icon={<FileText className="h-4 w-4" />} label="ENHANCED REPORT" value="Enhanced Digital Grading Report with full defect imaging" star dark />
-                      {tier.id === "gold-elite" && (
-                        <FeatureRow icon={<Crown className="h-4 w-4" />} label="PRIORITY HANDLING" value="Direct communication with head grader" star dark />
-                      )}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          {/* ── Black Label — always visible below tier cards ─────────────── */}
-          <div className="bg-[#141414] border border-[#D4AF37]/40 rounded-2xl p-6 mb-8 flex items-start gap-5">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)", boxShadow: "0 0 20px rgba(212,175,55,0.4)" }}>
-              <Star className="h-6 w-6 text-[#1A1400]" />
-            </div>
-            <div>
-              <p className="gold-shimmer-text text-sm font-black uppercase tracking-widest mb-2">The Black Label</p>
-              <p className="text-[#888888] text-sm leading-relaxed">
-                Cards that achieve a perfect <span className="text-white font-semibold">GEM MINT 10</span> with flawless subgrades in centering, corners, edges, and surface receive our exclusive Black Label — a black and gold slab marking perfection. Cards graded a standard 10 receive our white and gold GEM MINT label. <span className="text-[#D4AF37]/80 font-medium">The Black Label cannot be bought — it can only be earned.</span>
-              </p>
-            </div>
-          </div>
-
-          {/* ── Turnaround footnote ──────────────────────────────────────── */}
-          <div className="flex items-start gap-3 mb-8 px-1">
-            <Clock className="h-4 w-4 text-[#D4AF37]/60 shrink-0 mt-0.5" />
-            <p className="text-[#888888] text-xs leading-relaxed">
-              <span className="font-semibold text-[#666666]">*Turnaround times are measured in working days from the date your cards are received at our facility</span> — not from the date of posting. This ensures your turnaround guarantee is accurate regardless of postal delays. You'll receive an email confirmation when your cards arrive.
+      {/* ── SECTION V: VAULT CLUB TEASER ─────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+        <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="V" label="Vault Club" className="mb-4" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-10">
+            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              Silver membership.
+            </h2>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+              A perks-and-credits membership for collectors who submit regularly. No
+              percentage discount &mdash; tangible perks that cover real costs.
             </p>
           </div>
 
-          {/* ── Always-visible sections ──────────────────────────────────── */}
+          <div className="rounded-xl p-8 md:p-10" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-gold-soft)" }}>
+            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4 mb-8" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "20px" }}>
+              <div>
+                <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--v2-gold)" }}>
+                  {SILVER.label}
+                </p>
+                <h3 className="font-display italic font-medium text-2xl md:text-3xl" style={{ color: "var(--v2-ink)" }}>
+                  For the regular submitter.
+                </h3>
+              </div>
+              <div className="text-left md:text-right">
+                <p className="font-mono-v2 text-lg md:text-xl font-semibold" style={{ color: "var(--v2-ink)" }}>
+                  {poundsFromPence(SILVER.monthly_price_pence)}/mo
+                </p>
+                <p className="font-mono-v2 text-xs mt-1" style={{ color: "var(--v2-ink-mute)" }}>
+                  or {poundsFromPence(SILVER.annual_price_pence)}/year
+                </p>
+              </div>
+            </div>
 
-          {/* What's included in every tier */}
-          <div className="bg-white border border-[#E8E4DC] rounded-2xl p-6 mb-8">
-            <h2 className="text-[#1A1A1A] font-bold text-sm uppercase tracking-widest mb-4 flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-[#D4AF37]" />
-              What's included in every tier
-            </h2>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2.5">
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 mb-8">
               {[
-                "Professional grade assessment on our 1–10 scale",
-                "MintSeal tamper-evident slab with VaultLock NFC",
-                "Unique online-verifiable certificate",
-                "Claim code for verified ownership registration",
-                "Fully insured Royal Mail return shipping",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-2 text-sm text-[#1A1A1A]">
-                  <Check className="h-4 w-4 text-[#D4AF37] shrink-0 mt-0.5" />
-                  {item}
+                "Priority queue within your grading tier",
+                `${SILVER.free_authentication_monthly} free Authentication add-ons every month`,
+                "Free return shipping on every declared-value tier",
+                `${SILVER.ai_credits_monthly} AI Pre-Grade credits per month`,
+                "Early access to Population Report insights",
+              ].map((perk) => (
+                <li key={perk} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                  <Check size={14} style={{ color: "var(--v2-gold)" }} className="mt-1 shrink-0" />
+                  <span>{perk}</span>
                 </li>
               ))}
             </ul>
-          </div>
 
-          {/* Bulk discounts */}
-          <div className="bg-white border border-[#E8E4DC] rounded-2xl p-6 mb-8">
-            <h2 className="text-[#1A1A1A] font-bold text-sm uppercase tracking-widest mb-1 flex items-center gap-2">
-              <Package className="h-4 w-4 text-[#D4AF37]" />
-              Bulk discounts
-            </h2>
-            <p className="text-[#999999] text-xs mb-5">Applied automatically at checkout. Discounts apply across all grading tiers.</p>
-            <div className="grid grid-cols-3 gap-4">
-              {BULK_TIERS.map((b) => (
-                <div key={b.label} className="text-center border border-[#E8E4DC] rounded-xl p-4">
-                  <p className="text-2xl font-black text-[#D4AF37]">{b.discount}</p>
-                  <p className="text-[#666666] text-xs mt-1">{b.label}</p>
-                </div>
-              ))}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <Link
+                href="/vault-club"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] self-start"
+                style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
+              >
+                See Vault Club <ArrowRight size={14} />
+              </Link>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-wider" style={{ color: "var(--v2-ink-mute)" }}>
+                Subscriptions temporarily paused &mdash; relaunching with full perks system.
+              </p>
             </div>
           </div>
-
-          {/* Other services */}
-          <div className="mb-8">
-            <h2 className="text-[#1A1A1A] font-bold text-sm uppercase tracking-widest mb-5 flex items-center gap-2">
-              <Truck className="h-4 w-4 text-[#D4AF37]" />
-              Other services
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {ANCILLARY_SERVICES.map((svc) => (
-                <div
-                  key={svc.id}
-                  className="bg-white border border-[#E8E4DC] rounded-xl p-5 flex flex-col cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-[#D4AF37]/40"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <p className="font-bold text-[#1A1A1A] text-sm">{svc.name}</p>
-                    <p className="text-[#D4AF37] font-black text-2xl leading-none">{svc.price}</p>
-                  </div>
-                  <p className="text-[#999999] text-xs mb-3">{svc.turnaround}</p>
-                  <p className="text-[#666666] text-xs leading-relaxed mb-5 flex-1">{svc.description}</p>
-                  <Link href={`/submit?type=${svc.id}&tier=${svc.id}`}>
-                    <button className="gold-shimmer w-full py-2 rounded-lg text-xs font-bold uppercase tracking-wider">
-                      Submit Now
-                    </button>
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Authorized dealer */}
-          <div className="border border-[#D4AF37]/30 rounded-2xl p-6 bg-white">
-            <h2 className="text-[#1A1A1A] font-bold text-sm uppercase tracking-widest mb-2 flex items-center gap-2">
-              <Award className="h-4 w-4 text-[#D4AF37]" />
-              Become an Authorized Dealer
-            </h2>
-            <p className="text-[#666666] text-xs leading-relaxed mb-5">
-              Own a card shop or run a local collecting community? Partner with MintVault as an official submission drop-off point.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
-              {[
-                "Get your shop listed on our dealer locator",
-                "Earn commission on every submission",
-                "Dedicated support for group submissions",
-              ].map((text, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs text-[#444444]">
-                  <Check className="h-3.5 w-3.5 text-[#D4AF37] shrink-0 mt-0.5" />
-                  {text}
-                </div>
-              ))}
-            </div>
-            <p className="text-[#666666] text-xs">
-              For partnership enquiries:{" "}
-              <a href="mailto:mintvaultuk@gmail.com" className="text-[#B8960C] hover:underline font-medium">mintvaultuk@gmail.com</a>
-            </p>
-          </div>
-
         </div>
       </section>
 
-      {/* FAQ */}
-      <section className="bg-white py-14 md:py-20 border-t border-[#E8E4DC]">
-        <div className="max-w-2xl mx-auto px-4">
-          <FaqSection faqs={pricingFaqs} title="Pricing FAQ" />
+      {/* ── SECTION VI: DISCOUNT STACKING ────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+        <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="VI" label="Discount Stacking" className="mb-4" />
+          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-8" style={{ color: "var(--v2-ink)" }}>
+            One discount at a time.
+          </h2>
+          <p className="font-body text-base md:text-lg leading-relaxed mb-6" style={{ color: "var(--v2-ink-soft)" }}>
+            Your basket uses whichever saves you more &mdash; bulk discount, or Vault Club perks.
+            Never both. It keeps the maths honest and the pricing legible.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-10">
+            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+                Example A
+              </p>
+              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                Submit 10 or more cards? <strong style={{ color: "var(--v2-ink)" }}>Bulk discount applies</strong> &mdash; graduated from
+                5% at 10 cards to 15% at 50+.
+              </p>
+            </div>
+            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+                Example B
+              </p>
+              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                Silver member? <strong style={{ color: "var(--v2-ink)" }}>Vault Club perks apply</strong> &mdash; free return shipping,
+                free Authentication credits, priority queue.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
-      <CtaSection />
-    </>
+      {/* ── SECTION VII: FAQ ─────────────────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+        <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="VII" label="FAQ" className="mb-4" />
+          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+            Pricing questions.
+          </h2>
+
+          <div className="space-y-10">
+            {[
+              {
+                q: "Why only three tiers? What happened to Gold?",
+                a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork.",
+              },
+              {
+                q: "Is Black Label a paid upgrade?",
+                a: "No. Black Label is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There&rsquo;s no extra charge, no form to tick. If your card earns it, you get it.",
+              },
+              {
+                q: "Can I combine Vault Club perks with the bulk discount?",
+                a: "No. Your basket applies whichever saves you more &mdash; bulk discount or Vault Club perks &mdash; never both stacked. This keeps pricing predictable and fair.",
+              },
+              {
+                q: "Are cards insured in transit?",
+                a: "Yes. All return shipping is Royal Mail Special Delivery with cover matched to your declared-value tier. Incoming shipping is your responsibility, but we recommend Royal Mail Special Delivery for anything above £100.",
+              },
+              {
+                q: "What happens if my card is lost or damaged in custody?",
+                a: "We reimburse up to your declared value. That&rsquo;s what the Value Protection tier does &mdash; sets the ceiling on our liability if something goes wrong. Full terms are in our T&Cs.",
+              },
+              {
+                q: "Do you grade cards other than Pokémon?",
+                a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you&rsquo;re unsure, submit anyway &mdash; we&rsquo;ll flag it before grading if we can&rsquo;t authenticate.",
+              },
+            ].map((item) => (
+              <div key={item.q}>
+                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                  {item.q}
+                </h3>
+                <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                  {item.a}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION VIII: FINAL CTA (dark) ───────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
+          <SectionEyebrow numeral="VIII" label="Submit" className="mb-4" />
+          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
+            Ready when you are.
+          </h2>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+            From &pound;19. UK-based. Insured in transit and in custody.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+            <Link
+              href="/submit"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+            >
+              Submit a card <ArrowRight size={14} />
+            </Link>
+            <Link
+              href="/tools/estimate"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+            >
+              Try AI Pre-Grade (free) <ArrowRight size={14} />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <FooterV2 />
+    </div>
   );
 }

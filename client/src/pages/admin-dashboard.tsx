@@ -7,7 +7,7 @@ import {
   LogOut, Plus, Edit, Download, Search, Eye, EyeOff,
   FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
-  Package, ScanLine, DollarSign, Save, ArrowRight, Copy, Check, Loader2, Brain,
+  Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain,
 } from "lucide-react";
 
 type CertsFilter = {
@@ -20,6 +20,9 @@ import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
+import AdminCapacity from "@/pages/admin-capacity";
+import AdminTransfers from "@/pages/admin-transfers";
+import AdminScanHistory from "@/pages/admin-scan-history";
 
 interface DbInfo {
   env: string;
@@ -55,10 +58,12 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
+  const [pendingAnalysis, setPendingAnalysis] = useState<{ analysis: any; identification: any } | null>(null);
+  const [externalIdentification, setExternalIdentification] = useState<Record<string, unknown> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
@@ -100,7 +105,14 @@ export default function AdminDashboard({ onLogout }: Props) {
     setActiveTab("certs");
   };
 
-  const handleFormClose = () => {
+  const handleFormClose = (newCert?: any) => {
+    if (newCert && newCert.id) {
+      // A new cert was just created — switch to edit mode so workstation mounts
+      setEditingCert(newCert);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      return; // stay in showForm=true with the new cert loaded
+    }
     setShowForm(false);
     setEditingCert(null);
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
@@ -108,6 +120,7 @@ export default function AdminDashboard({ onLogout }: Props) {
   };
 
   const handleNewCert = () => {
+    // Open blank form — no DB row created until user saves with real data
     setEditingCert(null);
     setShowForm(true);
     setActiveTab("certs");
@@ -141,6 +154,23 @@ export default function AdminDashboard({ onLogout }: Props) {
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
+            externalIdentification={externalIdentification}
+            onExternalIdentificationConsumed={() => setExternalIdentification(null)}
+            onIdentifyAndGrade={(result) => {
+              // Push analysis to GradingPanel so it populates subgrades, defects, etc.
+              setPendingAnalysis(result);
+              // Also refetch cert for list updates
+              if (editingCert) {
+                fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
+                  .then(r => r.json())
+                  .then(certs => {
+                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                    if (updated) setEditingCert(updated);
+                  })
+                  .catch(() => {});
+              }
+              queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+            }}
           />
           {editingCert && editingCert.id && (
             <div className="mt-6 space-y-6">
@@ -148,8 +178,30 @@ export default function AdminDashboard({ onLogout }: Props) {
                 certId={editingCert.id}
                 cardName={editingCert.cardName || ""}
                 cardSet={editingCert.setName || ""}
+                cardGame={editingCert.cardGame || ""}
                 existingGrade={editingCert.gradeOverall}
-                onGradeApproved={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] })}
+                pendingAnalysis={pendingAnalysis}
+                onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
+                onManualIdentification={(id) => {
+                  // Sync AI panel's manual identification to the cert form
+                  setExternalIdentification(id);
+                }}
+                onGradeApproved={() => {
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                  // Return to cert list
+                  setShowForm(false);
+                  setEditingCert(null);
+                }}
+                onCertUpdated={async () => {
+                  // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
+                  try {
+                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" });
+                    const certs = await r.json();
+                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                    if (updated) setEditingCert(updated);
+                  } catch { /* ignore */ }
+                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                }}
               />
               <OwnershipSection cert={editingCert} />
               <NfcSection
@@ -187,8 +239,11 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "submissions" && <AdminSubmissions />}
       {activeTab === "intake" && <AdminIntake />}
       {activeTab === "pricing" && <AdminPricing />}
+      {activeTab === "capacity" && <AdminCapacity />}
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}
+      {activeTab === "transfers" && <AdminTransfers />}
+      {activeTab === "scans" && <AdminScanHistory />}
       {activeTab === "grading" && (() => {
         const gradingCert = certs.find(c => c.id === selectedGradingCertId) ?? null;
         return (
@@ -218,7 +273,7 @@ export default function AdminDashboard({ onLogout }: Props) {
                   />
                 </div>
               ) : (
-                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-8 text-center">
+                <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
                   <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
                 </div>
               )}
@@ -252,8 +307,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing" | "grading" | "learning") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "transfers" | "scans") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -331,6 +386,17 @@ function AdminHeader({
                 <DollarSign size={12} /> Pricing
               </button>
               <button
+                onClick={() => onTabChange("capacity")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "capacity"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-capacity"
+              >
+                <Database size={12} /> Capacity
+              </button>
+              <button
                 onClick={() => onTabChange("printing")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "printing"
@@ -362,6 +428,28 @@ function AdminHeader({
                 data-testid="tab-learning"
               >
                 <Brain size={12} /> AI Learning
+              </button>
+              <button
+                onClick={() => onTabChange("transfers")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "transfers"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-transfers"
+              >
+                <ArrowRightLeft size={12} /> Transfers
+              </button>
+              <button
+                onClick={() => onTabChange("scans")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "scans"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-scans"
+              >
+                <ScanLine size={12} /> Scans
               </button>
             </nav>
           </div>
@@ -621,7 +709,7 @@ function DashboardView({
   stats?: DashboardStats;
   onNewCert: () => void;
   onGoToCerts: (filter?: CertsFilter) => void;
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "printing") => void;
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing") => void;
 }) {
   const [certSearch, setCertSearch] = useState("");
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
@@ -917,10 +1005,10 @@ function RecentCertRow({
         <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
         <span className={`text-xs px-1.5 py-0.5 rounded ${
           cert.status === "active" || cert.status === "published"
-            ? "bg-emerald-500/20 text-emerald-400"
+            ? "bg-green-50 text-green-600"
             : cert.status === "voided"
-            ? "bg-red-500/20 text-red-400"
-            : "bg-gray-500/20 text-[#666666]"
+            ? "bg-red-50 text-red-600"
+            : "bg-gray-500/20 text-[#333333]"
         }`}>{cert.status}</span>
         <span className="text-[#999999] text-xs hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
@@ -1126,9 +1214,9 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 statusFilter === f
                   ? f === "voided"
-                    ? "bg-red-500/20 text-red-400 border-red-500/40"
+                    ? "bg-red-50 text-red-600 border-red-200"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-${f}`}
             >
@@ -1142,7 +1230,7 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 gradeTypeFilter === gt
                   ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-gradetype-${gt}`}
             >
@@ -1159,9 +1247,9 @@ function CertsView({
                   ? o === "claimed"
                     ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                     : o === "unclaimed"
-                    ? "bg-gray-700 text-[#666666] border-gray-600"
+                    ? "bg-gray-700 text-[#333333] border-gray-600"
                     : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#666666]"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-ownership-${o}`}
             >
@@ -1289,10 +1377,10 @@ function CertRow({
               </span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${
                 cert.status === "active" || cert.status === "published"
-                  ? "bg-emerald-500/20 text-emerald-400"
+                  ? "bg-green-50 text-green-600"
                   : cert.status === "voided"
-                  ? "bg-red-500/20 text-red-400"
-                  : "bg-gray-500/20 text-[#666666]"
+                  ? "bg-red-50 text-red-600"
+                  : "bg-gray-500/20 text-[#333333]"
               }`}>
                 {cert.status === "active" || cert.status === "published" ? <Eye size={10} className="inline mr-0.5" /> : <EyeOff size={10} className="inline mr-0.5" />}
                 {cert.status}
@@ -1421,15 +1509,15 @@ function VoidConfirmationModal({
           <AlertTriangle className="text-red-400 shrink-0" size={24} />
           <h3 className="text-red-400 font-bold tracking-wider text-sm uppercase">Void Certificate</h3>
         </div>
-        <p className="text-[#666666] text-sm mb-2">
+        <p className="text-[#333333] text-sm mb-2">
           You are about to void certificate <span className="text-[#1A1A1A] font-mono font-bold">{cert.certId}</span>.
         </p>
-        <p className="text-[#666666] text-xs mb-4">
+        <p className="text-[#333333] text-xs mb-4">
           This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public lookup page. The certificate ID will be preserved.
         </p>
 
         <div className="mb-3">
-          <label className="text-[#666666] text-xs block mb-1">Reason (optional)</label>
+          <label className="text-[#333333] text-xs block mb-1">Reason (optional)</label>
           <input
             type="text"
             value={reason}
@@ -1441,7 +1529,7 @@ function VoidConfirmationModal({
         </div>
 
         <div className="mb-5">
-          <label className="text-[#666666] text-xs block mb-1">
+          <label className="text-[#333333] text-xs block mb-1">
             Type <span className="text-red-400 font-bold">VOID</span> to confirm
           </label>
           <input
@@ -1457,7 +1545,7 @@ function VoidConfirmationModal({
         <div className="flex items-center gap-3 justify-end">
           <button
             onClick={onCancel}
-            className="text-[#666666] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
+            className="text-[#333333] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
             data-testid="button-void-cancel"
           >
             Cancel
@@ -1513,7 +1601,7 @@ function LabelPreviewModal({
 
         <div className="p-4 space-y-6">
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (72mm x 22mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/front?format=png&preview=1&t=${ts}`}
@@ -1526,7 +1614,7 @@ function LabelPreviewModal({
           </div>
 
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (72mm x 22mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/back?format=png&preview=1&t=${ts}`}
@@ -1539,7 +1627,7 @@ function LabelPreviewModal({
           </div>
 
           <div className="border-t border-[#D4AF37]/10 pt-4">
-            <p className="text-[#999999] text-xs mb-3">Print specs: 827 x 236px at 300 DPI = 70mm x 20mm exact</p>
+            <p className="text-[#999999] text-xs mb-3">Print specs: 850 x 260px at 300 DPI = 72mm x 22mm exact</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}

@@ -1,0 +1,15 @@
+{
+  "name": "mintvault-scanner-watcher",
+  "version": "1.0.0",
+  "description": "Watches a folder for scanned card images and uploads them to MintVault's admin scan-ingest endpoint.",
+  "main": "watcher.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node watcher.mjs"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "form-data": "^4.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}

@@ -12,11 +12,11 @@ interface Props {
   onOverride: (val: number | null) => void;
 }
 
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3, 2, 1];
+const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number | null): string {
   if (g === null) return "#888888";
-  if (g >= 9.5) return "#D4AF37";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8) return "#16A34A";
   if (g >= 6) return "#CA8A04";
   return "#DC2626";
@@ -56,8 +56,8 @@ function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: stri
 
   return (
     <div className="flex flex-col items-center gap-1">
-      <p className="text-[#888888] text-[9px] uppercase tracking-widest">Front centering</p>
-      <div className="relative w-20 h-28 border border-[#444444] rounded bg-[#111111] flex items-center justify-center">
+      <p className="text-[#333333] text-[9px] uppercase tracking-widest">Front centering</p>
+      <div className="relative w-20 h-28 border border-[#D4D0C8] rounded bg-[#F7F7F5] flex items-center justify-center">
         <div
           className="absolute rounded-sm"
           style={{
@@ -99,14 +99,14 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
       <div className="grid grid-cols-2 gap-2">
         {fields.map(f => (
           <div key={f.key}>
-            <label className="text-[#888888] text-[10px] block mb-1">{f.label}</label>
+            <label className="text-[#333333] text-[10px] block mb-1">{f.label}</label>
             <input
               type="text"
               value={f.value}
               onChange={e => onChange(f.key, e.target.value)}
               placeholder="52/48"
-              className={`w-full bg-[#111111] border rounded px-2 py-1.5 text-xs font-mono text-[#CCCCCC] ${
-                f.value && !validateRatio(f.value) ? "border-red-500" : "border-[#333333]"
+              className={`w-full bg-[#F7F7F5] border rounded px-2 py-1.5 text-xs font-mono text-[#1A1A1A] ${
+                f.value && !validateRatio(f.value) ? "border-red-500" : "border-[#D4D0C8]"
               }`}
             />
           </div>
@@ -116,12 +116,12 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
       <div className="flex items-center gap-4">
         <CenteringDiagram frontLR={frontLR} frontTB={frontTB} />
         <div className="flex-1">
-          <p className="text-[#888888] text-[10px] mb-1 uppercase tracking-widest">Calculated subgrade</p>
+          <p className="text-[#555555] text-[10px] mb-1 uppercase tracking-widest">Calculated subgrade</p>
           <p className="text-3xl font-black" style={{ color: gradeColor(displayGrade) }}>
             {displayGrade !== null ? displayGrade : "—"}
           </p>
           {overrideGrade !== null && (
-            <span className="text-[9px] text-[#888888]">(manual)</span>
+            <span className="text-[9px] text-[#555555]">(manual)</span>
           )}
           {!showOverride && (
             <button
@@ -137,12 +137,12 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
               <select
                 value={overrideGrade ?? ""}
                 onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-                className="bg-[#111111] border border-[#333333] text-[#CCCCCC] text-xs rounded px-2 py-1"
+                className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
               >
                 <option value="">Auto</option>
                 {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
-              <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#888888]">clear</button>
+              <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
             </div>
           )}
         </div>

@@ -65,17 +65,17 @@ export default function SportsCardGradingUk() {
           Sports Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           MintVault UK provides professional sports card grading for collectors and investors in the United Kingdom. Whether you collect Premier League football cards, NBA basketball cards, cricket cards, or other sports collectibles, our expert grading service authenticates and protects your cards in tamper-evident precision slabs.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           The UK sports card market has grown significantly, with top Premier League rookie cards, player parallels, and autographs commanding considerable prices on the secondary market. Professional grading is now essential for any serious sports card investor or collector.
         </p>
 
         <section className="mb-10" data-testid="section-sports-why">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Sports Cards?</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               <strong className="text-[#1A1A1A]">Protect rookie card value</strong> — a professionally graded Erling Haaland or Jude Bellingham rookie card in Gem Mint condition sells for dramatically more than an ungraded equivalent. The grade removes buyer uncertainty about card condition.
             </p>
@@ -98,19 +98,19 @@ export default function SportsCardGradingUk() {
             ].map((t) => (
               <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
                 <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+                <span className="text-[#555555] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#555555] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-sports-ownership">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership for Sports Cards</h2>
-          <p className="text-[#444444] text-sm leading-relaxed">
+          <p className="text-[#555555] text-sm leading-relaxed">
             MintVault is the only UK grading company with a verified ownership registry. When you sell a graded sports card, ownership can be transferred to the buyer through a secure two-step email-verified process. This gives buyers confidence that the card's ownership history is verified and recorded — particularly valuable for high-profile player cards where provenance matters.
           </p>
         </section>
@@ -127,7 +127,7 @@ export default function SportsCardGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}

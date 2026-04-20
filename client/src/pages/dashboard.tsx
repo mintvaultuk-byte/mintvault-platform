@@ -479,7 +479,7 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
         <p className="text-xs text-[#888888] mb-4">
           Get up to 30% off grading, monthly AI Pre-Grade credits, and your own activated Showroom.
         </p>
-        <Link href="/club">
+        <Link href="/vault-club">
           <button
             className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all active:scale-95"
             style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
@@ -521,7 +521,7 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
           >
             {portalMutation.isPending ? <Loader2 size={11} className="animate-spin inline" /> : "Manage"}
           </button>
-          <Link href="/club">
+          <Link href="/vault-club">
             <button className="text-xs text-[#B8960C] border border-[#D4AF37]/30 bg-[#D4AF37]/5 rounded-lg px-3 py-1.5 font-semibold hover:bg-[#D4AF37]/10 transition-colors">
               View Club
             </button>
@@ -673,7 +673,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             </span>
           ) : (
             <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-              Reserved · <Link href="/club" className="font-semibold hover:text-amber-800">Activate with Vault Club →</Link>
+              Reserved · <Link href="/vault-club" className="font-semibold hover:text-amber-800">Activate with Vault Club →</Link>
             </span>
           )}
         </div>

@@ -185,8 +185,20 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT,
       ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT,
       ADD COLUMN IF NOT EXISTS ai_credits_user_balance INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS ai_credits_last_refilled_at TIMESTAMP
+      ADD COLUMN IF NOT EXISTS ai_credits_last_refilled_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS member_credits_last_granted_at TIMESTAMPTZ
   `);
+
+  // Backfill member_credits_last_granted_at for users who already have member credits
+  try {
+    await db.execute(sql`
+      UPDATE users SET member_credits_last_granted_at = NOW() - INTERVAL '92 days'
+      WHERE member_credits_last_granted_at IS NULL
+        AND id IN (SELECT DISTINCT user_id FROM member_credits)
+    `);
+  } catch (e: any) {
+    console.log("[auth-schema] member_credits_last_granted_at backfill skipped:", e.message);
+  }
 
   // Vault Club events audit table
   await db.execute(sql`
@@ -203,9 +215,18 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
-  // Reholder credits table
+  // ── v230 rename: reholder_credits → member_credits ────────────────────────
+  // RENAME runs first — before CREATE TABLE — so CREATE doesn't block the rename
+  try {
+    await db.execute(sql`ALTER TABLE IF EXISTS reholder_credits RENAME TO member_credits`);
+    console.log("[v230-migrate] renamed reholder_credits → member_credits");
+  } catch (e: any) {
+    if (e.code !== "42P07" && e.code !== "42P01") console.error("[v230-migrate] rename failed:", e.message);
+  }
+
+  // Create table for fresh installs (no-op if rename already created it)
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS reholder_credits (
+    CREATE TABLE IF NOT EXISTS member_credits (
       id                    SERIAL PRIMARY KEY,
       user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       granted_at            TIMESTAMP DEFAULT NOW(),
@@ -215,6 +236,75 @@ export async function migrateAccountSchema(): Promise<void> {
       source                TEXT NOT NULL
     )
   `);
+
+  // Compat view so any lingering references to old name still resolve
+  try {
+    await db.execute(sql`DROP VIEW IF EXISTS reholder_credits`);
+    await db.execute(sql`CREATE OR REPLACE VIEW reholder_credits AS SELECT * FROM member_credits`);
+    console.log("[v230-migrate] compat view reholder_credits → member_credits created");
+  } catch (e: any) {
+    // If reholder_credits still exists as a base table (shouldn't after rename), skip
+    console.log("[v230-migrate] compat view skipped:", e.message);
+  }
+  try {
+    await db.execute(sql`ALTER TABLE member_credits ALTER COLUMN credit_type SET DEFAULT 'member'`);
+    await db.execute(sql`UPDATE member_credits SET credit_type = 'member' WHERE credit_type = 'reholder'`);
+  } catch (e: any) {
+    // credit_type column may not exist yet on fresh installs — Phase 6 migration adds it
+  }
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+      VALUES ('schema', 'member_credits', 'table_renamed',
+              '{"from": "reholder_credits", "to": "member_credits", "compat_view_active": true, "compat_view_drop_after": "2026-04-23"}'::jsonb,
+              NOW())
+      ON CONFLICT DO NOTHING
+    `);
+  } catch (e: any) {
+    // Non-critical
+  }
+
+  // ── v231: Deactivate Black Label Review tier (becomes auto-upgrade) ────────
+  try {
+    const r = await db.execute(sql`
+      UPDATE service_tiers
+      SET is_active = false, updated_at = NOW()
+      WHERE tier_id = 'gold' AND name = 'BLACK LABEL REVIEW' AND is_active = true
+      RETURNING id
+    `);
+    if (r.rows.length > 0) {
+      console.log("[v231-migrate] Black Label tier deactivated (becomes auto-upgrade)");
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('service_tier', 'gold', 'deactivated',
+                '{"reason": "Black Label becomes free automatic upgrade, not paid tier", "effective_from": "2026-04-16"}'::jsonb,
+                NOW())
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  } catch (e: any) {
+    console.log("[v231-migrate] Black Label deactivation skipped:", e.message);
+  }
+
+  // ── v232: Add source column to certificates for scan-ingest tracking ────────
+  try {
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_submission'`);
+    console.log("[v232-migrate] certificates.source column ensured");
+  } catch (e: any) {
+    console.log("[v232-migrate] source column skipped:", e.message);
+  }
+
+  // ── v233: Backfill model_version on grading_sessions ───────────────────────
+  try {
+    // Backfill all existing rows (graded before Opus 4.7 switch) with the prior model
+    await db.execute(sql`
+      UPDATE grading_sessions SET model_version = 'claude-sonnet-4-6'
+      WHERE model_version IS NULL
+    `);
+    console.log("[v233-migrate] grading_sessions.model_version backfilled");
+  } catch (e: any) {
+    console.log("[v233-migrate] model_version backfill skipped:", e.message);
+  }
 
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)

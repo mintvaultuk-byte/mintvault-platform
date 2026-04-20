@@ -75,16 +75,16 @@ export default function TcgGradingUk() {
           TCG Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#555555] text-base leading-relaxed mb-4">
           The trading card game market in the UK has grown substantially in recent years. From established franchises like Pokemon, Yu-Gi-Oh!, and Magic: The Gathering to newer games like Lorcana and One Piece, collectors and players across the country are accumulating cards with real financial value. MintVault provides professional TCG grading for collectors, investors, and resellers who want to protect, authenticate, and maximise the value of their cards.
         </p>
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#555555] text-sm leading-relaxed mb-8">
           Our UK-based grading service covers all major trading card games with consistent, professional standards. Whether you have a single high-value pull or a bulk collection across multiple TCGs, MintVault delivers expert grading, tamper-evident slabs, verifiable certificates, and fully insured return shipping.
         </p>
 
         <section className="mb-10" data-testid="section-for-collectors">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Collectors</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Serious TCG collectors grade their most prized cards to preserve them in pristine condition and create a professional, catalogued collection. A graded card in a tamper-evident slab is protected from the environmental and handling damage that affects raw cards over time.
             </p>
@@ -105,7 +105,7 @@ export default function TcgGradingUk() {
 
         <section className="mb-10" data-testid="section-for-investors">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Investors</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Trading cards have emerged as an alternative asset class, with some rare cards appreciating significantly in value over time. For investors, professional grading serves several important functions.
             </p>
@@ -126,7 +126,7 @@ export default function TcgGradingUk() {
 
         <section className="mb-10" data-testid="section-for-resellers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Resellers</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Professional traders and resellers use grading to differentiate their inventory and command premium prices. Graded cards stand out in marketplace listings and attract more buyer interest.
             </p>
@@ -160,19 +160,19 @@ export default function TcgGradingUk() {
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             Compare UK grading with overseas services in our <Link href="/psa-alternative-uk" className="text-[#D4AF37] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-supported-games">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Supported Trading Card Games</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#555555] text-sm leading-relaxed mb-4">
             MintVault grades cards from all major trading card games. Our grading standards are applied consistently regardless of which TCG a card belongs to:
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
@@ -182,18 +182,18 @@ export default function TcgGradingUk() {
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm">
+          <p className="text-[#555555] text-sm">
             Visit our <Link href="/tcg" className="text-[#D4AF37] hover:underline" data-testid="link-tcg-page">TCG page</Link> for detailed information about each supported game, or <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submit your cards</Link> directly.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-getting-started">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Getting Started</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
               Ready to grade your TCG cards? The process is straightforward:
             </p>
-            <ol className="list-decimal list-inside space-y-2 text-[#666666] text-sm pl-2">
+            <ol className="list-decimal list-inside space-y-2 text-[#555555] text-sm pl-2">
               <li>Visit our <Link href="/submit" className="text-[#D4AF37] hover:underline">submission page</Link> and choose your service tier</li>
               <li>Enter the details for each card you want graded</li>
               <li>Pay securely online and receive your submission reference</li>

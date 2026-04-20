@@ -9,17 +9,17 @@
  *
  * Approved dimensions (exact PDF points, 1 mm = 2.83464567 pt):
  *   Page:          595.28 × 841.89 pt  (A4 portrait)
- *   Label:         198.43 × 56.69 pt   (70 × 20 mm)
+ *   Label:         204.09 × 62.36 pt   (72 × 22 mm)
  *   Columns:       2  (col 0 = front, col 1 = back)
- *   Rows:          10 max
+ *   Rows:          9 max
  *   H gap:         28.35 pt            (10 mm — gap between columns)
  *   V gap:         24.25 pt            (8.56 mm — row pitch)
  *   Top margin:    28.35 pt            (10 mm)
- *   Left margin:   85.04 pt            (30 mm)
+ *   Left margin:   79.37 pt            (28 mm)
  *
  * Verification:
- *   Width:  85.04 + 198.43 + 28.35 + 198.43 + 85.04 = 595.29 ≈ 595.28 pt ✓
- *   Height: 28.35 + 10×56.69 + 9×24.25 + 28.35 = 841.95 ≈ 841.89 pt ✓
+ *   Width:  79.37 + 204.09 + 28.35 + 204.09 + 79.37 = 595.27 ≈ 595.28 pt ✓
+ *   Height: 28.35 + 9×62.36 + 8×24.25 + 28.35 = 811.94 ≤ 841.89 pt ✓
  *
  * TWO OUTPUT FILES:
  *   A) generateLabelSheet()  → A4 PDF, artwork only, no cut lines
@@ -38,23 +38,23 @@ import type { CertificateRecord } from "@shared/schema";
 const A4_W        = 595.28;  // pt (210 mm)
 const A4_H        = 841.89;  // pt (297 mm)
 
-const LABEL_W     = 198.43;  // pt (70 mm)
-const LABEL_H     =  56.69;  // pt (20 mm)
+const LABEL_W     = 204.09;  // pt (72 mm)
+const LABEL_H     =  62.36;  // pt (22 mm)
 
 const COLS        = 2;       // col 0 = front, col 1 = back
-const ROWS        = 10;      // 10 rows → 20 labels with 9 mm row spacing
+const ROWS        = 9;       // 9 rows → 18 labels (taller labels, one fewer row than before)
 
 const H_GAP       =  28.35;  // pt (10 mm) — centre gap between columns
 const V_GAP       =  24.25;  // pt (8.56 mm) — row spacing for ScanNCut tracking (~9 mm)
 
-const MARGIN_TOP  =  28.35;  // pt (10 mm) — (297 - 10×20 - 9×8.56) / 2
-const MARGIN_LEFT =  85.04;  // pt (30 mm) — (210 - 70 - 10 - 70) / 2
+const MARGIN_TOP  =  28.35;  // pt (10 mm)
+const MARGIN_LEFT =  79.37;  // pt (28 mm) — (210 - 72 - 10 - 72) / 2
 
 // mm equivalents (for SVG cut guide — SVG uses mm units)
 const PT_TO_MM    = 1 / 2.83464567;
-const LW_MM       = LABEL_W * PT_TO_MM;  // 70.00 mm
-const LH_MM       = LABEL_H * PT_TO_MM;  // 20.00 mm
-const ML_MM       = MARGIN_LEFT * PT_TO_MM; // 30.00 mm
+const LW_MM       = LABEL_W * PT_TO_MM;  // 72.00 mm
+const LH_MM       = LABEL_H * PT_TO_MM;  // 22.00 mm
+const ML_MM       = MARGIN_LEFT * PT_TO_MM; // 28.00 mm
 const MT_MM       = MARGIN_TOP  * PT_TO_MM; // 10.00 mm
 const HG_MM       = H_GAP * PT_TO_MM;    // 10.00 mm
 const VG_MM       = V_GAP * PT_TO_MM;    // ~8.56 mm

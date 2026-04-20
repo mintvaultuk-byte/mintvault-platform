@@ -1,737 +1,588 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, useLocation } from "wouter";
-import {
-  Truck, ClipboardList, Package, Search, Wifi,
-  Zap, Shield, Plus, Home, CreditCard, CheckCircle,
-  ChevronDown, Star, ArrowRight, ShoppingCart, Scan,
-  Upload, Sparkles, FileCheck
-} from "lucide-react";
-import SeoHead from "@/components/seo-head";
-import SiteHeader from "@/components/header";
-import FadeIn from "@/components/fade-in";
-import MintVaultWordmark from "@/components/mintvault-wordmark";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
+import HeaderV2 from "@/components/v2/header-v2";
+import FooterV2 from "@/components/v2/footer-v2";
+import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 
-/* ── 3D slab tilt ───────────────────────────────────────────────────── */
-function SlabTilt({ children }: { children: React.ReactNode }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const glareRef = useRef<HTMLDivElement | null>(null);
-  const isMobile = useRef(typeof window !== "undefined" && window.matchMedia("(hover: none)").matches);
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface HomepageStats {
+  total_graded: number;
+  unique_cards: number;
+  unique_sets: number;
+  avg_grade: number;
+  claimed_count: number;
+  recent_certs: {
+    id: number;
+    card_name: string;
+    set_name: string;
+    grade: string;
+    grade_type: string;
+    cert_number: string;
+    front_image_path: string | null;
+  }[];
+}
+
+type RecentCert = HomepageStats["recent_certs"][number];
+
+
+// ── Animated counter ───────────────────────────────────────────────────────
+
+function CountUp({ end, decimals = 0, duration = 1800 }: { end: number; decimals?: number; duration?: number }) {
+  const [value, setValue] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const started = useRef(false);
 
   useEffect(() => {
-    if (isMobile.current) return;
-    const el = containerRef.current;
-    const glare = glareRef.current;
-    if (!el) return;
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !started.current) {
+          started.current = true;
+          const start = performance.now();
+          function tick(now: number) {
+            const progress = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            setValue(eased * end);
+            if (progress < 1) requestAnimationFrame(tick);
+          }
+          requestAnimationFrame(tick);
+        }
+      },
+      { threshold: 0.3 }
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [end, duration]);
 
-    const onMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const dx = (e.clientX - cx) / (rect.width / 2);
-      const dy = (e.clientY - cy) / (rect.height / 2);
-      const maxDeg = 6;
-      el.style.transform = `perspective(700px) rotateY(${dx * maxDeg}deg) rotateX(${-dy * maxDeg}deg)`;
-      if (glare) {
-        glare.style.opacity = "1";
-        const gx = 50 + dx * 30;
-        const gy = 50 + dy * 30;
-        glare.style.background = `radial-gradient(circle at ${gx}% ${gy}%, rgba(255,255,255,0.18) 0%, transparent 65%)`;
-      }
-    };
+  return <span ref={ref}>{value.toFixed(decimals)}</span>;
+}
 
-    const onLeave = () => {
-      el.style.transform = "perspective(700px) rotateY(0deg) rotateX(0deg)";
-      if (glare) glare.style.opacity = "0";
-    };
+// ── Section fade-in ────────────────────────────────────────────────────────
 
-    el.addEventListener("mousemove", onMove);
-    el.addEventListener("mouseleave", onLeave);
-    return () => {
-      el.removeEventListener("mousemove", onMove);
-      el.removeEventListener("mouseleave", onLeave);
-    };
+function FadeIn({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      { threshold: 0.1 }
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
   }, []);
 
   return (
-    <div ref={containerRef} className="slab-tilt-container relative">
+    <div
+      ref={ref}
+      className={`transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"} ${className}`}
+    >
       {children}
-      <div ref={glareRef} className="slab-glare" />
     </div>
   );
 }
 
-export default function HomePage() {
-  const [, navigate] = useLocation();
-  const [faqOpen, setFaqOpen] = useState<number | null>(null);
+// ── Main page ──────────────────────────────────────────────────────────────
+
+export default function HomeV2() {
+  const { data: stats, error: statsError } = useQuery<HomepageStats>({
+    queryKey: ["/api/v2/homepage-stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/v2/homepage-stats");
+      if (!res.ok) throw new Error("Stats fetch failed");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    if (statsError) console.error("Homepage stats fetch failed:", statsError);
+  }, [statsError]);
+
+  const totalGraded = stats?.total_graded ?? 132;
+  const uniqueSets = stats?.unique_sets ?? 71;
+  const avgGrade = stats?.avg_grade ?? 8.9;
+  const recentCerts = stats?.recent_certs ?? [];
 
   return (
-    <div className="bg-white text-[#1A1A1A] font-sans overflow-x-hidden min-h-screen">
-      <SeoHead
-        title="MintVault - UK Card Grading with Verified Ownership | VaultLock™ NFC Slabs"
-        description="The only UK card grading service with a verified ownership registry. VaultLock™ NFC slabs, VaultLink™ QR authentication, and ownership certificates. Submit today."
-        canonical="https://mintvaultuk.com/"
-      />
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+      <HeaderV2 />
 
-      <SiteHeader />
-
-      <main className="pb-24">
-
-        {/* ── Hero ──────────────────────────────────────────────────── */}
-        <section className="relative min-h-[85vh] flex flex-col items-center justify-center px-6 overflow-hidden bg-[#FAFAF8] border-b border-[#E8E4DC]">
-
-          <div className="max-w-4xl w-full text-center relative z-10">
-
-            {/* Wordmark lockup — responsive clamp so it never overflows on mobile */}
-            <div className="flex justify-center mb-10 w-full px-4">
-              <div
-                style={{
-                  border: "2px solid #D4AF37",
-                  padding: "clamp(10px,2.5vw,22px) clamp(16px,4vw,50px)",
-                  maxWidth: "100%",
-                }}
+      {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
+      <section className="relative">
+        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
+          {/* Left — copy */}
+          <div>
+            <p
+              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+              style={{ color: "var(--v2-gold)" }}
+            >
+              Est. Kent &middot; MintVault UK
+            </p>
+            <h1
+              className="font-display italic font-medium leading-[0.95] mb-6"
+              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+            >
+              The standard for<br />graded collectibles.
+            </h1>
+            <p
+              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              AI-powered precision grading with NFC-linked certification.
+              Every grade logged, every slab traceable.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 mb-5">
+              <Link
+                href="/submit"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
               >
-                <div style={{
-                                    fontWeight: 900,
-                  fontSize: "clamp(44px,11vw,72px)",
-                  color: "#D4AF37",
-                  letterSpacing: "0.04em",
-                  lineHeight: 0.9,
-                  WebkitTextStroke: "1.5px #D4AF37",
-                  textShadow: "0 0 1px #D4AF37",
-                  whiteSpace: "nowrap",
-                }}>MINTVAULT</div>
+                Submit a card <ArrowRight size={14} />
+              </Link>
+              <Link
+                href="/tools/estimate"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
+                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              >
+                Try AI Pre-Grade <ArrowRight size={14} />
+              </Link>
+            </div>
+            <p
+              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              style={{ color: "var(--v2-ink-mute)" }}
+            >
+              From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
+            </p>
+          </div>
+
+          {/* Right — slab fan. Live data from /api/v2/homepage-stats → recent_certs.
+              Fallback: 3 monogram slabs when API returns 0 rows or errors.
+              Newest cert on top (slot 0) per HeroSlabFan's z-stacking. */}
+          {(() => {
+            const slots = recentCerts.length > 0
+              ? recentCerts.slice(0, 3)
+              : [null, null, null];
+            const padded: (RecentCert | null)[] = [...slots, null, null, null].slice(0, 3);
+            const slabs = padded.map((cert, i): SlabContent => {
+              const hasCardName = !!(cert?.card_name && cert.card_name.trim());
+              return {
+                topBadge: cert?.cert_number ?? null,
+                mainLabel: hasCardName ? cert!.card_name : "MintVault",
+                rightLabel: cert?.grade ? `MV ${cert.grade}` : null,
+                footnote: "NFC \u00b7 Verified",
+                key: cert ? String(cert.id) : `slot-${i}`,
+              };
+            }) as [SlabContent, SlabContent, SlabContent];
+            return <HeroSlabFan slabs={slabs} />;
+          })()}
+        </div>
+      </section>
+
+      {/* ── SECTION B: STATS + PROMISES ──────────────────────────────── */}
+      <FadeIn>
+        <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+          <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-6 md:gap-12 mb-12 md:mb-16 text-center">
+              {[
+                { value: totalGraded, label: "cards graded", decimals: 0 },
+                { value: uniqueSets, label: "sets represented", decimals: 0 },
+                { value: avgGrade, label: "average grade", decimals: 1 },
+              ].map((stat) => (
+                <div key={stat.label}>
+                  <p className="font-display italic font-medium text-3xl md:text-5xl" style={{ color: "var(--v2-ink)" }}>
+                    <CountUp end={stat.value} decimals={stat.decimals} />
+                  </p>
+                  <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mt-2" style={{ color: "var(--v2-ink-mute)" }}>
+                    {stat.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Promises row */}
+            <div className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8" style={{ borderColor: "var(--v2-line)" }}>
+              {[
+                { icon: Shield, title: "Insured in custody", desc: "Up to \u00a37,500 per card cover" },
+                { icon: Cpu, title: "NFC-verified", desc: "Every slab links to a live logbook" },
+                { icon: MapPin, title: "UK-based", desc: "Graded in Kent \u00b7 shipped across the UK" },
+                { icon: RefreshCw, title: "Reholder guarantee", desc: "Free regrade if we make a mistake" },
+              ].map(({ icon: Icon, title, desc }) => (
+                <div key={title}>
+                  <Icon size={18} style={{ color: "var(--v2-gold)" }} className="mb-2" />
+                  <p className="font-body text-sm font-semibold mb-1" style={{ color: "var(--v2-ink)" }}>{title}</p>
+                  <p className="font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </FadeIn>
+
+      {/* ── SECTION C: GRADING TIERS (dark) ──────────────────────────── */}
+      <FadeIn>
+        <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+          <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+              I &middot; Grading Tiers
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
+                Three tiers.<br /><span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One standard.</span>
+              </h2>
+              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+                Every card, regardless of service level, passes the same four-point
+                inspection (centering, corners, edges, surface). Tier only changes
+                how quickly you see it back.
+              </p>
+            </div>
+
+            {/* Pricing cards — outlined, narrow, centred */}
+            <div className="flex justify-center">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
+                {[
+                  {
+                    name: "Vault Queue", price: "19", days: "45 day", featured: false,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Value up to \u00a3500"],
+                  },
+                  {
+                    name: "Standard", price: "25", days: "21 day", featured: true,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Value up to \u00a32,500"],
+                  },
+                  {
+                    name: "Express", price: "45", days: "5 day", featured: false,
+                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Priority handling", "Value up to \u00a310,000"],
+                  },
+                ].map((tier) => (
+                  <div
+                    key={tier.name}
+                    className="relative rounded-xl flex flex-col"
+                    style={{
+                      padding: "48px 40px",
+                      backgroundColor: "transparent",
+                      border: tier.featured
+                        ? "1px solid rgba(212, 175, 55, 0.6)"
+                        : "1px solid rgba(212, 175, 55, 0.25)",
+                    }}
+                  >
+                    {/* MOST CHOSEN floating pill */}
+                    {tier.featured && (
+                      <span
+                        className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded"
+                        style={{
+                          top: "-14px",
+                          backgroundColor: "var(--v2-gold)",
+                          color: "var(--v2-panel-dark)",
+                        }}
+                      >
+                        Most chosen
+                      </span>
+                    )}
+
+                    {/* Tier name */}
+                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                      {tier.name}
+                    </p>
+
+                    {/* Price — Fraunces non-italic, floating pound sign */}
+                    <div className="relative mb-1" style={{ lineHeight: 1 }}>
+                      <span
+                        className="font-display font-semibold absolute"
+                        style={{
+                          color: "rgba(255,255,255,0.4)",
+                          fontSize: "clamp(28px, 3vw, 36px)",
+                          top: "4px",
+                          left: "-2px",
+                          transform: "translateX(-100%)",
+                        }}
+                      >
+                        &pound;
+                      </span>
+                      <span
+                        className="font-display font-semibold"
+                        style={{
+                          color: "#FFFFFF",
+                          fontSize: "clamp(72px, 6vw, 96px)",
+                          marginLeft: "20px",
+                        }}
+                      >
+                        {tier.price}
+                      </span>
+                    </div>
+
+                    {/* Turnaround — mono */}
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase mb-8"
+                      style={{ color: "#888888", letterSpacing: "0.15em" }}
+                    >
+                      {tier.days} turnaround
+                    </p>
+
+                    {/* Feature bullets — em-dash prefix */}
+                    <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                      {tier.features.map((f) => (
+                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "#E8E4DC" }}>
+                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+
+                    {/* CTA button */}
+                    <Link
+                      href="/submit"
+                      className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] w-full"
+                      style={
+                        tier.featured
+                          ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
+                          : { border: "1px solid var(--v2-gold)", color: "var(--v2-gold)" }
+                      }
+                    >
+                      Start a submission <ArrowRight size={14} />
+                    </Link>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Eyebrow badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#D4AF37]/40 bg-[#D4AF37]/08 mb-8">
-              <CheckCircle size={13} className="text-[#D4AF37]" />
-              <span className="text-[#B8960C] text-[10px] uppercase tracking-[0.2em] font-bold">UK's Only Verified Ownership Grader</span>
-            </div>
-
-            <h1 className="text-4xl md:text-6xl font-black tracking-tight text-[#0F0F0F] mb-6 leading-[1.05]">
-              THE ONLY UK GRADER WITH<br />
-              <span style={{ color: "#D4AF37" }}>VERIFIED OWNERSHIP</span>
-            </h1>
-
-            <p className="text-lg md:text-xl text-[#666666] max-w-2xl mx-auto mb-10 font-medium leading-relaxed">
-              Every graded card gets a VaultLock™ NFC slab, a VaultLink™ QR-verified certificate, and a registered ownership record. Prove who owns your card at any point in time.
+            <p className="font-body text-xs text-center mt-8" style={{ color: "rgba(255,255,255,0.35)" }}>
+              Bulk discounts from 10 cards.
             </p>
-
-            <div className="flex flex-col md:flex-row gap-4 justify-center items-center mb-14">
-              <Link href="/submit">
-                <button className="btn-gold w-full md:w-auto px-10 py-4 rounded-xl uppercase tracking-widest text-sm">
-                  Submit Your Cards
-                </button>
-              </Link>
-              <Link href="/cert">
-                <button className="relative z-[3] w-full md:w-auto px-10 py-4 rounded-xl bg-transparent border border-[#1A1A1A]/30 text-[#1A1A1A] font-bold uppercase tracking-widest text-sm hover:border-[#B8960C] hover:text-[#B8960C] transition-colors">
-                  Verify a Certificate
-                </button>
-              </Link>
-            </div>
-
-            {/* Trust bar */}
-            <div className="reveal-on-scroll grid grid-cols-2 md:grid-cols-4 gap-4 pt-8 border-t border-[#E8E4DC]">
-              {[
-                { icon: <Shield size={16} className="text-[#B8960C]" />, label: "UK-Based Facility" },
-                { icon: <Wifi size={16} className="text-[#B8960C]" />, label: "VaultLock™ NFC Slabs" },
-                { icon: <Truck size={16} className="text-[#B8960C]" />, label: "Royal Mail Insured" },
-                { icon: <CheckCircle size={16} className="text-[#B8960C]" />, label: "Verified Ownership Registry" },
-              ].map(({ icon, label }) => (
-                <div key={label} className="flex items-center justify-center gap-2">
-                  {icon}
-                  <span className="text-xs uppercase tracking-widest font-bold text-[#777777]">{label}</span>
-                </div>
-              ))}
-            </div>
           </div>
         </section>
+      </FadeIn>
 
-        {/* ── AI Pre-Grade Checker CTA ──────────────────────────────── */}
-        <section className="py-14 md:py-20 px-6 bg-white border-b border-[#E8E4DC] relative overflow-hidden">
-          {/* Gold accent lines */}
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#D4AF37]/30 to-transparent" />
-          <div className="max-w-2xl mx-auto text-center space-y-5">
-            <div>
-              <p className="text-[#B8960C] text-[10px] font-black uppercase tracking-[0.3em] mb-3">AI-Powered</p>
-              <h2 className="text-3xl md:text-4xl font-black text-[#1A1A1A] leading-tight">
-                AI Pre-Grade Checker
+      {/* ── SECTION D: INFRASTRUCTURE ────────────────────────────────── */}
+      <FadeIn>
+        <section style={{ backgroundColor: "var(--v2-paper)" }}>
+          <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+              II &middot; Infrastructure
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+                Three pieces of quiet infrastructure.
               </h2>
-              <p className="text-[#666666] text-base mt-3">Upload a photo. Get an instant AI condition report.</p>
-            </div>
-
-            {/* 3-step flow */}
-            <div className="grid grid-cols-3 gap-4 text-center">
-              {[
-                { icon: <Upload size={30} strokeWidth={1.5} />, label: "Upload Photo" },
-                { icon: <Sparkles size={30} strokeWidth={1.5} />, label: "AI Analyses" },
-                { icon: <FileCheck size={30} strokeWidth={1.5} />, label: "Get Results" },
-              ].map(({ icon, label }) => (
-                <div key={label} className="flex flex-col items-center gap-2">
-                  <div className="flex items-center justify-center" style={{ color: "#B8860B" }}>{icon}</div>
-                  <p className="text-[#888888] text-[11px] font-semibold uppercase tracking-wider">{label}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-center">
-              <Link href="/tools/estimate">
-                <button className="btn-gold w-full sm:w-auto sm:px-16 flex items-center justify-center py-5 rounded-2xl text-lg uppercase tracking-widest">
-                  Grade My Card
-                </button>
-              </Link>
-            </div>
-            <p className="text-[#999999] text-xs">First estimate free — no account needed</p>
-          </div>
-        </section>
-
-        {/* ── How It Works summary ─────────────────────────────────── */}
-        <section className="py-10 md:py-16 px-6 bg-white border-b border-[#E8E4DC]">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-10">
-              <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">Simple Process</p>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                How It Works
-              </h2>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {[
-                { icon: <ShoppingCart size={20} className="text-[#B8960C]" />, step: "01", title: "Choose a tier", desc: "Pick your grading speed — Standard from £12/card." },
-                { icon: <Package size={20} className="text-[#B8960C]" />, step: "02", title: "Post your cards", desc: "Send to our Rochester facility via insured post." },
-                { icon: <Scan size={20} className="text-[#B8960C]" />, step: "03", title: "We grade them", desc: "6400 DPI scans, AI analysis, expert assessment." },
-                { icon: <Truck size={20} className="text-[#B8960C]" />, step: "04", title: "Delivered back", desc: "VaultLock™ NFC slab + insured tracked Royal Mail return." },
-              ].map(({ icon, step, title, desc }, i) => (
-                <FadeIn key={step} delay={i * 100}>
-                  <div className="flex flex-col items-center text-center gap-3 p-5 rounded-2xl bg-white card-elevated">
-                    <div className="w-12 h-12 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/30 flex items-center justify-center">
-                      {icon}
-                    </div>
-                    <div>
-                      <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest mb-0.5">Step {step}</p>
-                      <p className="font-bold text-[#1A1A1A] text-sm">{title}</p>
-                      <p className="text-[#888888] text-xs mt-1 leading-relaxed">{desc}</p>
-                    </div>
-                  </div>
-                </FadeIn>
-              ))}
-            </div>
-            <div className="text-center mt-8">
-              <Link href="/how-it-works">
-                <button className="inline-flex items-center gap-2 text-[#B8960C] font-semibold text-sm hover:text-[#D4AF37] transition-colors">
-                  Learn more about our process <ArrowRight size={14} />
-                </button>
-              </Link>
-            </div>
-          </div>
-        </section>
-
-        {/* ── How Ownership Works ───────────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 bg-[#FAFAF8] border-b border-[#E8E4DC]">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-12">
-              <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">What Makes Us Different</p>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                How Ownership Works
-              </h2>
-              <p className="text-[#666666] mt-3 max-w-xl mx-auto text-sm">
-                We're the only UK grader that can prove who owns a card at any point in time — combining VaultLock™, VaultLink™, and a registered ownership record.
+              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+                Grading is the visible part. What makes a MintVault slab worth
+                more is what happens around it.
               </p>
             </div>
-            <div className="flex flex-col md:flex-row items-start gap-0 md:gap-0">
-              {[
-                { step: "01", title: "Submit", desc: "Send your cards to our UK facility via insured post." },
-                { step: "02", title: "Grade", desc: "Expert grading on our professional 1–10 scale." },
-                { step: "03", title: "Claim", desc: "Use your one-time claim code to register ownership." },
-                { step: "04", title: "Own", desc: "Receive your VaultLock™ NFC slab and ownership certificate PDF." },
-                { step: "05", title: "Transfer", desc: "Sell with confidence — transfer ownership via email verification." },
-              ].map(({ step, title, desc }, i, arr) => (
-                <div key={step} className="flex md:flex-col items-center md:items-center flex-1 gap-4 md:gap-0 mb-6 md:mb-0">
-                  <div className="flex flex-col md:flex-row items-center w-full md:w-auto">
-                    <div className="w-10 h-10 rounded-full bg-[#D4AF37] flex items-center justify-center text-[#1A1400] font-black text-xs flex-shrink-0">
-                      {step}
-                    </div>
-                    {i < arr.length - 1 && (
-                      <div className="hidden md:block h-px flex-1 bg-[#D4AF37]/30 mx-3" style={{ minWidth: "20px" }} />
-                    )}
-                  </div>
-                  <div className="text-left md:text-center md:mt-4 md:px-2">
-                    <p className="font-bold text-[#1A1A1A] text-sm">{title}</p>
-                    <p className="text-[#666666] text-xs mt-1 leading-relaxed">{desc}</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {/* Card 1 — NFC */}
+              <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+                  01 &middot; NFC Ownership
+                </p>
+                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "#FFFFFF" }}>
+                  Every slab knows who owns it.
+                </h3>
+                <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  A sub-millimetre NFC chip inside each slab links to an ownership
+                  registry. Tap with any phone &mdash; instantly see provenance, transfer
+                  history, and authenticity. Stolen, faked, or altered slabs
+                  invalidate on scan.
+                </p>
+                {/* Radar ring visual */}
+                <div className="flex items-center justify-center h-24">
+                  <div className="relative w-16 h-16">
+                    <div className="absolute inset-0 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.15, animationDuration: "2s" }} />
+                    <div className="absolute inset-2 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.25, animationDuration: "2s", animationDelay: "0.3s" }} />
+                    <div className="absolute inset-4 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.4, animationDuration: "2s", animationDelay: "0.6s" }} />
+                    <div className="absolute inset-[26px] rounded-full" style={{ backgroundColor: "var(--v2-gold)" }} />
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {/* Card 2 — AI Pre-Grade */}
+              <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}>
+                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+                  02 &middot; AI Pre-Grade
+                </p>
+                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "var(--v2-ink)" }}>
+                  Know your grade before you post.
+                </h3>
+                <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "var(--v2-ink-soft)" }}>
+                  Upload two photos. Our centering, corner, edge and surface model
+                  returns a likely grade in under 10 seconds. Trained on {stats?.unique_cards ?? 114} unique cards
+                  across {uniqueSets} sets. Free.
+                </p>
+                {/* Mono readout */}
+                <div className="rounded-lg p-4 font-mono-v2 text-[10px] leading-relaxed" style={{ backgroundColor: "var(--v2-paper-sunk)", color: "var(--v2-ink-soft)" }}>
+                  <p style={{ color: "var(--v2-ink)" }}>1999 Holo Charizard #4</p>
+                  <div className="mt-2 space-y-0.5">
+                    <div className="flex justify-between"><span>Centering</span><span style={{ color: "var(--v2-ink)" }}>9.5</span></div>
+                    <div className="flex justify-between"><span>Corners</span><span style={{ color: "var(--v2-ink)" }}>9.0</span></div>
+                    <div className="flex justify-between"><span>Edges</span><span style={{ color: "var(--v2-ink)" }}>9.5</span></div>
+                    <div className="flex justify-between"><span>Surface</span><span style={{ color: "var(--v2-ink)" }}>10.0</span></div>
+                    <div className="flex justify-between border-t pt-1 mt-1 font-semibold" style={{ borderColor: "var(--v2-line)", color: "var(--v2-gold)" }}>
+                      <span>Predicted</span><span>MV 9.5</span>
+                    </div>
+                  </div>
+                </div>
+                <Link
+                  href="/tools/estimate"
+                  className="inline-flex items-center gap-2 font-body text-xs font-semibold no-underline mt-5 transition-colors hover:underline"
+                  style={{ color: "var(--v2-gold)" }}
+                >
+                  Try it now <ArrowRight size={12} />
+                </Link>
+              </div>
+
+              {/* Card 3 — Vault Club (Silver only at launch) */}
+              <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line-soft)" }}>
+                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+                  03 &middot; Vault Club
+                </p>
+                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "var(--v2-ink)" }}>
+                  Membership for the serious.
+                </h3>
+                <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "var(--v2-ink-soft)" }}>
+                  Grading discounts, higher AI Pre-Grade allowance, priority queue,
+                  and a reserved username on the public registry.
+                </p>
+                <div className="space-y-2 mb-5">
+                  <div className="flex items-center justify-between font-body text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>
+                    <span>Silver</span>
+                    <div className="text-right">
+                      <span className="font-mono-v2 text-[11px]">&pound;9.99/mo</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>
+                    <span></span>
+                    <span className="font-mono-v2 text-[10px]">&pound;99/year</span>
+                  </div>
+                </div>
+                <Link
+                  href="/vault-club"
+                  className="inline-flex items-center gap-2 font-body text-xs font-semibold no-underline transition-colors hover:underline"
+                  style={{ color: "var(--v2-gold)" }}
+                >
+                  View all benefits <ArrowRight size={12} />
+                </Link>
+              </div>
             </div>
           </div>
         </section>
+      </FadeIn>
 
-        {/* ── Slab Showcase ─────────────────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 overflow-hidden bg-white border-b border-[#E8E4DC]">
-          <div className="relative z-[3] max-w-5xl mx-auto bg-[#FAFAF8] rounded-3xl border border-[#E8E4DC]" style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.06)" }}>
-            <div className="flex flex-col lg:flex-row items-center gap-12 p-8 lg:p-14">
+      {/* ── SECTION E: POPULATION REGISTRY ───────────────────────────── */}
+      <FadeIn>
+        <section style={{ backgroundColor: "var(--v2-paper-sunk)" }}>
+          <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+              III &middot; Population Registry
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
+              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+                The open population record.
+              </h2>
+              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+                Every card we grade, visible to the public. Populations, grade
+                distributions, last known sale. Collectors deserve to see the market
+                they trade in.
+              </p>
+            </div>
 
-              {/* Left — copy */}
-              <div className="flex-1 text-center lg:text-left">
-                <span className="reveal-on-scroll text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-4 block">The MintVault Slab</span>
-                <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight leading-tight mb-6 text-[#1A1A1A]">
-                  ENGINEERED FOR<br /><span className="gold-shimmer-text">PERMANENCE</span>
-                </h2>
-                <p className="reveal-on-scroll text-[#666666] text-base leading-relaxed mb-8 max-w-md mx-auto lg:mx-0">
-                  Every MintVault slab is precision-manufactured with VaultGlass™ UV-resistant acrylic and a MintSeal™ tamper-evident seal. Your card is protected for decades, not years.
-                </p>
-                <div className="reveal-on-scroll flex flex-wrap gap-2 justify-center lg:justify-start">
-                  {["VaultLock™", "VaultGlass™", "MintSeal™", "VaultLink™"].map((f) => (
-                    <span key={f} className="text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full bg-[#FFF9E6] border border-[#D4AF37]/30 text-[#B8960C]">
-                      {f}
+            {/* Ticker strip */}
+            {recentCerts.length > 0 && (
+              <div className="overflow-hidden mb-10 rounded-lg py-3 px-4" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}>
+                <div className="flex items-center gap-6 animate-marquee whitespace-nowrap font-mono-v2 text-[10px]" style={{ color: "var(--v2-ink-mute)" }}>
+                  {[...recentCerts, ...recentCerts].map((cert, i) => (
+                    <span key={i} className="flex items-center gap-2">
+                      <span style={{ color: "var(--v2-gold)" }}>{cert.cert_number}</span>
+                      <span>&middot;</span>
+                      <span>{cert.card_name}</span>
+                      <span>&middot;</span>
+                      <span style={{ color: "var(--v2-ink)" }}>MV {cert.grade}</span>
+                      <span>&middot;</span>
+                      <span>{cert.set_name}</span>
                     </span>
                   ))}
                 </div>
               </div>
+            )}
 
-              {/* Right — slab photo */}
-              <div className="flex-1 flex items-center justify-center relative">
-                <SlabTilt>
-                  <div style={{ animation: "slabFloat 5s ease-in-out infinite" }} className="relative">
-                    <img
-                      src="/images/premium-slab-closeup.webp"
-                      alt="MintVault graded card slab — UV-resistant acrylic with NFC chip"
-                      className="w-[240px] h-auto rounded-xl object-cover"
-                      style={{ boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}
-                    />
-                  </div>
-                </SlabTilt>
-                {/* Callout annotations */}
-                <div className="absolute top-10 -left-4 lg:-left-16 flex items-center gap-2">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">UV-Resistant</span>
-                  <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
-                </div>
-                <div className="absolute top-1/3 -right-2 lg:-right-16 flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
-                  <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">VaultLock™</span>
-                </div>
-                <div className="absolute bottom-16 -left-4 lg:-left-16 flex items-center gap-2">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">VaultLink™</span>
-                  <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
-                </div>
-                <div className="absolute bottom-4 -right-2 lg:-right-20 flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]/60" />
-                  <div className="h-px w-8 bg-[#D4AF37]/40" />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[#999999] whitespace-nowrap">Tamper-Evident</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Features ──────────────────────────────────────────────── */}
-        <section className="py-12 md:py-20 px-6 bg-white border-b border-[#E8E4DC]">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-12">
-              <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">Why Collectors Choose MintVault</p>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                THE MINTVAULT ADVANTAGE
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-
-              {/* NFC — 7 cols */}
-              <div className="reveal-on-scroll md:col-span-7 glass-card p-8 rounded-2xl relative overflow-hidden group" data-delay="1">
-                <h3 className="text-xl font-bold mb-3 text-[#1A1A1A]">VaultLock™ &amp; VaultLink™</h3>
-                <p className="text-[#666666] max-w-sm mb-6 text-sm leading-relaxed">
-                  Every slab contains a VaultLock™ NFC chip. Instant verification with no app required. Tap and prove authenticity in seconds.
-                </p>
-                <div className="absolute -bottom-4 -right-4 group-hover:scale-110 transition-transform duration-700">
-                  <div className="nfc-pulse w-20 h-20 flex items-center justify-center">
-                    <Wifi size={60} className="text-[#D4AF37]/20" />
-                  </div>
-                </div>
-              </div>
-
-              {/* No Conflict — 5 cols */}
-              <div className="reveal-on-scroll md:col-span-5 glass-card p-8 rounded-2xl flex flex-col justify-between" data-delay="2">
-                <div>
-                  <Shield size={28} className="text-[#D4AF37] mb-4" />
-                  <h3 className="text-xl font-bold mb-2 text-[#1A1A1A]">No Conflict of Interest</h3>
-                  <p className="text-[#666666] text-sm leading-relaxed">
-                    We do not buy, sell, or trade cards. Our grading is purely technical, unbiased, and objective. Every time.
-                  </p>
-                </div>
-              </div>
-
-              {/* Ownership Registry — 5 cols */}
-              <div className="reveal-on-scroll md:col-span-5 glass-card p-8 rounded-2xl" data-delay="3">
-                <h3 className="text-xl font-bold mb-5 text-[#1A1A1A]">Ownership Registry</h3>
-                <ul className="space-y-3 font-mono">
-                  {[["REGISTERED OWNER","You"],["CERTIFICATE","Verifiable"],["TRANSFER","Email Verified"],["STATUS","Active"]].map(([label, val], i, arr) => (
-                    <li key={label} className={`flex justify-between text-xs pb-2 ${i < arr.length - 1 ? "border-b border-[#E8E4DC]" : ""}`}>
-                      <span className="text-[#666666]">{label}</span>
-                      <span className="text-[#D4AF37] font-bold">{val}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Fast Turnaround — 7 cols */}
-              <div
-                className="reveal-on-scroll md:col-span-7 p-8 rounded-2xl flex items-center justify-between"
-                style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)", boxShadow: "0 4px 20px rgba(212,175,55,0.3)" }}
-                data-delay="4"
-              >
-                <div className="text-[#3c2f00]">
-                  <h3 className="text-2xl font-black mb-2 tracking-tight">Fast UK Turnaround</h3>
-                  <p className="font-medium opacity-80 text-sm">20-day Standard. 10-day Priority. 5-day Express. No international shipping delays.</p>
-                </div>
-                <Zap size={56} className="text-[#3c2f00]/20 flex-shrink-0" />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Your Card, Provably Yours ─────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 bg-[#FFF9E6] border-b border-[#D4AF37]/20">
-          <div className="max-w-5xl mx-auto flex flex-col lg:flex-row items-center gap-12">
-            <div className="flex-1">
-              <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-4">Ownership Registry</p>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A] mb-6">
-                Your Card,<br />Provably Yours
-              </h2>
-              <p className="text-[#666666] leading-relaxed mb-6">
-                Every MintVault-graded card is registered in our ownership registry. When you claim your card, you become the verified owner — with a certificate of authenticity emailed to you.
-              </p>
-              <p className="text-[#666666] leading-relaxed mb-8">
-                When you sell, you transfer ownership through a two-step email-verified process. The new owner gets their own certificate. The registry is permanent and tamper-proof.
-              </p>
-              <div className="flex gap-3 flex-wrap">
-                <Link href="/claim">
-                  <button className="gold-shimmer px-6 py-3 rounded-xl text-[#1A1400] font-bold text-sm uppercase tracking-widest">
-                    Claim Ownership
-                  </button>
-                </Link>
-                <Link href="/ownership">
-                  <button className="px-6 py-3 rounded-xl border border-[#D4AF37]/50 bg-white text-[#B8960C] font-bold text-sm uppercase tracking-widest hover:bg-[#FFF9E6] transition-colors">
-                    Learn More
-                  </button>
-                </Link>
-              </div>
-            </div>
-            <div className="flex-1">
-              <div className="bg-white rounded-2xl border border-[#D4AF37]/20 p-6" style={{ boxShadow: "0 4px 20px rgba(212,175,55,0.12)" }}>
-                {[
-                  { label: "Certificate ID", value: "MV-0000000042", gold: true },
-                  { label: "Card", value: "Charizard Base Set" },
-                  { label: "Grade", value: "9 — Mint" },
-                  { label: "Owner", value: "Registered & Verified" },
-                  { label: "Registry Status", value: "✓ Claimed", green: true },
-                  { label: "NFC Status", value: "✓ Active" },
-                ].map(({ label, value, gold, green }) => (
-                  <div key={label} className="flex justify-between items-center py-2.5 border-b border-[#E8E4DC] last:border-0">
-                    <span className="text-[#999999] text-sm">{label}</span>
-                    <span className={`text-sm font-semibold ${gold ? "text-[#D4AF37] font-mono" : green ? "text-emerald-600" : "text-[#1A1A1A]"}`}>{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Stolen Card Protection ───────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 bg-white border-b border-[#E8E4DC]">
-          <div className="max-w-5xl mx-auto flex flex-col lg:flex-row items-center gap-12">
-            <div className="flex-1">
-              <p className="text-red-500 font-bold uppercase tracking-[0.3em] text-[10px] mb-4">Theft Protection</p>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A] mb-6">
-                Stolen? We'll<br />Flag It Instantly.
-              </h2>
-              <p className="text-[#666666] leading-relaxed mb-6">
-                If your graded card is stolen, report it to our registry and we'll flag its certificate. Any buyer who scans the VaultLink™ QR code or VaultLock™ NFC chip on the slab sees a red warning — making fraudulent resale much harder.
-              </p>
-              <p className="text-[#666666] leading-relaxed mb-8">
-                Reports are email-verified to prevent false flags. Once confirmed, the warning is live instantly — no delay, no gatekeeping.
-              </p>
-              <Link href="/stolen-card-protection">
-                <button className="px-6 py-3 rounded-xl border border-red-400/50 bg-red-50 text-red-600 font-bold text-sm uppercase tracking-widest hover:bg-red-100 transition-colors">
-                  Learn About Stolen Protection
-                </button>
-              </Link>
-            </div>
-            <div className="flex-1">
-              <div className="rounded-2xl border border-red-200 p-6 bg-red-50" style={{ boxShadow: "0 4px 20px rgba(200,50,50,0.07)" }}>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-xs font-bold uppercase tracking-widest text-red-600">Stolen Alert Active</span>
-                </div>
-                {[
-                  { label: "Certificate ID", value: "MV-0000000099", gold: true },
-                  { label: "Card", value: "Charizard 1st Edition" },
-                  { label: "Grade", value: "8 — Very Good–Mint" },
-                  { label: "Status", value: "⚠ Reported Stolen", red: true },
-                  { label: "Registry", value: "Flagged — do not buy" },
-                ].map(({ label, value, gold, red }) => (
-                  <div key={label} className="flex justify-between items-center py-2.5 border-b border-red-100 last:border-0">
-                    <span className="text-[#999999] text-sm">{label}</span>
-                    <span className={`text-sm font-semibold ${gold ? "text-[#D4AF37] font-mono" : red ? "text-red-600 font-bold" : "text-[#1A1A1A]"}`}>{value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Grading Process ───────────────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 bg-white border-b border-[#E8E4DC]">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-12">
-              <p className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3">The Process</p>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                HOW IT WORKS
-              </h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {[
-                { step: "01", Icon: ClipboardList, title: "Submit Online",  desc: "Fill our digital submission form. Select your service level and insurance requirements.", href: "/submit" },
-                { step: "02", Icon: Package,       title: "Post Insured",   desc: "Send via Royal Mail Special Delivery to our UK facility. Fully insured transit.", href: "/pricing" },
-                { step: "03", Icon: Search,        title: "Expert Grading", desc: "Our graders analyse centering, surface, edges, and corners with precision.", href: "/why-mintvault#grading-scale" },
-                { step: "04", Icon: Wifi,          title: "Tap-To-Verify",  desc: "Receive your VaultLock™ NFC slab. Tap to verify the grade, ownership, and authenticity.", href: "/cert" },
-              ].map(({ step, Icon, title, desc, href }, i) => (
-                <Link key={step} href={href}>
-                  <div className="reveal-on-scroll glass-card p-6 rounded-2xl cursor-pointer h-full" data-delay={String(i + 1)}>
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center mb-5 flex-shrink-0"
-                      style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)" }}
-                    >
-                      <Icon size={20} className="text-[#3c2f00]" />
-                    </div>
-                    <div className="font-mono text-[#D4AF37] text-xs mb-2">STEP {step}</div>
-                    <h3 className="text-sm font-bold mb-2 text-[#1A1A1A] uppercase tracking-tight">{title}</h3>
-                    <p className="text-[#666666] text-xs leading-relaxed">{desc}</p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── Pricing CTA ───────────────────────────────────────────── */}
-        <section className="py-8 md:py-16 px-6 bg-[#FAFAF8] border-b border-[#E8E4DC]">
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="reveal-on-scroll text-3xl font-black tracking-tight text-[#1A1A1A] mb-4">
-              Simple, Transparent Pricing
-            </h2>
-            <p className="text-[#666666] mb-8 max-w-xl mx-auto">
-              From £12 per card. All tiers include grading, labelling, encapsulation, and fully insured Royal Mail return. Bulk discounts from 10 cards.
-            </p>
-            <div className="flex gap-4 justify-center">
-              <Link href="/pricing">
-                <button className="gold-shimmer px-8 py-3.5 rounded-xl text-[#1A1400] font-bold uppercase tracking-widest text-sm">
-                  View Pricing
-                </button>
-              </Link>
-              <Link href="/submit">
-                <button className="flex items-center gap-2 px-8 py-3.5 rounded-xl border border-[#D4AF37]/40 text-[#B8960C] font-bold uppercase tracking-widest text-sm hover:bg-[#FFF9E6] transition-colors">
-                  Submit Now <ArrowRight size={14} />
-                </button>
-              </Link>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Comparison ────────────────────────────────────────────── */}
-        <section className="py-10 md:py-20 px-6 bg-[#FAFAF8] border-b border-[#E8E4DC]">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3 block">Why Switch</span>
-              <h2 className="reveal-on-scroll text-3xl md:text-4xl font-black tracking-tight text-[#1A1A1A]">
-                THE CLEAR CHOICE
-              </h2>
-              <p className="text-[#666666] text-sm mt-4 max-w-xl mx-auto">
-                UK collectors deserve a grading service built for them — not one built for another market and shipped internationally.
-              </p>
-            </div>
-
-            <div className="reveal-on-scroll overflow-x-auto bg-white rounded-2xl border border-[#E8E4DC] p-1" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-              <table className="w-full min-w-[480px]">
-                <thead>
-                  <tr>
-                    <th className="text-left pb-4 pt-4 px-4 text-[#999999] text-xs uppercase tracking-widest font-bold w-[40%]">Feature</th>
-                    <th className="pb-4 pt-4 text-center">
-                      <div className="inline-flex flex-col items-center gap-1">
-                        <span className="text-[#D4AF37] font-black text-sm uppercase tracking-widest">MintVault</span>
-                        <span className="text-[#999999] text-[10px] font-mono">UK-BASED</span>
-                      </div>
-                    </th>
-                    <th className="pb-4 pt-4 text-center">
-                      <div className="inline-flex flex-col items-center gap-1">
-                        <span className="text-[#666666] font-bold text-sm uppercase tracking-widest">Other UK Graders</span>
-                        <span className="text-[#999999] text-[10px] font-mono">DOMESTIC</span>
-                      </div>
-                    </th>
-                    <th className="pb-4 pt-4 text-center">
-                      <div className="inline-flex flex-col items-center gap-1">
-                        <span className="text-[#666666] font-bold text-sm uppercase tracking-widest">International</span>
-                        <span className="text-[#999999] text-[10px] font-mono">OVERSEAS</span>
-                      </div>
-                    </th>
-                  </tr>
-                  <tr>
-                    <td colSpan={4} className="pb-2 px-4">
-                      <div className="h-px bg-[#E8E4DC]" />
-                    </td>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ["VaultLock™ Verification",         "✓", "✗", "✗"],
-                    ["UK-Based Grading Facility",       "✓", "✓", "✗"],
-                    ["No Conflict of Interest",         "✓", "~", "~"],
-                    ["Flat Transparent Pricing",        "✓", "~", "✗"],
-                    ["VaultLink™ QR Authentication",    "✓", "✓", "✗"],
-                    ["Insured Return Shipping (Royal Mail)", "✓", "✓", "✗"],
-                    ["Insurance Included",              "✓", "~", "✗"],
-                    ["No Value Upcharges",              "✓", "✗", "✗"],
-                    ["20-Day Standard Turnaround",      "✓", "~", "✗"],
-                    ["No Import / Customs Risk",        "✓", "✓", "✗"],
-                    ["Verified Ownership Registry",     "✓", "✗", "✗"],
-                  ].map(([feature, mv, uk, intl], i) => (
-                    <tr key={i} className={i % 2 === 0 ? "bg-[#FAFAF8]" : "bg-white"}>
-                      <td className="py-3 px-4 text-[#666666] text-sm rounded-l-lg">{feature}</td>
-                      <td className="py-3 text-center text-base font-bold">
-                        <span className={mv === "✓" ? "compare-check" : mv === "~" ? "compare-partial" : "compare-cross"}>
-                          {mv === "✓" ? "✓" : mv === "~" ? "◐" : "✗"}
-                        </span>
-                      </td>
-                      <td className="py-3 text-center text-base font-bold">
-                        <span className={uk === "✓" ? "compare-partial" : uk === "~" ? "compare-partial" : "compare-cross"}>
-                          {uk === "✓" ? "✓" : uk === "~" ? "◐" : "✗"}
-                        </span>
-                      </td>
-                      <td className="py-3 text-center text-base font-bold rounded-r-lg">
-                        <span className={intl === "✓" ? "compare-partial" : intl === "~" ? "compare-partial" : "compare-cross"}>
-                          {intl === "✓" ? "✓" : intl === "~" ? "◐" : "✗"}
-                        </span>
-                      </td>
+            {/* Mini table */}
+            {recentCerts.length > 0 && (
+              <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid var(--v2-line)" }}>
+                <table className="w-full text-left">
+                  <thead>
+                    <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
+                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>#</th>
+                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Card</th>
+                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Grade</th>
+                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>Set</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="text-center mt-6">
-              <span className="text-[#999999] text-[10px] font-mono">✓ confirmed · ◐ partial / varies · ✗ not available</span>
-            </div>
-          </div>
-        </section>
+                  </thead>
+                  <tbody>
+                    {recentCerts.map((cert, i) => (
+                      <tr key={cert.id} style={{ borderBottom: i < recentCerts.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
+                        <td className="font-mono-v2 text-[10px] py-3 px-4" style={{ color: "var(--v2-gold)" }}>{cert.cert_number}</td>
+                        <td className="font-body text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>{cert.card_name}</td>
+                        <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{cert.grade}</td>
+                        <td className="font-body text-xs py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>{cert.set_name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-        {/* ── FAQ ───────────────────────────────────────────────────── */}
-        <section className="py-20 px-6 bg-white">
-          <div className="max-w-3xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="text-[#B8960C] font-bold uppercase tracking-[0.3em] text-[10px] mb-3 block">Got Questions</span>
-              <h2 className="reveal-on-scroll text-3xl font-black tracking-tight text-[#1A1A1A]">
-                FREQUENTLY ASKED
-              </h2>
-            </div>
-
-            <div className="reveal-on-scroll space-y-2">
-              {[
-                {
-                  q: "How long does grading take?",
-                  a: "Standard is 20 working days, Priority is 10 working days, and Express is 5 working days — all from the date we receive your cards. You'll receive email updates at each stage — received, graded, and dispatched.",
-                },
-                {
-                  q: "What does the pricing include?",
-                  a: "All tiers include grading, label production, slab encapsulation, and fully insured Royal Mail Special Delivery return shipping. There are no hidden fees. Basic starts at £12 per card.",
-                },
-                {
-                  q: "How does VaultLock™ verification work?",
-                  a: "Every slab contains a VaultLock™ NFC chip. Simply tap your phone to the chip area — any modern iOS or Android device instantly opens the certificate page showing grade, certificate details, and ownership status. No app required.",
-                },
-                {
-                  q: "How does the ownership registry work?",
-                  a: "After you receive your graded slab, you use a one-time claim code (included with your submission) to register as the owner. Your name is recorded in our registry and you receive a certificate of authenticity by email. When you sell the card, you transfer ownership via a two-step email-verified process.",
-                },
-                {
-                  q: "Do you accept international submissions?",
-                  a: "Yes. We accept submissions from collectors worldwide. Return shipping to international addresses is fully insured via tracked courier. Contact us for a return shipping quote before submitting.",
-                },
-                {
-                  q: "What cards do you grade?",
-                  a: "We grade all trading cards including Pokémon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, sports cards, and more. If you're unsure whether your card qualifies, email us before submitting.",
-                },
-              ].map(({ q, a }, i) => (
-                <div key={i} className="glass-card rounded-xl overflow-hidden">
-                  <button
-                    onClick={() => setFaqOpen(faqOpen === i ? null : i)}
-                    className="w-full flex items-center justify-between px-6 py-5 text-left hover:bg-[#FAFAF8] transition-colors"
-                  >
-                    <span className="text-[#1A1A1A] text-sm font-semibold pr-6">{q}</span>
-                    <ChevronDown
-                      size={16}
-                      className={`text-[#D4AF37] shrink-0 transition-transform duration-300 ${faqOpen === i ? "rotate-180" : ""}`}
-                    />
-                  </button>
-                  {faqOpen === i && (
-                    <div className="px-6 pb-5 text-[#666666] text-sm leading-relaxed border-t border-[#E8E4DC] pt-4">
-                      {a}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="mt-8 text-center">
+              <Link
+                href="/registry"
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
+                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              >
+                Browse the full registry <ArrowRight size={14} />
+              </Link>
             </div>
           </div>
         </section>
+      </FadeIn>
 
-        {/* ── What We Grade ticker ──────────────────────────────────── */}
-        <section className="py-12 bg-[#FAFAF8] border-t border-[#E8E4DC] overflow-hidden">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="flex gap-16 items-center opacity-60 animate-[scroll_25s_linear_infinite] whitespace-nowrap">
-              {[
-                "Pokémon", "Sports Cards", "Yu-Gi-Oh!", "One Piece", "Magic: The Gathering",
-                "Pokémon", "Sports Cards", "Yu-Gi-Oh!", "One Piece", "Magic: The Gathering",
-              ].map((name, i) => (
-                <div key={i} className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[#D4AF37] text-base">✦</span>
-                  <span className="text-xl font-black uppercase tracking-tighter text-[#1A1A1A]">{name}</span>
-                </div>
-              ))}
-            </div>
+      {/* ── SECTION F: FINAL CTA (dark) ──────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
+          <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+            IV &middot; Submit
+          </p>
+          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
+            Submit a card.<br />See yourself on the registry.
+          </h2>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+            From &pound;19. UK-based. Insured in transit and in custody.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+            <Link
+              href="/submit"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+            >
+              Submit a card <ArrowRight size={14} />
+            </Link>
+            <Link
+              href="/tools/estimate"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+            >
+              Try AI Pre-Grade (free) <ArrowRight size={14} />
+            </Link>
           </div>
-        </section>
+          <p className="font-mono-v2 text-[9px] uppercase tracking-widest" style={{ color: "var(--v2-gold)" }}>
+            No login required for pre-grade &middot; Submission in 3 minutes
+          </p>
+        </div>
+      </section>
 
-      </main>
-
-      {/* ── Mobile Bottom Nav ─────────────────────────────────────── */}
-      <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-16 px-4 bg-white/95 backdrop-blur-xl border-t border-[#E8E4DC] md:hidden">
-        <Link href="/" className="flex flex-col items-center justify-center text-[#B8960C]">
-          <Home size={20} />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#666666]">Home</span>
-        </Link>
-        <Link href="/cert" className="flex flex-col items-center justify-center">
-          <CheckCircle size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Verify</span>
-        </Link>
-        <Link href="/pricing" className="flex flex-col items-center justify-center">
-          <CreditCard size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Pricing</span>
-        </Link>
-        <Link href="/dashboard" className="flex flex-col items-center justify-center">
-          <ClipboardList size={20} className="text-[#999999]" />
-          <span className="text-[9px] uppercase tracking-widest mt-1 text-[#999999]">Dashboard</span>
-        </Link>
-      </nav>
-
-      {/* ── Mobile FAB ────────────────────────────────────────────── */}
-      <div className="fixed bottom-20 right-5 md:hidden z-40">
-        <Link href="/submit">
-          <button className="gold-shimmer w-12 h-12 rounded-full flex items-center justify-center text-[#1A1400] active:scale-90 transition-transform" style={{ boxShadow: "0 4px 20px rgba(212, 175, 55, 0.5), 0 0 30px rgba(212, 175, 55, 0.2)" }}>
-            <Plus size={24} />
-          </button>
-        </Link>
-      </div>
-
+      <FooterV2 />
     </div>
   );
 }

@@ -33,12 +33,17 @@ function toCache(key: string, results: CardLookupResult[]) {
 }
 
 /** Pokémon TCG API — requires POKEMON_TCG_API_KEY env var */
-async function lookupPokemon(query: string): Promise<CardLookupResult[]> {
+async function lookupPokemon(query: string, mode: "exact" | "wildcard" = "exact"): Promise<CardLookupResult[]> {
   const apiKey = process.env.POKEMON_TCG_API_KEY;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["X-Api-Key"] = apiKey;
 
-  const url = `https://api.pokemontcg.io/v2/cards?q=name:"${encodeURIComponent(query)}"&pageSize=10`;
+  const clean = query.trim().replace(/"/g, "");
+  const q = mode === "wildcard"
+    ? `name:${encodeURIComponent(clean)}*`
+    : `name:"${encodeURIComponent(clean)}"`;
+  const url = `https://api.pokemontcg.io/v2/cards?q=${q}&pageSize=10`;
+  console.log(`[lookup-pokemon] query="${query}" mode=${mode} final_url=${url}`);
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Pokémon TCG API error: ${res.status}`);
   const json = await res.json();
@@ -116,24 +121,27 @@ async function lookupYugioh(query: string): Promise<CardLookupResult[]> {
  * @param game  "pokemon" | "mtg" | "yugioh" | "other"
  * @param query Card name or search string
  */
-export async function lookupCard(game: string, query: string): Promise<CardLookupResult[]> {
+export async function lookupCard(game: string, query: string, mode: "exact" | "wildcard" = "exact"): Promise<CardLookupResult[]> {
   if (!query || query.trim().length < 2) return [];
-  const key = `${game}:${query.toLowerCase().trim()}`;
+  // Normalise display names → canonical keys: "Pokémon" → "pokemon", "Yu-Gi-Oh!" → "yugioh"
+  const canonical = game.toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  const key = `${canonical}:${mode}:${query.toLowerCase().trim()}`;
   const cached = fromCache(key);
   if (cached) return cached;
 
   let results: CardLookupResult[] = [];
   try {
-    switch (game.toLowerCase()) {
+    switch (canonical) {
       case "pokemon":
-        results = await lookupPokemon(query);
+        results = await lookupPokemon(query, mode);
         break;
       case "mtg":
+      case "magic":
+      case "magicthegathering":
         results = await lookupMtg(query);
         break;
       case "yugioh":
-      case "yugi-oh":
-      case "yu-gi-oh":
+      case "yugioh!":
         results = await lookupYugioh(query);
         break;
       default:

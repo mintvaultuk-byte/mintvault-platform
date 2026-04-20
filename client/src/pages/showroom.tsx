@@ -285,7 +285,7 @@ export default function ShowroomPage() {
             This Showroom is reserved. The owner hasn't activated their Vault Club membership yet.
           </p>
           <div className="flex flex-col items-center gap-3">
-            <Link href="/club" className="text-sm text-[#B8960C] font-semibold hover:text-[#D4AF37] transition-colors">
+            <Link href="/vault-club" className="text-sm text-[#B8960C] font-semibold hover:text-[#D4AF37] transition-colors">
               Are you {data.username}? Activate your Showroom →
             </Link>
             <Link href="/showrooms" className="text-xs text-[#AAAAAA] hover:text-[#888888] transition-colors">

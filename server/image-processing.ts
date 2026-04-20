@@ -4,6 +4,40 @@
  */
 import sharp from "sharp";
 
+// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
+const CARD_CORNER_RADIUS_PCT = 0.04;
+
+/**
+ * Apply rounded-rectangle mask matching card corner radius.
+ * Output is PNG with transparent corners.
+ */
+export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
+  try {
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return inputBuffer;
+
+    const w = meta.width;
+    const h = meta.height;
+    const r = Math.round(w * CARD_CORNER_RADIUS_PCT);
+
+    const svgMask = Buffer.from(
+      `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="white"/></svg>`
+    );
+
+    const masked = await sharp(inputBuffer)
+      .ensureAlpha()
+      .composite([{ input: svgMask, blend: "dest-in" }])
+      .png({ quality: 90 })
+      .toBuffer();
+
+    console.log(`[mask] rounded corners: r=${r}px on ${w}×${h}`);
+    return masked;
+  } catch (err: any) {
+    console.warn("[mask] rounded corner masking failed, returning original:", err.message);
+    return inputBuffer;
+  }
+}
+
 export interface QualityCheck {
   name: string;
   status: "pass" | "warn" | "fail";
@@ -15,40 +49,351 @@ export interface QualityResult {
   checks: QualityCheck[];
 }
 
+// ── Adaptive background-subtraction card detection ──────────────────────────
+// Samples corners of the image to determine background colour, then uses
+// luminance distance to separate card from background. More robust than
+// fixed black threshold for holographic/silver/pale-bordered cards.
+
+const FALLBACK_BLACK_THRESHOLD = 30;
+
+/** Luminance of an RGB pixel (BT.601 weights) */
+function luma(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+/** Sample average RGB from a corner block of the image */
+function sampleCorner(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  startX: number, startY: number, size: number
+): { r: number; g: number; b: number; luma: number } {
+  let sumR = 0, sumG = 0, sumB = 0, count = 0;
+  const endX = Math.min(startX + size, w);
+  const endY = Math.min(startY + size, h);
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const idx = (y * w + x) * ch;
+      sumR += pixels[idx]; sumG += pixels[idx + 1]; sumB += pixels[idx + 2];
+      count++;
+    }
+  }
+  if (count === 0) return { r: 0, g: 0, b: 0, luma: 0 };
+  const avgR = sumR / count, avgG = sumG / count, avgB = sumB / count;
+  return { r: avgR, g: avgG, b: avgB, luma: luma(avgR, avgG, avgB) };
+}
+
 /**
- * Auto-crop: detect card in scan and crop tight.
- * Uses Sharp trim() to remove scanner background, then validates the result.
- * Falls back to original if card detection is ambiguous.
+ * Compute adaptive background colour by sampling all 4 corners.
+ * Returns the average + a luminance threshold for "is background" checks.
+ */
+function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: number) {
+  const sz = Math.max(20, Math.round(Math.min(w, h) * 0.04)); // ~4% of shorter dimension
+  const corners = [
+    sampleCorner(pixels, w, h, ch, 0, 0, sz),           // top-left
+    sampleCorner(pixels, w, h, ch, w - sz, 0, sz),      // top-right
+    sampleCorner(pixels, w, h, ch, 0, h - sz, sz),      // bottom-left
+    sampleCorner(pixels, w, h, ch, w - sz, h - sz, sz), // bottom-right
+  ];
+  const avgLuma = corners.reduce((s, c) => s + c.luma, 0) / corners.length;
+  const avgR = corners.reduce((s, c) => s + c.r, 0) / corners.length;
+  const avgG = corners.reduce((s, c) => s + c.g, 0) / corners.length;
+  const avgB = corners.reduce((s, c) => s + c.b, 0) / corners.length;
+
+  // Threshold: pixel is "card" if its luminance is > bgLuma + margin
+  // For dark backgrounds, margin is at least 25; for brighter, scale up
+  const margin = Math.max(25, avgLuma * 0.6 + 15);
+
+  return { avgR, avgG, avgB, avgLuma, threshold: avgLuma + margin };
+}
+
+/** Check if a pixel is background using adaptive threshold */
+function isBackgroundAdaptive(r: number, g: number, b: number, bgThreshold: number): boolean {
+  return luma(r, g, b) < bgThreshold;
+}
+
+/** Legacy fallback: fixed black threshold */
+function isBackground(r: number, g: number, b: number): boolean {
+  return r < FALLBACK_BLACK_THRESHOLD && g < FALLBACK_BLACK_THRESHOLD && b < FALLBACK_BLACK_THRESHOLD;
+}
+
+/**
+ * Detect card boundary using adaptive background detection.
+ * Samples corners to learn background colour, then finds bounding box of all non-background pixels.
+ * Falls back to fixed black threshold if adaptive detection fails.
+ */
+export function detectCardBoundary(
+  pixels: Uint8Array, w: number, h: number, ch: number
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  const bg = computeBackgroundProfile(pixels, w, h, ch);
+  console.log(`[card-detect] bg profile: luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} rgb=(${bg.avgR.toFixed(0)},${bg.avgG.toFixed(0)},${bg.avgB.toFixed(0)})`);
+
+  // Try adaptive detection first
+  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isBackgroundAdaptive(r, g, b, bg.threshold));
+  if (adaptive) {
+    console.log(`[card-detect] adaptive detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
+    return adaptive;
+  }
+
+  // Fallback to fixed black threshold
+  console.log("[card-detect] adaptive failed, falling back to fixed black threshold");
+  return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+}
+
+/** Core boundary detection with a pluggable background test */
+function detectBoundaryWithTest(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  isBg: (r: number, g: number, b: number) => boolean
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  let minX = w, maxX = 0, minY = h, maxY = 0;
+  let fgCount = 0;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * ch;
+      if (!isBg(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+        fgCount++;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  const totalPixels = w * h;
+  const nonBlackPct = (fgCount / totalPixels) * 100;
+
+  // Sanity: card should be 20-95% of image
+  if (nonBlackPct < 20 || nonBlackPct > 95 || maxX <= minX || maxY <= minY) {
+    return null;
+  }
+
+  return { minX, maxX, minY, maxY, nonBlackPct };
+}
+
+/**
+ * Deskew using non-black edge detection. Works on ANY card colour
+ * as long as the scanner background is black.
+ */
+export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
+  try {
+    console.log(`[deskew] START non-black edge detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
+
+    const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
+    const workW = Math.round(meta.width * scale);
+    const workH = Math.round(meta.height * scale);
+
+    const { data, info } = await sharp(inputBuffer)
+      .resize(workW, workH, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const w = info.width;
+    const h = info.height;
+    const ch = info.channels;
+
+    // Use adaptive background detection for deskew edge scanning
+    const bg = computeBackgroundProfile(pixels, w, h, ch);
+    const isBg = (r: number, g: number, b: number) => isBackgroundAdaptive(r, g, b, bg.threshold);
+
+    // Scan top 30% of image: for each row, find leftmost+rightmost non-background pixel
+    const topEdgePoints: { x: number; y: number }[] = [];
+    for (let row = 0; row < Math.round(h * 0.3); row++) {
+      let rowLeft = -1, rowRight = -1, fgInRow = 0;
+      for (let col = 0; col < w; col++) {
+        const idx = (row * w + col) * ch;
+        if (!isBg(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+          fgInRow++;
+          if (rowLeft === -1) rowLeft = col;
+          rowRight = col;
+        }
+      }
+      // Row must have >30% foreground pixels to count as card content
+      if (fgInRow > w * 0.3 && rowLeft >= 0) {
+        topEdgePoints.push({ x: rowLeft, y: row });
+        topEdgePoints.push({ x: rowRight, y: row });
+        if (topEdgePoints.length > 60) break;
+      }
+    }
+
+    if (topEdgePoints.length < 10) {
+      console.log(`[deskew] not enough non-black edge points (${topEdgePoints.length}), skipping`);
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    // Linear regression on edge points
+    const n = topEdgePoints.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (const p of topEdgePoints) { sumX += p.x; sumY += p.y; sumXY += p.x * p.y; sumX2 += p.x * p.x; }
+    const denom = n * sumX2 - sumX * sumX;
+    if (Math.abs(denom) < 0.001) return { buffer: inputBuffer, angle: 0 };
+
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const radians = Math.atan(slope);
+    const angle = radians * (180 / Math.PI);
+
+    console.log(`[deskew] non-black edge: points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
+
+    if (Math.abs(angle) > 5) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
+      return { buffer: inputBuffer, angle: 0 };
+    }
+    if (Math.abs(angle) < 0.05) {
+      console.log(`[deskew] angle ${angle.toFixed(4)}° below 0.05° threshold, skipping`);
+      return { buffer: inputBuffer, angle: 0 };
+    }
+
+    const rotated = await sharp(inputBuffer)
+      .rotate(-angle, { background: { r: 0, g: 0, b: 0, alpha: 1 } }) // black background fill for rotated edges
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    console.log(`[deskew] corrected ${angle.toFixed(2)}° (non-black, ${n} edge points)`);
+    return { buffer: rotated, angle };
+  } catch (err: any) {
+    console.warn("[deskew] detection failed, skipping:", err.message);
+    return { buffer: inputBuffer, angle: 0 };
+  }
+}
+
+/**
+ * Crop to card boundary by detecting non-black pixels.
+ * Works on ANY card colour as long as scanner uses a black background mat.
+ * Returns null if detection fails (caller should fall back to autoCrop).
+ */
+export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+  try {
+    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return null;
+
+    const scale = Math.min(1, 1500 / Math.max(meta.width, meta.height));
+    const workW = Math.round(meta.width * scale);
+    const workH = Math.round(meta.height * scale);
+
+    const { data, info } = await sharp(inputBuffer)
+      .resize(workW, workH, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels);
+
+    if (!boundary) {
+      console.log("[card-detect] boundary detection failed (not enough non-black or too much)");
+      return null;
+    }
+
+    // Scale back to original dimensions
+    const origMinX = Math.max(0, Math.round(boundary.minX / scale));
+    const origMinY = Math.max(0, Math.round(boundary.minY / scale));
+    const origMaxX = Math.min(meta.width, Math.round(boundary.maxX / scale));
+    const origMaxY = Math.min(meta.height, Math.round(boundary.maxY / scale));
+    const cropW = origMaxX - origMinX;
+    const cropH = origMaxY - origMinY;
+
+    // Safety: cropped area must be 20-95% of original
+    const areaRatio = (cropW * cropH) / (meta.width * meta.height);
+    if (areaRatio < 0.2) {
+      console.log(`[crop-safety] cropped to ${(areaRatio * 100).toFixed(0)}% — REJECTED, using uncropped`);
+      return null;
+    }
+
+    const cropped = await sharp(inputBuffer)
+      .extract({ left: origMinX, top: origMinY, width: cropW, height: cropH })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+
+    const ratio = cropW / cropH;
+    console.log(`[card-detect] ${meta.width}x${meta.height} → ${cropW}x${cropH} (non-black ${boundary.nonBlackPct.toFixed(1)}%, ratio=${ratio.toFixed(3)})`);
+    return { buffer: cropped, cropped: true };
+  } catch (err: any) {
+    console.warn(`[card-detect] detection failed: ${err.message}`);
+    return null;
+  }
+}
+
+// Keep cropToYellowBorder as alias for backward compat (routes.ts references it)
+export const cropToYellowBorder = cropToCardBoundary;
+
+/**
+ * Auto-crop: detect card in scan and crop tight to the actual card edges.
+ * Two-pass approach: aggressive trim first, then validate white border %.
+ * Falls back to softer trim if aggressive is too tight.
  */
 export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean }> {
   try {
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false };
 
-    // Trim background using threshold — works for dark and light scanner beds
-    const trimmed = await sharp(inputBuffer)
-      .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
-      .toBuffer({ resolveWithObject: true });
-
-    const { info } = trimmed;
-
-    // Validate: trimmed result must be at least 40% of original size (avoid over-trim)
-    const areaRatio = (info.width * info.height) / (meta.width * meta.height);
-    if (areaRatio < 0.15 || info.width < 100 || info.height < 100) {
-      return { buffer: inputBuffer, cropped: false };
+    // Downscale huge scanner images first to prevent OOM
+    let workBuffer = inputBuffer;
+    if (meta.width > 4000 || meta.height > 4000) {
+      workBuffer = await sharp(inputBuffer)
+        .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 95 })
+        .toBuffer();
     }
 
-    // Add 1% margin on each side
-    const padW = Math.round(info.width * 0.01);
-    const padH = Math.round(info.height * 0.01);
-    const finalW = info.width + padW * 2;
-    const finalH = info.height + padH * 2;
+    // Pass 1: Aggressive trim (threshold 80 — catches subtle yellow-on-white card borders)
+    let trimBuf: Buffer;
+    let trimInfo: sharp.OutputInfo;
+    try {
+      const result = await sharp(workBuffer)
+        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 80 })
+        .toBuffer({ resolveWithObject: true });
+      trimBuf = result.data;
+      trimInfo = result.info;
+    } catch {
+      // Aggressive trim failed — try softer
+      const result = await sharp(workBuffer)
+        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
+        .toBuffer({ resolveWithObject: true });
+      trimBuf = result.data;
+      trimInfo = result.info;
+    }
 
-    const padded = await sharp(trimmed.data)
+    // Validate: trimmed result must be reasonable
+    const origArea = (meta.width || 1) * (meta.height || 1);
+    const trimArea = trimInfo.width * trimInfo.height;
+    if (trimArea / origArea < 0.15 || trimInfo.width < 100 || trimInfo.height < 100) {
+      console.warn(`[crop] trim too aggressive: ${trimInfo.width}x${trimInfo.height} (${((trimArea / origArea) * 100).toFixed(1)}% of original)`);
+      return { buffer: workBuffer, cropped: false };
+    }
+
+    // Check white border percentage — sample 5px border on all 4 sides
+    const borderWhite = await measureBorderWhiteness(trimBuf, trimInfo.width, trimInfo.height);
+    if (borderWhite > 5) {
+      // >5% white on border — try even more aggressive trim
+      console.log(`[crop] first pass: ${borderWhite.toFixed(1)}% white border, re-trimming`);
+      try {
+        const tighter = await sharp(trimBuf)
+          .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 120 })
+          .toBuffer({ resolveWithObject: true });
+        if (tighter.info.width > 100 && tighter.info.height > 100) {
+          trimBuf = tighter.data;
+          trimInfo = tighter.info;
+        }
+      } catch { /* keep first pass result */ }
+    }
+
+    // Minimal padding (0.5% each side — just enough to avoid clipping card edge)
+    const padW = Math.max(1, Math.round(trimInfo.width * 0.005));
+    const padH = Math.max(1, Math.round(trimInfo.height * 0.005));
+
+    const padded = await sharp(trimBuf)
       .extend({ top: padH, bottom: padH, left: padW, right: padW, background: { r: 255, g: 255, b: 255, alpha: 1 } })
-      .resize(finalW, finalH)
       .jpeg({ quality: 95 })
       .toBuffer();
+
+    const ratio = trimInfo.width / trimInfo.height;
+    const expectedRatio = 0.714; // 2.5/3.5 = standard card
+    const ratioDiff = Math.abs(ratio - expectedRatio) / expectedRatio;
+    console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} white=${borderWhite.toFixed(1)}%`);
 
     return { buffer: padded, cropped: true };
   } catch {
@@ -56,8 +401,29 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
   }
 }
 
+/** Measure percentage of near-white pixels in a 5px border ring around the image */
+async function measureBorderWhiteness(buf: Buffer, w: number, h: number): Promise<number> {
+  try {
+    const { data } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const pixels = new Uint8Array(data);
+    let white = 0, total = 0;
+    const border = 5;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (x < border || x >= w - border || y < border || y >= h - border) {
+          total++;
+          if (pixels[y * w + x] > 240) white++;
+        }
+      }
+    }
+    return total > 0 ? (white / total) * 100 : 0;
+  } catch { return 0; }
+}
+
 /**
  * Generate all image variants for grading analysis.
+ * Resizes to max 2000px first to reduce memory usage,
+ * then processes sequentially to avoid OOM on 512MB-1GB machines.
  */
 export async function generateVariants(inputBuffer: Buffer): Promise<{
   greyscale: Buffer;
@@ -65,33 +431,34 @@ export async function generateVariants(inputBuffer: Buffer): Promise<{
   edgeenhanced: Buffer;
   inverted: Buffer;
 }> {
-  const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
-    sharp(inputBuffer)
-      .greyscale()
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  // Resize to 2576px max (Opus 4.7 resolution) — keeps peak RAM manageable
+  const resized = await sharp(inputBuffer)
+    .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 95 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .modulate({ brightness: 1.1 })
-      .linear(1.6, -(128 * 1.6 - 128))
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  // Sequential processing to limit peak memory
+  const greyscale = await sharp(resized)
+    .greyscale()
+    .jpeg({ quality: 95 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .greyscale()
-      .convolve({
-        width: 3,
-        height: 3,
-        kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1],
-      })
-      .jpeg({ quality: 90 })
-      .toBuffer(),
+  const highcontrast = await sharp(resized)
+    .modulate({ brightness: 1.1 })
+    .linear(1.6, -(128 * 1.6 - 128))
+    .jpeg({ quality: 95 })
+    .toBuffer();
 
-    sharp(inputBuffer)
-      .negate()
-      .jpeg({ quality: 90 })
-      .toBuffer(),
-  ]);
+  const edgeenhanced = await sharp(resized)
+    .greyscale()
+    .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+
+  const inverted = await sharp(resized)
+    .negate()
+    .jpeg({ quality: 95 })
+    .toBuffer();
 
   return { greyscale, highcontrast, edgeenhanced, inverted };
 }
