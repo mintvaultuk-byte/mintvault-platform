@@ -4961,7 +4961,10 @@ export async function registerRoutes(
       if (!req.file) return res.status(400).json({ error: "No image uploaded" });
       const apiKey = process.env.ANTHROPIC_API_KEY;
       console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
-      if (!apiKey) return res.status(503).json({ error: "AI service not configured — ANTHROPIC_API_KEY secret is missing from Fly.io. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-..." });
+      if (!apiKey) {
+        console.error("[tools/estimate] CRITICAL: ANTHROPIC_API_KEY secret missing. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app-name>");
+        return res.status(503).json({ error: "AI service is temporarily unavailable. Please try again shortly." });
+      }
 
       const email = (req.body.email || "").trim().toLowerCase();
       const isAdminFree = email === ADMIN_FREE_EMAIL;
