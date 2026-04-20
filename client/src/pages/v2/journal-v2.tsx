@@ -106,36 +106,65 @@ export default function JournalV2() {
 
                 {/* Right: editorial visual block */}
                 <div
-                  className="relative rounded-xl overflow-hidden aspect-square"
+                  className="relative w-full rounded-xl overflow-hidden"
                   style={{
                     backgroundColor: "var(--v2-panel-dark)",
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    backgroundImage:
-                      "radial-gradient(circle at 30% 30%, rgba(212,175,55,0.12), transparent 70%)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    backgroundImage: "radial-gradient(circle at 30% 30%, rgba(212,175,55,0.15), transparent 65%)",
+                    paddingBottom: "100%",
                   }}
                 >
-                  {/* Flourish numeral — literal rgba for predictable rendering */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none" aria-hidden="true">
+                  {/* Centered numeral — using grid for more reliable centering than flex */}
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                  >
                     <span
-                      className="font-display italic"
+                      aria-hidden="true"
                       style={{
                         fontFamily: '"Fraunces", Georgia, serif',
                         fontStyle: "italic",
                         fontWeight: 500,
-                        fontSize: "clamp(6rem, 12vw, 10rem)",
-                        color: "rgba(212, 175, 55, 0.35)",
+                        fontSize: "clamp(5rem, 14vw, 9rem)",
+                        color: "rgba(212, 175, 55, 0.45)",
                         lineHeight: 1,
+                        userSelect: "none",
+                        pointerEvents: "none",
                       }}
                     >
                       01
                     </span>
                   </div>
-                  {/* Mono label, bottom-left */}
+
+                  {/* Bottom-left "FEATURED" label */}
                   <span
-                    className="absolute bottom-4 left-4 font-mono-v2 text-[9px] uppercase tracking-widest"
-                    style={{ color: "rgba(255,255,255,0.4)" }}
+                    className="absolute bottom-5 left-5 font-mono-v2"
+                    style={{
+                      fontSize: "10px",
+                      letterSpacing: "0.2em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.55)",
+                      pointerEvents: "none",
+                    }}
                   >
                     Featured
+                  </span>
+
+                  {/* Top-right subtle marker */}
+                  <span
+                    className="absolute top-5 right-5 font-mono-v2"
+                    style={{
+                      fontSize: "9px",
+                      letterSpacing: "0.3em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.3)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    No.01
                   </span>
                 </div>
               </div>
