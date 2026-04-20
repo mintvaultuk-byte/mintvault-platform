@@ -7,6 +7,7 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import path from "path";
+import sharp from "sharp";
 import { buildLogbookData } from "./logbook-service";
 
 const PAGE_W = 595.28;
@@ -34,6 +35,35 @@ async function qr(url: string): Promise<Buffer> {
   return QRCode.toBuffer(url, { width: 140, margin: 1, color: { dark: "#000", light: "#fff" }, errorCorrectionLevel: "H" });
 }
 
+/**
+ * Resize card scan images before embedding in the PDF.
+ * Card scans are typically 3000-5000px wide at 2-5MB each; pdfkit embeds them
+ * uncompressed, so without this resize logbooks balloon to 10-20MB.
+ *
+ * Target: 1500px longest edge, JPEG quality 82 → typically ~200-400KB.
+ * Preserves aspect ratio, strips EXIF, converts to sRGB.
+ *
+ * Returns the original buffer on any sharp error (graceful degradation —
+ * customer still gets a working PDF, just a larger one).
+ */
+async function resizeForPdf(buf: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(buf)
+      .rotate() // respect EXIF orientation before strip
+      .resize({
+        width: 1500,
+        height: 1500,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 82, mozjpeg: true, progressive: true })
+      .toBuffer();
+  } catch (err: any) {
+    console.error("[logbook-pdf] image resize failed, using original:", err?.message);
+    return buf;
+  }
+}
+
 export interface LogbookPdfOptions { includeReferenceNumber?: boolean; }
 
 export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOptions = {}): Promise<Buffer | null> {
@@ -49,8 +79,18 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
     try {
       const qrBuf = await qr(verification.verifyUrl + `?sig=${verification.signature}`);
       let fBuf: Buffer | null = null, bBuf: Buffer | null = null;
-      if (images.front) { try { fBuf = Buffer.from(await (await fetch(images.front)).arrayBuffer()); } catch {} }
-      if (images.back) { try { bBuf = Buffer.from(await (await fetch(images.back)).arrayBuffer()); } catch {} }
+      if (images.front) {
+        try {
+          const raw = Buffer.from(await (await fetch(images.front)).arrayBuffer());
+          fBuf = await resizeForPdf(raw);
+        } catch {}
+      }
+      if (images.back) {
+        try {
+          const raw = Buffer.from(await (await fetch(images.back)).arrayBuffer());
+          bBuf = await resizeForPdf(raw);
+        } catch {}
+      }
 
       const doc = new PDFDocument({
         size: "A4",
@@ -61,7 +101,11 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
 
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
-      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("end", () => {
+        const pdfBuffer = Buffer.concat(chunks);
+        console.log(`[logbook-pdf] ${certId}: generated ${Math.round(pdfBuffer.length / 1024)} KB`);
+        resolve(pdfBuffer);
+      });
       doc.on("error", reject);
 
       let y = 25;
