@@ -171,6 +171,8 @@ import AiPreGradeV2 from "@/pages/v2/ai-pre-grade-v2";
 import ToolsEstimateV2 from "@/pages/v2/tools-estimate-v2";
 import JournalV2 from "@/pages/v2/journal-v2";
 import JournalDetailV2 from "@/pages/v2/journal-detail-v2";
+import TechnologyV2 from "@/pages/v2/technology-v2";
+import RegistryV2 from "@/pages/v2/registry-v2";
 
 function Router() {
   return (
@@ -190,6 +192,8 @@ function Router() {
         <Route path="/v2-tools/estimate" component={ToolsEstimateV2} />
         <Route path="/v2-journal" component={JournalV2} />
         <Route path="/v2-journal/:slug" component={JournalDetailV2} />
+        <Route path="/v2-technology" component={TechnologyV2} />
+        <Route path="/v2-registry" component={RegistryV2} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />

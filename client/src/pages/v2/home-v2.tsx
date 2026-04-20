@@ -537,7 +537,7 @@ export default function HomeV2() {
 
             <div className="mt-8 text-center">
               <Link
-                href="/population"
+                href="/v2-registry"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
                 style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
               >
