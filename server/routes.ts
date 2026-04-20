@@ -893,6 +893,31 @@ export async function registerRoutes(
     },
   });
 
+  // ── Health check — tests DB connectivity for Fly/monitoring ───────────────
+  // No auth, no rate limit. Returns 503 if DB unreachable.
+  const serverStartedAt = Date.now();
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const result = await db.execute(sql`SELECT 1 AS ok`);
+      const dbOk = result.rows.length > 0;
+      if (!dbOk) throw new Error("DB returned empty result for SELECT 1");
+      res.json({
+        status: "ok",
+        db: "ok",
+        uptime_ms: Date.now() - serverStartedAt,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error("[health] DB ping failed:", err.message);
+      res.status(503).json({
+        status: "degraded",
+        db: "failed",
+        error: err.message?.slice(0, 200) ?? "unknown",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   app.post("/api/cookies/acknowledge", cookieAckRateLimit, async (req, res) => {
     try {
       const userAgent = (req.headers["user-agent"] as string || "").slice(0, 500);
