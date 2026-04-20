@@ -19,11 +19,11 @@ function formatDate(iso: string): string {
 }
 
 // Remove v1-palette class attributes from body HTML and rewrite v1 `/guides/`
-// hrefs to `/v2-journal/`. Then inject stable IDs onto H2 tags so anchors work.
+// hrefs to `/journal/`. Then inject stable IDs onto H2 tags so anchors work.
 function sanitizeBody(html: string): string {
   return html
     .replace(/\sclass="[^"]*"/gi, "")
-    .replace(/href="\/guides\/([^"]+)"/gi, 'href="/v2-journal/$1"')
+    .replace(/href="\/guides\/([^"]+)"/gi, 'href="/journal/$1"')
     .replace(/<h2([^>]*)>(.*?)<\/h2>/gi, (_match, attrs, content) => {
       const text = String(content).replace(/<[^>]*>/g, "");
       const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -138,7 +138,7 @@ export default function JournalDetailV2() {
               The piece you&rsquo;re looking for doesn&rsquo;t exist or has been moved.
             </p>
             <Link
-              href="/v2-journal"
+              href="/journal"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full mt-8 transition-all hover:scale-[1.03]"
               style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
@@ -160,7 +160,7 @@ export default function JournalDetailV2() {
       <section style={{ backgroundColor: "var(--v2-paper)" }}>
         <div className="mx-auto max-w-3xl px-6 pt-8 md:pt-12">
           <Link
-            href="/v2-journal"
+            href="/journal"
             className="inline-flex items-center gap-2 font-mono-v2 text-[10px] uppercase tracking-widest"
             style={{ color: "var(--v2-ink-mute)" }}
           >
@@ -236,7 +236,7 @@ export default function JournalDetailV2() {
               {related.map((r) => (
                 <Link
                   key={r.slug}
-                  href={`/v2-journal/${r.slug}`}
+                  href={`/journal/${r.slug}`}
                   className="block p-6 rounded-xl transition-all hover:scale-[1.015] group"
                   style={{
                     backgroundColor: "var(--v2-paper)",

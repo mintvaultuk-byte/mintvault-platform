@@ -3,11 +3,11 @@ import { Link, useLocation } from "wouter";
 import { ArrowRight, Menu, X } from "lucide-react";
 
 const NAV_LINKS = [
-  { label: "Grading",    href: "/v2-pricing" },
-  { label: "Technology", href: "/v2-technology" },
-  { label: "Registry",   href: "/v2-registry" },
-  { label: "Vault Club", href: "/v2-vault-club" },
-  { label: "Journal",    href: "/v2-journal" },
+  { label: "Grading",    href: "/pricing" },
+  { label: "Technology", href: "/technology" },
+  { label: "Registry",   href: "/registry" },
+  { label: "Vault Club", href: "/vault-club" },
+  { label: "Journal",    href: "/journal" },
 ];
 
 export default function HeaderV2() {

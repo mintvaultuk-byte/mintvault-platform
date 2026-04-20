@@ -376,7 +376,7 @@ export default function RegistryV2() {
               Submit a card <ArrowRight size={14} />
             </Link>
             <Link
-              href="/v2-pricing"
+              href="/pricing"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
               style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
             >

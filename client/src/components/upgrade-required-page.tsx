@@ -53,7 +53,7 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
           </p>
         )}
 
-        <Link href="/club">
+        <Link href="/vault-club">
           <button
             className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] mb-4 transition-all active:scale-95"
             style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}

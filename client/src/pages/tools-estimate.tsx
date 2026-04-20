@@ -207,7 +207,7 @@ export default function ToolsEstimateV2() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           package: selectedPack,
-          return_path: "/v2-tools/estimate",
+          return_path: "/tools/estimate",
         }),
       });
       const data = await res.json();
@@ -571,7 +571,7 @@ export default function ToolsEstimateV2() {
                     Estimate another card
                   </button>
                   <Link
-                    href="/v2-pricing"
+                    href="/pricing"
                     className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2.5 rounded-full transition-all hover:scale-[1.03]"
                     style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                   >
@@ -787,11 +787,11 @@ export default function ToolsEstimateV2() {
             not definitive. This tool does not authenticate cards or detect counterfeits.
           </p>
           <p className="font-mono-v2 text-[11px] uppercase tracking-widest mt-5 flex flex-wrap gap-x-3 gap-y-1">
-            <Link href="/v2-pricing" className="hover:underline" style={{ color: "var(--v2-gold)" }}>
+            <Link href="/pricing" className="hover:underline" style={{ color: "var(--v2-gold)" }}>
               See full grading pricing &rarr;
             </Link>
             <span style={{ color: "var(--v2-ink-mute)" }}>&middot;</span>
-            <Link href="/v2-vault-club" className="hover:underline" style={{ color: "var(--v2-gold)" }}>
+            <Link href="/vault-club" className="hover:underline" style={{ color: "var(--v2-gold)" }}>
               See Vault Club &rarr;
             </Link>
           </p>

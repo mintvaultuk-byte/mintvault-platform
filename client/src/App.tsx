@@ -98,8 +98,6 @@ function ScrollToTop() {
   return null;
 }
 
-import HomePage from "@/pages/home";
-import PricingPage from "@/pages/pricing";
 import CertLookupPage from "@/pages/cert-lookup";
 import CertDetailPage from "@/pages/cert-detail";
 import WhyMintVaultPage from "@/pages/why-mintvault";
@@ -113,8 +111,6 @@ import TermsPage from "@/pages/terms";
 import LiabilityPage from "@/pages/liability";
 import AdminPage from "@/pages/admin";
 import NotFound from "@/pages/not-found";
-import GuidesPage from "@/pages/guides";
-import GuideDetailPage from "@/pages/guide-detail";
 import PokemonCardGradingUkPage from "@/pages/seo/pokemon-card-grading-uk";
 import TradingCardGradingUkPage from "@/pages/seo/trading-card-grading-uk";
 import CardGradingServiceUkPage from "@/pages/seo/card-grading-service-uk";
@@ -142,12 +138,9 @@ import GradingScalePage from "@/pages/grading-scale";
 import GradingGlossaryPage from "@/pages/grading-glossary";
 import GradingReportPage from "@/pages/grading-report";
 import MobileUploadPage from "@/pages/mobile-upload";
-import PreGradeEstimatePage from "@/pages/tools/estimate";
-import HowItWorksPage from "@/pages/how-it-works";
 import VaultReportPage from "@/pages/vault-report";
 import LogbookPage from "@/pages/logbook";
 import OurStoryPage from "@/pages/about/our-story";
-import TheMintVaultSlabPage from "@/pages/about/the-mintvault-slab";
 import EligibleCardsPage from "@/pages/grading/eligible-cards";
 import VaultReportsAboutPage from "@/pages/vault-reports/about";
 import HowToReadVaultPage from "@/pages/vault-reports/how-to-read";
@@ -161,18 +154,24 @@ import VerifyEmailPage from "@/pages/verify-email";
 import AccountSettingsPage from "@/pages/account-settings";
 import ShowroomPage from "@/pages/showroom";
 import ShowroomsListPage from "@/pages/showrooms";
-import ClubPage from "@/pages/club";
-import V2TestPage from "@/pages/v2-test";
-import HomeV2 from "@/pages/v2/home-v2";
-import PricingV2 from "@/pages/v2/pricing-v2";
-import VaultClubV2 from "@/pages/v2/vault-club-v2";
-import VerifyV2 from "@/pages/v2/verify-v2";
-import AiPreGradeV2 from "@/pages/v2/ai-pre-grade-v2";
-import ToolsEstimateV2 from "@/pages/v2/tools-estimate-v2";
-import JournalV2 from "@/pages/v2/journal-v2";
-import JournalDetailV2 from "@/pages/v2/journal-detail-v2";
-import TechnologyV2 from "@/pages/v2/technology-v2";
-import RegistryV2 from "@/pages/v2/registry-v2";
+import Home from "@/pages/home";
+import Pricing from "@/pages/pricing";
+import VaultClub from "@/pages/vault-club";
+import Verify from "@/pages/verify";
+import AiPreGrade from "@/pages/ai-pre-grade";
+import ToolsEstimate from "@/pages/tools-estimate";
+import Journal from "@/pages/journal";
+import JournalDetail from "@/pages/journal-detail";
+import Technology from "@/pages/technology";
+import Registry from "@/pages/registry";
+
+// Redirect helper — wouter has no built-in redirect, so we replace the URL
+// on mount and render nothing. Used for legacy URLs that moved during cutover.
+function Redirect({ to }: { to: string }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => { setLocation(to, { replace: true }); }, [to, setLocation]);
+  return null;
+}
 
 function Router() {
   return (
@@ -183,27 +182,24 @@ function Router() {
         <Route path="/admin">
           <AdminPage />
         </Route>
-        <Route path="/v2-test" component={V2TestPage} />
-        <Route path="/v2-home" component={HomeV2} />
-        <Route path="/v2-pricing" component={PricingV2} />
-        <Route path="/v2-vault-club" component={VaultClubV2} />
-        <Route path="/v2-verify" component={VerifyV2} />
-        <Route path="/v2-ai-pre-grade" component={AiPreGradeV2} />
-        <Route path="/v2-tools/estimate" component={ToolsEstimateV2} />
-        <Route path="/v2-journal" component={JournalV2} />
-        <Route path="/v2-journal/:slug" component={JournalDetailV2} />
-        <Route path="/v2-technology" component={TechnologyV2} />
-        <Route path="/v2-registry" component={RegistryV2} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />
         <Route path="/cert/:id" component={LogbookPage} />
         <Route path="/vault/:certId" component={LogbookPage} />
-        <Route path="/" component={HomePage} />
+        <Route path="/" component={Home} />
+        <Route path="/pricing" component={Pricing} />
+        <Route path="/vault-club" component={VaultClub} />
+        <Route path="/verify" component={Verify} />
+        <Route path="/ai-pre-grade" component={AiPreGrade} />
+        <Route path="/tools/estimate" component={ToolsEstimate} />
+        <Route path="/journal" component={Journal} />
+        <Route path="/journal/:slug" component={JournalDetail} />
+        <Route path="/technology" component={Technology} />
+        <Route path="/registry" component={Registry} />
         <Route>
           <Layout>
             <Switch>
-              <Route path="/pricing" component={PricingPage} />
               <Route path="/cert" component={CertLookupPage} />
               <Route path="/why-mintvault" component={WhyMintVaultPage} />
               <Route path="/labels" component={LabelsPage} />
@@ -214,8 +210,8 @@ function Router() {
               <Route path="/track" component={TrackPage} />
               <Route path="/terms-and-conditions" component={TermsPage} />
               <Route path="/liability-and-insurance" component={LiabilityPage} />
-              <Route path="/guides" component={GuidesPage} />
-              <Route path="/guides/:slug" component={GuideDetailPage} />
+              <Route path="/guides"><Redirect to="/journal" /></Route>
+              <Route path="/guides/:slug">{(params) => <Redirect to={`/journal/${(params as { slug: string }).slug}`} />}</Route>
               <Route path="/pokemon-card-grading-uk" component={PokemonCardGradingUkPage} />
               <Route path="/trading-card-grading-uk" component={TradingCardGradingUkPage} />
               <Route path="/card-grading-service-uk" component={CardGradingServiceUkPage} />
@@ -240,11 +236,10 @@ function Router() {
               <Route path="/api-docs" component={ApiDocsPage} />
               <Route path="/grading-scale" component={GradingScalePage} />
               <Route path="/grading-glossary" component={GradingGlossaryPage} />
-              <Route path="/tools/estimate" component={PreGradeEstimatePage} />
-              <Route path="/how-it-works" component={HowItWorksPage} />
+              <Route path="/how-it-works"><Redirect to="/technology" /></Route>
               <Route path="/legal/:slug" component={LegalPage} />
               <Route path="/about/our-story" component={OurStoryPage} />
-              <Route path="/about/the-mintvault-slab" component={TheMintVaultSlabPage} />
+              <Route path="/about/the-mintvault-slab"><Redirect to="/technology" /></Route>
               <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
               <Route path="/vault-reports/about" component={VaultReportsAboutPage} />
               <Route path="/vault-reports/how-to-read" component={HowToReadVaultPage} />
@@ -258,7 +253,6 @@ function Router() {
               <Route path="/account/settings" component={AccountSettingsPage} />
               <Route path="/showrooms" component={ShowroomsListPage} />
               <Route path="/showroom/:username" component={ShowroomPage} />
-              <Route path="/club" component={ClubPage} />
               <Route component={NotFound} />
             </Switch>
           </Layout>

@@ -77,7 +77,7 @@ export default function JournalV2() {
         >
           <div className="mx-auto max-w-5xl px-6 py-16 md:py-20">
             <SectionEyebrow numeral="I" label="Featured" className="mb-8" />
-            <Link href={`/v2-journal/${featured.slug}`} className="block group cursor-pointer">
+            <Link href={`/journal/${featured.slug}`} className="block group cursor-pointer">
               <div className="grid grid-cols-1 md:grid-cols-[1fr_1.6fr] gap-10 md:gap-16 items-center">
                 {/* Left: copy */}
                 <div>
@@ -213,7 +213,7 @@ export default function JournalV2() {
               {filtered.map((g) => (
                 <li key={g.slug}>
                   <Link
-                    href={`/v2-journal/${g.slug}`}
+                    href={`/journal/${g.slug}`}
                     className="block py-6 md:py-8 group"
                   >
                     <div className="grid grid-cols-1 md:grid-cols-[140px_1fr_auto] gap-4 md:gap-8 md:items-baseline">
