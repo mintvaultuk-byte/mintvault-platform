@@ -769,14 +769,15 @@ export async function registerRoutes(
     const { FEATURE_FLAGS } = require("./config/feature-flags");
     if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
 
-    const { LEGAL_SLUGS } = require("./config/legal");
-    const slug = req.params.slug;
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as { LEGAL_SLUGS: readonly string[]; LEGAL_ALIASES: Record<string, string> };
+    const slug = String(req.params.slug);
     if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
 
     try {
       const fs = require("fs");
       const path = require("path");
-      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const fileSlug = LEGAL_ALIASES[slug] || slug;
+      const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
       const content = fs.readFileSync(filePath, "utf-8");
 
       // Extract frontmatter title
@@ -797,14 +798,15 @@ export async function registerRoutes(
 
   // Admin preview — always available regardless of flag
   app.get("/api/admin/legal/:slug", requireAdmin, (req, res) => {
-    const { LEGAL_SLUGS } = require("./config/legal");
-    const slug = req.params.slug;
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as { LEGAL_SLUGS: readonly string[]; LEGAL_ALIASES: Record<string, string> };
+    const slug = String(req.params.slug);
     if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
 
     try {
       const fs = require("fs");
       const path = require("path");
-      const filePath = path.join(process.cwd(), "content", "legal", `${slug}.md`);
+      const fileSlug = LEGAL_ALIASES[slug] || slug;
+      const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
       const content = fs.readFileSync(filePath, "utf-8");
       const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
       const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
@@ -837,6 +839,43 @@ export async function registerRoutes(
   app.get("/about/the-mintvault-slab", (_req, res) => res.redirect(301, "/technology"));
   app.get("/guides", (_req, res) => res.redirect(301, "/journal"));
   app.get("/guides/:slug", (req, res) => res.redirect(301, `/journal/${req.params.slug}`));
+
+  // ── Legal route aliases → /legal/<slug> (SEO 301s) ────────────────────────
+  app.get("/privacy",                         (_req, res) => res.redirect(301, "/legal/privacy-policy"));
+  app.get("/cookies",                         (_req, res) => res.redirect(301, "/legal/cookies"));
+  app.get("/shipping-requirements",           (_req, res) => res.redirect(301, "/legal/shipping-requirements"));
+  app.get("/grading-standards",               (_req, res) => res.redirect(301, "/legal/grading-standards"));
+  app.get("/cancel",                          (_req, res) => res.redirect(301, "/legal/cancel"));
+  app.get("/adr",                             (_req, res) => res.redirect(301, "/legal/adr"));
+  app.get("/website-terms",                   (_req, res) => res.redirect(301, "/legal/website-terms"));
+  app.get("/submission-agreement",            (_req, res) => res.redirect(301, "/legal/submission-agreement"));
+  app.get("/guarantee-and-correction-policy", (_req, res) => res.redirect(301, "/legal/guarantee-and-correction-policy"));
+  // Legacy slug → canonical
+  app.get("/legal/guarantee", (_req, res) => res.redirect(301, "/legal/guarantee-and-correction-policy"));
+
+  // ── Cookie consent acknowledgment (strictly-necessary-only model) ─────────
+  const cookieAckRateLimit = rateLimit({
+    windowMs: 5 * 60 * 1000, max: 1,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many requests." },
+  });
+  app.post("/api/cookies/acknowledge", cookieAckRateLimit, async (req, res) => {
+    try {
+      const userAgent = (req.headers["user-agent"] as string || "").slice(0, 500);
+      const ipRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+      const ipHash = ipRaw ? crypto.createHash("sha256").update(ipRaw).digest("hex").slice(0, 32) : null;
+      await db.insert(auditLog).values({
+        entityType: "cookie_consent",
+        entityId: ipHash || "unknown",
+        action: "acknowledged",
+        details: { userAgent, ipHash, acknowledgedAt: new Date().toISOString() },
+      });
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[cookie-ack] failed:", err?.message);
+      res.json({ ok: true }); // non-blocking — client has localStorage as source of truth
+    }
+  });
 
   app.get("/api/version", (_req, res) => {
     res.json({

@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
 import { FeatureFlagsContext, useFeatureFlagsQuery } from "@/hooks/use-feature-flags";
 import LegalPage from "@/pages/legal-page";
+import CookieBanner from "@/components/cookie-banner";
 
 /* ─── Gold press burst — fires on every button/link press ───────────────────
  * Uses a global pointerdown listener so it covers all buttons automatically.
@@ -279,6 +280,7 @@ function App() {
           <GoldBurstEffect />
           <Toaster />
           <Router />
+          <CookieBanner />
         </TooltipProvider>
       </FeatureFlagsProvider>
     </QueryClientProvider>

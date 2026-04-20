@@ -1,3 +1,6 @@
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
+import { COMPANY } from "@shared/company";
+
 const FOOTER_COLS = [
   {
     title: "Grading",
@@ -26,24 +29,32 @@ const FOOTER_COLS = [
     ],
   },
   {
-    title: "Legal",
-    links: [
-      { label: "Terms of service", href: "/terms" },
-      { label: "Privacy policy", href: "/privacy" },
-      { label: "Grading agreement", href: "/grading-agreement" },
-      { label: "Returns policy", href: "/returns" },
-    ],
-  },
-  {
     title: "Contact",
     links: [
-      { label: "hello@mintvaultuk.com", href: "mailto:hello@mintvaultuk.com" },
-      { label: "Kent, England", href: "#" },
+      { label: COMPANY.supportEmail, href: `mailto:${COMPANY.supportEmail}` },
+      { label: `${COMPANY.tradingAddress.city}, England`, href: "#" },
     ],
   },
 ];
 
+const LEGAL_LINKS = [
+  { label: "Website Terms",            href: "/legal/website-terms" },
+  { label: "Submission Agreement",     href: "/legal/submission-agreement" },
+  { label: "Guarantee & Correction",   href: "/legal/guarantee-and-correction-policy" },
+  { label: "Privacy Policy",           href: "/legal/privacy-policy" },
+  { label: "Cookies Policy",           href: "/legal/cookies" },
+  { label: "Shipping Requirements",    href: "/legal/shipping-requirements" },
+  { label: "Grading Standards",        href: "/legal/grading-standards" },
+  { label: "Cancellation",             href: "/legal/cancel" },
+  { label: "Dispute Resolution (ADR)", href: "/legal/adr" },
+];
+
 export default function FooterV2() {
+  const flags = useFeatureFlags();
+  const cols = flags.legalPagesLive
+    ? [...FOOTER_COLS, { title: "Legal", links: LEGAL_LINKS }]
+    : FOOTER_COLS;
+
   return (
     <footer
       className="border-t"
@@ -54,8 +65,8 @@ export default function FooterV2() {
     >
       <div className="mx-auto max-w-7xl px-6 py-16">
         {/* Columns */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-12">
-          {FOOTER_COLS.map((col) => (
+        <div className={`grid grid-cols-2 gap-8 mb-12 ${flags.legalPagesLive ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
+          {cols.map((col) => (
             <div key={col.title}>
               <p
                 className="font-body text-xs font-semibold uppercase tracking-widest mb-4"
@@ -90,7 +101,7 @@ export default function FooterV2() {
             className="font-display italic text-lg font-medium"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            MintVault
+            {COMPANY.tradingName}
           </span>
 
           {/* Legal line */}
@@ -98,8 +109,9 @@ export default function FooterV2() {
             className="font-body text-xs leading-relaxed"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            &copy; 2026 MintVault Ltd &middot; Registered in England &amp; Wales
-            &middot; Company No. [pending] &middot; ICO Reg. [pending]
+            &copy; 2026 {COMPANY.legalName} &middot; Registered in England &amp; Wales
+            &middot; Company No. {COMPANY.companyNumber}
+            &middot; ICO Reg. {COMPANY.icoRegistrationNumber}
           </p>
         </div>
       </div>
