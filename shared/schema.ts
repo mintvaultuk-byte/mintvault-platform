@@ -57,6 +57,15 @@ export const accountMagicLinkTokens = pgTable("account_magic_link_tokens", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const customerMagicLinkTokens = pgTable("customer_magic_link_tokens", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  token: text("token").unique().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const loginAttempts = pgTable("login_attempts", {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),

@@ -5210,7 +5210,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Please enter a valid email address." });
       }
 
-      const token = createMagicToken(normalEmail);
+      const token = await createMagicToken(normalEmail);
       const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
       const loginUrl = `${baseUrl}/api/customer/verify/${token}`;
 
@@ -5226,7 +5226,7 @@ export async function registerRoutes(
   app.get("/api/customer/verify/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
-      const email = verifyMagicToken(token);
+      const email = await verifyMagicToken(token);
       if (!email) {
         return res.redirect("/dashboard?error=invalid_link");
       }

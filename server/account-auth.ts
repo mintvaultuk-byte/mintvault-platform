@@ -351,6 +351,44 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
+  // Magic link tokens for customer dashboard logins
+  // Email-identified (no users row required). Replaces in-memory Map that
+  // failed on multi-machine prod — see audit_log entry below.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS customer_magic_link_tokens (
+      id          SERIAL PRIMARY KEY,
+      email       TEXT NOT NULL,
+      token       TEXT UNIQUE NOT NULL,
+      expires_at  TIMESTAMP NOT NULL,
+      consumed_at TIMESTAMP,
+      created_at  TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS customer_magic_link_tokens_email_created_idx
+      ON customer_magic_link_tokens (email, created_at DESC)
+  `);
+  try {
+    const existing = await db.execute(sql`
+      SELECT 1 FROM audit_log
+      WHERE entity_type = 'schema'
+        AND entity_id = 'customer_magic_link_tokens'
+        AND action = 'table_created'
+      LIMIT 1
+    `);
+    if (existing.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('schema', 'customer_magic_link_tokens', 'table_created',
+                '{"reason":"fix magic-link failure on multi-machine prod","migration":"in-memory Map -> Postgres","ttl_minutes":15,"fixes":"~50% login failure rate when POST and GET landed on different Fly machines"}'::jsonb,
+                NOW())
+      `);
+      console.log("[customer-magic-link-migrate] table created + audit logged");
+    }
+  } catch (e: any) {
+    console.log("[customer-magic-link-migrate] audit_log skipped:", e.message);
+  }
+
   // Login attempts (rate limiting + audit)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS login_attempts (
