@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Mail, Loader2, CheckCircle, AlertCircle,
-  Package, Award, ArrowRightLeft, LogOut, ExternalLink, Download,
+  Package, Award, ArrowRightLeft, LogOut, ExternalLink, Download, Lock,
   ChevronRight, Clock, Truck, Box, Settings, RefreshCw,
   Globe, Copy, Check, Sparkles, Shield, Zap, TrendingDown,
   Camera, MapPin, X,
@@ -1018,17 +1018,6 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {cert.ownershipStatus === "claimed" && cert.ownerEmail?.toLowerCase() === me.email.toLowerCase() && (
-                      <a
-                        href={`/api/admin/certificates/${cert.certId}/certificate-document`}
-                        download={`MintVault-Certificate-${cert.certId}.pdf`}
-                        className="text-[10px] text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
-                        title="Download Certificate PDF"
-                      >
-                        <Download size={12} />
-                        <span className="hidden sm:inline">PDF</span>
-                      </a>
-                    )}
                     <Link href={`/cert/${cert.certId}`}>
                       <span className="text-[10px] font-mono text-[#999999] hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors cursor-pointer">
                         {cert.certId}
@@ -1112,14 +1101,32 @@ function OwnedCertRow({ cert, ownerEmail }: { cert: CustomerCert; ownerEmail: st
           <p className="text-sm text-[#1A1A1A] mt-0.5">{cert.cardName ?? "—"}</p>
           <p className="text-xs text-[#999999]">{cert.setName ?? ""}{cert.year ? ` (${cert.year})` : ""}</p>
         </div>
-        <button
-          onClick={() => { setShowTransfer(!showTransfer); setTransferResult(null); }}
-          className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors shrink-0"
-        >
-          <ArrowRightLeft size={12} />
-          Transfer
-          <ChevronRight size={12} className={`transition-transform ${showTransfer ? "rotate-90" : ""}`} />
-        </button>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          {cert.ownershipStatus === "claimed" && (
+            <div className="flex flex-col items-end gap-0.5">
+              <a
+                href={`/logbook/${cert.certId}/owner.pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
+              >
+                <Lock size={12} />
+                Download Owner Copy
+              </a>
+              <span className="text-[10px] text-[#B8960C]/70 text-right max-w-[180px] leading-tight">
+                Includes your reference number — keep private
+              </span>
+            </div>
+          )}
+          <button
+            onClick={() => { setShowTransfer(!showTransfer); setTransferResult(null); }}
+            className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
+          >
+            <ArrowRightLeft size={12} />
+            Transfer
+            <ChevronRight size={12} className={`transition-transform ${showTransfer ? "rotate-90" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {showTransfer && (
