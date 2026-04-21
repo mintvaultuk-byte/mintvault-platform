@@ -80,7 +80,7 @@ export default function YugiohCardGradingUk() {
               <strong className="text-[#1A1A1A]">Increased resale value</strong> — professionally graded Yu-Gi-Oh cards consistently sell for significantly more than their raw counterparts. A high-grade first edition card can command a considerable premium on platforms like eBay and TCGPlayer.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Authentication</strong> — counterfeit Yu-Gi-Oh cards are increasingly common, particularly for high-value vintage cards. Grading confirms your card is genuine. Each MintVault certificate can be <Link href="/cert" className="text-[#D4AF37] hover:underline">verified online</Link>.
+              <strong className="text-[#1A1A1A]">Authentication</strong> — counterfeit Yu-Gi-Oh cards are increasingly common, particularly for high-value vintage cards. Grading confirms your card is genuine. Each MintVault certificate can be <Link href="/verify" className="text-[#D4AF37] hover:underline">verified online</Link>.
             </p>
             <p>
               <strong className="text-[#1A1A1A]">Protection</strong> — sealed in a tamper-evident precision slab, your Yu-Gi-Oh card is shielded from fingerprints, moisture, UV exposure, and bending. The card's condition is preserved indefinitely.

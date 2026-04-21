@@ -1,3 +1,4 @@
+// TODO: scheduled for deletion after v2 layout consolidation verified stable in prod (feat/site-layout-consolidation, 2026-04-21)
 import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { Menu, X, ChevronDown, ChevronUp, ExternalLink, User, LogOut, Settings } from "lucide-react";

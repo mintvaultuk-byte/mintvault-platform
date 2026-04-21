@@ -99,7 +99,6 @@ function ScrollToTop() {
   return null;
 }
 
-import CertLookupPage from "@/pages/cert-lookup";
 import CertDetailPage from "@/pages/cert-detail";
 import WhyMintVaultPage from "@/pages/why-mintvault";
 import LabelsPage from "@/pages/labels";
@@ -201,7 +200,7 @@ function Router() {
         <Route>
           <Layout>
             <Switch>
-              <Route path="/cert" component={CertLookupPage} />
+              <Route path="/cert"><Redirect to="/verify" /></Route>
               <Route path="/why-mintvault" component={WhyMintVaultPage} />
               <Route path="/labels" component={LabelsPage} />
               <Route path="/reports" component={ReportsPage} />

@@ -98,7 +98,7 @@ export default function TcgGradingUk() {
               <strong className="text-[#1A1A1A]">Organisation</strong> — graded cards are uniform in size, easy to store upright, and simple to display. Many collectors find that a collection of slabbed cards looks significantly more impressive than a binder or box of raw cards.
             </p>
             <p>
-              Each MintVault certificate can be verified online using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>, providing a permanent digital record of each card in your collection.
+              Each MintVault certificate can be verified online using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>, providing a permanent digital record of each card in your collection.
             </p>
           </div>
         </section>

@@ -210,7 +210,7 @@ export default function HowToGradePokemonCards() {
               Each card is assessed individually by our trained graders, who evaluate centering, corners, edges, and surface quality on a 1 to 10 scale. After grading, cards are encapsulated in tamper-evident MintVault slabs with a printed label showing the card name, set, grade, and unique certificate number.
             </p>
             <p>
-              Your graded cards are returned via fully insured tracked shipping based on the total declared value of your submission. Once you receive them, you can verify each certificate using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert">online certificate lookup tool</Link>.
+              Your graded cards are returned via fully insured tracked shipping based on the total declared value of your submission. Once you receive them, you can verify each certificate using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">online certificate lookup tool</Link>.
             </p>
           </div>
         </section>

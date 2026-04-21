@@ -286,6 +286,11 @@ export default function ToolsEstimateV2() {
           >
             First one free today &middot; No account needed &middot; From 10p per estimate
           </p>
+          <p className="font-body text-xs mt-4" style={{ color: "var(--v2-ink-mute)" }}>
+            <Link href="/ai-pre-grade" className="no-underline hover:underline" style={{ color: "var(--v2-ink-soft)" }}>
+              Learn more about how this works →
+            </Link>
+          </p>
         </div>
       </section>
 

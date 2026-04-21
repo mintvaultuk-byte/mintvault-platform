@@ -102,7 +102,7 @@ export default function PsaAlternativeUk() {
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Brand Recognition and Verification</h3>
             <p>
-              PSA, BGS, and CGC have long histories in the global grading market, and their labels are widely recognised on international marketplaces. MintVault brings the same fundamentals — expert assessment, numerical grading on a 1–10 scale, tamper-evident encapsulation, and unique certificate numbers — with the added advantage that every grade is instantly <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert">verifiable online</Link> by any buyer, anywhere in the world. As the UK grading market matures and collectors increasingly value convenience, transparency, and domestic service quality, UK-graded cards are gaining strong traction across secondary marketplaces.
+              PSA, BGS, and CGC have long histories in the global grading market, and their labels are widely recognised on international marketplaces. MintVault brings the same fundamentals — expert assessment, numerical grading on a 1–10 scale, tamper-evident encapsulation, and unique certificate numbers — with the added advantage that every grade is instantly <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">verifiable online</Link> by any buyer, anywhere in the world. As the UK grading market matures and collectors increasingly value convenience, transparency, and domestic service quality, UK-graded cards are gaining strong traction across secondary marketplaces.
             </p>
 
             <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">UK-Based Customer Support</h3>

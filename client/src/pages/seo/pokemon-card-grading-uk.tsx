@@ -94,7 +94,7 @@ export default function PokemonCardGradingUk() {
           MintVault is a professional Pokemon card grading service based in the United Kingdom. We provide expert card assessment, tamper-evident precision slabs, and fully insured return shipping for collectors, investors, and resellers across the UK. Whether you have a single high-value chase card or a bulk submission of vintage pulls, our grading service is designed to protect and authenticate your collection.
         </p>
         <p className="text-[#666666] text-sm leading-relaxed mb-8">
-          Every card submitted to MintVault is individually assessed by trained graders who evaluate centering, corners, edges, and surface quality on a 1 to 10 scale. Your graded cards are sealed in our precision slabs and assigned a unique certificate that can be <Link href="/cert" className="text-[#E3350D] hover:underline" data-testid="link-cert-lookup">verified online</Link> at any time.
+          Every card submitted to MintVault is individually assessed by trained graders who evaluate centering, corners, edges, and surface quality on a 1 to 10 scale. Your graded cards are sealed in our precision slabs and assigned a unique certificate that can be <Link href="/verify" className="text-[#E3350D] hover:underline" data-testid="link-cert-lookup">verified online</Link> at any time.
         </p>
 
         <PokeballDivider />
@@ -132,7 +132,7 @@ export default function PokemonCardGradingUk() {
               <strong className="text-[#1A1A1A]">Long-Term Protection</strong> — once sealed in a MintVault slab, your Pokemon card is shielded from fingerprints, moisture, bending, UV exposure, and other environmental damage. The tamper-evident casing ensures the card's condition is preserved indefinitely, making it ideal for long-term holding or display.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Authentication and Trust</strong> — counterfeit Pokemon cards are an increasing concern in the hobby. Grading provides authentication that your card is genuine. Each MintVault certificate can be checked using our <Link href="/cert" className="text-[#E3350D] hover:underline">online verification tool</Link>, giving buyers and fellow collectors confidence in authenticity.
+              <strong className="text-[#1A1A1A]">Authentication and Trust</strong> — counterfeit Pokemon cards are an increasing concern in the hobby. Grading provides authentication that your card is genuine. Each MintVault certificate can be checked using our <Link href="/verify" className="text-[#E3350D] hover:underline">online verification tool</Link>, giving buyers and fellow collectors confidence in authenticity.
             </p>
             <p>
               <strong className="text-[#1A1A1A]">Collection Organisation</strong> — slabbed cards are uniform in size and easy to store, display, and catalogue. Many serious collectors prefer the clean, organised appearance that graded cards provide in a display case or binder.

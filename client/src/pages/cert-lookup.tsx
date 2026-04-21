@@ -1,3 +1,4 @@
+// TODO: scheduled for deletion after /cert → /verify redirect verified stable in prod (feat/site-layout-consolidation, 2026-04-21)
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { Search, Shield, Award, CheckCircle } from "lucide-react";

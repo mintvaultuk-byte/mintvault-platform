@@ -3,10 +3,28 @@ import { COMPANY } from "@shared/company";
 
 const FOOTER_COLS = [
   {
+    title: "Services",
+    links: [
+      { label: "Pokemon Card Grading UK",     href: "/pokemon-card-grading-uk" },
+      { label: "Trading Card Grading UK",     href: "/trading-card-grading-uk" },
+      { label: "TCG Grading UK",              href: "/tcg-grading-uk" },
+      { label: "MTG Card Grading UK",         href: "/mtg-card-grading-uk" },
+      { label: "Yu-Gi-Oh! Card Grading UK",   href: "/yugioh-card-grading-uk" },
+      { label: "One Piece Card Grading UK",   href: "/one-piece-card-grading-uk" },
+      { label: "Sports Card Grading UK",      href: "/sports-card-grading-uk" },
+      { label: "Card Grading Cost UK",        href: "/card-grading-cost-uk" },
+      { label: "Card Grading Service UK",     href: "/card-grading-service-uk" },
+      { label: "Card Grading Near Me",        href: "/card-grading-near-me" },
+      { label: "Best Card Grading UK",        href: "/best-card-grading-uk" },
+      { label: "PSA Alternative UK",          href: "/psa-alternative-uk" },
+      { label: "How to Grade Pokemon Cards",  href: "/how-to-grade-pokemon-cards" },
+    ],
+  },
+  {
     title: "Grading",
     links: [
       { label: "Submit a card", href: "/submit" },
-      { label: "Grading standards", href: "/grading" },
+      { label: "Grading standards", href: "/grading-scale" },
       { label: "AI Pre-Grade", href: "/tools/estimate" },
       { label: "Pricing", href: "/pricing" },
     ],
@@ -22,10 +40,10 @@ const FOOTER_COLS = [
   {
     title: "Company",
     links: [
-      { label: "About", href: "/about" },
-      { label: "Vault Club", href: "/club" },
+      { label: "About", href: "/about/our-story" },
+      { label: "Vault Club", href: "/vault-club" },
       { label: "Journal", href: "/journal" },
-      { label: "Contact", href: "/contact" },
+      { label: "Contact", href: "/help/contact" },
     ],
   },
   {
@@ -65,7 +83,7 @@ export default function FooterV2() {
     >
       <div className="mx-auto max-w-7xl px-6 py-16">
         {/* Columns */}
-        <div className={`grid grid-cols-2 gap-8 mb-12 ${flags.legalPagesLive ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
+        <div className={`grid grid-cols-2 gap-8 mb-12 ${flags.legalPagesLive ? "md:grid-cols-6" : "md:grid-cols-5"}`}>
           {cols.map((col) => (
             <div key={col.title}>
               <p

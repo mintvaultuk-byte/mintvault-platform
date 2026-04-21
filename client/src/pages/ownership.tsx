@@ -96,7 +96,7 @@ export default function OwnershipPage() {
             </p>
             <p>
               Ownership is stored against your email address in the MintVault registry. To verify a certificate or check ownership status, use the{" "}
-              <Link href="/cert" className="text-[#D4AF37] hover:underline">Certificate Lookup</Link>.
+              <Link href="/verify" className="text-[#D4AF37] hover:underline">Certificate Lookup</Link>.
             </p>
           </div>
         </div>

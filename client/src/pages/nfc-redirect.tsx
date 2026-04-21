@@ -64,7 +64,7 @@ export default function NfcRedirectPage() {
             <XCircle className="h-7 w-7 text-red-400 mx-auto" />
             <p className="text-red-300 text-sm">{error || "This tag could not be verified."}</p>
             <a
-              href="/cert"
+              href="/verify"
               className="inline-block text-[#D4AF37] text-sm border border-[#D4AF37]/30 rounded-lg px-4 py-2 hover:bg-[#D4AF37]/10 transition-colors"
             >
               Search certificates manually

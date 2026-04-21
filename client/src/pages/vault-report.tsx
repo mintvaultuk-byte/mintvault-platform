@@ -1279,7 +1279,7 @@ function VaultError({ certId }: { certId: string }) {
       </p>
       <p className="text-xs" style={{ color: "#AAAAAA" }}>
         Verify the cert ID and try again, or visit{" "}
-        <a href="/cert" style={{ color: "#B8960C" }}>Certificate Lookup</a>
+        <a href="/verify" style={{ color: "#B8960C" }}>Certificate Lookup</a>
       </p>
     </div>
   );

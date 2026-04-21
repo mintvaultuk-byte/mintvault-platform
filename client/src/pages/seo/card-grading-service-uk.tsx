@@ -138,7 +138,7 @@ export default function CardGradingServiceUk() {
               <strong className="text-[#1A1A1A]">Step 4: Encapsulation</strong> — graded cards are sealed in tamper-evident precision slabs with a professionally printed label showing the card details, grade, and unique certificate number.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 5: Insured Return</strong> — your graded cards are returned via fully insured tracked shipping. Once delivered, you can verify your certificates online at any time using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>.
+              <strong className="text-[#1A1A1A]">Step 5: Insured Return</strong> — your graded cards are returned via fully insured tracked shipping. Once delivered, you can verify your certificates online at any time using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>.
             </p>
           </div>
         </section>

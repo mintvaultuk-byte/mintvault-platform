@@ -182,7 +182,7 @@ export default function CertDetailPage() {
         <p className="text-[#666666] mb-6" data-testid="text-cert-not-found-desc">
           No certificate exists with ID: <span className="font-mono text-[#1A1A1A]">{certId}</span>
         </p>
-        <Link href="/cert">
+        <Link href="/verify">
           <button
             className="border border-[#D4AF37] bg-white text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#D4AF37]/10"
             data-testid="button-back-to-lookup"
@@ -227,7 +227,7 @@ export default function CertDetailPage() {
 
         {/* Back link + action buttons row */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <Link href="/cert" className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm" data-testid="link-back-lookup">
+          <Link href="/verify" className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm" data-testid="link-back-lookup">
             <ArrowLeft size={16} />
             Back to Lookup
           </Link>

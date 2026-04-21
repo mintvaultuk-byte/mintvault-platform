@@ -127,7 +127,7 @@ export default function TradingCardGradingUk() {
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Certification and Verification</h2>
           <div className="text-[#555555] text-sm leading-relaxed space-y-3">
             <p>
-              Every card graded by MintVault receives a unique certificate number. This number is printed directly on the slab label and recorded in our database. Anyone can verify a MintVault certificate using our <Link href="/cert" className="text-[#D4AF37] hover:underline" data-testid="link-cert-verify">online certificate lookup tool</Link>.
+              Every card graded by MintVault receives a unique certificate number. This number is printed directly on the slab label and recorded in our database. Anyone can verify a MintVault certificate using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert-verify">online certificate lookup tool</Link>.
             </p>
             <p>
               Certificate verification displays the card name, set, grade, and submission details. This provides buyers with confidence that the card and grade are authentic, which is particularly valuable when selling cards on secondary markets like eBay or trading card forums.

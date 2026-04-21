@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { ArrowRight, Menu, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, Menu, X, Search, HelpCircle, LayoutDashboard } from "lucide-react";
 
 const NAV_LINKS = [
   { label: "Grading",    href: "/pricing" },
@@ -10,11 +11,34 @@ const NAV_LINKS = [
   { label: "Journal",    href: "/journal" },
 ];
 
+const UTILITY_LINKS = [
+  { label: "Verify", href: "/verify", icon: Search },
+  { label: "Help",   href: "/help/faq", icon: HelpCircle },
+];
+
+interface AuthMe {
+  id: string;
+  email: string;
+  display_name: string | null;
+  email_verified: boolean;
+}
+
 export default function HeaderV2() {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Lock body scroll while the mobile overlay is open.
+  const { data: authMe } = useQuery<AuthMe | null>({
+    queryKey: ["/api/auth/me"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me");
+      if (res.status === 401) return null;
+      return res.json();
+    },
+    retry: false,
+    staleTime: 60_000,
+  });
+  const isAuthed = !!authMe;
+
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -70,13 +94,44 @@ export default function HeaderV2() {
 
           {/* Right side */}
           <div className="flex items-center gap-3 md:gap-4">
-            <Link
-              href="/login"
-              className="hidden md:inline-flex font-body text-sm font-medium no-underline transition-colors"
-              style={{ color: "var(--v2-ink-soft)" }}
-            >
-              Sign in
-            </Link>
+            {/* Utility links (Verify, Help) — desktop only */}
+            {UTILITY_LINKS.map((link) => {
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                  style={{ color: "var(--v2-ink-soft)" }}
+                  aria-label={link.label}
+                >
+                  <Icon size={14} />
+                  {link.label}
+                </Link>
+              );
+            })}
+
+            {/* Auth-aware: Dashboard if signed-in, Sign in otherwise */}
+            {isAuthed ? (
+              <Link
+                href="/dashboard"
+                className="hidden md:inline-flex items-center gap-1.5 font-body text-sm font-medium no-underline transition-colors"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                <LayoutDashboard size={14} />
+                Dashboard
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="hidden md:inline-flex font-body text-sm font-medium no-underline transition-colors"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                Sign in
+              </Link>
+            )}
+
+            {/* Primary CTA */}
             <Link
               href="/submit"
               className="hidden md:inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2 rounded-full transition-colors"
@@ -150,8 +205,8 @@ export default function HeaderV2() {
             </button>
           </div>
 
-          {/* Nav links */}
-          <nav className="flex-1 px-6 py-10 flex flex-col gap-1 overflow-y-auto">
+          {/* Primary nav */}
+          <nav className="flex-1 px-6 py-8 flex flex-col gap-1 overflow-y-auto">
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
@@ -166,6 +221,36 @@ export default function HeaderV2() {
                 {link.label}
               </Link>
             ))}
+
+            {/* Utility section — smaller, after primary nav */}
+            <div className="mt-6 pt-4 border-t" style={{ borderColor: "var(--v2-line)" }}>
+              {UTILITY_LINKS.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 py-3 font-body text-base no-underline"
+                    style={{ color: "var(--v2-ink-soft)" }}
+                  >
+                    <Icon size={16} />
+                    {link.label}
+                  </Link>
+                );
+              })}
+              {isAuthed ? (
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center gap-3 py-3 font-body text-base no-underline"
+                  style={{ color: "var(--v2-ink-soft)" }}
+                >
+                  <LayoutDashboard size={16} />
+                  Dashboard
+                </Link>
+              ) : null}
+            </div>
           </nav>
 
           {/* Bottom CTAs */}
@@ -181,14 +266,16 @@ export default function HeaderV2() {
             >
               Submit a card <ArrowRight size={14} />
             </Link>
-            <Link
-              href="/login"
-              onClick={() => setMobileOpen(false)}
-              className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full border"
-              style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
-            >
-              Sign in
-            </Link>
+            {!isAuthed && (
+              <Link
+                href="/login"
+                onClick={() => setMobileOpen(false)}
+                className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full border"
+                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       )}
