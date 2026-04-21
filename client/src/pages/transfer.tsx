@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
+import CertIdInput from "@/components/cert-id-input";
 
 type PageState =
   | { type: "form" }
@@ -163,14 +164,14 @@ export default function TransferPage() {
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="certId" className="text-[#444444]">Certificate Number</Label>
-                  <Input
+                  <CertIdInput
                     id="certId"
-                    placeholder="e.g. MV-2025-0042"
+                    placeholder="141"
                     value={certId}
-                    onChange={(e) => setCertId(e.target.value)}
-                    className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                    onChange={setCertId}
+                    className="rounded-md"
                   />
-                  <p className="text-xs text-[#999999]">Found on your MintVault label or certificate insert.</p>
+                  <p className="text-xs text-[#999999]">The certificate number from your slab label — just the number after &apos;MV&apos;</p>
                 </div>
 
                 <div className="space-y-2">

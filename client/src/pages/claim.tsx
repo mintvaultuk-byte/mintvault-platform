@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
+import CertIdInput from "@/components/cert-id-input";
 
 export default function ClaimPage() {
   const [certId, setCertId] = useState("");
@@ -94,16 +95,16 @@ export default function ClaimPage() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="certId" className="text-[#444444]">Certificate Number</Label>
-                <Input
+                <CertIdInput
                   id="certId"
-                  data-testid="input-cert-id"
-                  placeholder="e.g. MV-2025-0042"
+                  testId="input-cert-id"
+                  placeholder="141"
                   value={certId}
-                  onChange={(e) => setCertId(e.target.value)}
-                  className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                  onChange={setCertId}
+                  className="rounded-md"
                 />
                 <p className="text-xs text-[#999999]">
-                  Found on your MintVault label.
+                  Found on your MintVault label — just the number after &apos;MV&apos;
                 </p>
               </div>
 

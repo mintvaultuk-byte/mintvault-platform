@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Shield, AlertTriangle, CheckCircle, Mail, Search } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import CertIdInput from "@/components/cert-id-input";
 
 export default function StolenCardProtectionPage() {
   const [location] = useLocation();
@@ -85,15 +86,15 @@ export default function StolenCardProtectionPage() {
             <h2 className="text-2xl font-black text-[#1A1A1A] mb-2" style={{ letterSpacing: "-0.02em" }}>Check a Certificate</h2>
             <p className="text-[#666666] text-sm mb-6">Enter a certificate ID to check whether it has been reported stolen.</p>
             <div className="flex gap-3 max-w-sm">
-              <input
+              <CertIdInput
                 value={reportCertId}
-                onChange={e => setReportCertId(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && reportCertId.trim() && navigate(`/cert/${reportCertId.trim().toUpperCase()}`)}
-                placeholder="e.g. MV1"
-                className="flex-1 border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+                onChange={setReportCertId}
+                placeholder="1"
+                className="flex-1 rounded-lg"
+                onEnter={() => reportCertId.length > 2 && navigate(`/cert/${reportCertId}`)}
               />
               <button
-                onClick={() => reportCertId.trim() && navigate(`/cert/${reportCertId.trim().toUpperCase()}`)}
+                onClick={() => reportCertId.length > 2 && navigate(`/cert/${reportCertId}`)}
                 className="px-4 py-2.5 rounded-lg text-sm font-bold text-[#1A1400] flex items-center gap-2 transition-all"
                 style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
               >
@@ -195,12 +196,11 @@ function ReportForm() {
     <form onSubmit={handleSubmit} className="max-w-md space-y-4">
       <div>
         <label className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">Certificate ID *</label>
-        <input
-          required
+        <CertIdInput
           value={certId}
-          onChange={e => setCertId(e.target.value)}
-          placeholder="e.g. MV1 or MV-0000000001"
-          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+          onChange={setCertId}
+          placeholder="1"
+          className="w-full rounded-lg"
         />
       </div>
       <div>

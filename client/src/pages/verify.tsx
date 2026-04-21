@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { ArrowRight, Check } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
+import CertIdInput from "@/components/cert-id-input";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 
@@ -32,8 +33,6 @@ type VerifyStatus =
   | { kind: "not-found"; certId: string }
   | { kind: "rate-limited" }
   | { kind: "error" };
-
-const CERT_PATTERN = /^MV\d+$/;
 
 // ── Methods list (Section I) ───────────────────────────────────────────────
 
@@ -189,8 +188,8 @@ export default function VerifyV2() {
     e.preventDefault();
     const trimmed = certNumber.trim().toUpperCase();
 
-    if (!CERT_PATTERN.test(trimmed)) {
-      setFormatError("Format: MVXXX (e.g. MV141)");
+    if (trimmed.length < 3) {
+      setFormatError("Enter a certificate number.");
       return;
     }
     setFormatError(null);
@@ -260,23 +259,18 @@ export default function VerifyV2() {
                   border: `1px solid ${formatError ? "#b33" : "var(--v2-line)"}`,
                 }}
               >
-                <input
-                  type="text"
-                  inputMode="text"
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  maxLength={12}
+                <CertIdInput
+                  bordered={false}
                   value={certNumber}
-                  onChange={(e) => {
-                    setCertNumber(e.target.value.toUpperCase());
+                  onChange={(v) => {
+                    setCertNumber(v);
                     if (formatError) setFormatError(null);
                   }}
-                  placeholder="MV141"
+                  placeholder="141"
                   disabled={isLoading}
-                  aria-label="Certificate number"
-                  className="flex-1 bg-transparent outline-none px-5 py-3 font-mono-v2 text-base"
-                  style={{ color: "var(--v2-ink)", minWidth: 0 }}
+                  className="flex-1"
+                  inputClassName="font-mono-v2 text-base px-5 py-3"
+                  prefixClassName="font-mono-v2 text-base px-5"
                 />
                 <button
                   type="submit"
