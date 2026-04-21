@@ -10,6 +10,7 @@ export default function ClaimPage() {
   const [claimCode, setClaimCode] = useState("");
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
+  const [declaredNew, setDeclaredNew] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
@@ -41,6 +42,7 @@ export default function ClaimPage() {
         claimCode: claimCode.trim(),
         email: email.trim(),
         name: fullName.trim() || undefined,
+        declaredNew,
       });
       const data = await res.json();
       setResult({ type: "success", message: data.message });
@@ -158,6 +160,23 @@ export default function ClaimPage() {
                   We'll send a verification link to confirm your ownership.
                 </p>
               </div>
+
+              <label className="flex items-start gap-3 pt-2 cursor-pointer select-none">
+                <input
+                  id="declaredNew"
+                  data-testid="input-declared-new"
+                  type="checkbox"
+                  checked={declaredNew}
+                  onChange={(e) => setDeclaredNew(e.target.checked)}
+                  className="mt-1 w-4 h-4 accent-[#D4AF37] cursor-pointer"
+                />
+                <span className="text-sm text-[#444444] leading-snug">
+                  I am the first keeper of this card since grading (no previous owners).
+                  <span className="block text-xs text-[#999999] mt-1">
+                    Tick only if no-one else has owned this card between grading and now. Recorded on the Logbook.
+                  </span>
+                </span>
+              </label>
 
               <Button
                 type="submit"

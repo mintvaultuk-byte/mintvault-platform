@@ -141,6 +141,8 @@ export async function buildLogbookData(certIdInput: string) {
       nfcEnabled: !!c.nfcEnabled,
       nfcScanCount: c.nfcScanCount || 0,
       stolenStatus: c.stolenStatus || null,
+      stolenReportedAt: c.stolenReportedAt ? new Date(c.stolenReportedAt).toISOString() : null,
+      declaredNew: c.declaredNew === true,
     },
 
     verification: {

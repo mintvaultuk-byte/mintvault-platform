@@ -249,6 +249,8 @@ export const certificates = pgTable("certificates", {
   // Logbook version — increments on each owner PDF generation for V5C-style reissue tracking
   logbookVersion: integer("logbook_version").notNull().default(1),
   logbookLastIssuedAt: timestamp("logbook_last_issued_at"),
+  // DVLA-parity: first keeper declaration — set at initial claim time only
+  declaredNew: boolean("declared_new").notNull().default(false),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -420,6 +422,7 @@ export const claimVerifications = pgTable("claim_verifications", {
   expiresAt:   timestamp("expires_at").notNull(),
   usedAt:      timestamp("used_at"),
   createdAt:   timestamp("created_at").notNull().defaultNow(),
+  declaredNew: boolean("declared_new").notNull().default(false),
 });
 
 export type ClaimVerification = typeof claimVerifications.$inferSelect;

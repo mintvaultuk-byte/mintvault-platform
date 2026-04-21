@@ -4399,7 +4399,7 @@ export async function registerRoutes(
 
   app.post("/api/claim/request", claimRateLimit, async (req, res) => {
     try {
-      const { certId, claimCode, email, name } = req.body;
+      const { certId, claimCode, email, name, declaredNew } = req.body;
       if (!certId || !claimCode || !email) {
         return res.status(400).json({ error: "Certificate number, claim code, and email are all required." });
       }
@@ -4427,7 +4427,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
 
-      const token = await storage.createClaimVerification(normalizedId, email.trim(), name?.trim() || undefined);
+      const token = await storage.createClaimVerification(normalizedId, email.trim(), name?.trim() || undefined, declaredNew === true);
 
       const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
       const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;

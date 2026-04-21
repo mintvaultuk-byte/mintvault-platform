@@ -110,6 +110,22 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
 
       let y = 25;
       const clipped: string[] = [];
+      const isStolen = provenance.stolenStatus === "reported_stolen";
+
+      // ── STOLEN BANNER (only when flagged) ──────────────────────────────────
+      if (isStolen) {
+        const bannerH = 26;
+        doc.save().rect(M, y, CW, bannerH).fill("#C0392B").restore();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#FFFFFF")
+          .text("\u26A0  THIS CERTIFICATE HAS BEEN REPORTED STOLEN", M, y + 5, { width: CW, align: "center", height: 10, characterSpacing: 1 });
+        const reportedAt = (provenance as any).stolenReportedAt
+          ? new Date((provenance as any).stolenReportedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+          : null;
+        doc.font("Helvetica").fontSize(5).fillColor("#FFFFFF")
+          .text(`${reportedAt ? `Reported: ${reportedAt}. ` : ""}Do not transact with this cert. Contact support@mintvaultuk.com to verify.`,
+            M, y + 16, { width: CW, align: "center", height: 8 });
+        y += bannerH + 6;
+      }
 
       // Hard clamp — returns false if section won't fit, logs warning
       function fits(need: number, name: string): boolean {
@@ -209,8 +225,27 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       // ── REGISTRATION DETAILS (budget: ~30pt) ───────────────────────────────
       if (fits(28, "Registration")) {
         hr(); hd("Registration Details");
-        rw("Former Keepers", String(Math.max(0, (ownership?.chain?.length || 1) - 1)));
-        rw("Declared new", "Not declared");
+        // Former keepers headline — DVLA-style with "Last change" for transferred certs
+        const chainLen = ownership?.chain?.length || 0;
+        let formerKeepersValue: string;
+        if (chainLen === 0) {
+          formerKeepersValue = "\u2014 (unclaimed)";
+        } else if (chainLen === 1) {
+          formerKeepersValue = "0";
+        } else {
+          const formerReleaseDates = (ownership.chain as any[])
+            .filter((o: any) => !o.isCurrent && o.releasedAt)
+            .map((o: any) => new Date(o.releasedAt).getTime());
+          if (formerReleaseDates.length > 0) {
+            const lastChange = new Date(Math.max(...formerReleaseDates))
+              .toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+            formerKeepersValue = `${chainLen - 1}. Last change: ${lastChange}`;
+          } else {
+            formerKeepersValue = String(chainLen - 1);
+          }
+        }
+        rw("Former Keepers", formerKeepersValue);
+        rw("Declared new", (provenance as any).declaredNew ? "Yes \u2014 first owner since grading" : "Not declared");
         if (provenance.issuedAt) rw("First registration", new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }));
       }
 
@@ -225,7 +260,9 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       }
 
       // ── OWNER-ONLY: REFERENCE NUMBER ───────────────────────────────────────
-      if (opts.includeReferenceNumber) {
+      // Suppressed on stolen-flagged certs — do not give a stolen-flagged owner
+      // the leverage to initiate a transfer.
+      if (opts.includeReferenceNumber && !isStolen) {
         const refNum = (data as any).referenceNumber;
         if (refNum && fits(40, "Reference Number")) {
           hr(); hd("Document Reference Number");

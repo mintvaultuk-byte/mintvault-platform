@@ -113,7 +113,7 @@ export interface IStorage {
   generateClaimCode(certId: string): Promise<string>;
   getOrGenerateClaimCode(certId: string): Promise<string>;
   validateClaimCode(certId: string, claimCode: string): Promise<boolean>;
-  createClaimVerification(certId: string, email: string, ownerName?: string): Promise<string>;
+  createClaimVerification(certId: string, email: string, ownerName?: string, declaredNew?: boolean): Promise<string>;
   completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }>;
   getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]>;
   assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string): Promise<void>;
@@ -1270,7 +1270,7 @@ export class DatabaseStorage implements IStorage {
     return result.rows.length > 0;
   }
 
-  async createClaimVerification(certId: string, email: string, ownerName?: string): Promise<string> {
+  async createClaimVerification(certId: string, email: string, ownerName?: string, declaredNew?: boolean): Promise<string> {
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1281,6 +1281,7 @@ export class DatabaseStorage implements IStorage {
       ownerName: ownerName?.trim() || null,
       tokenHash,
       expiresAt,
+      declaredNew: declaredNew === true,
     });
 
     return token;
@@ -1321,6 +1322,7 @@ export class DatabaseStorage implements IStorage {
           ownership_token_generated_at = NOW(),
           owner_name = ${verification.ownerName ?? null},
           owner_email = ${verification.email},
+          declared_new = ${verification.declaredNew === true},
           updated_at = NOW()
       WHERE certificate_number = ${verification.certId}
     `);
