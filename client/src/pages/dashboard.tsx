@@ -1053,7 +1053,7 @@ export default function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {ownedCerts.map((cert) => (
-                <OwnedCertRow key={cert.id} cert={cert} ownerEmail={me.email} />
+                <OwnedCertRow key={cert.id} cert={cert} />
               ))}
             </div>
           )}
@@ -1063,36 +1063,8 @@ export default function DashboardPage() {
   );
 }
 
-// ── Owned cert row with inline transfer form ───────────────────────────────────
-function OwnedCertRow({ cert, ownerEmail }: { cert: CustomerCert; ownerEmail: string }) {
-  const [showTransfer, setShowTransfer] = useState(false);
-  const [toEmail, setToEmail] = useState("");
-  const [newOwnerName, setNewOwnerName] = useState("");
-  const [sending, setSending] = useState(false);
-  const [transferResult, setTransferResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
-
-  async function handleTransfer(e: React.FormEvent) {
-    e.preventDefault();
-    setSending(true);
-    setTransferResult(null);
-    try {
-      const res = await apiRequest("POST", "/api/transfer/request", {
-        certId: cert.certId,
-        fromEmail: ownerEmail,
-        toEmail: toEmail.trim(),
-        newOwnerName: newOwnerName.trim() || undefined,
-      });
-      const data = await res.json();
-      setTransferResult({ type: "success", message: data.message });
-    } catch (err: any) {
-      let msg = "Transfer failed. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
-      setTransferResult({ type: "error", message: msg });
-    } finally {
-      setSending(false);
-    }
-  }
-
+// ── Owned cert row ─────────────────────────────────────────────────────────────
+function OwnedCertRow({ cert }: { cert: CustomerCert }) {
   return (
     <div className="border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-xl p-4">
       <div className="flex items-start justify-between gap-2">
@@ -1118,64 +1090,14 @@ function OwnedCertRow({ cert, ownerEmail }: { cert: CustomerCert; ownerEmail: st
               </span>
             </div>
           )}
-          <button
-            onClick={() => { setShowTransfer(!showTransfer); setTransferResult(null); }}
-            className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
-          >
-            <ArrowRightLeft size={12} />
-            Transfer
-            <ChevronRight size={12} className={`transition-transform ${showTransfer ? "rotate-90" : ""}`} />
-          </button>
+          <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
+            <span className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors cursor-pointer">
+              <ArrowRightLeft size={12} />
+              Transfer
+            </span>
+          </Link>
         </div>
       </div>
-
-      {showTransfer && (
-        <div className="mt-4 pt-4 border-t border-[#E8E4DC]">
-          {transferResult ? (
-            <div className={`flex items-start gap-2 text-sm rounded-lg p-3 ${
-              transferResult.type === "success"
-                ? "text-green-600 bg-green-50 border border-green-300"
-                : "text-red-500 bg-red-50 border border-red-300"
-            }`}>
-              {transferResult.type === "success" ? <CheckCircle size={14} className="shrink-0 mt-0.5" /> : <AlertCircle size={14} className="shrink-0 mt-0.5" />}
-              {transferResult.message}
-            </div>
-          ) : (
-            <form onSubmit={handleTransfer} className="space-y-3">
-              <p className="text-xs text-[#999999]">Initiate a transfer of ownership to a new owner.</p>
-              <div>
-                <label className="block text-xs text-[#666666] mb-1">New Owner's Full Name</label>
-                <input
-                  type="text"
-                  value={newOwnerName}
-                  onChange={(e) => setNewOwnerName(e.target.value)}
-                  placeholder="e.g. James Smith"
-                  className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-[#1A1A1A] placeholder:text-[#999999] text-sm focus:outline-none focus:border-[#D4AF37]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-[#666666] mb-1">New Owner's Email</label>
-                <input
-                  type="email"
-                  value={toEmail}
-                  onChange={(e) => setToEmail(e.target.value)}
-                  placeholder="newowner@email.com"
-                  required
-                  className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-[#1A1A1A] placeholder:text-[#999999] text-sm focus:outline-none focus:border-[#D4AF37]"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={sending || !toEmail.trim()}
-                className="flex items-center gap-1.5 text-xs font-bold text-[#1A1400] btn-gold px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                {sending ? <Loader2 size={12} className="animate-spin" /> : <ArrowRightLeft size={12} />}
-                {sending ? "Sending..." : "Initiate Transfer"}
-              </button>
-            </form>
-          )}
-        </div>
-      )}
     </div>
   );
 }
