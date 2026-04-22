@@ -320,7 +320,9 @@ function AdminHeader({
     refetchInterval: 60000,
   });
 
-  const isProd = dbInfo?.env === "production";
+  const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
+  const envLabel = isStagingHost ? "STAGING" : (dbInfo?.env === "production" ? "PRODUCTION" : "DEVELOPMENT");
+  const envIsGreen = !isStagingHost && dbInfo?.env === "production";
   const shortHost = dbInfo?.neon_host
     ? dbInfo.neon_host.split(".")[0].slice(0, 12)
     : "...";
@@ -470,14 +472,14 @@ function AdminHeader({
           <div className="flex items-center gap-3 text-[10px] font-mono" data-testid="env-banner">
             <span
               className={`px-2 py-0.5 rounded font-bold tracking-wider uppercase ${
-                isProd
+                envIsGreen
                   ? "bg-green-600/20 text-green-400 border border-green-600/40"
                   : "bg-orange-600/20 text-orange-400 border border-orange-600/40"
               }`}
               data-testid="badge-env"
             >
               <Shield size={10} className="inline mr-1 -mt-px" />
-              ENV: {dbInfo.env}
+              ENV: {envLabel}
             </span>
             <span className="text-[#999999] flex items-center gap-1" data-testid="badge-db">
               <Database size={10} />
