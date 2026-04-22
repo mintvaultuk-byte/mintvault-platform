@@ -5033,6 +5033,47 @@ export async function registerRoutes(
     }
   });
 
+  // ── STAGING HARNESS (seed + reset test data — staging only) ──────────────
+  // Endpoints registered on every deploy but triple-guarded:
+  //   1. requireAdmin (session-authenticated admin)
+  //   2. APP_URL must contain 'mintvault-v2'
+  //   3. STAGING_ONLY env var must equal '1'
+  // All three must pass. See server/staging-harness.ts for implementation.
+  {
+    const { stagingOnlyGuard, seedE2Ev1, resetStagingData, SafetyLimitExceeded } = await import("./staging-harness");
+
+    app.post("/api/admin/staging/seed", requireAdmin, stagingOnlyGuard, async (req, res) => {
+      try {
+        const dryRun = req.query.dryRun === "true";
+        const adminEmail = req.session.adminEmail || "unknown-admin";
+        const result = await seedE2Ev1({ dryRun, adminEmail });
+        if (result.alreadySeeded) {
+          return res.status(409).json({ error: "Already seeded — run reset first.", alreadySeeded: true });
+        }
+        return res.json(result);
+      } catch (err: any) {
+        console.error("[staging-harness] seed error:", err.message, err.stack?.split("\n")[1]?.trim());
+        return res.status(500).json({ error: "Seed failed.", detail: err.message });
+      }
+    });
+
+    app.post("/api/admin/staging/reset", requireAdmin, stagingOnlyGuard, async (req, res) => {
+      try {
+        const dryRun = req.query.dryRun === "true";
+        const adminEmail = req.session.adminEmail || "unknown-admin";
+        const result = await resetStagingData({ dryRun, adminEmail });
+        return res.json(result);
+      } catch (err: any) {
+        if (err instanceof SafetyLimitExceeded) {
+          console.warn("[staging-harness] reset refused (safety limit):", err.message);
+          return res.status(400).json({ error: err.message, totalCount: err.totalCount, limit: err.limit });
+        }
+        console.error("[staging-harness] reset error:", err.message, err.stack?.split("\n")[1]?.trim());
+        return res.status(500).json({ error: "Reset failed.", detail: err.message });
+      }
+    });
+  }
+
   // ── ADMIN OWNERSHIP ROUTES ────────────────────────────────────────────────
   app.get("/api/admin/certificates/:certId/ownership", requireAdmin, async (req, res) => {
     try {

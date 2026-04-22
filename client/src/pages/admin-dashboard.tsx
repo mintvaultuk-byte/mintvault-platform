@@ -9,6 +9,9 @@ import {
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
   Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain,
 } from "lucide-react";
+import StagingHarnessPanel from "@/components/staging-harness-panel";
+
+const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
 
 type CertsFilter = {
   status?: "all" | "active" | "voided";
@@ -218,6 +221,8 @@ export default function AdminDashboard({ onLogout }: Props) {
   return (
     <div className="min-h-screen bg-white">
       <AdminHeader onLogout={handleLogout} activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {isStagingHost && <StagingHarnessPanel />}
 
       {activeTab === "dashboard" && (
         <DashboardView stats={stats} onNewCert={handleNewCert} onGoToCerts={handleGoToCerts} onTabChange={setActiveTab} />
