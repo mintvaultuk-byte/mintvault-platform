@@ -4934,6 +4934,105 @@ export async function registerRoutes(
     }
   });
 
+  // ── ADMIN TRANSFER RESOLVE (force-finalise + force-cancel) ──────────────
+  app.post("/api/admin/transfers/:id/force-finalise", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid transfer id." });
+
+      const { reason } = req.body || {};
+      if (typeof reason !== "string" || reason.trim().length < 10) {
+        return res.status(400).json({ error: "Reason is required (minimum 10 characters)." });
+      }
+      const trimmedReason = reason.trim().slice(0, 2000);
+
+      const transfer = await storage.getTransferV2(id);
+      if (!transfer) return res.status(404).json({ error: "Transfer not found." });
+
+      if (["completed", "cancelled", "expired"].includes(transfer.status)) {
+        return res.status(400).json({ error: `Transfer is already ${transfer.status}.` });
+      }
+      if (!["pending_dispute", "disputed"].includes(transfer.status)) {
+        return res.status(400).json({ error: "Force-finalise is only allowed on pending_dispute or disputed transfers." });
+      }
+
+      const priorStatus = transfer.status;
+      const result = await storage.finaliseTransferV2(id, { skipStatusCheck: true });
+      if (!result.success) return res.status(400).json({ error: result.error || "Finalise failed." });
+
+      const adminUser = req.session.adminEmail || ADMIN_EMAIL;
+      await storage.writeAuditLog("transfer", transfer.certId, "admin_force_finalise", adminUser, {
+        transferId: id,
+        priorStatus,
+        reason: trimmedReason,
+        fromEmail: transfer.fromEmail,
+        toEmail: transfer.toEmail,
+        disputeReason: transfer.disputeReason ?? null,
+        disputedBy: transfer.disputedBy ?? null,
+      });
+
+      // Notify both parties — same template as cron-driven finalise
+      try {
+        await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
+        await sendTransferV2Completed({ email: result.toEmail!, certId: result.certId!, role: "incoming", newKeeperName: result.ownerName });
+      } catch (emailErr: any) {
+        console.error("[admin] force-finalise emails failed (non-fatal):", emailErr.message);
+      }
+
+      return res.json({ ok: true, certId: result.certId, toEmail: result.toEmail });
+    } catch (err: any) {
+      console.error("[admin] force-finalise error:", err);
+      return res.status(500).json({ error: "Failed to force-finalise transfer." });
+    }
+  });
+
+  app.post("/api/admin/transfers/:id/force-cancel", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid transfer id." });
+
+      const { reason } = req.body || {};
+      if (typeof reason !== "string" || reason.trim().length < 10) {
+        return res.status(400).json({ error: "Reason is required (minimum 10 characters)." });
+      }
+      const trimmedReason = reason.trim().slice(0, 1900);
+
+      const transfer = await storage.getTransferV2(id);
+      if (!transfer) return res.status(404).json({ error: "Transfer not found." });
+
+      if (["completed", "cancelled", "expired"].includes(transfer.status)) {
+        return res.status(400).json({ error: `Transfer is already ${transfer.status}.` });
+      }
+
+      const priorStatus = transfer.status;
+      const adminPrefixed = `[ADMIN] ${trimmedReason}`;
+      const result = await storage.cancelTransferV2(id, adminPrefixed);
+      if (!result.success) return res.status(400).json({ error: result.error || "Cancel failed." });
+
+      const adminUser = req.session.adminEmail || ADMIN_EMAIL;
+      await storage.writeAuditLog("transfer", transfer.certId, "admin_force_cancel", adminUser, {
+        transferId: id,
+        priorStatus,
+        reason: trimmedReason,
+        fromEmail: transfer.fromEmail,
+        toEmail: transfer.toEmail,
+      });
+
+      // Notify both parties
+      try {
+        await sendTransferV2Cancelled({ email: transfer.fromEmail, certId: transfer.certId, reason: adminPrefixed });
+        await sendTransferV2Cancelled({ email: transfer.toEmail, certId: transfer.certId, reason: adminPrefixed });
+      } catch (emailErr: any) {
+        console.error("[admin] force-cancel emails failed (non-fatal):", emailErr.message);
+      }
+
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[admin] force-cancel error:", err);
+      return res.status(500).json({ error: "Failed to cancel transfer." });
+    }
+  });
+
   // ── ADMIN OWNERSHIP ROUTES ────────────────────────────────────────────────
   app.get("/api/admin/certificates/:certId/ownership", requireAdmin, async (req, res) => {
     try {

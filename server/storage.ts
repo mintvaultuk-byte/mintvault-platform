@@ -134,7 +134,7 @@ export interface IStorage {
   listTransfersV2(filters?: { status?: string; certId?: string }): Promise<TransferVerification[]>;
   disputeTransferV2(transferId: number, disputedBy: "outgoing" | "incoming", reason: string): Promise<{ success: boolean; error?: string }>;
   cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }>;
-  finaliseTransferV2(transferId: number): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  finaliseTransferV2(transferId: number, opts?: { skipStatusCheck?: boolean }): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
   getTransfersReadyToFinalise(): Promise<TransferVerification[]>;
   expireStaleTransfersV2(): Promise<number>;
 
@@ -1934,7 +1934,7 @@ export class DatabaseStorage implements IStorage {
     return { success: true };
   }
 
-  async finaliseTransferV2(transferId: number): Promise<{
+  async finaliseTransferV2(transferId: number, opts?: { skipStatusCheck?: boolean }): Promise<{
     success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string;
   }> {
     const [transfer] = await db.select()
@@ -1945,7 +1945,12 @@ export class DatabaseStorage implements IStorage {
       ));
 
     if (!transfer) return { success: false, error: "Transfer not found." };
-    if (transfer.status !== "pending_dispute") return { success: false, error: "Transfer is not in dispute window." };
+    if (["completed", "cancelled", "expired"].includes(transfer.status)) {
+      return { success: false, error: `Transfer is already ${transfer.status}.` };
+    }
+    if (!opts?.skipStatusCheck && transfer.status !== "pending_dispute") {
+      return { success: false, error: "Transfer is not in dispute window." };
+    }
     if (transfer.finalisedAt) return { success: false, error: "Already finalised." };
 
     const cert = await this.getCertificateByCertId(transfer.certId);
