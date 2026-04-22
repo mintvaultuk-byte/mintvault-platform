@@ -3,6 +3,23 @@ import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, n
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+/**
+ * ── Certificate-ID naming convention ────────────────────────────────────────
+ *
+ * Primary `certificates` table stores the MV business id (e.g. "MV141") in the
+ * column named `certificate_number` (historical name — line 202). All other
+ * tables referencing a certificate use column `cert_id` (FK shorthand, same
+ * string value). Drizzle exposes both as the TS field `certId`, so app code is
+ * uniform; raw SQL sees the split.
+ *
+ * Tables with `cert_id` column: label_prints, label_overrides, reprint_log,
+ * ownership_history, claim_verifications, transfer_verifications, stolen_reports,
+ * marketplace_listings, marketplace_orders.
+ *
+ * Note: `replaced_by_cert_id` (certificates table, line 211) is an INTEGER FK
+ * to certificates.id, NOT the MV string. Name is misleading — it's a row ref.
+ */
+
 export const BUILD_STAMP = "MV-P5-20260225-nohalf";
 
 export const users = pgTable("users", {
