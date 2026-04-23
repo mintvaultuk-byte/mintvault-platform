@@ -36,6 +36,7 @@ import {
   sendEmailChangedNotification, sendAccountDeletedEmail,
 } from "./email";
 import { requireAuth } from "./middleware/auth";
+import { requireScannerOrAdmin } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
@@ -7637,7 +7638,7 @@ export async function registerRoutes(
 
   app.post(
     "/api/admin/scan-ingest",
-    requireAdmin,
+    requireScannerOrAdmin,
     scanUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
     async (req, res) => {
       const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");

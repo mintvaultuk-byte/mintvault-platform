@@ -2,202 +2,246 @@
 /**
  * MintVault Scanner Watcher
  *
- * Watches ~/mintvault-scans/inbox/ for new image files.
- * Pairs them as front + back, uploads to /api/admin/scan-ingest.
+ * Watches ~/mintvault-scans/inbox/ for .tif files from SilverFast SE.
+ * Pairs them by 60-second timestamp proximity (first = front, second = back)
+ * and uploads each pair to /api/admin/scan-ingest using a static
+ * SCANNER_API_TOKEN header (no admin cookie needed).
  *
- * File pairing logic:
- *   1. If filename contains _front or _back suffix → explicit pair
- *   2. Otherwise → pair by timestamp proximity (within 60s = same card)
- *      First file = front, second = back
+ * On success: moved to ~/mintvault-scans/processed/YYYY-MM-DD/
+ * On failure: moved to ~/mintvault-scans/failed/YYYY-MM-DD/ + .error.txt sibling
  *
- * On success: moves to ~/mintvault-scans/processed/
- * On failure: moves to ~/mintvault-scans/failed/
+ * Required env:
+ *   SCANNER_API_TOKEN        — matching the server's Fly secret
  *
- * Required env vars:
- *   MINTVAULT_API_URL  — e.g. https://mintvault.fly.dev
- *   MINTVAULT_ADMIN_COOKIE — session cookie value (mv.sid=...)
+ * Optional env:
+ *   MINTVAULT_INGEST_URL     — defaults to prod scan-ingest URL; override
+ *                              with the staging URL for dev testing
  *
- * Usage:
- *   cd scripts/scanner-watcher
- *   npm install
- *   MINTVAULT_API_URL=https://mintvault.fly.dev MINTVAULT_ADMIN_COOKIE="mv.sid=s%3A..." npm start
+ * Logs to stdout. Under launchd the plist redirects stdout/stderr to
+ * ~/mintvault-scans/watcher.log so the daemon's output ends up there. For
+ * manual runs, pipe into `tee` if a file is wanted. Rotation is a manual /
+ * Phase 6 concern — see docs/scanner-watcher-todo.md.
+ *
+ * Launch: `npm start` (or via launchd — see install.sh in the same dir)
  */
 
 import chokidar from "chokidar";
 import FormData from "form-data";
 import fetch from "node-fetch";
-import fs from "fs";
-import path from "path";
-import os from "os";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
-const API_URL = process.env.MINTVAULT_API_URL || "https://mintvault.fly.dev";
-const ADMIN_COOKIE = process.env.MINTVAULT_ADMIN_COOKIE || "";
+// ── Config ────────────────────────────────────────────────────────────────
+const INGEST_URL = process.env.MINTVAULT_INGEST_URL || "https://mintvault.fly.dev/api/admin/scan-ingest";
+const TOKEN = process.env.SCANNER_API_TOKEN || "";
 
 const BASE = path.join(os.homedir(), "mintvault-scans");
 const INBOX = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED = path.join(BASE, "failed");
 
-// Ensure directories exist
-for (const dir of [INBOX, PROCESSED, FAILED]) {
+const PAIR_TIMEOUT_MS = 60_000;
+
+// Only TIF from SilverFast. JPGs are duplicates we deliberately ignore.
+const ACCEPTED_EXT = new Set([".tif", ".tiff"]);
+const IGNORED_EXT = new Set([".jpg", ".jpeg", ".png", ".bmp", ".gif"]);
+
+// ── Ensure directory tree exists ─────────────────────────────────────────
+for (const dir of [BASE, INBOX, PROCESSED, FAILED]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"]);
+// ── Logging ──────────────────────────────────────────────────────────────
+// Stdout only — under launchd, plist redirects stdout to watcher.log.
+// For manual runs, pipe to tee if file output is desired.
+function log(msg, level = "info") {
+  const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
+  process.stdout.write(line);
+}
 
-/** Pending files waiting for a pair */
-const pending = new Map(); // basename → { path, time }
-
-const PAIR_TIMEOUT_MS = 60_000; // 60 seconds to find a pair
-
-function log(msg) {
-  console.log(`[${new Date().toISOString().slice(11, 19)}] ${msg}`);
+// ── File movement ────────────────────────────────────────────────────────
+function dateFolder(base) {
+  const today = new Date().toISOString().slice(0, 10);
+  const dir = path.join(base, today);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function moveFile(src, destDir) {
   const name = path.basename(src);
-  const dest = path.join(destDir, `${Date.now()}_${name}`);
+  const dest = path.join(destDir, name);
+  let target = dest;
+  // Collision handling: append (2), (3) etc — never overwrite
+  let suffix = 2;
+  while (fs.existsSync(target)) {
+    const { name: base, ext } = path.parse(dest);
+    target = path.join(destDir, `${base} (${suffix})${ext}`);
+    suffix++;
+  }
   try {
-    fs.renameSync(src, dest);
+    fs.renameSync(src, target);
   } catch {
-    // Cross-device move fallback
-    fs.copyFileSync(src, dest);
+    fs.copyFileSync(src, target);
     fs.unlinkSync(src);
   }
-  return dest;
+  return target;
 }
 
+function writeErrorFile(targetPath, reason) {
+  const errPath = `${targetPath}.error.txt`;
+  const payload = `${new Date().toISOString()}\n${reason}\n`;
+  try { fs.writeFileSync(errPath, payload); } catch { /* best-effort */ }
+}
+
+// ── Upload ───────────────────────────────────────────────────────────────
 async function upload(frontPath, backPath) {
-  log(`Uploading: front=${path.basename(frontPath)} back=${backPath ? path.basename(backPath) : "none"}`);
+  const frontName = path.basename(frontPath);
+  const backName = backPath ? path.basename(backPath) : null;
+  log(`Uploading: front=${frontName}${backName ? ` back=${backName}` : " (front-only)"}`);
 
   const form = new FormData();
   form.append("front", fs.createReadStream(frontPath));
   if (backPath) form.append("back", fs.createReadStream(backPath));
+  form.append("client_source", "scanner_watcher");
 
+  let response;
   try {
-    const res = await fetch(`${API_URL}/api/admin/scan-ingest`, {
+    response = await fetch(INGEST_URL, {
       method: "POST",
       headers: {
-        cookie: ADMIN_COOKIE,
+        "x-scanner-token": TOKEN,
         ...form.getHeaders(),
       },
       body: form,
     });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      log(`FAILED (${res.status}): ${data.error || JSON.stringify(data)}`);
-      moveFile(frontPath, FAILED);
-      if (backPath) moveFile(backPath, FAILED);
-      return;
-    }
-
-    log(`SUCCESS: ${data.certId} — ${data.message}`);
-    log(`  Workstation: ${API_URL}${data.workstationUrl}`);
-    moveFile(frontPath, PROCESSED);
-    if (backPath) moveFile(backPath, PROCESSED);
   } catch (err) {
-    log(`ERROR: ${err.message}`);
-    moveFile(frontPath, FAILED);
-    if (backPath) moveFile(backPath, FAILED);
+    const reason = `network error: ${err.message}`;
+    log(`FAILED ${frontName}: ${reason}`, "error");
+    const failDir = dateFolder(FAILED);
+    const moved = moveFile(frontPath, failDir);
+    writeErrorFile(moved, reason);
+    if (backPath) {
+      const movedBack = moveFile(backPath, failDir);
+      writeErrorFile(movedBack, reason);
+    }
+    return;
   }
+
+  let data;
+  try { data = await response.json(); } catch { data = {}; }
+
+  if (!response.ok) {
+    const reason = `HTTP ${response.status}: ${data.error || JSON.stringify(data)}`;
+    log(`FAILED ${frontName}: ${reason}`, "error");
+    const failDir = dateFolder(FAILED);
+    const moved = moveFile(frontPath, failDir);
+    writeErrorFile(moved, reason);
+    if (backPath) {
+      const movedBack = moveFile(backPath, failDir);
+      writeErrorFile(movedBack, reason);
+    }
+    return;
+  }
+
+  log(`SUCCESS ${frontName}: ${data.certId} (${data.aiStatus || "queued"}) — ${data.message || ""}`);
+  const processedDir = dateFolder(PROCESSED);
+  moveFile(frontPath, processedDir);
+  if (backPath) moveFile(backPath, processedDir);
 }
 
-function getSide(filename) {
-  const lower = filename.toLowerCase();
-  if (lower.includes("_front") || lower.includes("-front")) return "front";
-  if (lower.includes("_back") || lower.includes("-back")) return "back";
-  return null;
-}
-
-function getBaseName(filename) {
-  // Strip _front/_back suffix and extension for pairing
-  return filename.replace(/[_-](front|back)/i, "").replace(/\.[^.]+$/, "");
-}
+// ── Pairing (simplified FIFO, 60s timestamp proximity) ───────────────────
+/** The one pending scan awaiting a pair, or null. */
+let pending = null; // { path, time, timerId }
 
 function handleNewFile(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  if (!IMAGE_EXTS.has(ext)) return;
-
   const filename = path.basename(filePath);
-  const side = getSide(filename);
-  const base = getBaseName(filename);
-  const now = Date.now();
+  const ext = path.extname(filePath).toLowerCase();
 
-  log(`New file: ${filename} (side=${side || "auto"}, base=${base})`);
-
-  if (side) {
-    // Explicit side — look for the other half
-    const otherSide = side === "front" ? "back" : "front";
-    const otherKey = `${base}_${otherSide}`;
-    const match = pending.get(otherKey);
-
-    if (match) {
-      pending.delete(otherKey);
-      const front = side === "front" ? filePath : match.path;
-      const back = side === "back" ? filePath : match.path;
-      upload(front, back);
-    } else {
-      const key = `${base}_${side}`;
-      pending.set(key, { path: filePath, time: now });
-      log(`  Waiting for ${otherSide} pair...`);
-      // Timeout: upload front-only if no pair arrives
-      setTimeout(() => {
-        if (pending.has(key)) {
-          pending.delete(key);
-          if (side === "front") {
-            log(`  Timeout: uploading ${filename} as front-only`);
-            upload(filePath, null);
-          } else {
-            log(`  Timeout: ${filename} is back-only, skipping (need front)`);
-            moveFile(filePath, FAILED);
-          }
-        }
-      }, PAIR_TIMEOUT_MS);
-    }
-  } else {
-    // Auto-pair by timestamp proximity
-    let paired = false;
-    for (const [key, entry] of pending) {
-      if (Math.abs(now - entry.time) < PAIR_TIMEOUT_MS) {
-        pending.delete(key);
-        // First file = front, second = back
-        upload(entry.path, filePath);
-        paired = true;
-        break;
-      }
-    }
-    if (!paired) {
-      pending.set(filePath, { path: filePath, time: now });
-      log(`  Waiting for pair (60s timeout)...`);
-      setTimeout(() => {
-        if (pending.has(filePath)) {
-          pending.delete(filePath);
-          log(`  Timeout: uploading ${filename} as front-only`);
-          upload(filePath, null);
-        }
-      }, PAIR_TIMEOUT_MS);
-    }
+  // Skip hidden files and macOS metadata
+  if (filename.startsWith(".") || filename === ".DS_Store") {
+    log(`Ignored (hidden): ${filename}`, "debug");
+    return;
   }
+
+  // Skip non-TIF images (SilverFast emits .jpg duplicates we don't want)
+  if (IGNORED_EXT.has(ext)) {
+    log(`Ignored (${ext} not accepted — TIF only): ${filename}`, "debug");
+    return;
+  }
+
+  if (!ACCEPTED_EXT.has(ext)) {
+    log(`Ignored (unknown extension ${ext}): ${filename}`, "debug");
+    return;
+  }
+
+  const now = Date.now();
+  log(`New scan: ${filename}`);
+
+  if (pending) {
+    const age = now - pending.time;
+    if (age < PAIR_TIMEOUT_MS) {
+      // Pair found
+      clearTimeout(pending.timerId);
+      const front = pending.path;
+      const back = filePath;
+      pending = null;
+      log(`  Paired with ${path.basename(front)} (${age}ms since front)`);
+      upload(front, back);
+      return;
+    }
+    // Stale pending shouldn't reach here (timer fires first) — defensive clear
+    clearTimeout(pending.timerId);
+    pending = null;
+  }
+
+  // Start a new pending window
+  const timerId = setTimeout(() => {
+    if (pending && pending.path === filePath) {
+      log(`  Timeout: ${filename} had no pair in 60s — uploading as front-only`);
+      const lone = pending.path;
+      pending = null;
+      upload(lone, null);
+    }
+  }, PAIR_TIMEOUT_MS);
+  pending = { path: filePath, time: now, timerId };
+  log(`  Waiting up to 60s for a pair...`);
 }
 
-// Validate config
-if (!ADMIN_COOKIE) {
-  console.error("ERROR: MINTVAULT_ADMIN_COOKIE env var is required.");
-  console.error("Get it from your browser's DevTools → Application → Cookies → mv.sid value");
+// ── Startup validation ───────────────────────────────────────────────────
+if (!TOKEN) {
+  const msg = `FATAL: SCANNER_API_TOKEN env var is required. Refusing to start — a token-less POST would just 401 the server.`;
+  console.error(msg);
+  console.error(`Create ~/.mintvault-scanner.env with:`);
+  console.error(`  SCANNER_API_TOKEN=<your-64-char-hex-token>`);
+  console.error(`Then restart via launchctl, or run with the env var exported.`);
   process.exit(1);
 }
 
-log(`MintVault Scanner Watcher`);
-log(`API: ${API_URL}`);
+log(`─────────────────────────────────────────────────────────`);
+log(`MintVault Scanner Watcher starting`);
+log(`Ingest URL: ${INGEST_URL}`);
 log(`Inbox: ${INBOX}`);
-log(`Watching for new images...`);
+log(`Accepted: .tif, .tiff   |   Ignored: .jpg, .jpeg, .png, .bmp, .gif, dotfiles`);
+log(`Pairing: 60s FIFO timestamp proximity (first=front, second=back)`);
+log(`─────────────────────────────────────────────────────────`);
 
 const watcher = chokidar.watch(INBOX, {
   ignoreInitial: true,
-  awaitWriteFinish: { stabilityThreshold: 1000, pollInterval: 200 },
+  awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 250 },
 });
 
 watcher.on("add", handleNewFile);
-watcher.on("error", err => log(`Watcher error: ${err.message}`));
+watcher.on("error", err => log(`Watcher error: ${err.message}`, "error"));
+
+// Graceful shutdown
+function shutdown(signal) {
+  log(`Received ${signal}, shutting down gracefully`);
+  if (pending) {
+    clearTimeout(pending.timerId);
+    log(`  Unpaired scan at shutdown: ${path.basename(pending.path)} — remains in inbox`);
+  }
+  watcher.close().finally(() => process.exit(0));
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

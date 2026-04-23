@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MintVault Scanner Watcher — launchd LaunchAgent.
+  install.sh substitutes __WRAPPER_PATH__ and __HOME__ before copying this
+  file into ~/Library/LaunchAgents/. Do not load this source file directly.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mintvault.scanner-watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WRAPPER_PATH__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/mintvault-scans/watcher.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/mintvault-scans/watcher.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
