@@ -140,6 +140,21 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [approved, setApproved]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  /**
+   * Clear overallOverride if currently set, toasting once so the grader sees
+   * what happened. Called from every sub-grade / centering value edit: the
+   * saved overall is stale the moment a grader changes any input.
+   */
+  function clearOverallOverrideIfSet() {
+    if (overallOverride !== null) {
+      setOverallOverride(null);
+      toast({
+        title: "Override cleared",
+        description: "Overall grade now recomputed from sub-grades",
+      });
+    }
+  }
+
   // Quick-grade mode
   const [quickGrade, setQuickGrade] = useState(() => {
     try { return localStorage.getItem("mv_quick_grade") === "1"; } catch { return false; }
@@ -189,7 +204,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (gradingData.edgesScore != null)    setEdgesOverride(Number(gradingData.edgesScore));
     if (gradingData.surfaceScore != null)  setSurfaceOverride(Number(gradingData.surfaceScore));
     if (gradingData.grade != null)         setOverallOverride(Number(gradingData.grade));
-    // Centering: don't override — let centeringCalc derive from L/R + T/B ratios
+    // Centering: prefer letting centeringCalc derive from L/R + T/B ratios.
+    // Fallback: if ratios are missing but a centering_score was saved, use it
+    // as an override so the Overall formula still has a value to weight.
+    const hasCenteringRatios = !!(gradingData.centeringFrontLr && gradingData.centeringFrontTb &&
+                                  gradingData.centeringBackLr  && gradingData.centeringBackTb);
+    if (!hasCenteringRatios && gradingData.centeringScore != null) {
+      setCenteringOverride(Number(gradingData.centeringScore));
+    }
   }, [gradingData]);
 
   // AI analysis state
@@ -213,6 +235,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (co > 0) setCornersOverride(co);
     if (e > 0) setEdgesOverride(e);
     if (s > 0) setSurfaceOverride(s);
+    // AI re-ran → any prior manual overall override is stale. Let formula redrive.
+    setOverallOverride(null);
 
     setAiSources(prev => ({
       ...prev,
@@ -308,6 +332,36 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
     // Notify parent to refresh cert data (AI autofills card name/set/number on the server)
     onCertUpdated?.();
+  }
+
+  /**
+   * Populate all sub-grade overrides + zone values from the last AI analysis
+   * that ran during this session. Clears overallOverride so the formula
+   * re-derives from the AI sub-grades. Gated on in-session aiAnalysis —
+   * on a cold reload without a fresh AI run, the button is disabled.
+   */
+  function handleRevertToAi() {
+    if (!aiAnalysis) {
+      toast({ title: "No AI draft in this session", description: "Run AI Identify & Grade first", variant: "destructive" });
+      return;
+    }
+    const c  = aiAnalysis.centering?.subgrade ?? 0;
+    const co = aiAnalysis.corners?.subgrade   ?? 0;
+    const e  = aiAnalysis.edges?.subgrade     ?? 0;
+    const s  = aiAnalysis.surface?.subgrade   ?? 0;
+
+    if (c  > 0) setCenteringOverride(null);
+    if (co > 0) setCornersOverride(co);
+    if (e  > 0) setEdgesOverride(e);
+    if (s  > 0) setSurfaceOverride(s);
+    setOverallOverride(null);
+
+    if (aiAnalysis.centering?.front_left_right) setFrontLR(aiAnalysis.centering.front_left_right);
+    if (aiAnalysis.centering?.front_top_bottom) setFrontTB(aiAnalysis.centering.front_top_bottom);
+    if (aiAnalysis.centering?.back_left_right)  setBackLR(aiAnalysis.centering.back_left_right);
+    if (aiAnalysis.centering?.back_top_bottom)  setBackTB(aiAnalysis.centering.back_top_bottom);
+
+    toast({ title: "Reverted to AI draft", description: "Review and approve to save" });
   }
 
   // pendingAnalysis is passed through to AiPanel via externalAnalysis prop
@@ -407,6 +461,19 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         <div className="flex items-center gap-3">
           <button
             type="button"
+            onClick={handleRevertToAi}
+            disabled={!aiAnalysis}
+            title={aiAnalysis ? "Clear all overrides and re-populate sub-grades from the last AI run this session" : "Run AI Identify & Grade first to enable this"}
+            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
+              aiAnalysis
+                ? "text-[#555555] border border-[#D4D0C8] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+                : "text-[#999999] border border-[#E8E4DC] opacity-60 cursor-not-allowed"
+            }`}
+          >
+            Revert to AI
+          </button>
+          <button
+            type="button"
             onClick={() => setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; })}
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
             title="Toggle quick-grade mode (Q)"
@@ -431,6 +498,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             setCornersOverride(s.corners);
             setEdgesOverride(s.edges);
             setSurfaceOverride(s.surface);
+            clearOverallOverrideIfSet();
           }}
           onApprove={() => setShowConfirm(true)}
           onSave={saveDraft}
@@ -510,6 +578,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     ? ({ tl: "backTL", tr: "backTR" } as const)[pos]
                     : ({ tl: "frontTL", tr: "frontTR" } as const)[pos];
                   setCorners(prev => ({ ...prev, [key]: v }));
+                  clearOverallOverrideIfSet();
                 };
                 const ee = viewerSide === "back"
                   ? { top: edges.backTop, left: edges.backLeft, right: edges.backRight }
@@ -524,6 +593,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     ? ({ top: "backTop", left: "backLeft", right: "backRight" } as const)[pos]
                     : ({ top: "frontTop", left: "frontLeft", right: "frontRight" } as const)[pos];
                   setEdges(prev => ({ ...prev, [key]: v }));
+                  clearOverallOverrideIfSet();
                 };
                 return (
                   <>
@@ -651,6 +721,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 else if (key === "corners") setCornersOverride(val);
                 else if (key === "edges") setEdgesOverride(val);
                 else if (key === "surface") setSurfaceOverride(val);
+                clearOverallOverrideIfSet();
               }}
             />
           )}
@@ -697,6 +768,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 else if (field === "frontTB") setFrontTB(val);
                 else if (field === "backLR") setBackLR(val);
                 else setBackTB(val);
+                clearOverallOverrideIfSet();
               }}
               overrideGrade={centeringOverride}
               onOverride={v => { setCenteringOverride(v); }}
@@ -708,7 +780,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             <CornerGrading
               values={corners}
               subgrade={cornersGrade}
-              onChange={setCorners}
+              onChange={(v) => { setCorners(v); clearOverallOverrideIfSet(); }}
               overrideGrade={cornersOverride}
               onOverride={setCornersOverride}
             />
@@ -718,7 +790,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <div className="bg-[#F7F7F5] rounded-lg p-3">
             <EdgeGrading
               values={edges}
-              onChange={setEdges}
+              onChange={(v) => { setEdges(v); clearOverallOverrideIfSet(); }}
               overrideGrade={edgesOverride}
               onOverride={setEdgesOverride}
             />
@@ -728,7 +800,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <div className="bg-[#F7F7F5] rounded-lg p-3">
             <SurfaceGrading
               values={surface}
-              onChange={setSurface}
+              onChange={(v) => { setSurface(v); clearOverallOverrideIfSet(); }}
               overrideGrade={surfaceOverride}
               onOverride={setSurfaceOverride}
             />
@@ -806,6 +878,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             setCenteringOverride(null);
             setCenteringMethod("manual");
             setManualCenteringSide(null);
+            clearOverallOverrideIfSet();
           }}
           onCancel={() => setManualCenteringSide(null)}
         />
