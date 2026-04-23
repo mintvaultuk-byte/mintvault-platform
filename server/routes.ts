@@ -5575,6 +5575,8 @@ export async function registerRoutes(
         const certId = normalizeCertId(cert.certId);
         const updates: Record<string, string> = {};
         const qualityResults: Record<string, any> = {};
+        let frontCroppedBuf: Buffer | null = null;
+        let backCroppedBuf: Buffer | null = null;
 
         async function processAngle(angle: "front" | "back" | "angled" | "closeup", buffer: Buffer) {
           const ext = "jpg";
@@ -5601,13 +5603,18 @@ export async function registerRoutes(
           const quality = await checkImageQuality(croppedBuf);
           qualityResults[angle] = { ...quality, cropped, deskewAngle };
 
-          // 5. Also update the primary front/back image paths used for display + AI
+          // 5. Also update the primary front/back image paths used for display + AI.
+          // Canonical display key uses .png with correct image/png mime — croppedBuf is PNG bytes.
           if (angle === "front") {
-            updates["front_image_path"] = r2KeyForImage(certId, "front", ext);
-            await uploadToR2(r2KeyForImage(certId, "front", ext), croppedBuf, "image/jpeg");
+            frontCroppedBuf = croppedBuf;
+            const displayKey = r2KeyForImage(certId, "front", "png");
+            updates["front_image_path"] = displayKey;
+            await uploadToR2(displayKey, croppedBuf, "image/png");
           } else if (angle === "back") {
-            updates["back_image_path"] = r2KeyForImage(certId, "back", ext);
-            await uploadToR2(r2KeyForImage(certId, "back", ext), croppedBuf, "image/jpeg");
+            backCroppedBuf = croppedBuf;
+            const displayKey = r2KeyForImage(certId, "back", "png");
+            updates["back_image_path"] = displayKey;
+            await uploadToR2(displayKey, croppedBuf, "image/png");
           }
 
           // 6. Variants — fire-and-forget (don't block the response)
@@ -5695,6 +5702,27 @@ export async function registerRoutes(
         for (const [key, val] of Object.entries(updates)) {
           if (key === "image_quality_checks") continue;
           try { responseUrls[key] = await getR2SignedUrl(val, 3600); } catch { responseUrls[key] = null; }
+        }
+
+        // Fire async AI pipeline on first full upload (both front+back just became available and no prior analysis)
+        try {
+          const existingAi = (cert as any).aiAnalysis;
+          const aiEmpty = !existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0);
+          const aiGradeEmpty = (cert as any).aiDraftGrade === null || (cert as any).aiDraftGrade === undefined;
+          if (aiEmpty && aiGradeEmpty && frontCroppedBuf && backCroppedBuf) {
+            console.log(`[upload-images] cert=${id} first full upload with empty AI → triggering async pipeline`);
+            const { runAiOnCertIfIdle } = await import("./scan-ingest-service");
+            const aiPromise = runAiOnCertIfIdle(id, frontCroppedBuf, backCroppedBuf);
+            if (aiPromise) {
+              aiPromise
+                .then(r => console.log(`[upload-images] AI done for cert ${id}: grade=${r.grade} strength=${r.strengthScore}`))
+                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e.message}`));
+            }
+          } else {
+            console.log(`[upload-images] cert=${id} skipping AI trigger (aiEmpty=${aiEmpty} aiGradeEmpty=${aiGradeEmpty} frontBuf=${!!frontCroppedBuf} backBuf=${!!backCroppedBuf})`);
+          }
+        } catch (aiErr: any) {
+          console.error(`[upload-images] AI trigger setup failed for cert ${id}: ${aiErr.message}`);
         }
 
         res.json({ success: true, urls: responseUrls, quality: qualityResults });

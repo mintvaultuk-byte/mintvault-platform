@@ -179,3 +179,34 @@ export async function runAiOnCert(
 
   return { cardName, grade: gradeValue, strengthScore };
 }
+
+// ── Auto-trigger gate ──────────────────────────────────────────────────────
+// In-process map of AI calls fired automatically (e.g. by the upload-images
+// handler on first full upload). Only the automatic trigger registers here;
+// manual endpoints (measure-centering, detect-defects, grade-card) deliberately
+// don't participate — user-initiated races are their choice. The map prevents
+// duplicate auto-fires from racing each other (e.g. front + back uploaded as
+// separate requests that each see empty ai_analysis). Cleared on process exit.
+
+const inFlightAutoAi = new Map<number, Promise<unknown>>();
+
+/**
+ * Fire runAiOnCert only if no auto-triggered AI call is currently in flight
+ * for this cert. Returns the promise if fired, or null if skipped.
+ * Use this from automatic trigger paths only.
+ */
+export function runAiOnCertIfIdle(
+  certId: number,
+  frontCropped: Buffer,
+  backCropped: Buffer | null,
+): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> | null {
+  if (inFlightAutoAi.has(certId)) {
+    console.log(`[ai] skip auto-trigger: already in-flight for cert ${certId}`);
+    return null;
+  }
+  const p = runAiOnCert(certId, frontCropped, backCropped).finally(() => {
+    inFlightAutoAi.delete(certId);
+  });
+  inFlightAutoAi.set(certId, p);
+  return p;
+}

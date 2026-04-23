@@ -9,7 +9,10 @@ const CARD_CORNER_RADIUS_PCT = 0.04;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
- * Output is PNG with transparent corners.
+ * Output is PNG with transparent corners AND a consistent white RGB fill
+ * under the transparent pixels — so any downstream flatten (PDF export,
+ * thumbnailers that drop alpha, older email clients) renders clean white,
+ * not whatever pixel colour happened to sit under the masked-out corner.
  */
 export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
   try {
@@ -24,14 +27,30 @@ export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
       `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="white"/></svg>`
     );
 
+    // Step 1: apply alpha mask (only modifies alpha channel; RGB retained)
     const masked = await sharp(inputBuffer)
       .ensureAlpha()
       .composite([{ input: svgMask, blend: "dest-in" }])
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Step 2: flatten RGB under transparent pixels to white (255) for consistency
+    const px = new Uint8Array(masked.data);
+    let flattenedCount = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] < 128) {
+        px[i] = 255; px[i + 1] = 255; px[i + 2] = 255;
+        flattenedCount++;
+      }
+    }
+
+    // Step 3: re-encode as PNG
+    const out = await sharp(px, { raw: { width: masked.info.width, height: masked.info.height, channels: 4 } })
       .png({ quality: 90 })
       .toBuffer();
 
-    console.log(`[mask] rounded corners: r=${r}px on ${w}×${h}`);
-    return masked;
+    console.log(`[mask] rounded corners: r=${r}px on ${w}×${h} (flattened ${flattenedCount} transparent-corner pixels to white)`);
+    return out;
   } catch (err: any) {
     console.warn("[mask] rounded corner masking failed, returning original:", err.message);
     return inputBuffer;
@@ -115,6 +134,50 @@ function isBackground(r: number, g: number, b: number): boolean {
   return r < FALLBACK_BLACK_THRESHOLD && g < FALLBACK_BLACK_THRESHOLD && b < FALLBACK_BLACK_THRESHOLD;
 }
 
+// ── Mat-agnostic card detection (works for black AND white scanner mats) ─────
+// Samples a thin border strip (outer 2% on all 4 sides) and takes the median
+// RGB as the mat colour. A pixel is classified as "card" if its Euclidean
+// colour distance from the mat median exceeds a threshold. This replaces the
+// luma-below-threshold approach, which only worked against dark mats.
+
+interface MatProfile {
+  matR: number;
+  matG: number;
+  matB: number;
+  threshold: number;
+}
+
+/** Sample outer 2% border strip, return median RGB as mat colour */
+function computeMatProfile(pixels: Uint8Array, w: number, h: number, ch: number): MatProfile {
+  const borderPx = Math.max(5, Math.round(Math.min(w, h) * 0.02));
+  const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+
+  const pushAt = (x: number, y: number) => {
+    const i = (y * w + x) * ch;
+    rs.push(pixels[i]); gs.push(pixels[i + 1]); bs.push(pixels[i + 2]);
+  };
+
+  for (let y = 0; y < borderPx; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+  for (let y = h - borderPx; y < h; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+  for (let y = borderPx; y < h - borderPx; y++) {
+    for (let x = 0; x < borderPx; x++) pushAt(x, y);
+    for (let x = w - borderPx; x < w; x++) pushAt(x, y);
+  }
+
+  const median = (arr: number[]) => {
+    arr.sort((a, b) => a - b);
+    return arr[Math.floor(arr.length / 2)];
+  };
+
+  return { matR: median(rs), matG: median(gs), matB: median(bs), threshold: 45 };
+}
+
+/** Euclidean colour distance from mat median exceeds threshold → card pixel */
+function isCardPixel(r: number, g: number, b: number, mat: MatProfile): boolean {
+  const dr = r - mat.matR, dg = g - mat.matG, db = b - mat.matB;
+  return Math.sqrt(dr * dr + dg * dg + db * db) > mat.threshold;
+}
+
 /**
  * Detect card boundary using adaptive background detection.
  * Samples corners to learn background colour, then finds bounding box of all non-background pixels.
@@ -123,18 +186,26 @@ function isBackground(r: number, g: number, b: number): boolean {
 export function detectCardBoundary(
   pixels: Uint8Array, w: number, h: number, ch: number
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
-  const bg = computeBackgroundProfile(pixels, w, h, ch);
-  console.log(`[card-detect] bg profile: luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} rgb=(${bg.avgR.toFixed(0)},${bg.avgG.toFixed(0)},${bg.avgB.toFixed(0)})`);
+  // Primary: mat-distance detector (works against any mat colour)
+  const mat = computeMatProfile(pixels, w, h, ch);
+  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}`);
+  const matBased = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isCardPixel(r, g, b, mat));
+  if (matBased) {
+    console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels`);
+    return matBased;
+  }
 
-  // Try adaptive detection first
+  // Fallback 1: legacy adaptive-luma
+  const bg = computeBackgroundProfile(pixels, w, h, ch);
+  console.log(`[card-detect] falling back to adaptive-luma: avgLuma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)}`);
   const adaptive = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isBackgroundAdaptive(r, g, b, bg.threshold));
   if (adaptive) {
-    console.log(`[card-detect] adaptive detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
+    console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
     return adaptive;
   }
 
-  // Fallback to fixed black threshold
-  console.log("[card-detect] adaptive failed, falling back to fixed black threshold");
+  // Fallback 2: fixed black threshold
+  console.log("[card-detect] adaptive-luma failed, falling back to fixed black threshold");
   return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
 }
 
@@ -171,12 +242,13 @@ function detectBoundaryWithTest(
 }
 
 /**
- * Deskew using non-black edge detection. Works on ANY card colour
- * as long as the scanner background is black.
+ * Deskew using mat-agnostic edge detection. Works on ANY scanner mat colour
+ * (black, white, neutral) by measuring each pixel's colour distance from the
+ * sampled mat colour rather than assuming a dark background.
  */
 export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer; angle: number }> {
   try {
-    console.log(`[deskew] START non-black edge detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[deskew] START mat-agnostic edge detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, angle: 0 };
 
@@ -195,23 +267,23 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
     const h = info.height;
     const ch = info.channels;
 
-    // Use adaptive background detection for deskew edge scanning
-    const bg = computeBackgroundProfile(pixels, w, h, ch);
-    const isBg = (r: number, g: number, b: number) => isBackgroundAdaptive(r, g, b, bg.threshold);
+    const mat = computeMatProfile(pixels, w, h, ch);
+    console.log(`[deskew] mat colour: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}`);
+    const isCard = (r: number, g: number, b: number) => isCardPixel(r, g, b, mat);
 
-    // Scan top 30% of image: for each row, find leftmost+rightmost non-background pixel
+    // Scan top 30% of image: for each row, find leftmost+rightmost card pixel
     const topEdgePoints: { x: number; y: number }[] = [];
     for (let row = 0; row < Math.round(h * 0.3); row++) {
       let rowLeft = -1, rowRight = -1, fgInRow = 0;
       for (let col = 0; col < w; col++) {
         const idx = (row * w + col) * ch;
-        if (!isBg(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+        if (isCard(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
           fgInRow++;
           if (rowLeft === -1) rowLeft = col;
           rowRight = col;
         }
       }
-      // Row must have >30% foreground pixels to count as card content
+      // Row must have >30% card pixels to count as card content
       if (fgInRow > w * 0.3 && rowLeft >= 0) {
         topEdgePoints.push({ x: rowLeft, y: row });
         topEdgePoints.push({ x: rowRight, y: row });
@@ -220,7 +292,7 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
     }
 
     if (topEdgePoints.length < 10) {
-      console.log(`[deskew] not enough non-black edge points (${topEdgePoints.length}), skipping`);
+      console.log(`[deskew] not enough card-edge points (${topEdgePoints.length}) against mat rgb(${mat.matR},${mat.matG},${mat.matB}), skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
 
@@ -247,11 +319,11 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
     }
 
     const rotated = await sharp(inputBuffer)
-      .rotate(-angle, { background: { r: 0, g: 0, b: 0, alpha: 1 } }) // black background fill for rotated edges
+      .rotate(-angle, { background: { r: mat.matR, g: mat.matG, b: mat.matB, alpha: 1 } }) // fill rotated edges with sampled mat colour so they trim cleanly downstream
       .jpeg({ quality: 95 })
       .toBuffer();
 
-    console.log(`[deskew] corrected ${angle.toFixed(2)}° (non-black, ${n} edge points)`);
+    console.log(`[deskew] corrected ${angle.toFixed(2)}° (${n} edge points, mat-fill rgb(${mat.matR},${mat.matG},${mat.matB}))`);
     return { buffer: rotated, angle };
   } catch (err: any) {
     console.warn("[deskew] detection failed, skipping:", err.message);
@@ -365,20 +437,33 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
       return { buffer: workBuffer, cropped: false };
     }
 
-    // Check white border percentage — sample 5px border on all 4 sides
-    const borderWhite = await measureBorderWhiteness(trimBuf, trimInfo.width, trimInfo.height);
-    if (borderWhite > 5) {
-      // >5% white on border — try even more aggressive trim
-      console.log(`[crop] first pass: ${borderWhite.toFixed(1)}% white border, re-trimming`);
+    // Measure the proportion of near-white pixels in the 5-px border ring.
+    // NOTE: this is the outer-ring ratio, NOT a trim-quality signal — a
+    // correctly-cropped card with a white margin (common on Pokémon backs)
+    // will legitimately read 90–100%. The re-trim below is an attempt to
+    // catch remaining mat bleed, but will no-op when the white IS the card.
+    let borderRingWhitePct = await measureBorderRingWhiteness(trimBuf, trimInfo.width, trimInfo.height);
+    const firstPassRingWhite = borderRingWhitePct;
+    let retrimApplied = false;
+    if (borderRingWhitePct > 5) {
+      console.log(`[crop] first pass: border_ring_white=${borderRingWhitePct.toFixed(1)}%, attempting re-trim`);
       try {
         const tighter = await sharp(trimBuf)
           .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 120 })
           .toBuffer({ resolveWithObject: true });
-        if (tighter.info.width > 100 && tighter.info.height > 100) {
+        const shrunk = tighter.info.width < trimInfo.width || tighter.info.height < trimInfo.height;
+        if (tighter.info.width > 100 && tighter.info.height > 100 && shrunk) {
           trimBuf = tighter.data;
           trimInfo = tighter.info;
+          borderRingWhitePct = await measureBorderRingWhiteness(trimBuf, trimInfo.width, trimInfo.height);
+          retrimApplied = true;
+          console.log(`[crop] re-trim reduced border ring: ${firstPassRingWhite.toFixed(1)}% → ${borderRingWhitePct.toFixed(1)}%`);
+        } else {
+          console.log(`[crop] re-trim no-op (tighter threshold found no additional mat to remove — remaining white is card margin, not mat)`);
         }
-      } catch { /* keep first pass result */ }
+      } catch {
+        console.log(`[crop] re-trim failed, keeping first-pass result`);
+      }
     }
 
     // Minimal padding (0.5% each side — just enough to avoid clipping card edge)
@@ -393,7 +478,8 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     const ratio = trimInfo.width / trimInfo.height;
     const expectedRatio = 0.714; // 2.5/3.5 = standard card
     const ratioDiff = Math.abs(ratio - expectedRatio) / expectedRatio;
-    console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} white=${borderWhite.toFixed(1)}%`);
+    const ringNote = borderRingWhitePct > 90 ? " (likely card margin)" : retrimApplied ? " (post re-trim)" : "";
+    console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} border_ring_white=${borderRingWhitePct.toFixed(1)}%${ringNote}`);
 
     return { buffer: padded, cropped: true };
   } catch {
@@ -401,8 +487,13 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
   }
 }
 
-/** Measure percentage of near-white pixels in a 5px border ring around the image */
-async function measureBorderWhiteness(buf: Buffer, w: number, h: number): Promise<number> {
+/**
+ * Measure percentage of near-white pixels (greyscale > 240) within a 5-px
+ * ring around the image perimeter. This is a RING ratio, not a trim-quality
+ * score — for a correctly-cropped card with a white margin it will read
+ * 90–100%. Used as a heuristic to decide whether to attempt a tighter trim.
+ */
+async function measureBorderRingWhiteness(buf: Buffer, w: number, h: number): Promise<number> {
   try {
     const { data } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
     const pixels = new Uint8Array(data);
