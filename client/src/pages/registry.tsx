@@ -231,7 +231,7 @@ export default function RegistryV2() {
                   <div
                     className="relative overflow-hidden"
                     style={{
-                      backgroundColor: "var(--v2-panel-dark)",
+                      backgroundColor: "var(--v2-line-soft)",
                       aspectRatio: "3 / 4",
                     }}
                   >
@@ -246,7 +246,7 @@ export default function RegistryV2() {
                       <div className="absolute inset-0 grid place-items-center">
                         <span
                           className="font-mono-v2 text-[10px] uppercase tracking-widest"
-                          style={{ color: "rgba(255,255,255,0.3)" }}
+                          style={{ color: "var(--v2-ink-mute)" }}
                         >
                           No image
                         </span>
