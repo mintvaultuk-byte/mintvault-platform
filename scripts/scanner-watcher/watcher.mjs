@@ -125,6 +125,7 @@ async function upload(frontPath, backPath) {
       const movedBack = moveFile(backPath, failDir);
       writeErrorFile(movedBack, reason);
     }
+    log(`READY FOR NEXT SCAN`);
     return;
   }
 
@@ -141,6 +142,7 @@ async function upload(frontPath, backPath) {
       const movedBack = moveFile(backPath, failDir);
       writeErrorFile(movedBack, reason);
     }
+    log(`READY FOR NEXT SCAN`);
     return;
   }
 
@@ -148,6 +150,7 @@ async function upload(frontPath, backPath) {
   const processedDir = dateFolder(PROCESSED);
   moveFile(frontPath, processedDir);
   if (backPath) moveFile(backPath, processedDir);
+  log(`READY FOR NEXT SCAN`);
 }
 
 // ── Pairing (simplified FIFO, 60s timestamp proximity) ───────────────────
