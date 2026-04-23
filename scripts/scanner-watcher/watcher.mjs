@@ -31,6 +31,7 @@ import fetch from "node-fetch";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawn } from "node:child_process";
 
 // ── Config ────────────────────────────────────────────────────────────────
 const INGEST_URL = process.env.MINTVAULT_INGEST_URL || "https://mintvault.fly.dev/api/admin/scan-ingest";
@@ -58,6 +59,30 @@ for (const dir of [BASE, INBOX, PROCESSED, FAILED]) {
 function log(msg, level = "info") {
   const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
   process.stdout.write(line);
+}
+
+// ── macOS notification (best-effort, darwin-only) ────────────────────────
+// Posts a native banner so Cornelius doesn't have to watch the Terminal.
+// Silently no-ops on Linux/CI so the code still runs anywhere. osascript is
+// invoked via spawn (no shell) to avoid shell-metachar issues; the message
+// is escaped for AppleScript string syntax (\, ").
+function escapeAppleScript(s) {
+  return String(s ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n]+/g, " ");
+}
+
+function notify(title, message) {
+  if (process.platform !== "darwin") return;
+  try {
+    const script = `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}" sound name "Glass"`;
+    const child = spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
+    child.on("error", () => { /* best-effort — don't break uploads */ });
+    child.unref();
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ── File movement ────────────────────────────────────────────────────────
@@ -126,6 +151,7 @@ async function upload(frontPath, backPath) {
       writeErrorFile(movedBack, reason);
     }
     log(`READY FOR NEXT SCAN`);
+    notify("MintVault ✗", `FAILED — see watcher.log`);
     return;
   }
 
@@ -143,6 +169,7 @@ async function upload(frontPath, backPath) {
       writeErrorFile(movedBack, reason);
     }
     log(`READY FOR NEXT SCAN`);
+    notify("MintVault ✗", `FAILED HTTP ${response.status} — see watcher.log`);
     return;
   }
 
@@ -151,6 +178,7 @@ async function upload(frontPath, backPath) {
   moveFile(frontPath, processedDir);
   if (backPath) moveFile(backPath, processedDir);
   log(`READY FOR NEXT SCAN`);
+  notify("MintVault ✓", data.certId ? `READY — ${data.certId} uploaded` : `READY — uploaded`);
 }
 
 // ── Pairing (simplified FIFO, 60s timestamp proximity) ───────────────────
