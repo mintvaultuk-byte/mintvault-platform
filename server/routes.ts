@@ -5562,7 +5562,8 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality, reCentreBitmap } = await import("./image-processing");
+        const cropGeometryByAngle: Record<string, any> = {};
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -5593,8 +5594,12 @@ export async function registerRoutes(
           const yellowResult = await cropToYellowBorder(deskewedBuf);
           const { buffer: rectCropped, cropped } = yellowResult || await autoCrop(deskewedBuf);
 
+          // 3a. Deterministic re-centre — symmetric padding so the card sits centred in its bitmap
+          const centreResult = await reCentreBitmap(rectCropped);
+          cropGeometryByAngle[angle] = { pre_padding_px: centreResult.pre_padding_px, post_asymmetry_px: centreResult.post_asymmetry_px, extended: centreResult.extended };
+
           // 4. Rounded corner mask (card-shaped output with transparent corners)
-          const croppedBuf = await maskRoundedCorners(rectCropped);
+          const croppedBuf = await maskRoundedCorners(centreResult.buffer);
           const ext2 = "png"; // PNG for transparency support
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
           await uploadToR2(cropKey, croppedBuf, "image/png");
@@ -5697,6 +5702,12 @@ export async function registerRoutes(
         if (updates.image_quality_checks)    await db.execute(sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`);
         if (updates.front_image_path)        await db.execute(sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`);
         if (updates.back_image_path)         await db.execute(sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`);
+
+        // Crop forensics — records reCentre asymmetry + whether padding was extended. Read-only signal.
+        if (Object.keys(cropGeometryByAngle).length > 0) {
+          const cropGeometry = { ...cropGeometryByAngle, pipeline_version: "converged_v1", recorded_at: new Date().toISOString() };
+          await db.execute(sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+        }
 
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};

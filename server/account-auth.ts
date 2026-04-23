@@ -306,6 +306,17 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v233-migrate] model_version backfill skipped:", e.message);
   }
 
+  // ── v234 (Phase Y): crop_geometry column for scanner/admin pipeline convergence ───
+  // Stores reCentreBitmap pre-padding + post-asymmetry forensics per side.
+  // Nullable — does not affect existing rows; new uploads populate via scan-ingest
+  // and admin CaptureWizard pipelines.
+  try {
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS crop_geometry JSONB`);
+    console.log("[v234-migrate] certificates.crop_geometry column ensured");
+  } catch (e: any) {
+    console.log("[v234-migrate] crop_geometry column skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`

@@ -170,11 +170,36 @@ export interface ImageVariants {
 
 /**
  * Generate all 5 analysis views from a single card image buffer.
- * Input is auto-cropped first, then 4 variants are derived.
+ *
+ * Cropping chain (unified with the admin CaptureWizard path — Phase Y
+ * convergence): deskew → cropToYellowBorder || autoCrop → reCentreBitmap.
+ * This inherits the Phase 1 Bugs 1-3 fixes (mat-agnostic deskew, re-trim
+ * logging, alpha-mask white fill — though mask isn't applied here) and
+ * produces a card-centred flat JPEG suitable both for AI consumption and
+ * for downstream round-corner masking at the scan-ingest layer.
+ *
+ * Returned `cropped` is a flat JPEG. The display-ready masked PNG is the
+ * caller's responsibility (see scan-ingest-service uploadImagesToCert).
+ *
+ * Kept the old `autoCropCard` export in place for any non-variant callers
+ * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
-export async function generateImageVariants(buffer: Buffer): Promise<ImageVariants> {
-  const cropped = await autoCropCard(buffer);
+export async function generateImageVariants(buffer: Buffer): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } }> {
+  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap } = await import("./image-processing");
 
+  // Step 1: deskew small rotations before cropping
+  const { buffer: deskewed, angle } = await deskewCard(buffer);
+  if (Math.abs(angle) > 0.05) console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°`);
+
+  // Step 2: tight card-boundary crop (mat-agnostic); fall back to sharp.trim-based autoCrop
+  const yellowResult = await cropToYellowBorder(deskewed);
+  const rectCropped = yellowResult ? yellowResult.buffer : (await autoCrop(deskewed)).buffer;
+
+  // Step 3: deterministic re-centre — symmetric padding so the card sits centred in its bitmap
+  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped);
+  const cropped = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
+
+  // Step 4: derive the four analysis variants from the centred flat image
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
     sharp(cropped).grayscale().jpeg({ quality: 95 }).toBuffer(),
     sharp(cropped).linear(1.5, -30).jpeg({ quality: 95 }).toBuffer(),
@@ -187,9 +212,17 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
     sharp(cropped).negate().jpeg({ quality: 95 }).toBuffer(),
   ]);
 
-  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB`);
+  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB (re-centre asym=${post_asymmetry_px.horizontal}/${post_asymmetry_px.vertical}px, extended=${extended})`);
 
-  return { original: buffer, cropped, greyscale, highcontrast, edgeenhanced, inverted };
+  return {
+    original: buffer,
+    cropped,
+    greyscale,
+    highcontrast,
+    edgeenhanced,
+    inverted,
+    cropGeometry: { pre_padding_px, post_asymmetry_px, extended },
+  };
 }
 
 // ── Pokémon card-code → TCG API set ID normalisation ─────────────────────

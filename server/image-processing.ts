@@ -512,6 +512,93 @@ async function measureBorderRingWhiteness(buf: Buffer, w: number, h: number): Pr
 }
 
 /**
+ * Re-centre the card content within its own bitmap by symmetrically padding
+ * the short side with white until left/right and top/bottom paddings match.
+ *
+ * Scans inward from each edge using a luma threshold (opaque pixels only;
+ * alpha<128 pixels are skipped so an already-masked input is tolerated). The
+ * first row/col with mean luma below {@link WHITE_PADDING_THRESH} marks the
+ * card bound. Any side with less padding than its opposite is extended with
+ * white until the bounds match to within 1 px.
+ *
+ * Intended to run BEFORE maskRoundedCorners — the rounded-corner mask then
+ * sits on a properly-centred card rectangle, so the displayed image in the
+ * admin UI sits centred regardless of scanner-bed drift.
+ *
+ * Returns the (possibly re-padded) buffer plus pre/post asymmetry metrics so
+ * the caller can log / persist them for forensics.
+ */
+const WHITE_PADDING_THRESH = 240;
+export async function reCentreBitmap(inputBuffer: Buffer): Promise<{
+  buffer: Buffer;
+  pre_padding_px: { top: number; bottom: number; left: number; right: number };
+  post_asymmetry_px: { horizontal: number; vertical: number };
+  extended: boolean;
+}> {
+  const meta = await sharp(inputBuffer).metadata();
+  if (!meta.width || !meta.height) {
+    return { buffer: inputBuffer, pre_padding_px: { top: 0, bottom: 0, left: 0, right: 0 }, post_asymmetry_px: { horizontal: 0, vertical: 0 }, extended: false };
+  }
+
+  const { data, info } = await sharp(inputBuffer).raw().toBuffer({ resolveWithObject: true });
+  const px = new Uint8Array(data);
+  const w = info.width, h = info.height, ch = info.channels;
+
+  function rowLuma(y: number): number | null {
+    let sum = 0, count = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) continue;
+      sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      count++;
+    }
+    return count > 0 ? sum / count : null;
+  }
+  function colLuma(x: number): number | null {
+    let sum = 0, count = 0;
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) continue;
+      sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      count++;
+    }
+    return count > 0 ? sum / count : null;
+  }
+
+  let top = 0, bottom = 0, left = 0, right = 0;
+  for (let y = 0; y < h; y++) { const m = rowLuma(y); if (m !== null && m < WHITE_PADDING_THRESH) { top = y; break; } }
+  for (let y = h - 1; y >= 0; y--) { const m = rowLuma(y); if (m !== null && m < WHITE_PADDING_THRESH) { bottom = h - 1 - y; break; } }
+  for (let x = 0; x < w; x++) { const m = colLuma(x); if (m !== null && m < WHITE_PADDING_THRESH) { left = x; break; } }
+  for (let x = w - 1; x >= 0; x--) { const m = colLuma(x); if (m !== null && m < WHITE_PADDING_THRESH) { right = w - 1 - x; break; } }
+
+  const prePadding = { top, bottom, left, right };
+  const hDiff = Math.abs(left - right);
+  const vDiff = Math.abs(top - bottom);
+
+  if (hDiff <= 1 && vDiff <= 1) {
+    return { buffer: inputBuffer, pre_padding_px: prePadding, post_asymmetry_px: { horizontal: hDiff, vertical: vDiff }, extended: false };
+  }
+
+  const extLeft = left < right ? right - left : 0;
+  const extRight = right < left ? left - right : 0;
+  const extTop = top < bottom ? bottom - top : 0;
+  const extBottom = bottom < top ? top - bottom : 0;
+
+  const out = await sharp(inputBuffer)
+    .extend({ top: extTop, bottom: extBottom, left: extLeft, right: extRight, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    .jpeg({ quality: 95 })
+    .toBuffer();
+
+  console.log(`[recentre] padding L/R=${left}/${right} T/B=${top}/${bottom} — extended L+${extLeft} R+${extRight} T+${extTop} B+${extBottom}`);
+  return {
+    buffer: out,
+    pre_padding_px: prePadding,
+    post_asymmetry_px: { horizontal: 0, vertical: 0 }, // by construction: ext balances the diff
+    extended: true,
+  };
+}
+
+/**
  * Generate all image variants for grading analysis.
  * Resizes to max 2000px first to reduce memory usage,
  * then processes sequentially to avoid OOM on 512MB-1GB machines.
