@@ -41,8 +41,12 @@ const BASE = path.join(os.homedir(), "mintvault-scans");
 const INBOX = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED = path.join(BASE, "failed");
+const STATE_FILE = path.join(BASE, "watcher-state.json");
+const STATE_TMP = path.join(BASE, "watcher-state.json.tmp");
 
 const PAIR_TIMEOUT_MS = 60_000;
+const SUCCESS_DWELL_MS = 3_000;   // success banner dwell before auto-reset to idle
+const ERROR_DWELL_MS = 10_000;    // error banner dwell before auto-reset to idle
 
 // Only TIF from SilverFast. JPGs are duplicates we deliberately ignore.
 const ACCEPTED_EXT = new Set([".tif", ".tiff"]);
@@ -85,6 +89,51 @@ function notify(title, message) {
   }
 }
 
+// ── State file (for the SwiftBar plugin + status.mjs live display) ───────
+// Written atomically (temp + rename) on every state transition. Schema
+// matches the Phase AB SwiftBar spec — see ~/.mintvault-scanner-tools.
+// Write failures are swallowed so state IO can never break upload flow.
+// last_cert sticks across the idle that follows success, so the menu bar
+// can always show "Last cert: MV145" until the next cycle starts.
+let stateResetTimer = null;
+let lastCert = null;
+let lastSide = null;
+
+function writeState(state, opts = {}) {
+  try {
+    if (stateResetTimer) {
+      clearTimeout(stateResetTimer);
+      stateResetTimer = null;
+    }
+    if (opts.last_cert) lastCert = opts.last_cert;
+    if (opts.last_side !== undefined) lastSide = opts.last_side;
+    // On idle transition, clear the sticky side so the menu bar doesn't keep
+    // showing "front" after a cycle has finished.
+    if (state === "idle") lastSide = null;
+
+    const payload = {
+      state,
+      pairing_window_expires_at: opts.pairing_window_expires_at ?? null,
+      last_cert: lastCert,
+      last_side: lastSide,
+      last_error: opts.last_error ?? null,
+      ingest_url: INGEST_URL,
+      updated_at: new Date().toISOString(),
+    };
+
+    fs.writeFileSync(STATE_TMP, JSON.stringify(payload, null, 2));
+    fs.renameSync(STATE_TMP, STATE_FILE);
+
+    if (state === "success") {
+      stateResetTimer = setTimeout(() => writeState("idle"), SUCCESS_DWELL_MS);
+    } else if (state === "error") {
+      stateResetTimer = setTimeout(() => writeState("idle"), ERROR_DWELL_MS);
+    }
+  } catch (err) {
+    try { log(`writeState failed (${err.message}) — continuing`, "warn"); } catch {}
+  }
+}
+
 // ── File movement ────────────────────────────────────────────────────────
 function dateFolder(base) {
   const today = new Date().toISOString().slice(0, 10);
@@ -124,6 +173,7 @@ async function upload(frontPath, backPath) {
   const frontName = path.basename(frontPath);
   const backName = backPath ? path.basename(backPath) : null;
   log(`Uploading: front=${frontName}${backName ? ` back=${backName}` : " (front-only)"}`);
+  writeState("uploading", { last_side: backName ? "back" : "front" });
 
   const form = new FormData();
   form.append("front", fs.createReadStream(frontPath));
@@ -151,6 +201,7 @@ async function upload(frontPath, backPath) {
       writeErrorFile(movedBack, reason);
     }
     log(`READY FOR NEXT SCAN`);
+    writeState("error", { last_error: reason });
     notify("MintVault ✗", `FAILED — see watcher.log`);
     return;
   }
@@ -169,6 +220,7 @@ async function upload(frontPath, backPath) {
       writeErrorFile(movedBack, reason);
     }
     log(`READY FOR NEXT SCAN`);
+    writeState("error", { last_error: reason });
     notify("MintVault ✗", `FAILED HTTP ${response.status} — see watcher.log`);
     return;
   }
@@ -178,6 +230,7 @@ async function upload(frontPath, backPath) {
   moveFile(frontPath, processedDir);
   if (backPath) moveFile(backPath, processedDir);
   log(`READY FOR NEXT SCAN`);
+  writeState("success", { last_cert: data.certId || null });
   notify("MintVault ✓", data.certId ? `READY — ${data.certId} uploaded` : `READY — uploaded`);
 }
 
@@ -227,6 +280,7 @@ function handleNewFile(filePath) {
   }
 
   // Start a new pending window
+  const deadline = now + PAIR_TIMEOUT_MS;
   const timerId = setTimeout(() => {
     if (pending && pending.path === filePath) {
       log(`  Timeout: ${filename} had no pair in 60s — uploading as front-only`);
@@ -237,6 +291,7 @@ function handleNewFile(filePath) {
   }, PAIR_TIMEOUT_MS);
   pending = { path: filePath, time: now, timerId };
   log(`  Waiting up to 60s for a pair...`);
+  writeState("front-received", { pairing_window_expires_at: new Date(deadline).toISOString(), last_side: "front" });
 }
 
 // ── Startup validation ───────────────────────────────────────────────────
@@ -253,9 +308,12 @@ log(`─────────────────────────
 log(`MintVault Scanner Watcher starting`);
 log(`Ingest URL: ${INGEST_URL}`);
 log(`Inbox: ${INBOX}`);
+log(`State file: ${STATE_FILE}`);
 log(`Accepted: .tif, .tiff   |   Ignored: .jpg, .jpeg, .png, .bmp, .gif, dotfiles`);
 log(`Pairing: 60s FIFO timestamp proximity (first=front, second=back)`);
 log(`─────────────────────────────────────────────────────────`);
+
+writeState("idle");
 
 const watcher = chokidar.watch(INBOX, {
   ignoreInitial: true,
