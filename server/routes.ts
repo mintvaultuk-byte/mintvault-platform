@@ -5728,7 +5728,7 @@ export async function registerRoutes(
             if (aiPromise) {
               aiPromise
                 .then(r => console.log(`[upload-images] AI done for cert ${id}: grade=${r.grade} strength=${r.strengthScore}`))
-                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e.message}`));
+                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e?.message || e}\n${e?.stack || "(no stack)"}`));
             }
           } else {
             console.log(`[upload-images] cert=${id} skipping AI trigger (aiEmpty=${aiEmpty} aiGradeEmpty=${aiGradeEmpty} frontBuf=${!!frontCroppedBuf} backBuf=${!!backCroppedBuf})`);
@@ -7696,13 +7696,13 @@ export async function registerRoutes(
               message: `Certificate ${certInfo.certId} graded.`,
             });
           } catch (aiErr: any) {
-            console.error(`[scan-ingest] AI failed for ${certInfo.certId}: ${aiErr.message}`);
+            console.error(`[scan-ingest] AI failed for ${certInfo.certId} (sync): ${aiErr?.message || aiErr}\n${aiErr?.stack || "(no stack)"}`);
             res.json({
               certId: certInfo.certId,
               dbId: certInfo.id,
               workstationUrl: `/admin#grading-${certInfo.id}`,
               aiStatus: "failed",
-              aiError: aiErr.message,
+              aiError: aiErr?.message || String(aiErr),
               message: `Certificate ${certInfo.certId} created but AI grading failed. Retry from workstation.`,
             });
           }
@@ -7710,7 +7710,7 @@ export async function registerRoutes(
           // Watcher script / admin UI — respond immediately, AI runs in background
           const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
             .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
-            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
+            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId} (async): ${e?.message || e}\n${e?.stack || "(no stack)"}`));
 
           res.json({
             certId: certInfo.certId,

@@ -160,8 +160,17 @@ export async function runAiOnCert(
   frontCropped: Buffer,
   backCropped: Buffer | null,
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
+  // Resolve the MV-number for diagnostic context (retry logs, error traces).
+  // One extra lookup on a path that already takes 30-90s — negligible.
+  let certTag: string | number = certId;
+  try {
+    const r = await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`);
+    const row = r.rows[0] as any;
+    if (row?.certificate_number) certTag = row.certificate_number;
+  } catch { /* best-effort — fall back to numeric id */ }
+
   // Step 1: Identify the card
-  const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg");
+  const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg", certTag);
   const game = identification.detected_game?.toLowerCase();
 
   let enrichedId = await verifyAndEnrichCardData(identification);
@@ -193,7 +202,7 @@ export async function runAiOnCert(
   }
 
   // Step 2: Full grading analysis
-  const analysis = await analyzeCardFromBuffers(frontCropped, backCropped, game);
+  const analysis = await analyzeCardFromBuffers(frontCropped, backCropped, game, certTag);
 
   // Step 3: Extract strength score
   const strengthScore = typeof (analysis as any).grade_strength_score === "number"

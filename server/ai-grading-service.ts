@@ -545,7 +545,8 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
 export async function analyzeCardFromBuffers(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
-  cardGame?: string
+  cardGame?: string,
+  certId?: string | number,
 ): Promise<GradingAnalysis> {
   await rateLimit();
 
@@ -570,6 +571,7 @@ export async function analyzeCardFromBuffers(
       thinking: true,
       systemPrompt,
       label: "grade",
+      certId,
     });
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
@@ -580,7 +582,7 @@ export async function analyzeCardFromBuffers(
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix" });
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix", certId });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -630,11 +632,42 @@ function imageBlock(base64: string, mediaType = "image/jpeg"): object {
 
 // ── Claude API call ────────────────────────────────────────────────────────
 
+/**
+ * Retry policy for the Claude API call.
+ *
+ * - 120s per-attempt timeout (Opus 4.7 grading with 6 images + adaptive
+ *   thinking regularly exceeds the old 30s ceiling — that was the root
+ *   cause of the "This operation was aborted" failures on MV149/MV150)
+ * - Max 2 retries on AbortError, low-level network errors, or HTTP 5xx
+ * - Backoff: 1s then 3s
+ * - Never retries 4xx (auth / bad request / rate limit) — caller decides
+ */
+const CLAUDE_TIMEOUT_MS = 120_000;
+const CLAUDE_RETRY_BACKOFF_MS = [0, 1000, 3000]; // index = attempt number (1, 2, 3)
+const CLAUDE_MAX_ATTEMPTS = 3;
+
+function isRetryableClaudeError(err: any, response?: Response | null): { retry: boolean; reason: string } {
+  if (response && !response.ok) {
+    if (response.status >= 500) return { retry: true, reason: `HTTP ${response.status}` };
+    return { retry: false, reason: `HTTP ${response.status}` };
+  }
+  const name = err?.name || "";
+  const code = err?.code || "";
+  if (name === "AbortError") return { retry: true, reason: "abort" };
+  if (code === "ECONNRESET" || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+    return { retry: true, reason: `network ${code}` };
+  }
+  if (typeof err?.message === "string" && /fetch failed|network/i.test(err.message)) {
+    return { retry: true, reason: "network" };
+  }
+  return { retry: false, reason: "other" };
+}
+
 async function callClaude(
   content: object[],
   maxTokens: number,
   model = "claude-opus-4-7",
-  options?: { thinking?: boolean; systemPrompt?: string; label?: string },
+  options?: { thinking?: boolean; systemPrompt?: string; label?: string; certId?: string | number },
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
@@ -659,11 +692,41 @@ async function callClaude(
     }];
   }
 
-  const response = await anthropicFetch(body, { apiKey, timeoutMs: 30_000 });
+  const certTag = options?.certId != null ? `cert=${options.certId}` : (options?.label || "unknown");
+  let response: Response | null = null;
+  let lastErr: any = null;
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${errText.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= CLAUDE_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      const delay = CLAUDE_RETRY_BACKOFF_MS[attempt - 1];
+      await new Promise(r => setTimeout(r, delay));
+      const decision = isRetryableClaudeError(lastErr, response);
+      console.log(`[ai/retry] ${attempt - 1}/${CLAUDE_MAX_ATTEMPTS - 1} for ${certTag} after ${decision.reason} (${delay}ms delay)`);
+    }
+
+    response = null;
+    lastErr = null;
+    try {
+      response = await anthropicFetch(body, { apiKey, timeoutMs: CLAUDE_TIMEOUT_MS });
+    } catch (err: any) {
+      lastErr = err;
+      const decision = isRetryableClaudeError(err, null);
+      if (decision.retry && attempt < CLAUDE_MAX_ATTEMPTS) continue;
+      throw new Error(`Claude API ${err?.name || "error"} after ${attempt} attempt${attempt > 1 ? "s" : ""} (${CLAUDE_TIMEOUT_MS}ms per attempt) for ${certTag}: ${err?.message || err}`);
+    }
+
+    if (!response.ok) {
+      const decision = isRetryableClaudeError(null, response);
+      if (decision.retry && attempt < CLAUDE_MAX_ATTEMPTS) continue;
+      const errText = await response.text();
+      throw new Error(`Claude API error ${response.status} for ${certTag}: ${errText.slice(0, 300)}`);
+    }
+
+    break; // success — fall through to parse
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(`Claude API exhausted retries for ${certTag}: ${lastErr?.message || "unknown"}`);
   }
 
   const data = await response.json() as Record<string, unknown>;
@@ -800,7 +863,8 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
 
 export async function identifyCardFromBuffer(
   buffer: Buffer,
-  _mimeType: string
+  _mimeType: string,
+  certId?: string | number,
 ): Promise<CardIdentification> {
   await rateLimit();
   const { buffer: resized, mediaType } = await resizeForClaude(buffer);
@@ -812,7 +876,7 @@ export async function identifyCardFromBuffer(
       [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
       1024,
       "claude-haiku-4-5-20251001",
-      { label: "identify-haiku" }
+      { label: "identify-haiku", certId }
     ),
     identifyWithGpt(base64),
   ]);
