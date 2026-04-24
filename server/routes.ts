@@ -5867,7 +5867,7 @@ export async function registerRoutes(
 
       const cropped = await sharpFn(workBuf)
         .extract({ left, top, width: w, height: h })
-        .jpeg({ quality: 95 })
+        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
         .toBuffer();
 
       const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;

@@ -320,7 +320,7 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 
     const rotated = await sharp(inputBuffer)
       .rotate(-angle, { background: { r: mat.matR, g: mat.matG, b: mat.matB, alpha: 1 } }) // fill rotated edges with sampled mat colour so they trim cleanly downstream
-      .jpeg({ quality: 95 })
+      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer();
 
     console.log(`[deskew] corrected ${angle.toFixed(2)}° (${n} edge points, mat-fill rgb(${mat.matR},${mat.matG},${mat.matB}))`);
@@ -377,7 +377,7 @@ export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer:
 
     const cropped = await sharp(inputBuffer)
       .extract({ left: origMinX, top: origMinY, width: cropW, height: cropH })
-      .jpeg({ quality: 95 })
+      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer();
 
     const ratio = cropW / cropH;
@@ -407,7 +407,7 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     if (meta.width > 4000 || meta.height > 4000) {
       workBuffer = await sharp(inputBuffer)
         .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 95 })
+        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
         .toBuffer();
     }
 
@@ -472,7 +472,7 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
 
     const padded = await sharp(trimBuf)
       .extend({ top: padH, bottom: padH, left: padW, right: padW, background: { r: 255, g: 255, b: 255, alpha: 1 } })
-      .jpeg({ quality: 95 })
+      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer();
 
     const ratio = trimInfo.width / trimInfo.height;
@@ -525,30 +525,30 @@ export async function generateVariants(inputBuffer: Buffer): Promise<{
   // Resize to 2576px max (Opus 4.7 resolution) — keeps peak RAM manageable
   const resized = await sharp(inputBuffer)
     .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 95 })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   // Sequential processing to limit peak memory
   const greyscale = await sharp(resized)
     .greyscale()
-    .jpeg({ quality: 95 })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   const highcontrast = await sharp(resized)
     .modulate({ brightness: 1.1 })
     .linear(1.6, -(128 * 1.6 - 128))
-    .jpeg({ quality: 95 })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   const edgeenhanced = await sharp(resized)
     .greyscale()
     .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
-    .jpeg({ quality: 95 })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   const inverted = await sharp(resized)
     .negate()
-    .jpeg({ quality: 95 })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   return { greyscale, highcontrast, edgeenhanced, inverted };

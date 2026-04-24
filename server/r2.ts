@@ -25,6 +25,14 @@ function getBucket(): string {
   return bucket;
 }
 
+// Default cache policy for uploads. Cert-keyed R2 objects are content-stable
+// per cert number (overwrites re-create the same key), so aggressive caching
+// is safe. With signed-URL access today this header only helps within a
+// single presigned URL's lifetime (~10 min) and for back/forward browser
+// navigation; it becomes meaningful once R2 is fronted by a CDN or served
+// publicly. Harmless in the meantime.
+const DEFAULT_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
 export async function uploadToR2(key: string, body: Buffer, contentType: string): Promise<string> {
   const client = getClient();
   await client.send(new PutObjectCommand({
@@ -32,6 +40,7 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
     Key: key,
     Body: body,
     ContentType: contentType,
+    CacheControl: DEFAULT_CACHE_CONTROL,
   }));
   return key;
 }
