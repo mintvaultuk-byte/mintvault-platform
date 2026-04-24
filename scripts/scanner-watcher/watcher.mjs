@@ -44,7 +44,7 @@ const FAILED = path.join(BASE, "failed");
 const STATE_FILE = path.join(BASE, "watcher-state.json");
 const STATE_TMP = path.join(BASE, "watcher-state.json.tmp");
 
-const PAIR_TIMEOUT_MS = 60_000;
+const PAIR_TIMEOUT_MS = 45_000;
 const SUCCESS_DWELL_MS = 3_000;   // success banner dwell before auto-reset to idle
 const ERROR_DWELL_MS = 10_000;    // error banner dwell before auto-reset to idle
 
