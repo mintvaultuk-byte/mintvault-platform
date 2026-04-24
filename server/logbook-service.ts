@@ -35,7 +35,7 @@ export async function buildLogbookData(certIdInput: string) {
     }
   }
   if (!cert) return null;
-  if (cert.status !== "active") return null;
+  if (cert.status === "voided") return null;
 
   const c = cert as any;
   const certId = normalizeCertId(cert.certId);

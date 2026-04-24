@@ -4351,7 +4351,7 @@ export async function registerRoutes(
     try {
       const certId = req.params.certId.toUpperCase();
       const cert = await storage.getCertificateByCertId(certId);
-      if (!cert || cert.deletedAt) {
+      if (!cert) {
         return res.status(404).json({ error: "Certificate not found" });
       }
       const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || undefined;
