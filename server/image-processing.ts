@@ -219,10 +219,11 @@ export function detectCardBoundary(
   // Primary: mat-distance detector (works against any mat colour)
   const mat = computeMatProfile(pixels, w, h, ch);
   console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}${certTag}`);
-  const matBased = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isCardPixel(r, g, b, mat));
+  const matIsBg = (r: number, g: number, b: number) => !isCardPixel(r, g, b, mat);
+  const matBased = detectBoundaryWithTest(pixels, w, h, ch, matIsBg);
   if (matBased) {
     console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
-    return matBased;
+    return tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag);
   }
 
   // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
@@ -234,12 +235,14 @@ export function detectCardBoundary(
   const adaptive = detectBoundaryWithTest(pixels, w, h, ch, bg.isBackground);
   if (adaptive) {
     console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
-    return adaptive;
+    return tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag);
   }
 
   // Fallback 2: fixed black threshold
   console.log(`[card-detect] adaptive-luma failed, falling back to fixed black threshold${certTag}`);
-  return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+  const fixed = detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+  if (!fixed) return null;
+  return tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag);
 }
 
 /** Core boundary detection with a pluggable background test */
@@ -272,6 +275,104 @@ function detectBoundaryWithTest(
   }
 
   return { minX, maxX, minY, maxY, nonBlackPct };
+}
+
+// ── Fix 1: aspect-tighten to Pokémon card ratio ──────────────────────────────
+// Pokémon standard card is 63mm × 88mm → width/height = 0.7159. Raw card-detect
+// bounds often include a mm or two of mat because the outer card border is
+// pale; tightening to the expected ratio trims that remainder. Symmetric shrink
+// (both edges by equal px) so we don't introduce bias for the re-centre stage.
+// Safeguard: bail out if shrinking would discard >2% of the bounds-internal
+// card pixels — that means the true card isn't aspect-off, the test is, and
+// we should leave the bounds alone rather than eat into the card.
+
+const POKEMON_ASPECT = 0.716;
+const ASPECT_TOL = 0.005;
+const MAX_ASPECT_TRIM_LOSS_PCT = 2;
+
+function tightenToPokemonAspect(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number },
+  isBg: (r: number, g: number, b: number) => boolean,
+  certTag: string,
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } {
+  const startMinX = bounds.minX, startMaxX = bounds.maxX;
+  const startMinY = bounds.minY, startMaxY = bounds.maxY;
+  const startW = startMaxX - startMinX + 1;
+  const startH = startMaxY - startMinY + 1;
+  const startRatio = startW / startH;
+
+  // Already in range — nothing to do
+  if (startRatio >= POKEMON_ASPECT - ASPECT_TOL && startRatio <= POKEMON_ASPECT + ASPECT_TOL) {
+    console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} in-range, no trim${certTag}`);
+    return bounds;
+  }
+
+  // Integral image of fg pixels over the WHOLE frame, built once. Lets us
+  // check "fg pixels inside rect R" in O(1) per iteration.
+  const integ = new Int32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch;
+      const fg = isBg(pixels[i], pixels[i + 1], pixels[i + 2]) ? 0 : 1;
+      rowSum += fg;
+      integ[y * w + x] = rowSum + (y > 0 ? integ[(y - 1) * w + x] : 0);
+    }
+  }
+  const fgCountInRect = (x0: number, x1: number, y0: number, y1: number) => {
+    const A = (x0 > 0 && y0 > 0) ? integ[(y0 - 1) * w + (x0 - 1)] : 0;
+    const B = (y0 > 0) ? integ[(y0 - 1) * w + x1] : 0;
+    const C = (x0 > 0) ? integ[y1 * w + (x0 - 1)] : 0;
+    const D = integ[y1 * w + x1];
+    return D - B - C + A;
+  };
+
+  const originalFg = fgCountInRect(startMinX, startMaxX, startMinY, startMaxY);
+  const maxLoss = Math.max(1, Math.floor(originalFg * MAX_ASPECT_TRIM_LOSS_PCT / 100));
+
+  let minX = startMinX, maxX = startMaxX, minY = startMinY, maxY = startMaxY;
+  let aborted: "pixel-loss" | "collapse" | null = null;
+
+  // Symmetric 1-px shrink per side per iteration, max bw+bh steps
+  const maxSteps = startW + startH;
+  for (let step = 0; step < maxSteps; step++) {
+    const bw = maxX - minX + 1;
+    const bh = maxY - minY + 1;
+    const ratio = bw / bh;
+    if (ratio >= POKEMON_ASPECT - ASPECT_TOL && ratio <= POKEMON_ASPECT + ASPECT_TOL) break;
+
+    let nMinX = minX, nMaxX = maxX, nMinY = minY, nMaxY = maxY;
+    if (ratio > POKEMON_ASPECT + ASPECT_TOL) {
+      nMinX = minX + 1; nMaxX = maxX - 1;
+    } else {
+      nMinY = minY + 1; nMaxY = maxY - 1;
+    }
+    if (nMaxX <= nMinX || nMaxY <= nMinY) { aborted = "collapse"; break; }
+
+    const fgAfter = fgCountInRect(nMinX, nMaxX, nMinY, nMaxY);
+    if (originalFg - fgAfter > maxLoss) { aborted = "pixel-loss"; break; }
+
+    minX = nMinX; maxX = nMaxX; minY = nMinY; maxY = nMaxY;
+  }
+
+  const finalW = maxX - minX + 1;
+  const finalH = maxY - minY + 1;
+  const finalRatio = finalW / finalH;
+  const trimmedW = startW - finalW;
+  const trimmedH = startH - finalH;
+  const finalFg = fgCountInRect(minX, maxX, minY, maxY);
+  const finalPct = (finalFg / (finalW * finalH)) * 100;
+
+  if (trimmedW === 0 && trimmedH === 0) {
+    console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} could not shrink (${aborted || "bounds"})${certTag}`);
+    return bounds;
+  }
+
+  const suffix = aborted ? ` [early-exit: ${aborted}]` : "";
+  console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} → ${finalRatio.toFixed(3)} (trimmed ${trimmedW}px width, ${trimmedH}px height)${suffix}${certTag}`);
+
+  return { minX, maxX, minY, maxY, nonBlackPct: finalPct };
 }
 
 /**
