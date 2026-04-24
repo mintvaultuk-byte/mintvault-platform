@@ -1065,6 +1065,7 @@ export async function registerRoutes(
         SELECT cert_id, card_name, set_name, grade_overall, grade_type, card_game, front_image_path
         FROM certificates
         WHERE status = 'active'
+          AND deleted_at IS NULL
           AND card_name IS NOT NULL
           AND grade_overall IS NOT NULL
           AND front_image_path IS NOT NULL
@@ -2155,7 +2156,7 @@ export async function registerRoutes(
         const popRows = await db.execute(sql`
           SELECT grade FROM certificates
           WHERE card_name = ${c.cardName} AND set_name = ${c.setName} AND card_game = ${c.cardGame}
-            AND status = 'active' AND grade IS NOT NULL
+            AND status = 'active' AND deleted_at IS NULL AND grade IS NOT NULL
         `);
         const grades: number[] = (popRows.rows || []).map((r: any) => parseFloat(r.grade)).filter((g: number) => !isNaN(g));
         const totalGraded = grades.length;
@@ -2659,7 +2660,7 @@ export async function registerRoutes(
           SELECT ROUND(grade::numeric, 0)::int AS g, COUNT(*) AS cnt
           FROM certificates
           WHERE card_name = ${c.cardName} AND set_name = ${c.setName} AND card_game = ${c.cardGame}
-            AND status = 'active' AND grade IS NOT NULL AND grade_type = 'numeric'
+            AND status = 'active' AND deleted_at IS NULL AND grade IS NOT NULL AND grade_type = 'numeric'
           GROUP BY 1
         `);
         const dist: Record<string, number> = {};
@@ -6345,7 +6346,7 @@ export async function registerRoutes(
                grade_approved_at,
                (front_image_path IS NOT NULL OR grading_front_original IS NOT NULL) AS has_images
         FROM certificates
-        WHERE status = 'active' AND grade_approved_at IS NULL
+        WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL
         ORDER BY created_at ASC
         LIMIT 100
       `);
@@ -6373,7 +6374,7 @@ export async function registerRoutes(
     // Default: first ungraded
     try {
       const rows = await db.execute(sql`
-        SELECT cert_id FROM certificates WHERE status = 'active' AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1
+        SELECT cert_id FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1
       `);
       const first = rows.rows?.[0] as any;
       res.json({ certId: first ? normalizeCertId(first.cert_id) : null });
@@ -6483,7 +6484,7 @@ export async function registerRoutes(
       }
       if (!dbCert) {
         // Fall back to first ungraded
-        const rows = await db.execute(sql`SELECT * FROM certificates WHERE status = 'active' AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`);
+        const rows = await db.execute(sql`SELECT * FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`);
         dbCert = rows.rows?.[0];
       }
       if (!dbCert) return res.status(404).json({ error: "No active certificate found for upload" });
