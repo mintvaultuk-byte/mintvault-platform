@@ -184,15 +184,15 @@ export interface ImageVariants {
  * Kept the old `autoCropCard` export in place for any non-variant callers
  * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
-export async function generateImageVariants(buffer: Buffer): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } }> {
+export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } }> {
   const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap } = await import("./image-processing");
 
   // Step 1: deskew small rotations before cropping
   const { buffer: deskewed, angle } = await deskewCard(buffer);
-  if (Math.abs(angle) > 0.05) console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°`);
+  if (Math.abs(angle) > 0.05) console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°${certId != null ? ` cert=${certId}` : ""}`);
 
   // Step 2: tight card-boundary crop (mat-agnostic); fall back to sharp.trim-based autoCrop
-  const yellowResult = await cropToYellowBorder(deskewed);
+  const yellowResult = await cropToYellowBorder(deskewed, certId);
   const rectCropped = yellowResult ? yellowResult.buffer : (await autoCrop(deskewed)).buffer;
 
   // Step 3: deterministic re-centre — symmetric padding so the card sits centred in its bitmap

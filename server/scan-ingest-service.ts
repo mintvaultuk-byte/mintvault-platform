@@ -68,9 +68,10 @@ export async function uploadImagesToCert(
   const frontResized = await resizeBuf(frontBuffer);
   const backResized = backBuffer ? await resizeBuf(backBuffer) : null;
 
-  // Generate variants via the unified pipeline (deskew + autoCrop + reCentre)
-  const frontVariants = await generateImageVariants(frontResized);
-  const backVariants = backResized ? await generateImageVariants(backResized) : null;
+  // Generate variants via the unified pipeline (deskew + autoCrop + reCentre).
+  // Pass certNumber so card-detect logs are traceable per cert (Fix 0).
+  const frontVariants = await generateImageVariants(frontResized, certNumber);
+  const backVariants = backResized ? await generateImageVariants(backResized, certNumber) : null;
 
   // Derive display-ready masked PNGs from the flat cropped output
   const frontMaskedPng = await maskRoundedCorners(frontVariants.cropped);

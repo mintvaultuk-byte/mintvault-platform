@@ -101,8 +101,25 @@ function sampleCorner(
 }
 
 /**
- * Compute adaptive background colour by sampling all 4 corners.
- * Returns the average + a luminance threshold for "is background" checks.
+ * Compute adaptive background colour by sampling all 4 corners, with a
+ * mat-aware branching threshold.
+ *
+ * Fix 0 — bug: old formula `threshold = avgLuma + max(25, avgLuma*0.6+15)`
+ * for a white mat (avgLuma≈246.9) produced threshold≈410.0, which exceeds
+ * max luma (255). `isBackgroundAdaptive` returning `luma < threshold` was
+ * then ALWAYS true — every pixel flagged as background → adaptive-luma
+ * stage always failed on bright mats, falling through to later fallbacks.
+ *
+ * New branching (standard mat is WHITE — tuned for that):
+ *   - avgLuma > 180 (bright mat): threshold = avgLuma − 60. Background
+ *     is BRIGHT (high luma). "isBackground(p)" = luma(p) > threshold.
+ *   - avgLuma < 60  (dark mat):  threshold = clamp(avgLuma + margin, 200).
+ *     Background is DARK (low luma). "isBackground(p)" = luma(p) < threshold.
+ *   - 60 ≤ avgLuma ≤ 180 (ambiguous): log warning and default to the
+ *     bright-mat formula (standard mat is white).
+ *
+ * Returns an `isBackground(r,g,b)` closure so callers don't need to know
+ * which direction to compare.
  */
 function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: number) {
   const sz = Math.max(20, Math.round(Math.min(w, h) * 0.04)); // ~4% of shorter dimension
@@ -117,16 +134,27 @@ function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: 
   const avgG = corners.reduce((s, c) => s + c.g, 0) / corners.length;
   const avgB = corners.reduce((s, c) => s + c.b, 0) / corners.length;
 
-  // Threshold: pixel is "card" if its luminance is > bgLuma + margin
-  // For dark backgrounds, margin is at least 25; for brighter, scale up
-  const margin = Math.max(25, avgLuma * 0.6 + 15);
+  let mode: "bright-mat" | "dark-mat" | "ambiguous";
+  let threshold: number;
+  let isBackground: (r: number, g: number, b: number) => boolean;
 
-  return { avgR, avgG, avgB, avgLuma, threshold: avgLuma + margin };
-}
+  if (avgLuma > 180) {
+    mode = "bright-mat";
+    threshold = avgLuma - 60; // ~186 for avgLuma=246
+    isBackground = (r, g, b) => luma(r, g, b) > threshold;
+  } else if (avgLuma < 60) {
+    mode = "dark-mat";
+    const margin = Math.max(25, avgLuma * 0.6 + 15);
+    threshold = Math.min(200, avgLuma + margin);
+    isBackground = (r, g, b) => luma(r, g, b) < threshold;
+  } else {
+    // Ambiguous band: treat as bright-mat (standard mat is white) but warn.
+    mode = "ambiguous";
+    threshold = avgLuma - 60;
+    isBackground = (r, g, b) => luma(r, g, b) > threshold;
+  }
 
-/** Check if a pixel is background using adaptive threshold */
-function isBackgroundAdaptive(r: number, g: number, b: number, bgThreshold: number): boolean {
-  return luma(r, g, b) < bgThreshold;
+  return { avgR, avgG, avgB, avgLuma, threshold, mode, isBackground };
 }
 
 /** Legacy fallback: fixed black threshold */
@@ -184,28 +212,33 @@ function isCardPixel(r: number, g: number, b: number, mat: MatProfile): boolean 
  * Falls back to fixed black threshold if adaptive detection fails.
  */
 export function detectCardBoundary(
-  pixels: Uint8Array, w: number, h: number, ch: number
+  pixels: Uint8Array, w: number, h: number, ch: number, certId?: string | number
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  const certTag = certId != null ? ` cert=${certId}` : "";
+
   // Primary: mat-distance detector (works against any mat colour)
   const mat = computeMatProfile(pixels, w, h, ch);
-  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}`);
+  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}${certTag}`);
   const matBased = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isCardPixel(r, g, b, mat));
   if (matBased) {
-    console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels`);
+    console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
     return matBased;
   }
 
-  // Fallback 1: legacy adaptive-luma
+  // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
   const bg = computeBackgroundProfile(pixels, w, h, ch);
-  console.log(`[card-detect] falling back to adaptive-luma: avgLuma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)}`);
-  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isBackgroundAdaptive(r, g, b, bg.threshold));
+  console.log(`[card-detect] adaptive-luma: mat_luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} (${bg.mode} mode)${certTag}`);
+  if (bg.mode === "ambiguous") {
+    console.warn(`[card-detect] ambiguous mat luma (60–180) — defaulting to bright-mat formula${certTag}`);
+  }
+  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, bg.isBackground);
   if (adaptive) {
-    console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
+    console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
     return adaptive;
   }
 
   // Fallback 2: fixed black threshold
-  console.log("[card-detect] adaptive-luma failed, falling back to fixed black threshold");
+  console.log(`[card-detect] adaptive-luma failed, falling back to fixed black threshold${certTag}`);
   return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
 }
 
@@ -336,9 +369,9 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
  * Works on ANY card colour as long as scanner uses a black background mat.
  * Returns null if detection fails (caller should fall back to autoCrop).
  */
-export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | number): Promise<{ buffer: Buffer; cropped: boolean } | null> {
   try {
-    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)${certId != null ? ` cert=${certId}` : ""}`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return null;
 
@@ -353,7 +386,7 @@ export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer:
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
-    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels);
+    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels, certId);
 
     if (!boundary) {
       console.log("[card-detect] boundary detection failed (not enough non-black or too much)");
