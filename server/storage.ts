@@ -612,13 +612,20 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  /** Live cert by numeric PK. Soft-deleted certs (deleted_at IS NOT NULL) are NOT returned.
+   *  For admin/audit flows that need to see soft-deleted rows, add a dedicated
+   *  getCertificateIncludingDeleted — do not widen this one. */
   async getCertificate(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.select().from(certificates).where(eq(certificates.id, id));
+    const [cert] = await db.select().from(certificates)
+      .where(sql`${certificates.id} = ${id} AND ${certificates.deletedAt} IS NULL`);
     return cert;
   }
 
+  /** Live cert by public MV cert-id. Soft-deleted certs (deleted_at IS NOT NULL) are NOT returned.
+   *  See getCertificate above for the rationale on scoping. */
   async getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.select().from(certificates).where(eq(certificates.certId, certId));
+    const [cert] = await db.select().from(certificates)
+      .where(sql`${certificates.certId} = ${certId} AND ${certificates.deletedAt} IS NULL`);
     return cert;
   }
 
