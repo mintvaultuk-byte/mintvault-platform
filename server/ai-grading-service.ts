@@ -195,8 +195,9 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   const yellowResult = await cropToYellowBorder(deskewed, certId);
   const rectCropped = yellowResult ? yellowResult.buffer : (await autoCrop(deskewed)).buffer;
 
-  // Step 3: deterministic re-centre — symmetric padding so the card sits centred in its bitmap
-  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped);
+  // Step 3: deterministic re-centre — measure actual card edges vs mat colour
+  // and shift to centre (Fix 2). Pass certId for traceability.
+  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId });
   const cropped = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
 
   // Step 4: derive the four analysis variants from the centred flat image

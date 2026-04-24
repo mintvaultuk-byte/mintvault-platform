@@ -646,29 +646,45 @@ async function measureBorderRingWhiteness(buf: Buffer, w: number, h: number): Pr
 }
 
 /**
- * Re-centre the card content within its own bitmap by symmetrically padding
- * the short side with white until left/right and top/bottom paddings match.
+ * Re-centre the card content within its own bitmap by measuring actual card
+ * edges against the mat colour (Fix 2 rewrite — previously used a fixed white-
+ * luma threshold, which fell over on black/neutral mats and on cards with
+ * pale outer borders).
  *
- * Scans inward from each edge using a luma threshold (opaque pixels only;
- * alpha<128 pixels are skipped so an already-masked input is tolerated). The
- * first row/col with mean luma below {@link WHITE_PADDING_THRESH} marks the
- * card bound. Any side with less padding than its opposite is extended with
- * white until the bounds match to within 1 px.
+ * Algorithm:
+ *  1. Determine matRgb — either supplied by caller (preferred: sample from the
+ *     pre-crop buffer where the strip is reliably mat) or best-effort-sampled
+ *     from the outer 2% strip of the input buffer.
+ *  2. Scan inward from each edge. A row/col is declared "card" when >70% of
+ *     its opaque pixels are non-mat (Euclidean colour distance > 45 from
+ *     matRgb). The first such row/col on each side gives the margin L/R/T/B.
+ *  3. If |L-R| > 4 (or |T-B| > 4), the card is off-centre within the bitmap.
+ *     Shift it by dx = round((R-L)/2) (and dy analogously) — trim `dx` from
+ *     the loose side, pad `dx` mat-coloured pixels on the tight side. Bitmap
+ *     dimensions are preserved.
  *
- * Intended to run BEFORE maskRoundedCorners — the rounded-corner mask then
- * sits on a properly-centred card rectangle, so the displayed image in the
- * admin UI sits centred regardless of scanner-bed drift.
+ * Pad colour is matRgb so the visible mat colour stays consistent; the
+ * downstream maskRoundedCorners pass replaces the mat region with
+ * transparent corners anyway.
  *
- * Returns the (possibly re-padded) buffer plus pre/post asymmetry metrics so
- * the caller can log / persist them for forensics.
+ * Returns the (possibly shifted) buffer plus pre-shift margins and applied
+ * shift amounts for forensics / audit-log persistence.
  */
-const WHITE_PADDING_THRESH = 240;
-export async function reCentreBitmap(inputBuffer: Buffer): Promise<{
+const EDGE_DETECT_COLOUR_DELTA = 45;       // matches isCardPixel threshold
+const EDGE_DETECT_ROW_COVERAGE = 0.70;     // 70% non-mat = card row
+const RE_CENTRE_SHIFT_EPSILON = 4;         // margin diff below this → no shift
+const DEFAULT_MAT_RGB = { r: 255, g: 255, b: 255 }; // standard mat is white
+
+export async function reCentreBitmap(
+  inputBuffer: Buffer,
+  options?: { matRgb?: { r: number; g: number; b: number }; certId?: string | number },
+): Promise<{
   buffer: Buffer;
   pre_padding_px: { top: number; bottom: number; left: number; right: number };
   post_asymmetry_px: { horizontal: number; vertical: number };
   extended: boolean;
 }> {
+  const certTag = options?.certId != null ? ` cert=${options.certId}` : "";
   const meta = await sharp(inputBuffer).metadata();
   if (!meta.width || !meta.height) {
     return { buffer: inputBuffer, pre_padding_px: { top: 0, bottom: 0, left: 0, right: 0 }, post_asymmetry_px: { horizontal: 0, vertical: 0 }, extended: false };
@@ -678,57 +694,115 @@ export async function reCentreBitmap(inputBuffer: Buffer): Promise<{
   const px = new Uint8Array(data);
   const w = info.width, h = info.height, ch = info.channels;
 
-  function rowLuma(y: number): number | null {
-    let sum = 0, count = 0;
+  // Mat colour: prefer caller-supplied; else sample outer 2% strip (fallback).
+  let matR: number, matG: number, matB: number;
+  if (options?.matRgb) {
+    matR = options.matRgb.r; matG = options.matRgb.g; matB = options.matRgb.b;
+  } else {
+    // Sample outer-strip median — same approach as computeMatProfile, but on
+    // the full buffer (post-crop). If the crop was aggressive and the strip
+    // is mostly card, the resulting "mat" colour won't match real mat; callers
+    // should pass matRgb explicitly for that case.
+    const strip = Math.max(3, Math.round(Math.min(w, h) * 0.02));
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    const pushAt = (x: number, y: number) => {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) return;
+      rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
+    };
+    for (let y = 0; y < strip; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+    for (let y = h - strip; y < h; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+    for (let y = strip; y < h - strip; y++) {
+      for (let x = 0; x < strip; x++) pushAt(x, y);
+      for (let x = w - strip; x < w; x++) pushAt(x, y);
+    }
+    const median = (arr: number[]) => { arr.sort((a, b) => a - b); return arr.length ? arr[Math.floor(arr.length / 2)] : 0; };
+    if (rs.length > 0) {
+      matR = median(rs); matG = median(gs); matB = median(bs);
+    } else {
+      matR = DEFAULT_MAT_RGB.r; matG = DEFAULT_MAT_RGB.g; matB = DEFAULT_MAT_RGB.b;
+    }
+  }
+
+  const isNonMat = (r: number, g: number, b: number): boolean => {
+    const dr = r - matR, dg = g - matG, db = b - matB;
+    return Math.sqrt(dr * dr + dg * dg + db * db) > EDGE_DETECT_COLOUR_DELTA;
+  };
+
+  // Row coverage: fraction of opaque pixels in row y that are non-mat.
+  const rowCoverage = (y: number): number => {
+    let nonMat = 0, opaque = 0;
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * ch;
       if (ch === 4 && px[i + 3] < 128) continue;
-      sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-      count++;
+      opaque++;
+      if (isNonMat(px[i], px[i + 1], px[i + 2])) nonMat++;
     }
-    return count > 0 ? sum / count : null;
-  }
-  function colLuma(x: number): number | null {
-    let sum = 0, count = 0;
+    return opaque > 0 ? nonMat / opaque : 0;
+  };
+  const colCoverage = (x: number): number => {
+    let nonMat = 0, opaque = 0;
     for (let y = 0; y < h; y++) {
       const i = (y * w + x) * ch;
       if (ch === 4 && px[i + 3] < 128) continue;
-      sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-      count++;
+      opaque++;
+      if (isNonMat(px[i], px[i + 1], px[i + 2])) nonMat++;
     }
-    return count > 0 ? sum / count : null;
-  }
+    return opaque > 0 ? nonMat / opaque : 0;
+  };
 
   let top = 0, bottom = 0, left = 0, right = 0;
-  for (let y = 0; y < h; y++) { const m = rowLuma(y); if (m !== null && m < WHITE_PADDING_THRESH) { top = y; break; } }
-  for (let y = h - 1; y >= 0; y--) { const m = rowLuma(y); if (m !== null && m < WHITE_PADDING_THRESH) { bottom = h - 1 - y; break; } }
-  for (let x = 0; x < w; x++) { const m = colLuma(x); if (m !== null && m < WHITE_PADDING_THRESH) { left = x; break; } }
-  for (let x = w - 1; x >= 0; x--) { const m = colLuma(x); if (m !== null && m < WHITE_PADDING_THRESH) { right = w - 1 - x; break; } }
+  for (let y = 0; y < h; y++) { if (rowCoverage(y) > EDGE_DETECT_ROW_COVERAGE) { top = y; break; } }
+  for (let y = h - 1; y >= 0; y--) { if (rowCoverage(y) > EDGE_DETECT_ROW_COVERAGE) { bottom = h - 1 - y; break; } }
+  for (let x = 0; x < w; x++) { if (colCoverage(x) > EDGE_DETECT_ROW_COVERAGE) { left = x; break; } }
+  for (let x = w - 1; x >= 0; x--) { if (colCoverage(x) > EDGE_DETECT_ROW_COVERAGE) { right = w - 1 - x; break; } }
 
   const prePadding = { top, bottom, left, right };
   const hDiff = Math.abs(left - right);
   const vDiff = Math.abs(top - bottom);
 
-  if (hDiff <= 1 && vDiff <= 1) {
-    return { buffer: inputBuffer, pre_padding_px: prePadding, post_asymmetry_px: { horizontal: hDiff, vertical: vDiff }, extended: false };
+  if (hDiff <= RE_CENTRE_SHIFT_EPSILON && vDiff <= RE_CENTRE_SHIFT_EPSILON) {
+    console.log(`[re-centre] margins L:${left} R:${right} T:${top} B:${bottom} — within ±${RE_CENTRE_SHIFT_EPSILON}px, no shift${certTag}`);
+    return { buffer: inputBuffer, pre_padding_px: prePadding, post_asymmetry_px: { horizontal: 0, vertical: 0 }, extended: false };
   }
 
-  const extLeft = left < right ? right - left : 0;
-  const extRight = right < left ? left - right : 0;
-  const extTop = top < bottom ? bottom - top : 0;
-  const extBottom = bottom < top ? top - bottom : 0;
+  // Compute shifts. dx > 0 moves card to the right (trim right margin, pad left).
+  const dx = hDiff > RE_CENTRE_SHIFT_EPSILON ? Math.round((right - left) / 2) : 0;
+  const dy = vDiff > RE_CENTRE_SHIFT_EPSILON ? Math.round((bottom - top) / 2) : 0;
 
-  const out = await sharp(inputBuffer)
-    .extend({ top: extTop, bottom: extBottom, left: extLeft, right: extRight, background: { r: 255, g: 255, b: 255, alpha: 1 } })
-    .jpeg({ quality: 95 })
-    .toBuffer();
+  // Materialise the shift: extract the inner region offset by the shift, then
+  // pad the tight side with mat colour so the bitmap keeps its original size.
+  let extractLeft = 0, extractTop = 0, extractW = w, extractH = h;
+  let padLeft = 0, padRight = 0, padTop = 0, padBottom = 0;
+  if (dx > 0) { // shift card right: trim right, pad left
+    extractLeft = 0; extractW = w - dx; padLeft = dx;
+  } else if (dx < 0) { // shift card left: trim left, pad right
+    extractLeft = -dx; extractW = w + dx; padRight = -dx;
+  }
+  if (dy > 0) { // shift card down: trim bottom, pad top
+    extractTop = 0; extractH = h - dy; padTop = dy;
+  } else if (dy < 0) { // shift card up: trim top, pad bottom
+    extractTop = -dy; extractH = h + dy; padBottom = -dy;
+  }
 
-  console.log(`[recentre] padding L/R=${left}/${right} T/B=${top}/${bottom} — extended L+${extLeft} R+${extRight} T+${extTop} B+${extBottom}`);
+  let pipeline = sharp(inputBuffer);
+  if (extractLeft > 0 || extractTop > 0 || extractW !== w || extractH !== h) {
+    pipeline = pipeline.extract({ left: extractLeft, top: extractTop, width: extractW, height: extractH });
+  }
+  if (padLeft || padRight || padTop || padBottom) {
+    pipeline = pipeline.extend({ top: padTop, bottom: padBottom, left: padLeft, right: padRight, background: { r: matR, g: matG, b: matB, alpha: 1 } });
+  }
+  const out = await pipeline.jpeg({ quality: 95 }).toBuffer();
+
+  const dxSign = dx > 0 ? `+${dx}` : `${dx}`;
+  const dySign = dy > 0 ? `+${dy}` : `${dy}`;
+  console.log(`[re-centre] margins L:${left} R:${right} T:${top} B:${bottom} → shift ${dxSign}x, ${dySign}y${certTag}`);
+
   return {
     buffer: out,
     pre_padding_px: prePadding,
-    post_asymmetry_px: { horizontal: 0, vertical: 0 }, // by construction: ext balances the diff
-    extended: true,
+    post_asymmetry_px: { horizontal: dx, vertical: dy },
+    extended: false,
   };
 }
 
