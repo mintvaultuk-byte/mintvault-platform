@@ -632,7 +632,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
 }
 
 export async function sendTransferV2IncomingConfirmation(data: {
-  toEmail: string; fromEmail: string; certId: string; confirmUrl: string;
+  toEmail: string; fromEmail: string; certId: string; confirmUrl: string; previousOwnersCount: number;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -642,7 +642,9 @@ export async function sendTransferV2IncomingConfirmation(data: {
 
   const extraRows = `
 <span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">Transferred From</span>
-<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.fromEmail}</span>`;
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.fromEmail}</span>
+<span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">Former Keepers</span>
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.previousOwnersCount}</span>`;
 
   const body = `
 <p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The current Registered Keeper of the certificate below has authorised a transfer of keepership to you.</p>

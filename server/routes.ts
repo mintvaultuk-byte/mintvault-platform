@@ -17,6 +17,7 @@ import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertShee
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { getOwnerChain } from "./ownership-service";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
 import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
@@ -4709,11 +4710,17 @@ export async function registerRoutes(
       const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
       const incomingConfirmUrl = `${baseUrl}/transfer/accept?token=${result.newOwnerToken}&v=2`;
 
+      // Compute former-keeper count for DVLA-parity on the incoming-transfer email.
+      // Matches the Former Keepers row on the Logbook PDF (L247) — chain.length - 1.
+      const ownerChain = result.certId ? await getOwnerChain(result.certId) : [];
+      const previousOwnersCount = Math.max(0, ownerChain.length - 1);
+
       await sendTransferV2IncomingConfirmation({
         toEmail: result.toEmail || "",
         fromEmail: result.fromEmail || "",
         certId: result.certId || "",
         confirmUrl: incomingConfirmUrl,
+        previousOwnersCount,
       });
 
       return res.redirect(`/transfer?step=outgoing_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
