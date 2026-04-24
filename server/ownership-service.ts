@@ -36,7 +36,7 @@ export async function getOwnerChain(certId: string): Promise<OwnerEntry[]> {
 
       return {
         ownerNumber: idx + 1,
-        displayName: (event as any).public_name ? (event.notes?.replace("Original submitter: ", "") || null) : null,
+        displayName: event.publicName ? (event.notes?.replace("Original submitter: ", "") || null) : null,
         email: null, // never expose email publicly
         claimedAt,
         releasedAt,
