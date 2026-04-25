@@ -170,11 +170,37 @@ export interface ImageVariants {
 
 /**
  * Generate all 5 analysis views from a single card image buffer.
- * Input is auto-cropped first, then 4 variants are derived.
+ *
+ * Cropping chain (unified with the admin CaptureWizard path — Phase Y
+ * convergence): deskew → cropToYellowBorder || autoCrop → reCentreBitmap.
+ * This inherits the Phase 1 Bugs 1-3 fixes (mat-agnostic deskew, re-trim
+ * logging, alpha-mask white fill — though mask isn't applied here) and
+ * produces a card-centred flat JPEG suitable both for AI consumption and
+ * for downstream round-corner masking at the scan-ingest layer.
+ *
+ * Returned `cropped` is a flat JPEG. The display-ready masked PNG is the
+ * caller's responsibility (see scan-ingest-service uploadImagesToCert).
+ *
+ * Kept the old `autoCropCard` export in place for any non-variant callers
+ * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
-export async function generateImageVariants(buffer: Buffer): Promise<ImageVariants> {
-  const cropped = await autoCropCard(buffer);
+export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } }> {
+  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap } = await import("./image-processing");
 
+  // Step 1: deskew small rotations before cropping
+  const { buffer: deskewed, angle } = await deskewCard(buffer);
+  if (Math.abs(angle) > 0.05) console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°${certId != null ? ` cert=${certId}` : ""}`);
+
+  // Step 2: tight card-boundary crop (mat-agnostic); fall back to sharp.trim-based autoCrop
+  const yellowResult = await cropToYellowBorder(deskewed, certId);
+  const rectCropped = yellowResult ? yellowResult.buffer : (await autoCrop(deskewed)).buffer;
+
+  // Step 3: deterministic re-centre — measure actual card edges vs mat colour
+  // and shift to centre (Fix 2). Pass certId for traceability.
+  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId });
+  const cropped = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
+
+  // Step 4: derive the four analysis variants from the centred flat image
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
     sharp(cropped).grayscale().jpeg({ quality: 95 }).toBuffer(),
     sharp(cropped).linear(1.5, -30).jpeg({ quality: 95 }).toBuffer(),
@@ -187,9 +213,17 @@ export async function generateImageVariants(buffer: Buffer): Promise<ImageVarian
     sharp(cropped).negate().jpeg({ quality: 95 }).toBuffer(),
   ]);
 
-  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB`);
+  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB (re-centre asym=${post_asymmetry_px.horizontal}/${post_asymmetry_px.vertical}px, extended=${extended})`);
 
-  return { original: buffer, cropped, greyscale, highcontrast, edgeenhanced, inverted };
+  return {
+    original: buffer,
+    cropped,
+    greyscale,
+    highcontrast,
+    edgeenhanced,
+    inverted,
+    cropGeometry: { pre_padding_px, post_asymmetry_px, extended },
+  };
 }
 
 // ── Pokémon card-code → TCG API set ID normalisation ─────────────────────
@@ -512,7 +546,8 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
 export async function analyzeCardFromBuffers(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
-  cardGame?: string
+  cardGame?: string,
+  certId?: string | number,
 ): Promise<GradingAnalysis> {
   await rateLimit();
 
@@ -537,6 +572,7 @@ export async function analyzeCardFromBuffers(
       thinking: true,
       systemPrompt,
       label: "grade",
+      certId,
     });
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
@@ -547,7 +583,7 @@ export async function analyzeCardFromBuffers(
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix" });
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix", certId });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -597,11 +633,42 @@ function imageBlock(base64: string, mediaType = "image/jpeg"): object {
 
 // ── Claude API call ────────────────────────────────────────────────────────
 
+/**
+ * Retry policy for the Claude API call.
+ *
+ * - 120s per-attempt timeout (Opus 4.7 grading with 6 images + adaptive
+ *   thinking regularly exceeds the old 30s ceiling — that was the root
+ *   cause of the "This operation was aborted" failures on MV149/MV150)
+ * - Max 2 retries on AbortError, low-level network errors, or HTTP 5xx
+ * - Backoff: 1s then 3s
+ * - Never retries 4xx (auth / bad request / rate limit) — caller decides
+ */
+const CLAUDE_TIMEOUT_MS = 120_000;
+const CLAUDE_RETRY_BACKOFF_MS = [0, 1000, 3000]; // index = attempt number (1, 2, 3)
+const CLAUDE_MAX_ATTEMPTS = 3;
+
+function isRetryableClaudeError(err: any, response?: Response | null): { retry: boolean; reason: string } {
+  if (response && !response.ok) {
+    if (response.status >= 500) return { retry: true, reason: `HTTP ${response.status}` };
+    return { retry: false, reason: `HTTP ${response.status}` };
+  }
+  const name = err?.name || "";
+  const code = err?.code || "";
+  if (name === "AbortError") return { retry: true, reason: "abort" };
+  if (code === "ECONNRESET" || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+    return { retry: true, reason: `network ${code}` };
+  }
+  if (typeof err?.message === "string" && /fetch failed|network/i.test(err.message)) {
+    return { retry: true, reason: "network" };
+  }
+  return { retry: false, reason: "other" };
+}
+
 async function callClaude(
   content: object[],
   maxTokens: number,
   model = "claude-opus-4-7",
-  options?: { thinking?: boolean; systemPrompt?: string; label?: string },
+  options?: { thinking?: boolean; systemPrompt?: string; label?: string; certId?: string | number },
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
@@ -626,11 +693,41 @@ async function callClaude(
     }];
   }
 
-  const response = await anthropicFetch(body, { apiKey, timeoutMs: 30_000 });
+  const certTag = options?.certId != null ? `cert=${options.certId}` : (options?.label || "unknown");
+  let response: Response | null = null;
+  let lastErr: any = null;
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${errText.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= CLAUDE_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      const delay = CLAUDE_RETRY_BACKOFF_MS[attempt - 1];
+      await new Promise(r => setTimeout(r, delay));
+      const decision = isRetryableClaudeError(lastErr, response);
+      console.log(`[ai/retry] ${attempt - 1}/${CLAUDE_MAX_ATTEMPTS - 1} for ${certTag} after ${decision.reason} (${delay}ms delay)`);
+    }
+
+    response = null;
+    lastErr = null;
+    try {
+      response = await anthropicFetch(body, { apiKey, timeoutMs: CLAUDE_TIMEOUT_MS });
+    } catch (err: any) {
+      lastErr = err;
+      const decision = isRetryableClaudeError(err, null);
+      if (decision.retry && attempt < CLAUDE_MAX_ATTEMPTS) continue;
+      throw new Error(`Claude API ${err?.name || "error"} after ${attempt} attempt${attempt > 1 ? "s" : ""} (${CLAUDE_TIMEOUT_MS}ms per attempt) for ${certTag}: ${err?.message || err}`);
+    }
+
+    if (!response.ok) {
+      const decision = isRetryableClaudeError(null, response);
+      if (decision.retry && attempt < CLAUDE_MAX_ATTEMPTS) continue;
+      const errText = await response.text();
+      throw new Error(`Claude API error ${response.status} for ${certTag}: ${errText.slice(0, 300)}`);
+    }
+
+    break; // success — fall through to parse
+  }
+
+  if (!response || !response.ok) {
+    throw new Error(`Claude API exhausted retries for ${certTag}: ${lastErr?.message || "unknown"}`);
   }
 
   const data = await response.json() as Record<string, unknown>;
@@ -767,7 +864,8 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
 
 export async function identifyCardFromBuffer(
   buffer: Buffer,
-  _mimeType: string
+  _mimeType: string,
+  certId?: string | number,
 ): Promise<CardIdentification> {
   await rateLimit();
   const { buffer: resized, mediaType } = await resizeForClaude(buffer);
@@ -779,7 +877,7 @@ export async function identifyCardFromBuffer(
       [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
       1024,
       "claude-haiku-4-5-20251001",
-      { label: "identify-haiku" }
+      { label: "identify-haiku", certId }
     ),
     identifyWithGpt(base64),
   ]);

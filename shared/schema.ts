@@ -262,6 +262,15 @@ export const certificates = pgTable("certificates", {
   centeringFrontTb: text("centering_front_tb"),
   centeringBackLr: text("centering_back_lr"),
   centeringBackTb: text("centering_back_tb"),
+  // Crop pipeline forensics (Phase Y convergence). Nullable; populated on
+  // every scan-ingest or admin CaptureWizard upload. Does NOT feed grade
+  // calculation — the centering grade remains AI-driven via centering_inner_*.
+  cropGeometry: jsonb("crop_geometry").$type<{
+    front?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } | null;
+    back?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } | null;
+    pipeline_version?: string;
+    recorded_at?: string;
+  } | null>(),
   defects: jsonb("defects").$type<Array<{type: string; location: string; position?: {x_percent: number; y_percent: number}; severity: string; description: string}>>().default([]),
   aiDefects: jsonb("ai_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
   verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),

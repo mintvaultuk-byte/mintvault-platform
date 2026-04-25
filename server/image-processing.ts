@@ -101,8 +101,25 @@ function sampleCorner(
 }
 
 /**
- * Compute adaptive background colour by sampling all 4 corners.
- * Returns the average + a luminance threshold for "is background" checks.
+ * Compute adaptive background colour by sampling all 4 corners, with a
+ * mat-aware branching threshold.
+ *
+ * Fix 0 — bug: old formula `threshold = avgLuma + max(25, avgLuma*0.6+15)`
+ * for a white mat (avgLuma≈246.9) produced threshold≈410.0, which exceeds
+ * max luma (255). `isBackgroundAdaptive` returning `luma < threshold` was
+ * then ALWAYS true — every pixel flagged as background → adaptive-luma
+ * stage always failed on bright mats, falling through to later fallbacks.
+ *
+ * New branching (standard mat is WHITE — tuned for that):
+ *   - avgLuma > 180 (bright mat): threshold = avgLuma − 60. Background
+ *     is BRIGHT (high luma). "isBackground(p)" = luma(p) > threshold.
+ *   - avgLuma < 60  (dark mat):  threshold = clamp(avgLuma + margin, 200).
+ *     Background is DARK (low luma). "isBackground(p)" = luma(p) < threshold.
+ *   - 60 ≤ avgLuma ≤ 180 (ambiguous): log warning and default to the
+ *     bright-mat formula (standard mat is white).
+ *
+ * Returns an `isBackground(r,g,b)` closure so callers don't need to know
+ * which direction to compare.
  */
 function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: number) {
   const sz = Math.max(20, Math.round(Math.min(w, h) * 0.04)); // ~4% of shorter dimension
@@ -117,16 +134,27 @@ function computeBackgroundProfile(pixels: Uint8Array, w: number, h: number, ch: 
   const avgG = corners.reduce((s, c) => s + c.g, 0) / corners.length;
   const avgB = corners.reduce((s, c) => s + c.b, 0) / corners.length;
 
-  // Threshold: pixel is "card" if its luminance is > bgLuma + margin
-  // For dark backgrounds, margin is at least 25; for brighter, scale up
-  const margin = Math.max(25, avgLuma * 0.6 + 15);
+  let mode: "bright-mat" | "dark-mat" | "ambiguous";
+  let threshold: number;
+  let isBackground: (r: number, g: number, b: number) => boolean;
 
-  return { avgR, avgG, avgB, avgLuma, threshold: avgLuma + margin };
-}
+  if (avgLuma > 180) {
+    mode = "bright-mat";
+    threshold = avgLuma - 60; // ~186 for avgLuma=246
+    isBackground = (r, g, b) => luma(r, g, b) > threshold;
+  } else if (avgLuma < 60) {
+    mode = "dark-mat";
+    const margin = Math.max(25, avgLuma * 0.6 + 15);
+    threshold = Math.min(200, avgLuma + margin);
+    isBackground = (r, g, b) => luma(r, g, b) < threshold;
+  } else {
+    // Ambiguous band: treat as bright-mat (standard mat is white) but warn.
+    mode = "ambiguous";
+    threshold = avgLuma - 60;
+    isBackground = (r, g, b) => luma(r, g, b) > threshold;
+  }
 
-/** Check if a pixel is background using adaptive threshold */
-function isBackgroundAdaptive(r: number, g: number, b: number, bgThreshold: number): boolean {
-  return luma(r, g, b) < bgThreshold;
+  return { avgR, avgG, avgB, avgLuma, threshold, mode, isBackground };
 }
 
 /** Legacy fallback: fixed black threshold */
@@ -184,29 +212,37 @@ function isCardPixel(r: number, g: number, b: number, mat: MatProfile): boolean 
  * Falls back to fixed black threshold if adaptive detection fails.
  */
 export function detectCardBoundary(
-  pixels: Uint8Array, w: number, h: number, ch: number
+  pixels: Uint8Array, w: number, h: number, ch: number, certId?: string | number
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+  const certTag = certId != null ? ` cert=${certId}` : "";
+
   // Primary: mat-distance detector (works against any mat colour)
   const mat = computeMatProfile(pixels, w, h, ch);
-  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}`);
-  const matBased = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isCardPixel(r, g, b, mat));
+  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}${certTag}`);
+  const matIsBg = (r: number, g: number, b: number) => !isCardPixel(r, g, b, mat);
+  const matBased = detectBoundaryWithTest(pixels, w, h, ch, matIsBg);
   if (matBased) {
-    console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels`);
-    return matBased;
+    console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
+    return tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag);
   }
 
-  // Fallback 1: legacy adaptive-luma
+  // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
   const bg = computeBackgroundProfile(pixels, w, h, ch);
-  console.log(`[card-detect] falling back to adaptive-luma: avgLuma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)}`);
-  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, (r, g, b) => isBackgroundAdaptive(r, g, b, bg.threshold));
+  console.log(`[card-detect] adaptive-luma: mat_luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} (${bg.mode} mode)${certTag}`);
+  if (bg.mode === "ambiguous") {
+    console.warn(`[card-detect] ambiguous mat luma (60–180) — defaulting to bright-mat formula${certTag}`);
+  }
+  const adaptive = detectBoundaryWithTest(pixels, w, h, ch, bg.isBackground);
   if (adaptive) {
-    console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg`);
-    return adaptive;
+    console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
+    return tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag);
   }
 
   // Fallback 2: fixed black threshold
-  console.log("[card-detect] adaptive-luma failed, falling back to fixed black threshold");
-  return detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+  console.log(`[card-detect] adaptive-luma failed, falling back to fixed black threshold${certTag}`);
+  const fixed = detectBoundaryWithTest(pixels, w, h, ch, isBackground);
+  if (!fixed) return null;
+  return tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag);
 }
 
 /** Core boundary detection with a pluggable background test */
@@ -239,6 +275,104 @@ function detectBoundaryWithTest(
   }
 
   return { minX, maxX, minY, maxY, nonBlackPct };
+}
+
+// ── Fix 1: aspect-tighten to Pokémon card ratio ──────────────────────────────
+// Pokémon standard card is 63mm × 88mm → width/height = 0.7159. Raw card-detect
+// bounds often include a mm or two of mat because the outer card border is
+// pale; tightening to the expected ratio trims that remainder. Symmetric shrink
+// (both edges by equal px) so we don't introduce bias for the re-centre stage.
+// Safeguard: bail out if shrinking would discard >2% of the bounds-internal
+// card pixels — that means the true card isn't aspect-off, the test is, and
+// we should leave the bounds alone rather than eat into the card.
+
+const POKEMON_ASPECT = 0.716;
+const ASPECT_TOL = 0.005;
+const MAX_ASPECT_TRIM_LOSS_PCT = 2;
+
+function tightenToPokemonAspect(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number },
+  isBg: (r: number, g: number, b: number) => boolean,
+  certTag: string,
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } {
+  const startMinX = bounds.minX, startMaxX = bounds.maxX;
+  const startMinY = bounds.minY, startMaxY = bounds.maxY;
+  const startW = startMaxX - startMinX + 1;
+  const startH = startMaxY - startMinY + 1;
+  const startRatio = startW / startH;
+
+  // Already in range — nothing to do
+  if (startRatio >= POKEMON_ASPECT - ASPECT_TOL && startRatio <= POKEMON_ASPECT + ASPECT_TOL) {
+    console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} in-range, no trim${certTag}`);
+    return bounds;
+  }
+
+  // Integral image of fg pixels over the WHOLE frame, built once. Lets us
+  // check "fg pixels inside rect R" in O(1) per iteration.
+  const integ = new Int32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch;
+      const fg = isBg(pixels[i], pixels[i + 1], pixels[i + 2]) ? 0 : 1;
+      rowSum += fg;
+      integ[y * w + x] = rowSum + (y > 0 ? integ[(y - 1) * w + x] : 0);
+    }
+  }
+  const fgCountInRect = (x0: number, x1: number, y0: number, y1: number) => {
+    const A = (x0 > 0 && y0 > 0) ? integ[(y0 - 1) * w + (x0 - 1)] : 0;
+    const B = (y0 > 0) ? integ[(y0 - 1) * w + x1] : 0;
+    const C = (x0 > 0) ? integ[y1 * w + (x0 - 1)] : 0;
+    const D = integ[y1 * w + x1];
+    return D - B - C + A;
+  };
+
+  const originalFg = fgCountInRect(startMinX, startMaxX, startMinY, startMaxY);
+  const maxLoss = Math.max(1, Math.floor(originalFg * MAX_ASPECT_TRIM_LOSS_PCT / 100));
+
+  let minX = startMinX, maxX = startMaxX, minY = startMinY, maxY = startMaxY;
+  let aborted: "pixel-loss" | "collapse" | null = null;
+
+  // Symmetric 1-px shrink per side per iteration, max bw+bh steps
+  const maxSteps = startW + startH;
+  for (let step = 0; step < maxSteps; step++) {
+    const bw = maxX - minX + 1;
+    const bh = maxY - minY + 1;
+    const ratio = bw / bh;
+    if (ratio >= POKEMON_ASPECT - ASPECT_TOL && ratio <= POKEMON_ASPECT + ASPECT_TOL) break;
+
+    let nMinX = minX, nMaxX = maxX, nMinY = minY, nMaxY = maxY;
+    if (ratio > POKEMON_ASPECT + ASPECT_TOL) {
+      nMinX = minX + 1; nMaxX = maxX - 1;
+    } else {
+      nMinY = minY + 1; nMaxY = maxY - 1;
+    }
+    if (nMaxX <= nMinX || nMaxY <= nMinY) { aborted = "collapse"; break; }
+
+    const fgAfter = fgCountInRect(nMinX, nMaxX, nMinY, nMaxY);
+    if (originalFg - fgAfter > maxLoss) { aborted = "pixel-loss"; break; }
+
+    minX = nMinX; maxX = nMaxX; minY = nMinY; maxY = nMaxY;
+  }
+
+  const finalW = maxX - minX + 1;
+  const finalH = maxY - minY + 1;
+  const finalRatio = finalW / finalH;
+  const trimmedW = startW - finalW;
+  const trimmedH = startH - finalH;
+  const finalFg = fgCountInRect(minX, maxX, minY, maxY);
+  const finalPct = (finalFg / (finalW * finalH)) * 100;
+
+  if (trimmedW === 0 && trimmedH === 0) {
+    console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} could not shrink (${aborted || "bounds"})${certTag}`);
+    return bounds;
+  }
+
+  const suffix = aborted ? ` [early-exit: ${aborted}]` : "";
+  console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} → ${finalRatio.toFixed(3)} (trimmed ${trimmedW}px width, ${trimmedH}px height)${suffix}${certTag}`);
+
+  return { minX, maxX, minY, maxY, nonBlackPct: finalPct };
 }
 
 /**
@@ -336,9 +470,9 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
  * Works on ANY card colour as long as scanner uses a black background mat.
  * Returns null if detection fails (caller should fall back to autoCrop).
  */
-export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | number): Promise<{ buffer: Buffer; cropped: boolean } | null> {
   try {
-    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)`);
+    console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)${certId != null ? ` cert=${certId}` : ""}`);
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return null;
 
@@ -353,7 +487,7 @@ export async function cropToCardBoundary(inputBuffer: Buffer): Promise<{ buffer:
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
-    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels);
+    const boundary = detectCardBoundary(pixels, info.width, info.height, info.channels, certId);
 
     if (!boundary) {
       console.log("[card-detect] boundary detection failed (not enough non-black or too much)");
@@ -509,6 +643,167 @@ async function measureBorderRingWhiteness(buf: Buffer, w: number, h: number): Pr
     }
     return total > 0 ? (white / total) * 100 : 0;
   } catch { return 0; }
+}
+
+/**
+ * Re-centre the card content within its own bitmap by measuring actual card
+ * edges against the mat colour (Fix 2 rewrite — previously used a fixed white-
+ * luma threshold, which fell over on black/neutral mats and on cards with
+ * pale outer borders).
+ *
+ * Algorithm:
+ *  1. Determine matRgb — either supplied by caller (preferred: sample from the
+ *     pre-crop buffer where the strip is reliably mat) or best-effort-sampled
+ *     from the outer 2% strip of the input buffer.
+ *  2. Scan inward from each edge. A row/col is declared "card" when >70% of
+ *     its opaque pixels are non-mat (Euclidean colour distance > 45 from
+ *     matRgb). The first such row/col on each side gives the margin L/R/T/B.
+ *  3. If |L-R| > 4 (or |T-B| > 4), the card is off-centre within the bitmap.
+ *     Shift it by dx = round((R-L)/2) (and dy analogously) — trim `dx` from
+ *     the loose side, pad `dx` mat-coloured pixels on the tight side. Bitmap
+ *     dimensions are preserved.
+ *
+ * Pad colour is matRgb so the visible mat colour stays consistent; the
+ * downstream maskRoundedCorners pass replaces the mat region with
+ * transparent corners anyway.
+ *
+ * Returns the (possibly shifted) buffer plus pre-shift margins and applied
+ * shift amounts for forensics / audit-log persistence.
+ */
+const EDGE_DETECT_COLOUR_DELTA = 45;       // matches isCardPixel threshold
+const EDGE_DETECT_ROW_COVERAGE = 0.70;     // 70% non-mat = card row
+const RE_CENTRE_SHIFT_EPSILON = 4;         // margin diff below this → no shift
+const DEFAULT_MAT_RGB = { r: 255, g: 255, b: 255 }; // standard mat is white
+
+export async function reCentreBitmap(
+  inputBuffer: Buffer,
+  options?: { matRgb?: { r: number; g: number; b: number }; certId?: string | number },
+): Promise<{
+  buffer: Buffer;
+  pre_padding_px: { top: number; bottom: number; left: number; right: number };
+  post_asymmetry_px: { horizontal: number; vertical: number };
+  extended: boolean;
+}> {
+  const certTag = options?.certId != null ? ` cert=${options.certId}` : "";
+  const meta = await sharp(inputBuffer).metadata();
+  if (!meta.width || !meta.height) {
+    return { buffer: inputBuffer, pre_padding_px: { top: 0, bottom: 0, left: 0, right: 0 }, post_asymmetry_px: { horizontal: 0, vertical: 0 }, extended: false };
+  }
+
+  const { data, info } = await sharp(inputBuffer).raw().toBuffer({ resolveWithObject: true });
+  const px = new Uint8Array(data);
+  const w = info.width, h = info.height, ch = info.channels;
+
+  // Mat colour: prefer caller-supplied; else sample outer 2% strip (fallback).
+  let matR: number, matG: number, matB: number;
+  if (options?.matRgb) {
+    matR = options.matRgb.r; matG = options.matRgb.g; matB = options.matRgb.b;
+  } else {
+    // Sample outer-strip median — same approach as computeMatProfile, but on
+    // the full buffer (post-crop). If the crop was aggressive and the strip
+    // is mostly card, the resulting "mat" colour won't match real mat; callers
+    // should pass matRgb explicitly for that case.
+    const strip = Math.max(3, Math.round(Math.min(w, h) * 0.02));
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    const pushAt = (x: number, y: number) => {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) return;
+      rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
+    };
+    for (let y = 0; y < strip; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+    for (let y = h - strip; y < h; y++) for (let x = 0; x < w; x++) pushAt(x, y);
+    for (let y = strip; y < h - strip; y++) {
+      for (let x = 0; x < strip; x++) pushAt(x, y);
+      for (let x = w - strip; x < w; x++) pushAt(x, y);
+    }
+    const median = (arr: number[]) => { arr.sort((a, b) => a - b); return arr.length ? arr[Math.floor(arr.length / 2)] : 0; };
+    if (rs.length > 0) {
+      matR = median(rs); matG = median(gs); matB = median(bs);
+    } else {
+      matR = DEFAULT_MAT_RGB.r; matG = DEFAULT_MAT_RGB.g; matB = DEFAULT_MAT_RGB.b;
+    }
+  }
+
+  const isNonMat = (r: number, g: number, b: number): boolean => {
+    const dr = r - matR, dg = g - matG, db = b - matB;
+    return Math.sqrt(dr * dr + dg * dg + db * db) > EDGE_DETECT_COLOUR_DELTA;
+  };
+
+  // Row coverage: fraction of opaque pixels in row y that are non-mat.
+  const rowCoverage = (y: number): number => {
+    let nonMat = 0, opaque = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) continue;
+      opaque++;
+      if (isNonMat(px[i], px[i + 1], px[i + 2])) nonMat++;
+    }
+    return opaque > 0 ? nonMat / opaque : 0;
+  };
+  const colCoverage = (x: number): number => {
+    let nonMat = 0, opaque = 0;
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * ch;
+      if (ch === 4 && px[i + 3] < 128) continue;
+      opaque++;
+      if (isNonMat(px[i], px[i + 1], px[i + 2])) nonMat++;
+    }
+    return opaque > 0 ? nonMat / opaque : 0;
+  };
+
+  let top = 0, bottom = 0, left = 0, right = 0;
+  for (let y = 0; y < h; y++) { if (rowCoverage(y) > EDGE_DETECT_ROW_COVERAGE) { top = y; break; } }
+  for (let y = h - 1; y >= 0; y--) { if (rowCoverage(y) > EDGE_DETECT_ROW_COVERAGE) { bottom = h - 1 - y; break; } }
+  for (let x = 0; x < w; x++) { if (colCoverage(x) > EDGE_DETECT_ROW_COVERAGE) { left = x; break; } }
+  for (let x = w - 1; x >= 0; x--) { if (colCoverage(x) > EDGE_DETECT_ROW_COVERAGE) { right = w - 1 - x; break; } }
+
+  const prePadding = { top, bottom, left, right };
+  const hDiff = Math.abs(left - right);
+  const vDiff = Math.abs(top - bottom);
+
+  if (hDiff <= RE_CENTRE_SHIFT_EPSILON && vDiff <= RE_CENTRE_SHIFT_EPSILON) {
+    console.log(`[re-centre] margins L:${left} R:${right} T:${top} B:${bottom} — within ±${RE_CENTRE_SHIFT_EPSILON}px, no shift${certTag}`);
+    return { buffer: inputBuffer, pre_padding_px: prePadding, post_asymmetry_px: { horizontal: 0, vertical: 0 }, extended: false };
+  }
+
+  // Compute shifts. dx > 0 moves card to the right (trim right margin, pad left).
+  const dx = hDiff > RE_CENTRE_SHIFT_EPSILON ? Math.round((right - left) / 2) : 0;
+  const dy = vDiff > RE_CENTRE_SHIFT_EPSILON ? Math.round((bottom - top) / 2) : 0;
+
+  // Materialise the shift: extract the inner region offset by the shift, then
+  // pad the tight side with mat colour so the bitmap keeps its original size.
+  let extractLeft = 0, extractTop = 0, extractW = w, extractH = h;
+  let padLeft = 0, padRight = 0, padTop = 0, padBottom = 0;
+  if (dx > 0) { // shift card right: trim right, pad left
+    extractLeft = 0; extractW = w - dx; padLeft = dx;
+  } else if (dx < 0) { // shift card left: trim left, pad right
+    extractLeft = -dx; extractW = w + dx; padRight = -dx;
+  }
+  if (dy > 0) { // shift card down: trim bottom, pad top
+    extractTop = 0; extractH = h - dy; padTop = dy;
+  } else if (dy < 0) { // shift card up: trim top, pad bottom
+    extractTop = -dy; extractH = h + dy; padBottom = -dy;
+  }
+
+  let pipeline = sharp(inputBuffer);
+  if (extractLeft > 0 || extractTop > 0 || extractW !== w || extractH !== h) {
+    pipeline = pipeline.extract({ left: extractLeft, top: extractTop, width: extractW, height: extractH });
+  }
+  if (padLeft || padRight || padTop || padBottom) {
+    pipeline = pipeline.extend({ top: padTop, bottom: padBottom, left: padLeft, right: padRight, background: { r: matR, g: matG, b: matB, alpha: 1 } });
+  }
+  const out = await pipeline.jpeg({ quality: 95 }).toBuffer();
+
+  const dxSign = dx > 0 ? `+${dx}` : `${dx}`;
+  const dySign = dy > 0 ? `+${dy}` : `${dy}`;
+  console.log(`[re-centre] margins L:${left} R:${right} T:${top} B:${bottom} → shift ${dxSign}x, ${dySign}y${certTag}`);
+
+  return {
+    buffer: out,
+    pre_padding_px: prePadding,
+    post_asymmetry_px: { horizontal: dx, vertical: dy },
+    extended: false,
+  };
 }
 
 /**

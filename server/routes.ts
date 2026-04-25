@@ -5571,7 +5571,8 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality } = await import("./image-processing");
+        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality, reCentreBitmap } = await import("./image-processing");
+        const cropGeometryByAngle: Record<string, any> = {};
 
         const id = parseInt(String(req.params.id), 10);
         const cert = await storage.getCertificate(id);
@@ -5602,8 +5603,13 @@ export async function registerRoutes(
           const yellowResult = await cropToYellowBorder(deskewedBuf);
           const { buffer: rectCropped, cropped } = yellowResult || await autoCrop(deskewedBuf);
 
+          // 3a. Deterministic re-centre — measure actual card edges against
+          // mat colour and shift card to centre inside the bitmap (Fix 2).
+          const centreResult = await reCentreBitmap(rectCropped, { certId });
+          cropGeometryByAngle[angle] = { pre_padding_px: centreResult.pre_padding_px, post_asymmetry_px: centreResult.post_asymmetry_px, extended: centreResult.extended };
+
           // 4. Rounded corner mask (card-shaped output with transparent corners)
-          const croppedBuf = await maskRoundedCorners(rectCropped);
+          const croppedBuf = await maskRoundedCorners(centreResult.buffer);
           const ext2 = "png"; // PNG for transparency support
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
           await uploadToR2(cropKey, croppedBuf, "image/png");
@@ -5707,6 +5713,12 @@ export async function registerRoutes(
         if (updates.front_image_path)        await db.execute(sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`);
         if (updates.back_image_path)         await db.execute(sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`);
 
+        // Crop forensics — records reCentre asymmetry + whether padding was extended. Read-only signal.
+        if (Object.keys(cropGeometryByAngle).length > 0) {
+          const cropGeometry = { ...cropGeometryByAngle, pipeline_version: "converged_v1", recorded_at: new Date().toISOString() };
+          await db.execute(sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+        }
+
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};
         for (const [key, val] of Object.entries(updates)) {
@@ -5726,7 +5738,7 @@ export async function registerRoutes(
             if (aiPromise) {
               aiPromise
                 .then(r => console.log(`[upload-images] AI done for cert ${id}: grade=${r.grade} strength=${r.strengthScore}`))
-                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e.message}`));
+                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e?.message || e}\n${e?.stack || "(no stack)"}`));
             }
           } else {
             console.log(`[upload-images] cert=${id} skipping AI trigger (aiEmpty=${aiEmpty} aiGradeEmpty=${aiGradeEmpty} frontBuf=${!!frontCroppedBuf} backBuf=${!!backCroppedBuf})`);
@@ -7694,13 +7706,13 @@ export async function registerRoutes(
               message: `Certificate ${certInfo.certId} graded.`,
             });
           } catch (aiErr: any) {
-            console.error(`[scan-ingest] AI failed for ${certInfo.certId}: ${aiErr.message}`);
+            console.error(`[scan-ingest] AI failed for ${certInfo.certId} (sync): ${aiErr?.message || aiErr}\n${aiErr?.stack || "(no stack)"}`);
             res.json({
               certId: certInfo.certId,
               dbId: certInfo.id,
               workstationUrl: `/admin#grading-${certInfo.id}`,
               aiStatus: "failed",
-              aiError: aiErr.message,
+              aiError: aiErr?.message || String(aiErr),
               message: `Certificate ${certInfo.certId} created but AI grading failed. Retry from workstation.`,
             });
           }
@@ -7708,7 +7720,7 @@ export async function registerRoutes(
           // Watcher script / admin UI — respond immediately, AI runs in background
           const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
             .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
-            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId}: ${e.message}`));
+            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId} (async): ${e?.message || e}\n${e?.stack || "(no stack)"}`));
 
           res.json({
             certId: certInfo.certId,

@@ -36,15 +36,30 @@ export async function createCertForScan(): Promise<{ id: number; certId: string;
 
 /**
  * Upload front + back images to R2 and save paths to the certificate.
- * Runs the full image processing pipeline (deskew, crop, variants).
+ * Runs the unified image-processing pipeline (deskew, tight crop,
+ * deterministic re-centre, rounded-corner mask) — Phase Y convergence
+ * with the admin CaptureWizard path.
+ *
+ * Writes per side:
+ *   grading/{id}/{side}_original.jpg     — raw scan (AI "before" reference)
+ *   grading/{id}/{side}_cropped.jpg      — flat cropped (AI consumption)
+ *   grading/{id}/{side}_cropped.png      — masked display (alpha corners)
+ *   grading/{id}/{side}_{variant}.jpg    — greyscale/highcontrast/etc
+ *   images/{certId}/{side}.png           — canonical display key (front_image_path)
  */
 export async function uploadImagesToCert(
   certId: number,
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { generateVariants } = await import("./image-processing");
+  const { maskRoundedCorners } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
+
+  // Resolve cert number for display-key path (images/{CERT}/…). The stored
+  // certificate_number is already normalised ("MV145", not "MV-0000000145");
+  // fall back to synthesising from db id if somehow missing.
+  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+  const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
 
   // Resize raw scans (scanner output can be very large)
   const resizeBuf = async (buf: Buffer) =>
@@ -53,47 +68,83 @@ export async function uploadImagesToCert(
   const frontResized = await resizeBuf(frontBuffer);
   const backResized = backBuffer ? await resizeBuf(backBuffer) : null;
 
-  // Generate 5 variants each (original, cropped, greyscale, highcontrast, edgeenhanced, inverted)
-  const frontVariants = await generateImageVariants(frontResized);
-  const backVariants = backResized ? await generateImageVariants(backResized) : null;
+  // Generate variants via the unified pipeline (deskew + autoCrop + reCentre).
+  // Pass certNumber so card-detect logs are traceable per cert (Fix 0).
+  const frontVariants = await generateImageVariants(frontResized, certNumber);
+  const backVariants = backResized ? await generateImageVariants(backResized, certNumber) : null;
 
-  // Upload all to R2
+  // Derive display-ready masked PNGs from the flat cropped output
+  const frontMaskedPng = await maskRoundedCorners(frontVariants.cropped);
+  const backMaskedPng = backVariants ? await maskRoundedCorners(backVariants.cropped) : null;
+
+  // Upload all to R2 — explicit extension map per variant kind
   const prefix = `images/grading/${certId}`;
   const uploadKeys: Record<string, string> = {};
   const uploads: Promise<void>[] = [];
 
-  for (const [vName, buf] of Object.entries(frontVariants) as [string, Buffer][]) {
+  // Flat JPG variants (including cropped — kept .jpg for AI compatibility with the old key shape)
+  const jpgVariants = ["original", "cropped", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
+  for (const vName of jpgVariants) {
+    const buf = (frontVariants as any)[vName] as Buffer | undefined;
+    if (!buf) continue;
     const k = `${prefix}/front_${vName}.jpg`;
     uploadKeys[`front_${vName}`] = k;
     uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
   }
   if (backVariants) {
-    for (const [vName, buf] of Object.entries(backVariants) as [string, Buffer][]) {
+    for (const vName of jpgVariants) {
+      const buf = (backVariants as any)[vName] as Buffer | undefined;
+      if (!buf) continue;
       const k = `${prefix}/back_${vName}.jpg`;
       uploadKeys[`back_${vName}`] = k;
       uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
     }
   }
-  await Promise.all(uploads);
-  console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image variants to R2`);
 
-  // Save R2 keys to certificate
+  // Masked display PNG (with alpha rounded corners) + canonical display key
+  const frontPngKey = `${prefix}/front_cropped.png`;
+  const frontDisplayKey = `images/${certNumber}/front.png`;
+  uploadKeys["front_cropped_png"] = frontPngKey;
+  uploadKeys["front_display"] = frontDisplayKey;
+  uploads.push(uploadToR2(frontPngKey, frontMaskedPng, "image/png").then(() => {}));
+  uploads.push(uploadToR2(frontDisplayKey, frontMaskedPng, "image/png").then(() => {}));
+  if (backMaskedPng) {
+    const backPngKey = `${prefix}/back_cropped.png`;
+    const backDisplayKey = `images/${certNumber}/back.png`;
+    uploadKeys["back_cropped_png"] = backPngKey;
+    uploadKeys["back_display"] = backDisplayKey;
+    uploads.push(uploadToR2(backPngKey, backMaskedPng, "image/png").then(() => {}));
+    uploads.push(uploadToR2(backDisplayKey, backMaskedPng, "image/png").then(() => {}));
+  }
+
+  await Promise.all(uploads);
+  console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
+
+  // Persist R2 keys + crop_geometry forensics
+  const cropGeometry = {
+    front: (frontVariants as any).cropGeometry ?? null,
+    back: backVariants ? (backVariants as any).cropGeometry ?? null : null,
+    pipeline_version: "converged_v1",
+    recorded_at: new Date().toISOString(),
+  };
+
   await db.execute(sql`
     UPDATE certificates SET
       grading_front_original    = ${uploadKeys.front_original || null},
-      grading_front_cropped     = ${uploadKeys.front_cropped || null},
+      grading_front_cropped     = ${uploadKeys.front_cropped_png || uploadKeys.front_cropped || null},
       grading_front_greyscale   = ${uploadKeys.front_greyscale || null},
       grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
       grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
       grading_front_inverted    = ${uploadKeys.front_inverted || null},
       grading_back_original     = ${uploadKeys.back_original || null},
-      grading_back_cropped      = ${uploadKeys.back_cropped || null},
+      grading_back_cropped      = ${uploadKeys.back_cropped_png || uploadKeys.back_cropped || null},
       grading_back_greyscale    = ${uploadKeys.back_greyscale || null},
       grading_back_highcontrast  = ${uploadKeys.back_highcontrast || null},
       grading_back_edgeenhanced  = ${uploadKeys.back_edgeenhanced || null},
       grading_back_inverted     = ${uploadKeys.back_inverted || null},
-      front_image_path          = ${uploadKeys.front_cropped || uploadKeys.front_original || null},
-      back_image_path           = ${uploadKeys.back_cropped || uploadKeys.back_original || null},
+      front_image_path          = ${uploadKeys.front_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || uploadKeys.front_original || null},
+      back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
+      crop_geometry             = ${JSON.stringify(cropGeometry)}::jsonb,
       updated_at                = NOW()
     WHERE id = ${certId}
   `);
@@ -110,8 +161,17 @@ export async function runAiOnCert(
   frontCropped: Buffer,
   backCropped: Buffer | null,
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
+  // Resolve the MV-number for diagnostic context (retry logs, error traces).
+  // One extra lookup on a path that already takes 30-90s — negligible.
+  let certTag: string | number = certId;
+  try {
+    const r = await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`);
+    const row = r.rows[0] as any;
+    if (row?.certificate_number) certTag = row.certificate_number;
+  } catch { /* best-effort — fall back to numeric id */ }
+
   // Step 1: Identify the card
-  const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg");
+  const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg", certTag);
   const game = identification.detected_game?.toLowerCase();
 
   let enrichedId = await verifyAndEnrichCardData(identification);
@@ -143,7 +203,7 @@ export async function runAiOnCert(
   }
 
   // Step 2: Full grading analysis
-  const analysis = await analyzeCardFromBuffers(frontCropped, backCropped, game);
+  const analysis = await analyzeCardFromBuffers(frontCropped, backCropped, game, certTag);
 
   // Step 3: Extract strength score
   const strengthScore = typeof (analysis as any).grade_strength_score === "number"
