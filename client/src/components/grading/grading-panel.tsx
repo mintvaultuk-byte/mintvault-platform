@@ -423,6 +423,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       toast({ title: "Draft saved" });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -445,6 +447,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       setShowConfirm(false);
       toast({ title: `${certIdStr || "Certificate"} approved — ${finalGradeOverall} ${label}` });
       onGradeApproved?.(certIdStr, finalGradeOverall);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
     } finally {

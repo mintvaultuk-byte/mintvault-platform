@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
 import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw, Database, Pencil } from "lucide-react";
@@ -65,6 +65,7 @@ type ProtectedField = AutofillField | "designations";
 export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade, externalIdentification, onExternalIdentificationConsumed }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const initRarity = certificate?.rarity || "";
   const initVariant = certificate?.variant || "";
@@ -441,6 +442,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       setApproved(true);
       // Update the form's grade fields to reflect the approved grade
       updateField("gradeOverall", aiDraft.overall);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certificate?.id}/grading`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
     } catch (e: any) {
       setAiError(e.message);
     } finally {
