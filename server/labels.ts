@@ -872,12 +872,13 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   const wbH      = qrSize + qrPad;          // 155
   const wbBottom = wbTop + wbH;             // 170
 
-  // Cert ID: positioned below white box with deliberate top padding.
-  // Font shrunk to 18px to fit alongside enlarged QR (+25% cumulative).
-  // certTopGap kept tight at 8px so the QR can reclaim the vertical space.
+  // Cert ID: visually centred between the QR image bottom and the inner
+  // gold border. Note: the white box (wbBottom=210) extends 5px past the
+  // QR for quiet-zone padding, but on a white label that 5px is invisible
+  // (white-on-white with the label background). The visible reference is
+  // the QR image bottom (qrY + qrSize), not wbBottom.
   const certFontH  = 18;
-  const certTopGap = 8;                                               // px gap from wbBottom to text top
-  const certMidY   = wbBottom + certTopGap + Math.round(certFontH / 2); // 210 + 8 + 9 = 227
+  const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);      // (18 + 187 + 242) / 2 = 223.5 → 224
 
   // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
   const gfLeft = wbLeft;                    // 657 — alias kept for layout calc
