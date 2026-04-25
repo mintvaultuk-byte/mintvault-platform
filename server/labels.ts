@@ -694,10 +694,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
 
-  // Inter-block gaps
-  const G_NM_YS  = 11;  // Card Name → Year+Set
-  const G_YS_VAR = 11;  // Year+Set → Variant
-  const G_VAR_RAR = 11; // Variant → Rarity
+  // Inter-block gaps — computed dynamically below to distribute lines
+  // across the zone instead of clustering.
+  const MIN_GAP = 6;   // floor: keeps adjacent lines from touching
+  const MAX_GAP = 22;  // ceiling: prevents gappy look on 2-line cards
 
   // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
@@ -725,34 +725,53 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
   const rarLines = rarityText ? wrapText(ctx, rarityText, textMaxW, 1) : [];
 
-  // ── VERTICAL CENTERING ────────────────────────────────────────────────────
+  // ── VERTICAL DISTRIBUTION ─────────────────────────────────────────────────
+  // Distribute lines across the zone rather than clustering with fixed gaps:
+  // first line near top, last line near bottom, remainder split evenly across
+  // active inter-line gaps (clamped to MIN_GAP..MAX_GAP).
   function lh(sz: number, n: number): number { return n > 0 ? n * sz + (n - 1) * LG : 0; }
 
   let nmSzR = nameSz, ysSzR = SZ_YS, varSzR = SZ_VAR, rarSzR = SZ_VAR;
 
-  const computeStack = () =>
-      lh(nmSzR, nmLines.length)
-    + (nmLines.length > 0 && ysLines.length > 0 ? G_NM_YS  : 0)
+  const totalLineHeights = () =>
+      lh(nmSzR,  nmLines.length)
     + lh(ysSzR,  ysLines.length)
-    + (ysLines.length > 0 && varLines.length > 0 ? G_YS_VAR : 0)
     + lh(varSzR, varLines.length)
-    + (varLines.length > 0 && rarLines.length > 0 ? G_VAR_RAR : 0)
     + lh(rarSzR, rarLines.length);
 
-  let stackH = computeStack();
+  // Active inter-line gap = a non-empty block followed by another non-empty
+  // block (skipping any empty blocks in between).
+  const activeGapCount = () => {
+    let n = 0;
+    if (nmLines.length  > 0 && (ysLines.length > 0 || varLines.length > 0 || rarLines.length > 0)) n++;
+    if (ysLines.length  > 0 && (varLines.length > 0 || rarLines.length > 0)) n++;
+    if (varLines.length > 0 && rarLines.length > 0) n++;
+    return n;
+  };
 
-  // Overflow guard: if stack exceeds zone, scale all sizes down proportionally
+  // Overflow guard: if even the tightest possible stack (lines + minGap*count)
+  // exceeds zone, shrink fonts proportionally. Floor is 16px so headlines
+  // remain legible even with all 4 lines + a 2-line wrapped name.
   const maxStack = textZoneH * 0.94;
-  if (stackH > maxStack) {
-    const s = maxStack / stackH;
+  const tightestStack = () => totalLineHeights() + MIN_GAP * activeGapCount();
+  if (tightestStack() > maxStack) {
+    const s = maxStack / tightestStack();
     nmSzR  = Math.max(16, Math.round(nmSzR  * s));
     ysSzR  = Math.max(16, Math.round(ysSzR  * s));
     varSzR = Math.max(16, Math.round(varSzR * s));
     rarSzR = Math.max(16, Math.round(rarSzR * s));
-    stackH = computeStack();
   }
 
-  let curY = textZoneT + Math.max(0, Math.round((textZoneH - stackH) / 2));
+  // Distribute remaining vertical space evenly across active gaps.
+  const gapCount = activeGapCount();
+  const availableForGaps = textZoneH - totalLineHeights();
+  const gapSize = gapCount > 0
+    ? Math.max(MIN_GAP, Math.min(MAX_GAP, availableForGaps / gapCount))
+    : 0;
+
+  // Start at top of text zone — first block sits near the top, last near
+  // the bottom, gaps spread between.
+  let curY = textZoneT;
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   ctx.textAlign    = "left";
@@ -771,15 +790,15 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const secondaryFg = labelFg === WHITE ? "rgba(255,255,255,0.75)" : "#555555";
   renderBlock(nmLines, nmSzR, "bold", labelFg);
-  if (nmLines.length && ysLines.length) curY += G_NM_YS;
+  if (nmLines.length > 0 && (ysLines.length > 0 || varLines.length > 0 || rarLines.length > 0)) curY += gapSize;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
   renderBlock(ysLines, ysSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
-  if (ysLines.length && varLines.length) curY += G_YS_VAR;
+  if (ysLines.length > 0 && (varLines.length > 0 || rarLines.length > 0)) curY += gapSize;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
   renderBlock(varLines, varSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
-  if (varLines.length && rarLines.length) curY += G_VAR_RAR;
+  if (varLines.length > 0 && rarLines.length > 0) curY += gapSize;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
   renderBlock(rarLines, rarSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
