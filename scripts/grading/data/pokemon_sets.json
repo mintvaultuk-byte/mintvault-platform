@@ -1,0 +1,275 @@
+{
+  "BS": {
+    "name": "Base Set",
+    "year": 1999,
+    "series": "Original",
+    "total_cards": 102,
+    "aliases": ["BASE", "BASE1"]
+  },
+  "JU": {
+    "name": "Jungle",
+    "year": 1999,
+    "series": "Original",
+    "total_cards": 64,
+    "aliases": ["JUNGLE"]
+  },
+  "FO": {
+    "name": "Fossil",
+    "year": 1999,
+    "series": "Original",
+    "total_cards": 62,
+    "aliases": ["FOSSIL"]
+  },
+  "B2": {
+    "name": "Base Set 2",
+    "year": 2000,
+    "series": "Original",
+    "total_cards": 130,
+    "aliases": ["BASE2"]
+  },
+  "TR": {
+    "name": "Team Rocket",
+    "year": 2000,
+    "series": "Original",
+    "total_cards": 83,
+    "aliases": ["TEAMROCKET"]
+  },
+  "G1": {
+    "name": "Gym Heroes",
+    "year": 2000,
+    "series": "Gym",
+    "total_cards": 132,
+    "aliases": ["GYM1"]
+  },
+  "G2": {
+    "name": "Gym Challenge",
+    "year": 2000,
+    "series": "Gym",
+    "total_cards": 132,
+    "aliases": ["GYM2"]
+  },
+  "N1": {
+    "name": "Neo Genesis",
+    "year": 2000,
+    "series": "Neo",
+    "total_cards": 111,
+    "aliases": ["NEO1"]
+  },
+  "N2": {
+    "name": "Neo Discovery",
+    "year": 2001,
+    "series": "Neo",
+    "total_cards": 75,
+    "aliases": ["NEO2"]
+  },
+  "SV01": {
+    "name": "Scarlet & Violet",
+    "year": 2023,
+    "series": "Scarlet & Violet",
+    "total_cards": 258,
+    "aliases": ["SV1", "SVP", "SVBS"]
+  },
+  "SV02": {
+    "name": "Paldea Evolved",
+    "year": 2023,
+    "series": "Scarlet & Violet",
+    "total_cards": 279,
+    "aliases": ["SV2", "PAL"]
+  },
+  "SV03": {
+    "name": "Obsidian Flames",
+    "year": 2023,
+    "series": "Scarlet & Violet",
+    "total_cards": 230,
+    "aliases": ["SV3", "OBF"]
+  },
+  "SV04": {
+    "name": "Paradox Rift",
+    "year": 2023,
+    "series": "Scarlet & Violet",
+    "total_cards": 266,
+    "aliases": ["SV4", "PAR"]
+  },
+  "SV05": {
+    "name": "Temporal Forces",
+    "year": 2024,
+    "series": "Scarlet & Violet",
+    "total_cards": 218,
+    "aliases": ["SV5", "TEF"]
+  },
+  "SV06": {
+    "name": "Twilight Masquerade",
+    "year": 2024,
+    "series": "Scarlet & Violet",
+    "total_cards": 226,
+    "aliases": ["SV6", "TWM"]
+  },
+  "SV07": {
+    "name": "Shrouded Fable",
+    "year": 2024,
+    "series": "Scarlet & Violet",
+    "total_cards": 99,
+    "aliases": ["SV7", "SFA"]
+  },
+  "SV08": {
+    "name": "Stellar Crown",
+    "year": 2024,
+    "series": "Scarlet & Violet",
+    "total_cards": 175,
+    "aliases": ["SV8", "SCR"]
+  },
+  "SV09": {
+    "name": "Surging Sparks",
+    "year": 2024,
+    "series": "Scarlet & Violet",
+    "total_cards": 252,
+    "aliases": ["SV9", "SSP"]
+  },
+  "MEW": {
+    "name": "Pokémon 151",
+    "year": 2023,
+    "series": "Scarlet & Violet",
+    "total_cards": 207,
+    "aliases": ["MEW", "151"]
+  },
+  "CRZ": {
+    "name": "Crown Zenith",
+    "year": 2023,
+    "series": "Sword & Shield",
+    "total_cards": 230,
+    "aliases": ["CZ"]
+  },
+  "SIT": {
+    "name": "Silver Tempest",
+    "year": 2022,
+    "series": "Sword & Shield",
+    "total_cards": 215,
+    "aliases": ["SSH12", "ST"]
+  },
+  "LOR": {
+    "name": "Lost Origin",
+    "year": 2022,
+    "series": "Sword & Shield",
+    "total_cards": 217,
+    "aliases": ["LO"]
+  },
+  "PGO": {
+    "name": "Pokémon GO",
+    "year": 2022,
+    "series": "Sword & Shield",
+    "total_cards": 88,
+    "aliases": []
+  },
+  "AST": {
+    "name": "Astral Radiance",
+    "year": 2022,
+    "series": "Sword & Shield",
+    "total_cards": 216,
+    "aliases": ["AR"]
+  },
+  "BRS": {
+    "name": "Brilliant Stars",
+    "year": 2022,
+    "series": "Sword & Shield",
+    "total_cards": 186,
+    "aliases": ["BS"]
+  },
+  "FST": {
+    "name": "Fusion Strike",
+    "year": 2021,
+    "series": "Sword & Shield",
+    "total_cards": 284,
+    "aliases": []
+  },
+  "EVS": {
+    "name": "Evolving Skies",
+    "year": 2021,
+    "series": "Sword & Shield",
+    "total_cards": 237,
+    "aliases": ["ES"]
+  },
+  "CRE": {
+    "name": "Chilling Reign",
+    "year": 2021,
+    "series": "Sword & Shield",
+    "total_cards": 233,
+    "aliases": []
+  },
+  "BST": {
+    "name": "Battle Styles",
+    "year": 2021,
+    "series": "Sword & Shield",
+    "total_cards": 183,
+    "aliases": []
+  },
+  "SHF": {
+    "name": "Shining Fates",
+    "year": 2021,
+    "series": "Sword & Shield",
+    "total_cards": 213,
+    "aliases": ["SF"]
+  },
+  "VIV": {
+    "name": "Vivid Voltage",
+    "year": 2020,
+    "series": "Sword & Shield",
+    "total_cards": 203,
+    "aliases": []
+  },
+  "CPA": {
+    "name": "Champion's Path",
+    "year": 2020,
+    "series": "Sword & Shield",
+    "total_cards": 73,
+    "aliases": ["CP"]
+  },
+  "DAA": {
+    "name": "Darkness Ablaze",
+    "year": 2020,
+    "series": "Sword & Shield",
+    "total_cards": 201,
+    "aliases": []
+  },
+  "RCL": {
+    "name": "Rebel Clash",
+    "year": 2020,
+    "series": "Sword & Shield",
+    "total_cards": 192,
+    "aliases": []
+  },
+  "SSH": {
+    "name": "Sword & Shield Base",
+    "year": 2020,
+    "series": "Sword & Shield",
+    "total_cards": 202,
+    "aliases": ["SSH1"]
+  },
+  "HF": {
+    "name": "Hidden Fates",
+    "year": 2019,
+    "series": "Sun & Moon",
+    "total_cards": 68,
+    "aliases": []
+  },
+  "UNM": {
+    "name": "Unified Minds",
+    "year": 2019,
+    "series": "Sun & Moon",
+    "total_cards": 236,
+    "aliases": []
+  },
+  "UNB": {
+    "name": "Unbroken Bonds",
+    "year": 2019,
+    "series": "Sun & Moon",
+    "total_cards": 214,
+    "aliases": []
+  },
+  "DET": {
+    "name": "Detective Pikachu",
+    "year": 2019,
+    "series": "Sun & Moon",
+    "total_cards": 18,
+    "aliases": ["DP"]
+  }
+}

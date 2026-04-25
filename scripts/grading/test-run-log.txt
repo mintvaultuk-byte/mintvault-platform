@@ -1,0 +1,267 @@
+=== MintVault CV Grading Suite — Test Run Summary ===
+Generated: Fri Apr 24 18:17:35 UTC 2026
+
+==============================================
+=== test_card_id.py ===
+==============================================
+
+=== Test 1 — modern SV 151 card ===
+  Raw OCR: '| le MEW 058/165 (c) 2023 Pokemon | |'
+  ✓ [primary] total: expected=165 got=165
+  ✓ [primary] copyright_year: expected=2023 got=2023
+  ✓ [primary] number: expected=58 got=58
+  ✓ [advisory] card_number: expected='058/165' got='058/165'
+  · [advisory] regulation_mark: expected='F' got=None
+  confidence: 0.735
+  field_confidences: {'card_number': 0.95, 'copyright_year': 0.9, 'regulation_mark': 0.0, 'set_code': 0.4}
+  ✓ PASS
+
+=== Test 2 — SV02 Paldea Evolved ===
+  Raw OCR: '| Kc) svo2 193/279 (c) 2023 Pokemon | |'
+  ✓ [primary] total: expected=279 got=279
+  ✓ [primary] copyright_year: expected=2023 got=2023
+  ✓ [primary] number: expected=193 got=193
+  ✓ [advisory] card_number: expected='193/279' got='193/279'
+  · [advisory] regulation_mark: expected='G' got=None
+  confidence: 0.775
+  field_confidences: {'card_number': 0.95, 'copyright_year': 0.9, 'regulation_mark': 0.0, 'set_code': 0.6}
+  ✓ PASS
+
+=== Test 3 — classic Base Set Charizard-style ===
+  Raw OCR: '| 4/102 |\n(c) 1999 Nintendo'
+  ✓ [primary] total: expected=102 got=102
+  ✓ [primary] copyright_year: expected=1999 got=1999
+  ✓ [primary] number: expected=4 got=4
+  ✓ [advisory] card_number: expected='4/102' got='4/102'
+  confidence: 0.655
+  field_confidences: {'card_number': 0.95, 'copyright_year': 0.9, 'regulation_mark': 0.0, 'set_code': 0.0}
+  ✓ PASS
+
+=== Test 4 — high card number in 230-card set ===
+  Raw OCR: '| Kc) Svo3 215/230 (c) 2023 Pokemon | |'
+  ✓ [primary] total: expected=230 got=230
+  ✓ [primary] copyright_year: expected=2023 got=2023
+  ✓ [primary] number: expected=215 got=215
+  ✓ [advisory] card_number: expected='215/230' got='215/230'
+  · [advisory] regulation_mark: expected='G' got=None
+  confidence: 0.775
+  field_confidences: {'card_number': 0.95, 'copyright_year': 0.9, 'regulation_mark': 0.0, 'set_code': 0.6}
+  ✓ PASS
+
+=== Test 5 — zero-padded single-digit card number ===
+  Raw OCR: '| le MEW 007/165 (c) 2023 Pokemon | |'
+  ✓ [primary] total: expected=165 got=165
+  ✓ [primary] copyright_year: expected=2023 got=2023
+  ✓ [primary] number: expected=7 got=7
+  ✓ [advisory] card_number: expected='007/165' got='007/165'
+  · [advisory] regulation_mark: expected='F' got=None
+  confidence: 0.735
+  field_confidences: {'card_number': 0.95, 'copyright_year': 0.9, 'regulation_mark': 0.0, 'set_code': 0.4}
+  ✓ PASS
+
+=== Test 6 — set DB resolution ===
+  Expected: set resolves to 'Scarlet & Violet'
+  Got set: None
+  ✗ FAIL (set not resolved)
+
+============================================================
+CARD_ID TESTS FAIL ✗
+============================================================
+
+==============================================
+=== test_surface.py ===
+==============================================
+
+=== Test 1 — clean art (no defects) ===
+  scratches: 5  density: 0.008
+  print_line_score: 1.0
+  surface_score: 0.933  (expected range 0.75-1.0)
+  psa_ceiling: 9  confidence: 0.95
+  ✓ PASS
+
+=== Test 2 — 3 scratches ===
+  scratches: 6  density: 0.01
+  print_line_score: 1.0
+  surface_score: 0.919  (expected range 0.5-0.95)
+  psa_ceiling: 9  confidence: 0.95
+  ✓ PASS
+
+=== Test 3 — 20 scratches (heavily damaged) ===
+  scratches: 32  density: 0.053
+  print_line_score: 1.0
+  surface_score: 0.569  (expected range 0.0-0.75)
+  psa_ceiling: 5  confidence: 0.95
+  ✓ PASS
+
+=== Test 4 — print-line banding ===
+  scratches: 252  density: 0.418
+  print_line_score: 0.056
+  surface_score: 0.02  (expected range 0.0-0.95)
+  psa_ceiling: 1  confidence: 0.95
+  ✓ PASS
+
+=== Test 5 — combined: 10 scratches + banding ===
+  scratches: 239  density: 0.396
+  print_line_score: 0.268
+  surface_score: 0.094  (expected range 0.0-0.8)
+  psa_ceiling: 1  confidence: 0.95
+  ✓ PASS
+
+=== Test 6 — discrimination ordering ===
+  clean=0.933  few=0.919  many=0.569
+  ✓ PASS  (expected clean >= few >= many)
+
+==================================================
+SURFACE TESTS PASS ✓
+==================================================
+
+==============================================
+=== test_miscut.py ===
+==============================================
+
+=== Test 1 — perfectly cut ===
+  top: mean=100.0  cov=0.0  samples=41
+  bottom: mean=100.0  cov=0.0  samples=41
+  left: mean=100.0  cov=0.0  samples=41
+  right: mean=100.0  cov=0.0  samples=41
+  worst_side: top  worst_cov: 0.0
+  classification: perfect (expected one of ['perfect'])
+  slant_detected: False
+  ✓ PASS
+
+=== Test 2 — off-centre but uniform borders (not a miscut) ===
+  top: mean=100.0  cov=0.0  samples=40
+  bottom: mean=100.0  cov=0.0  samples=40
+  left: mean=150.0  cov=0.0  samples=41
+  right: mean=70.0  cov=0.0  samples=41
+  worst_side: top  worst_cov: 0.0
+  classification: perfect (expected one of ['perfect', 'slight'])
+  slant_detected: False
+  ✓ PASS
+
+=== Test 3 — slight slant on top (30px over width) ===
+  top: mean=114.49  cov=0.0759  samples=41
+  bottom: mean=100.0  cov=0.0  samples=41
+  left: mean=100.0  cov=0.0  samples=41
+  right: mean=100.0  cov=0.0  samples=41
+  worst_side: top  worst_cov: 0.0759
+  classification: slight (expected one of ['slight', 'noticeable'])
+  slant_detected: False
+  ✓ PASS
+
+=== Test 4 — pronounced slant (miscut) ===
+  top: mean=159.44  cov=0.2185  samples=41
+  bottom: mean=100.0  cov=0.0  samples=41
+  left: mean=100.0  cov=0.0  samples=41
+  right: mean=123.27  cov=1.1938  samples=41
+  worst_side: right  worst_cov: 1.1938
+  classification: miscut (expected one of ['noticeable', 'miscut'])
+  slant_detected: True
+  ✓ PASS
+
+=== Test 5 — factory shift (uniform-thickness, different sizes) ===
+  top: mean=130.0  cov=0.0  samples=40
+  bottom: mean=70.0  cov=0.0  samples=40
+  left: mean=140.0  cov=0.0  samples=41
+  right: mean=60.0  cov=0.0  samples=41
+  worst_side: top  worst_cov: 0.0
+  classification: perfect (expected one of ['perfect', 'slight'])
+  slant_detected: False
+  ✓ PASS
+
+==================================================
+MISCUT TESTS PASS ✓
+==================================================
+
+==============================================
+=== test_holofoil.py ===
+==============================================
+
+=== Test 1 — hash stability (same image) ===
+  phash: d8bf5fffa7d1e282708627e38f79da08580c8dc38de358207024a7c987db788a
+  ✓ PASS (identical hashes)
+
+=== Test 2 — identical images compare as 'same_card' ===
+  combined_distance: 0.0  verdict: same_card
+  ✓ PASS
+
+=== Test 3 — same card with 5 scratches — should still compare as same ===
+  combined_distance: 0.0152  verdict: same_card
+  ✓ PASS
+
+=== Test 4 — different cards (distinct random art) ===
+  combined_distance: 0.2574  verdict: uncertain
+  ✓ PASS (expected different or uncertain)
+
+=== Test 5 — PNG vs JPEG 75%-quality, same art ===
+  combined_distance: 0.0129  verdict: same_card
+  ✓ PASS (JPEG compression should NOT fool the hash)
+
+==================================================
+HOLO TESTS PASS ✓
+==================================================
+
+==============================================
+=== test_grade_synthesis.py ===
+==============================================
+
+=== Test 1 — all ceilings 10 → PSA 10 ===
+  proposed_grade: 10 (expected 10)
+  limiting_factor: centering (expected centering)
+  confidence: 0.75
+  reasoning: centering=10 [cv, conf 0.95]; surface=10 [cv, conf 0.95]; miscut=10 [cv, conf 0.95]; corners=10 [ai, conf 0.75]; edges=1...
+  ✓ PASS
+
+=== Test 2 — centering 8 pins → PSA 8 ===
+  proposed_grade: 8 (expected 8)
+  limiting_factor: centering (expected centering)
+  confidence: 0.75
+  reasoning: centering=8 [cv, conf 0.90]; surface=10 [cv, conf 0.95]; miscut=10 [cv, conf 0.95]; corners=10 [ai, conf 0.75]; edges=10...
+  ✓ PASS
+
+=== Test 3 — surface 4 pins (heavily scratched) ===
+  proposed_grade: 4 (expected 4)
+  limiting_factor: surface (expected surface)
+  confidence: 0.75
+  reasoning: centering=8 [cv, conf 0.90]; surface=4 [cv, conf 0.95]; miscut=10 [cv, conf 0.95]; corners=10 [ai, conf 0.75]; edges=10 ...
+  ✓ PASS
+
+=== Test 4 — miscut classification → PSA 4 cap ===
+  proposed_grade: 4 (expected 4)
+  limiting_factor: miscut (expected miscut)
+  confidence: 0.75
+  reasoning: centering=10 [cv, conf 0.95]; surface=10 [cv, conf 0.95]; miscut=4 [cv, conf 0.95]; corners=10 [ai, conf 0.75]; edges=10...
+  ✓ PASS
+
+=== Test 5 — AI corners=6 pins → PSA 6 ===
+  proposed_grade: 6 (expected 6)
+  limiting_factor: corners (expected corners)
+  confidence: 0.75
+  reasoning: centering=10 [cv, conf 0.95]; surface=10 [cv, conf 0.95]; miscut=10 [cv, conf 0.95]; corners=6 [ai, conf 0.75]; edges=10...
+  ✓ PASS
+
+=== Test 6 — AI edges=5 pins → PSA 5 ===
+  proposed_grade: 5 (expected 5)
+  limiting_factor: edges (expected edges)
+  confidence: 0.75
+  reasoning: centering=10 [cv, conf 0.95]; surface=10 [cv, conf 0.95]; miscut=10 [cv, conf 0.95]; corners=9 [ai, conf 0.75]; edges=5 ...
+  ✓ PASS
+
+=== Test 7 — realistic mix → PSA 7 limited by surface ===
+  proposed_grade: 7 (expected 7)
+  limiting_factor: surface (expected surface)
+  confidence: 0.75
+  reasoning: centering=8 [cv, conf 0.90]; surface=7 [cv, conf 0.90]; miscut=10 [cv, conf 0.95]; corners=9 [ai, conf 0.75]; edges=10 [...
+  ✓ PASS
+
+=== Test 8 — no miscut data, centering 6 limits → PSA 6 ===
+  proposed_grade: 6 (expected 6)
+  limiting_factor: centering (expected centering)
+  confidence: 0.75
+  reasoning: centering=6 [cv, conf 0.85]; surface=7 [cv, conf 0.90]; miscut=10 [missing, conf 0.00]; corners=10 [ai, conf 0.75]; edge...
+  ✓ PASS
+
+==================================================
+SYNTHESIS TESTS PASS ✓
+==================================================
+
