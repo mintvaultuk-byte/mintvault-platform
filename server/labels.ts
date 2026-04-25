@@ -943,7 +943,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   try {
     const { createCanvas } = await import("canvas");
     const nfcImg  = await loadImage(NFC_ICON_PATH);
-    const iconSz  = 110;                                  // rendered square size (px)
+    const iconSz  = 165;                                  // rendered square size (px)
     const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
     const iconY   = Math.round(PX_H / 2 - iconSz / 2);
     console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
