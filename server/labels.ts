@@ -622,7 +622,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.textBaseline = "middle";
     ctx.shadowBlur    = 0;
     ctx.shadowColor   = "transparent";
-    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2));
+    // +3 optical down-shift: caps-only text (MV2) has visual mass in upper
+    // half, so em-box-middle centring reads high. Pattern matches grade-digit
+    // optical adjustment (PR #26).
+    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2) + 3);
   }
 
   // ── 3b. MINTVAULT wordmark lockup — Bodoni Moda 900, gold border box ────────
