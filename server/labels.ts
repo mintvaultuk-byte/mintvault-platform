@@ -688,8 +688,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
   const textZoneH = contentB - textZoneT;
 
+  // Top padding — push first line down from the MintVault header band.
+  // Mild (12%) so the SZ_NM bump survives auto-shrink on 3-line cards.
+  const TOP_PAD       = Math.round(textZoneH * 0.12);
+  const adjTextZoneT  = textZoneT + TOP_PAD;
+  const adjTextZoneH  = textZoneH - TOP_PAD;
+
   // ── Base font sizes ───────────────────────────────────────────────────────
-  const SZ_NM  = 34;   // Line 1: Card Name — hero, bold
+  const SZ_NM  = 44;   // Line 1: Card Name — hero, bold
   const SZ_YS  = 30;   // Line 2: Year + Set
   const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
@@ -752,7 +758,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // Overflow guard: if even the tightest possible stack (lines + minGap*count)
   // exceeds zone, shrink fonts proportionally. Floor is 16px so headlines
   // remain legible even with all 4 lines + a 2-line wrapped name.
-  const maxStack = textZoneH * 0.94;
+  const maxStack = adjTextZoneH * 0.94;
   const tightestStack = () => totalLineHeights() + MIN_GAP * activeGapCount();
   if (tightestStack() > maxStack) {
     const s = maxStack / tightestStack();
@@ -764,14 +770,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // Distribute remaining vertical space evenly across active gaps.
   const gapCount = activeGapCount();
-  const availableForGaps = textZoneH - totalLineHeights();
+  const availableForGaps = adjTextZoneH - totalLineHeights();
   const gapSize = gapCount > 0
     ? Math.max(MIN_GAP, Math.min(MAX_GAP, availableForGaps / gapCount))
     : 0;
 
-  // Start at top of text zone — first block sits near the top, last near
-  // the bottom, gaps spread between.
-  let curY = textZoneT;
+  // Start at top of (padded) text zone — first block sits near the top,
+  // last near the bottom, gaps spread between.
+  let curY = adjTextZoneT;
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   ctx.textAlign    = "left";
