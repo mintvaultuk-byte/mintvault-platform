@@ -22,6 +22,7 @@ import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
 import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
 import { anthropicFetch } from "./anthropic-fetch";
+import { APP_BASE_URL } from "./app-url";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
   hashPassword, verifyPassword, validatePassword,
@@ -1052,7 +1053,7 @@ export async function registerRoutes(
         gradeNumeric,
         gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
         ownershipStatus: dbCert.ownershipStatus || "unclaimed",
-        verifyUrl: `https://mintvaultuk.com/cert/${normalizeCertId(dbCert.certId)}`,
+        verifyUrl: `${APP_BASE_URL}/cert/${normalizeCertId(dbCert.certId)}`,
       });
     } catch (err: any) {
       console.error("[verify] error:", err.message);
@@ -4432,7 +4433,7 @@ export async function registerRoutes(
 
       const token = await storage.createClaimVerification(normalizedId, email.trim(), name?.trim() || undefined, declaredNew === true);
 
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;
 
       await sendClaimVerification({ email: email.trim(), certId: normalizedId, verifyUrl });
@@ -4524,7 +4525,7 @@ export async function registerRoutes(
       }
 
       const ownerToken = await storage.createTransferVerification(normalizedId, fromEmail.trim(), toEmail.trim(), newOwnerName?.trim() || undefined);
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const confirmUrl = `${baseUrl}/api/transfer/owner-confirm?token=${ownerToken}`;
 
       await sendTransferOwnerConfirmation({ fromEmail: fromEmail.trim(), toEmail: toEmail.trim(), certId: normalizedId, confirmUrl });
@@ -4547,7 +4548,7 @@ export async function registerRoutes(
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}`);
       }
 
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const newOwnerConfirmUrl = `${baseUrl}/api/transfer/new-owner-confirm?token=${result.newOwnerToken}`;
 
       await sendTransferNewOwnerConfirmation({
@@ -4676,7 +4677,7 @@ export async function registerRoutes(
         referenceNumber: certRefNumber,
       });
 
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const confirmUrl = `${baseUrl}/api/v2/transfers/outgoing-confirm?token=${ownerToken}`;
 
       await sendTransferV2OutgoingConfirmation({
@@ -4708,7 +4709,7 @@ export async function registerRoutes(
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2`);
       }
 
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const incomingConfirmUrl = `${baseUrl}/transfer/accept?token=${result.newOwnerToken}&v=2`;
 
       // Compute former-keeper count for DVLA-parity on the incoming-transfer email.
@@ -5281,7 +5282,7 @@ export async function registerRoutes(
   });
 
   app.get("/sitemap.xml", (_req, res) => {
-    const baseUrl = "https://mintvaultuk.com";
+    const baseUrl = APP_BASE_URL;
     const now = new Date().toISOString().split("T")[0];
 
     const staticPages = [
@@ -5322,7 +5323,7 @@ export async function registerRoutes(
   });
 
   app.get("/robots.txt", (_req, res) => {
-    const baseUrl = "https://mintvaultuk.com";
+    const baseUrl = APP_BASE_URL;
     const txt = [
       "User-agent: *",
       "Allow: /",
@@ -5360,7 +5361,7 @@ export async function registerRoutes(
       }
 
       const token = await createMagicToken(normalEmail);
-      const baseUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const baseUrl = APP_BASE_URL;
       const loginUrl = `${baseUrl}/api/customer/verify/${token}`;
 
       await sendMagicLink({ email: normalEmail, loginUrl });
@@ -7420,7 +7421,7 @@ export async function registerRoutes(
     if (!pkgInfo) return res.status(400).json({ error: "Invalid package" });
     try {
       const stripe = await getUncachableStripeClient();
-      const origin = (req.headers.origin as string) || "https://mintvaultuk.com";
+      const origin = (req.headers.origin as string) || APP_BASE_URL;
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],
         mode: "payment",

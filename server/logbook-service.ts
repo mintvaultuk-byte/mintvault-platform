@@ -7,6 +7,7 @@ import { getR2SignedUrl } from "./r2";
 import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { getOwnerChain } from "./ownership-service";
+import { APP_BASE_URL } from "./app-url";
 
 function normalizeCertId(raw: string): string {
   const m = raw.match(/^MV-?0*(\d+)$/i);
@@ -148,7 +149,7 @@ export async function buildLogbookData(certIdInput: string) {
     verification: {
       signature,
       signedAt: new Date().toISOString(),
-      verifyUrl: `https://mintvaultuk.com/api/logbook/${certId}/verify`,
+      verifyUrl: `${APP_BASE_URL}/api/logbook/${certId}/verify`,
     },
 
     ownership: await (async () => {
