@@ -61,12 +61,18 @@ const I_H      = I_BOTTOM - I_TOP;  // 224
 const LOGO_PATH      = path.join(process.cwd(), "public", "brand", "logo.png");
 const NFC_ICON_PATH  = path.join(process.cwd(), "public", "brand", "nfc-tap-icon.png");
 const BODONI_PATH    = path.join(process.cwd(), "public", "brand", "BodoniModa-Black.ttf");
+const INTER_BLACK_PATH = path.join(process.cwd(), "public", "brand", "Inter-Black.ttf");
 
-// Register Bodoni Moda for canvas — runs once at module load.
+// Register custom fonts for canvas — runs once at module load.
 // Safe to call multiple times; canvas deduplicates by family+weight.
+// Bodoni Moda: MintVault wordmark on the front+back labels.
+// Inter Black: card-name hero on the front label (registered at weight 900
+//   so ctx.font = "900 ${sz}px Inter Black" picks it up; falls back to
+//   Arial bold via family chain if registration silently fails).
 try {
   const { registerFont } = require("canvas");
-  registerFont(BODONI_PATH, { family: "Bodoni Moda", weight: "900" });
+  registerFont(BODONI_PATH,      { family: "Bodoni Moda", weight: "900" });
+  registerFont(INTER_BLACK_PATH, { family: "Inter Black", weight: "900" });
 } catch {
   // canvas not available at import time in some build contexts — ignore
 }
@@ -707,9 +713,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MAX_GAP = 22;  // ceiling: prevents gappy look on 2-line cards
 
   // Line 1 — Card Name (shrinks 48→24px before wrapping to fit max width)
-  // Uses 900 weight + Arial Black family for the heaviest available system
-  // weight; falls back to Arial bold if Arial Black isn't installed.
-  const NM_FAMILY = '"Arial Black", Arial, Helvetica, sans-serif';
+  // Uses Inter Black (registered at module load) at weight 900; falls back
+  // through Arial Black → Arial → Helvetica → sans-serif if registration
+  // didn't take effect for any reason.
+  const NM_FAMILY = '"Inter Black", "Arial Black", Arial, Helvetica, sans-serif';
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   ctx.font = `900 ${SZ_NM}px ${NM_FAMILY}`;
   let nameSz = SZ_NM;
