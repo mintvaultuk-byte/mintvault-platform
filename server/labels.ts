@@ -690,14 +690,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── Base font sizes ───────────────────────────────────────────────────────
   const SZ_NM  = 38;   // Line 1: Card Name — hero, bold
-  const SZ_YS  = 26;   // Line 2: Year + Set
-  const SZ_VAR = 26;   // Line 3: Variant
+  const SZ_YS  = 30;   // Line 2: Year + Set
+  const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
 
   // Inter-block gaps
-  const G_NM_YS  = 9;   // Card Name → Year+Set
-  const G_YS_VAR = 9;   // Year+Set → Variant
-  const G_VAR_RAR = 9;  // Variant → Rarity
+  const G_NM_YS  = 12;  // Card Name → Year+Set
+  const G_YS_VAR = 12;  // Year+Set → Variant
+  const G_VAR_RAR = 12; // Variant → Rarity
 
   // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
@@ -746,9 +746,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   if (stackH > maxStack) {
     const s = maxStack / stackH;
     nmSzR  = Math.max(16, Math.round(nmSzR  * s));
-    ysSzR  = Math.max(14, Math.round(ysSzR  * s));
-    varSzR = Math.max(14, Math.round(varSzR * s));
-    rarSzR = Math.max(14, Math.round(rarSzR * s));
+    ysSzR  = Math.max(16, Math.round(ysSzR  * s));
+    varSzR = Math.max(16, Math.round(varSzR * s));
+    rarSzR = Math.max(16, Math.round(rarSzR * s));
     stackH = computeStack();
   }
 
