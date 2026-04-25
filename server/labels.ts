@@ -689,15 +689,15 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textZoneH = contentB - textZoneT;
 
   // ── Base font sizes ───────────────────────────────────────────────────────
-  const SZ_NM  = 38;   // Line 1: Card Name — hero, bold
+  const SZ_NM  = 34;   // Line 1: Card Name — hero, bold
   const SZ_YS  = 30;   // Line 2: Year + Set
   const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
 
   // Inter-block gaps
-  const G_NM_YS  = 12;  // Card Name → Year+Set
-  const G_YS_VAR = 12;  // Year+Set → Variant
-  const G_VAR_RAR = 12; // Variant → Rarity
+  const G_NM_YS  = 11;  // Card Name → Year+Set
+  const G_YS_VAR = 11;  // Year+Set → Variant
+  const G_VAR_RAR = 11; // Variant → Rarity
 
   // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
@@ -948,33 +948,30 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     const iconY   = Math.round(PX_H / 2 - iconSz / 2);
     console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
 
-    // Step 1 — draw source icon onto an offscreen canvas (same size)
-    const off = createCanvas(iconSz, iconSz);
+    // PNG is opaque RGB (black icon on white background), no alpha channel —
+    // confirmed via `sips`: samplesPerPixel: 3, hasAlpha: no. The previous
+    // destination-out/destination-in compositing assumed alpha and produced
+    // invisible output. Extract alpha via inverse luminance instead: dark
+    // pixels become opaque gold, light pixels become transparent. Continuous
+    // luminance values handle antialiased edges cleanly.
+    const off    = createCanvas(iconSz, iconSz);
     const offCtx = off.getContext("2d");
     offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
-
-    // Step 2 — overlay the gold colour using source-atop so only opaque pixels are painted
-    // The icon is black-on-white so we first make white transparent via destination-out trick:
-    // multiply blend with black achieves this on canvas 2d, but the simplest reliable
-    // approach is: use the icon as a mask by painting gold then compositing with destination-in.
-    const mask = createCanvas(iconSz, iconSz);
-    const maskCtx = mask.getContext("2d");
-    // Paint gold fill
-    maskCtx.fillStyle = GOLD;
-    maskCtx.fillRect(0, 0, iconSz, iconSz);
-    // Cut out the icon shape: pixels from nfcImg are used as the alpha mask
-    maskCtx.globalCompositeOperation = "destination-in";
-    // The source icon is black on white — invert it so the dark strokes become the mask
-    // We do this by drawing it with multiply on a black base: anything dark stays, white goes transparent
-    const inv = createCanvas(iconSz, iconSz);
-    const invCtx = inv.getContext("2d");
-    invCtx.fillStyle = BLACK;
-    invCtx.fillRect(0, 0, iconSz, iconSz);
-    invCtx.globalCompositeOperation = "destination-out";
-    invCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
-    maskCtx.drawImage(inv, 0, 0);
-
-    ctx.drawImage(mask, iconX, iconY);
+    const imgData = offCtx.getImageData(0, 0, iconSz, iconSz);
+    const d = imgData.data;
+    const goldHex = GOLD_DARK.replace("#", "");
+    const gR = parseInt(goldHex.substring(0, 2), 16);
+    const gG = parseInt(goldHex.substring(2, 4), 16);
+    const gB = parseInt(goldHex.substring(4, 6), 16);
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = (d[i] + d[i+1] + d[i+2]) / 3;
+      d[i]   = gR;
+      d[i+1] = gG;
+      d[i+2] = gB;
+      d[i+3] = 255 - lum;  // alpha: black input → 255 (opaque), white → 0 (clear)
+    }
+    offCtx.putImageData(imgData, 0, 0);
+    ctx.drawImage(off, iconX, iconY);
   } catch (err) {
     // Fallback: draw programmatic signal arcs if icon fails to load
     console.error(`[label-back-debug] cert=${cert.certId} NFC icon failed, falling back to arcs:`, err);
