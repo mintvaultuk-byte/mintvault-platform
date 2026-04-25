@@ -3,6 +3,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import type { CertificateRecord } from "@shared/schema";
 import { isNonNumericGrade, gradeLabelFull } from "@shared/schema";
+import { APP_BASE_URL } from "./app-url";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
 const PAGE_W = 595.28;
@@ -79,7 +80,7 @@ export async function generateCertificateDocument(
   return new Promise(async (resolve, reject) => {
     try {
       const certId = normalizeCertId(cert.certId);
-      const verifyUrl = `https://mintvaultuk.com/cert/${certId}`;
+      const verifyUrl = `${APP_BASE_URL}/cert/${certId}`;
       const qrBuf = await generateQR(verifyUrl, 300);
 
       const doc = new PDFDocument({

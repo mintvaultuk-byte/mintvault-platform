@@ -3,6 +3,7 @@ import PDFDocument from "pdfkit";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabel, gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import path from "path";
+import { APP_BASE_URL } from "./app-url";
 
 /**
  * Merge label_overrides into a certificate record before rendering.
@@ -71,7 +72,7 @@ try {
 }
 
 function getCertUrl(certId: string): string {
-  return `https://mintvaultuk.com/vault/${certId}`;
+  return `${APP_BASE_URL}/vault/${certId}`;
 }
 
 async function generateQRBuffer(url: string, size: number): Promise<Buffer> {

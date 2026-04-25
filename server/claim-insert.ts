@@ -1,6 +1,7 @@
 import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
 import path from "path";
+import { APP_BASE_URL } from "./app-url";
 
 const DPI = 300;
 const MM = DPI / 25.4;
@@ -26,7 +27,7 @@ const GRAY    = "#555555";   // body text on white
 const GRAY_LT = "#888888";   // labels/captions on white
 const GRAY_BG = "#F5F0E8";   // alternating row bg (matches certificate)
 
-const CLAIM_BASE_URL = "https://mintvaultuk.com/claim";
+const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
 
 function formatClaimCode(code: string): string {
   const c = code.toUpperCase();

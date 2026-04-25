@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { APP_BASE_URL } from "./app-url";
 
 const FROM_EMAIL = "MintVault UK <noreply@mintvaultuk.com>";
 const FALLBACK_FROM = "MintVault UK <onboarding@resend.dev>";
@@ -75,7 +76,7 @@ ${body}
 }
 
 function trackingUrl(submissionId: string): string {
-  const base = process.env.APP_URL || "https://mintvaultuk.com";
+  const base = APP_BASE_URL;
   return `${base}/track`;
 }
 
@@ -130,8 +131,8 @@ ${crossoverRows}
 </ol>
 ${data.labelToken ? `
 <p style="margin-top:24px;">
-<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
-<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
 </p>` : ""}
 <p style="margin-top:24px;">
 <a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
@@ -191,18 +192,18 @@ export async function sendSubmissionConfirmationV2(data: {
 </ol>
 ${data.labelToken ? `
 <p style="margin-top:24px;">
-<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
-<a href="https://mintvaultuk.com/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
 </p>` : ""}
 
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #333;">
 <p style="color:#666;font-size:11px;margin:0 0 4px 0;">Legal Documents:</p>
 <p style="color:#999;font-size:11px;margin:0;">
-<a href="https://mintvaultuk.com/legal/website-terms" style="color:#D4AF37;">Website Terms</a> ·
-<a href="https://mintvaultuk.com/legal/submission-agreement" style="color:#D4AF37;">Submission Agreement</a> ·
-<a href="https://mintvaultuk.com/legal/guarantee" style="color:#D4AF37;">Guarantee Policy</a> ·
-<a href="https://mintvaultuk.com/legal/privacy-policy" style="color:#D4AF37;">Privacy Policy</a> ·
-<a href="https://mintvaultuk.com/legal/shipping-requirements" style="color:#D4AF37;">Shipping Requirements</a>
+<a href="${APP_BASE_URL}/legal/website-terms" style="color:#D4AF37;">Website Terms</a> ·
+<a href="${APP_BASE_URL}/legal/submission-agreement" style="color:#D4AF37;">Submission Agreement</a> ·
+<a href="${APP_BASE_URL}/legal/guarantee" style="color:#D4AF37;">Guarantee Policy</a> ·
+<a href="${APP_BASE_URL}/legal/privacy-policy" style="color:#D4AF37;">Privacy Policy</a> ·
+<a href="${APP_BASE_URL}/legal/shipping-requirements" style="color:#D4AF37;">Shipping Requirements</a>
 </p>
 ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">You accepted the Submission Agreement (version ${data.termsVersion}) on ${data.termsAcceptedAt || "submission"} UTC.</p>` : ""}
 </div>`;
@@ -440,7 +441,7 @@ function ownershipBaseHtml(title: string, body: string): string {
         <td style="color:rgba(255,255,255,0.20);font-size:10px;line-height:1.7;font-family:'Courier New',Courier,monospace;">
           <span style="color:rgba(201,162,39,0.45);font-weight:700;letter-spacing:1px;">MINTVAULT UK LTD</span><br>
           Professional Card Grading &amp; Certification<br>
-          <a href="https://mintvaultuk.com" style="color:rgba(201,162,39,0.35);text-decoration:none;">mintvaultuk.com</a>
+          <a href="${APP_BASE_URL}" style="color:rgba(201,162,39,0.35);text-decoration:none;">mintvaultuk.com</a>
         </td>
         <td align="right" valign="bottom">
           <span style="color:rgba(201,162,39,0.20);font-size:8px;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-family:'Courier New',Courier,monospace;line-height:1.8;">VAULT<br>SECURED</span>
@@ -880,7 +881,7 @@ export async function sendCertificatePdf(data: {
   You can also verify this certificate at any time by visiting:
 </p>
 <p style="margin:0 0 24px 0;">
-  <a href="https://mintvaultuk.com/cert/${data.certId}" style="color:#D4AF37;">
+  <a href="${APP_BASE_URL}/cert/${data.certId}" style="color:#D4AF37;">
     mintvaultuk.com/cert/${data.certId}
   </a>
 </p>

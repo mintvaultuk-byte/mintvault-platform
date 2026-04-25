@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import path from "path";
 import fs from "fs";
+import { APP_BASE_URL } from "./app-url";
 
 const GOLD = "#D4AF37";
 const DARK = "#111111";
@@ -46,7 +47,7 @@ export async function generatePackingSlipPDF(data: PackingSlipData): Promise<Buf
   return new Promise(async (resolve, reject) => {
     try {
       const qrDataUrl = await QRCode.toDataURL(
-        `https://mintvaultuk.com/submit/track/${data.submissionId}`,
+        `${APP_BASE_URL}/submit/track/${data.submissionId}`,
         { width: 140, margin: 1, color: { dark: "#000000", light: "#ffffff" } }
       );
       const qrBuffer = Buffer.from(qrDataUrl.split(",")[1], "base64");
