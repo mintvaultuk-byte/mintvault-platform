@@ -877,7 +877,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // QR for quiet-zone padding, but on a white label that 5px is invisible
   // (white-on-white with the label background). The visible reference is
   // the QR image bottom (qrY + qrSize), not wbBottom.
-  const certFontH  = 18;
+  const certFontH  = 28;
   const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);      // (18 + 187 + 242) / 2 = 223.5 → 224
 
   // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
