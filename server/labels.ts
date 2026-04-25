@@ -893,15 +893,15 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // QR image on white background
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // Cert ID — readable below the QR box, right-aligned to QR right edge.
-  ctx.textAlign    = "right";
+  // Cert ID — readable below the QR box, centred under it.
+  ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
   const certBackFit = fitFontSize(ctx, cert.certId, wbW - 8, certFontH, 14);
   ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
   ctx.fillStyle     = labelFg;
   ctx.shadowBlur    = 0;
   ctx.shadowColor   = "transparent";
-  ctx.fillText(cert.certId, qrX + qrSize, certMidY);
+  ctx.fillText(cert.certId, qrCenterX, certMidY);
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
