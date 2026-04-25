@@ -290,7 +290,9 @@ function buildRarityText(cert: CertificateRecord): string {
     const other = (cert as any).rarityOther;
     return other ? other.toUpperCase() : "OTHER";
   }
-  return RARITY_DISPLAY[code] || code.replace(/_/g, " ");
+  // Form may write "Uncommon", AI may write "uncommon", manual import may write
+  // "RARE_HOLO" — uppercase the lookup key so display map hits regardless.
+  return RARITY_DISPLAY[String(code).toUpperCase()] || String(code).replace(/_/g, " ");
 }
 
 function buildLine3(cert: CertificateRecord): string {
@@ -695,6 +697,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // Inter-block gaps
   const G_NM_YS  = 9;   // Card Name → Year+Set
   const G_YS_VAR = 9;   // Year+Set → Variant
+  const G_VAR_RAR = 9;  // Variant → Rarity
 
   // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
@@ -717,17 +720,24 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
   const varLines = variantText ? wrapText(ctx, variantText.toUpperCase(), textMaxW, 1) : [];
 
+  // Line 4 — Rarity (only if present)
+  const rarityText = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
+  ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
+  const rarLines = rarityText ? wrapText(ctx, rarityText, textMaxW, 1) : [];
+
   // ── VERTICAL CENTERING ────────────────────────────────────────────────────
   function lh(sz: number, n: number): number { return n > 0 ? n * sz + (n - 1) * LG : 0; }
 
-  let nmSzR = nameSz, ysSzR = SZ_YS, varSzR = SZ_VAR;
+  let nmSzR = nameSz, ysSzR = SZ_YS, varSzR = SZ_VAR, rarSzR = SZ_VAR;
 
   const computeStack = () =>
       lh(nmSzR, nmLines.length)
     + (nmLines.length > 0 && ysLines.length > 0 ? G_NM_YS  : 0)
     + lh(ysSzR,  ysLines.length)
     + (ysLines.length > 0 && varLines.length > 0 ? G_YS_VAR : 0)
-    + lh(varSzR, varLines.length);
+    + lh(varSzR, varLines.length)
+    + (varLines.length > 0 && rarLines.length > 0 ? G_VAR_RAR : 0)
+    + lh(rarSzR, rarLines.length);
 
   let stackH = computeStack();
 
@@ -738,6 +748,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     nmSzR  = Math.max(16, Math.round(nmSzR  * s));
     ysSzR  = Math.max(14, Math.round(ysSzR  * s));
     varSzR = Math.max(14, Math.round(varSzR * s));
+    rarSzR = Math.max(14, Math.round(rarSzR * s));
     stackH = computeStack();
   }
 
@@ -767,6 +778,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   if (ysLines.length && varLines.length) curY += G_YS_VAR;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
   renderBlock(varLines, varSzR, "bold", secondaryFg);
+  try { (ctx as any).letterSpacing = "0px"; } catch {}
+  if (varLines.length && rarLines.length) curY += G_VAR_RAR;
+  try { (ctx as any).letterSpacing = "0.5px"; } catch {}
+  renderBlock(rarLines, rarSzR, "bold", secondaryFg);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
 
   ctx.textAlign    = "left";
@@ -931,6 +946,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     const iconSz  = 110;                                  // rendered square size (px)
     const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
     const iconY   = Math.round(PX_H / 2 - iconSz / 2);
+    console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
 
     // Step 1 — draw source icon onto an offscreen canvas (same size)
     const off = createCanvas(iconSz, iconSz);
@@ -959,8 +975,9 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     maskCtx.drawImage(inv, 0, 0);
 
     ctx.drawImage(mask, iconX, iconY);
-  } catch {
+  } catch (err) {
     // Fallback: draw programmatic signal arcs if icon fails to load
+    console.error(`[label-back-debug] cert=${cert.certId} NFC icon failed, falling back to arcs:`, err);
     const iconSz = 100;
     drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_DARK);
   }
