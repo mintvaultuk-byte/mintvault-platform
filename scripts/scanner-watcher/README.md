@@ -152,6 +152,27 @@ Boots the agent out of launchd and removes the plist. User data
 intentionally preserved — remove them manually if fully cleaning up. The
 uninstaller prints the `rm` commands at the end.
 
+## Live status display (optional, separate Terminal)
+
+The watcher writes `~/mintvault-scans/status.json` on every state change
+(idle → waiting for pair → uploading → done/error). A standalone
+zero-dependency Node script renders that as a big friendly banner so you
+can see at a glance whether it's safe to put the next card on the scanner.
+
+```bash
+node ~/mintvault-platform/scripts/scanner-watcher/status.mjs
+```
+
+Banner states:
+- **READY** (green) — safe to scan the next card
+- **WAITING FOR BACK** (yellow) + countdown — front scanned, need the back within 60s
+- **UPLOADING…** (cyan) — pair in flight to the server
+- **✓ UPLOADED MV145** (bright green, 10s dwell) — success, then returns to READY
+- **✗ ERROR** (red, 15s dwell) — upload failed; check `watcher.log` for details
+
+Run it in a dedicated Terminal window alongside SilverFast. `Ctrl+C` to quit.
+No install step — pure Node + ANSI, reads `status.json` every 250 ms.
+
 ## Stopping the watcher (without uninstalling)
 
 ```bash
