@@ -625,7 +625,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   //   3. Use textAlign="left" with an explicit x so the text lands exactly
   //      in the centre of the correctly-sized border box.
   const MV_HDR_SZ    = 42;                           // font size
-  const MV_HDR_PAD   = 8;                            // top padding from content area
+  const MV_HDR_PAD   = 21;                           // top padding from content area (was 8 — +13 for breathing room from gold border)
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
   const MV_BELOW_GAP = 10;                           // gap below lockup before card text
