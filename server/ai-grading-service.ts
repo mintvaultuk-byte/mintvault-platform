@@ -202,15 +202,15 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
 
   // Step 4: derive the four analysis variants from the centred flat image
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
-    sharp(cropped).grayscale().jpeg({ quality: 95 }).toBuffer(),
-    sharp(cropped).linear(1.5, -30).jpeg({ quality: 95 }).toBuffer(),
+    sharp(cropped).grayscale().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
+    sharp(cropped).linear(1.5, -30).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
     sharp(cropped)
       .greyscale()
       .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
       .normalize()
-      .jpeg({ quality: 95 })
+      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer(),
-    sharp(cropped).negate().jpeg({ quality: 95 }).toBuffer(),
+    sharp(cropped).negate().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
   ]);
 
   console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB (re-centre asym=${post_asymmetry_px.horizontal}/${post_asymmetry_px.vertical}px, extended=${extended})`);
@@ -492,7 +492,7 @@ export async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer;
       fit: "inside",
       withoutEnlargement: true,
     })
-    .jpeg({ quality: 95, mozjpeg: true })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
   console.log(`[ai/resize] ${(inputSize / 1024 / 1024).toFixed(2)}MB -> ${(resized.length / 1024 / 1024).toFixed(2)}MB`);
   return { buffer: resized, mediaType: "image/jpeg" };
@@ -528,7 +528,7 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
     .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 95, mozjpeg: true })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
   console.log(
