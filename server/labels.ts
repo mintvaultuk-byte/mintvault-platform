@@ -554,7 +554,11 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillText(gradeAbbr, panelCX, cardNumBot + ABBR_TOP_PAD);
     try { (ctx as any).letterSpacing = "0px"; } catch {}
 
-    // Grade number — dark, large, subtle drop shadow
+    // Grade number — dark, large, subtle drop shadow.
+    // Sizing zone keeps small safety margins so the digit doesn't kiss the
+    // abbr line above or the panel bottom edge during fitFontSize. Centring
+    // however ignores those margins and uses descBot ↔ stripY directly so
+    // the digit sits visually centred in the full lower panel zone.
     const descBot      = cardNumBot + ABBR_TOP_PAD + abbrFontSize;
     const ABBR_NUM_GAP = 6;
     const NUM_BOT_PAD  = 10;
@@ -563,7 +567,12 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     const numZoneH     = numZoneBot - numZoneTop;
     const maxByH       = Math.floor(numZoneH / 0.754);
     const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, Math.min(133, maxByH), 48);
-    const gradeNumCY   = (numZoneTop + numZoneBot) / 2 + gradeFontSize * 0.024;
+    // Optical-centre adjustment: textBaseline="middle" places the em-box
+    // middle at Y, but a numeral's visual centre sits ~15% of em ABOVE the
+    // em-box middle (digits have no descender; visual mass is top-heavy).
+    // 0.08*em pushes the digit down so it reads visually centred rather
+    // than mathematically centred.
+    const gradeNumCY   = (descBot + stripY) / 2 + gradeFontSize * 0.08;
 
     ctx.shadowOffsetX = 1;
     ctx.shadowOffsetY = 1;
