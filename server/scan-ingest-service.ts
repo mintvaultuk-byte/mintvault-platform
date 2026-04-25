@@ -219,6 +219,24 @@ export async function runAiOnCert(
   const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
   const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
 
+  // Year derivation — kept consistent with routes.ts identify-and-analyze.
+  // Prefer Claude's copyright_year, fall back to TCG-verified detected_year.
+  // Reject AI-only years > 5y from current year unless TCG confirmed.
+  let yearText: string | null = null;
+  if (shouldWriteDetails) {
+    const rawYear = identification.copyright_year || enrichedId.detected_year || null;
+    const match = rawYear ? String(rawYear).match(/\d{4}/) : null;
+    yearText = match ? match[0] : null;
+    if (yearText && !tcgVerified) {
+      const y = parseInt(yearText, 10);
+      const currentYear = new Date().getFullYear();
+      if (isNaN(y) || Math.abs(y - currentYear) > 5) {
+        console.warn(`[scan-ingest] year guard: AI guessed ${yearText} but TCG didn't verify — clearing`);
+        yearText = null;
+      }
+    }
+  }
+
   // Step 5: Save to certificate
   await db.execute(sql`
     UPDATE certificates SET
@@ -229,6 +247,7 @@ export async function runAiOnCert(
       card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
       card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
       rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+      year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
       grade_strength_score = ${strengthScore},
       updated_at = NOW()
     WHERE id = ${certId}
