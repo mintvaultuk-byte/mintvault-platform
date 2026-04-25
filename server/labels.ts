@@ -859,7 +859,7 @@ function drawContactlessIcon(
 async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
-  const qrSize = 170;                        // +13% from 150 — capped to leave room for cert ID below
+  const qrSize = 187;                        // +25% from original 150 (170→187 with cert ID shrunk to fit)
   const qrPad  = 5;                          // quiet-zone padding on left & bottom
   const qrY    = I_TOP;                      // flush to top inner border
   const qrX    = I_RIGHT - qrSize;           // flush to right inner border
@@ -873,11 +873,11 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   const wbBottom = wbTop + wbH;             // 170
 
   // Cert ID: positioned below white box with deliberate top padding.
-  // Font cap raised to 30px (+20% vs 25px) to match front label visual weight.
-  // certTopGap ensures clear breathing room between QR base and text cap-height.
-  const certFontH  = 30;
-  const certTopGap = 14;                                              // px gap from wbBottom to text top
-  const certMidY   = wbBottom + certTopGap + Math.round(certFontH / 2); // 170 + 14 + 15 = 199
+  // Font shrunk to 18px to fit alongside enlarged QR (+25% cumulative).
+  // certTopGap kept tight at 8px so the QR can reclaim the vertical space.
+  const certFontH  = 18;
+  const certTopGap = 8;                                               // px gap from wbBottom to text top
+  const certMidY   = wbBottom + certTopGap + Math.round(certFontH / 2); // 210 + 8 + 9 = 227
 
   // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
   const gfLeft = wbLeft;                    // 657 — alias kept for layout calc
