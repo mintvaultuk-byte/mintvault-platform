@@ -91,10 +91,11 @@ function fitFontSize(
   maxWidth: number,
   maxSize: number,
   minSize: number,
-  weight: string = "bold"
+  weight: string = "bold",
+  family: string = "Arial, Helvetica, sans-serif"
 ): number {
   for (let s = maxSize; s >= minSize; s--) {
-    ctx.font = `${weight} ${s}px Arial, Helvetica, sans-serif`;
+    ctx.font = `${weight} ${s}px ${family}`;
     if (ctx.measureText(text).width <= maxWidth) return s;
   }
   return minSize;
@@ -342,7 +343,7 @@ export async function generateLabelPNG(
     && parseFloat(cert.gradeEdges     || "0") === 10
     && parseFloat(cert.gradeSurface   || "0") === 10;
   const labelBg = isBlack ? BLACK : WHITE;
-  const labelFg = isBlack ? WHITE : "#1A1A1A";
+  const labelFg = isBlack ? WHITE : "#000000";
 
   const canvas = createCanvas(PX_W, PX_H);
   const ctx = canvas.getContext("2d");
@@ -444,7 +445,7 @@ function drawSimpleBarcode(
  * Right 32%: gold grade panel (grade abbr + number, vertically centred)
  * Bottom strip ~38px: barcode | MintVault logo | cert number
  */
-async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
+async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#000000") {
   const gradeType = cert.gradeType || "numeric";
   const isNonNum  = isNonNumericGrade(gradeType);
   const grade     = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
@@ -695,7 +696,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const adjTextZoneH  = textZoneH - TOP_PAD;
 
   // ── Base font sizes ───────────────────────────────────────────────────────
-  const SZ_NM  = 44;   // Line 1: Card Name — hero, bold
+  const SZ_NM  = 48;   // Line 1: Card Name — hero, 900 weight
   const SZ_YS  = 30;   // Line 2: Year + Set
   const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
@@ -705,14 +706,17 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MIN_GAP = 6;   // floor: keeps adjacent lines from touching
   const MAX_GAP = 22;  // ceiling: prevents gappy look on 2-line cards
 
-  // Line 1 — Card Name (shrinks 38→24px before wrapping to fit max width)
+  // Line 1 — Card Name (shrinks 48→24px before wrapping to fit max width)
+  // Uses 900 weight + Arial Black family for the heaviest available system
+  // weight; falls back to Arial bold if Arial Black isn't installed.
+  const NM_FAMILY = '"Arial Black", Arial, Helvetica, sans-serif';
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
-  ctx.font = `bold ${SZ_NM}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${SZ_NM}px ${NM_FAMILY}`;
   let nameSz = SZ_NM;
   if (cardNameText && ctx.measureText(cardNameText).width > textMaxW) {
-    nameSz = fitFontSize(ctx, cardNameText, textMaxW, SZ_NM, 24, "bold");
+    nameSz = fitFontSize(ctx, cardNameText, textMaxW, SZ_NM, 24, "900", NM_FAMILY);
   }
-  ctx.font = `bold ${nameSz}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${nameSz}px ${NM_FAMILY}`;
   const nmLines = cardNameText ? wrapText(ctx, cardNameText, textMaxW, 2) : [];
 
   // Line 2 — Year + Set Name
@@ -783,9 +787,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.textAlign    = "left";
   ctx.textBaseline = "top";
 
-  const renderBlock = (lines: string[], sz: number, weight: string, color: string) => {
+  const renderBlock = (lines: string[], sz: number, weight: string, color: string, family: string = "Arial, Helvetica, sans-serif") => {
     if (!lines.length) return;
-    ctx.font      = `${weight} ${sz}px Arial, Helvetica, sans-serif`;
+    ctx.font      = `${weight} ${sz}px ${family}`;
     ctx.fillStyle = color;
     for (const line of lines) {
       ctx.fillText(line, textLeft, curY);
@@ -794,8 +798,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     curY -= LG;
   };
 
-  const secondaryFg = labelFg === WHITE ? "rgba(255,255,255,0.75)" : "#555555";
-  renderBlock(nmLines, nmSzR, "bold", labelFg);
+  const secondaryFg = labelFg === WHITE ? "rgba(255,255,255,0.95)" : "#000000";
+  renderBlock(nmLines, nmSzR, "900", labelFg, NM_FAMILY);
   if (nmLines.length > 0 && (ysLines.length > 0 || varLines.length > 0 || rarLines.length > 0)) curY += gapSize;
   try { (ctx as any).letterSpacing = "0.5px"; } catch {}
   renderBlock(ysLines, ysSzR, "bold", secondaryFg);
