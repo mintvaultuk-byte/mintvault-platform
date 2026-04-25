@@ -706,8 +706,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── Base font sizes ───────────────────────────────────────────────────────
   const SZ_NM  = 48;   // Line 1: Card Name — hero, 900 weight
-  const SZ_YS  = 30;   // Line 2: Year + Set
-  const SZ_VAR = 30;   // Line 3: Variant (and Line 4: Rarity reuse this size)
+  const SZ_YS  = 34;   // Line 2: Year + Set
+  const SZ_VAR = 34;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
 
   // Inter-block gaps — computed dynamically below to distribute lines
