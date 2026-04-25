@@ -2083,15 +2083,22 @@ export async function registerRoutes(
       const finalOverall = isNonNum ? null : parseFloat(overall);
       const computedLabel = (!isNonNum && finalOverall === 10) ? "black" : "Standard";
 
+      // P0 preservation helper — see /grade handler for rationale.
+      const num = (v: unknown): number | null => {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        return isNaN(n) ? null : n;
+      };
+
       // Promote ai_defects → verified_defects on grade approval (if not already set)
       await db.execute(sql`
         UPDATE certificates SET
           grade_type        = ${finalGradeType},
           grade             = ${isNonNum ? null : finalOverall},
-          centering_score   = ${isNonNum ? null : (parseFloat(centering) || null)},
-          corners_score     = ${isNonNum ? null : (parseFloat(corners) || null)},
-          edges_score       = ${isNonNum ? null : (parseFloat(edges) || null)},
-          surface_score     = ${isNonNum ? null : (parseFloat(surface) || null)},
+          centering_score   = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(centering)}::numeric, centering_score)`},
+          corners_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(corners)}::numeric,   corners_score)`},
+          edges_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(edges)}::numeric,     edges_score)`},
+          surface_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(surface)}::numeric,   surface_score)`},
           label_type        = ${computedLabel},
           grade_approved_by = ${"Cornelius Oliver"},
           grade_approved_at = NOW(),
@@ -6125,28 +6132,40 @@ export async function registerRoutes(
       const b = req.body;
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
-      const gradeNum = isNonNum ? null : parseFloat(overallGrade);
+      const parsedOverall = parseFloat(overallGrade);
+      const gradeNum = isNonNum ? null : (isNaN(parsedOverall) ? null : parsedOverall);
+
+      // P0 preservation helpers — return null when payload field is missing/empty/invalid,
+      // so the SQL COALESCE below falls through to the existing column value.
+      // (Prior `parseFloat(x) || null` idiom silently nulled rows on partial saves.)
+      const num = (v: unknown): number | null => {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        return isNaN(n) ? null : n;
+      };
+      const txt = (v: unknown): string | null => (v == null || v === "") ? null : String(v);
+      const jsn = (v: unknown): string | null => v != null ? JSON.stringify(v) : null;
 
       await db.execute(sql`
         UPDATE certificates SET
-          centering_front_lr  = ${b.centering_front_lr || null},
-          centering_front_tb  = ${b.centering_front_tb || null},
-          centering_back_lr   = ${b.centering_back_lr  || null},
-          centering_back_tb   = ${b.centering_back_tb  || null},
-          centering_score     = ${isNonNum ? null : (parseFloat(b.grade_centering) || null)},
-          corners_score       = ${isNonNum ? null : (parseFloat(b.grade_corners)   || null)},
-          edges_score         = ${isNonNum ? null : (parseFloat(b.grade_edges)     || null)},
-          surface_score       = ${isNonNum ? null : (parseFloat(b.grade_surface)   || null)},
-          grade               = ${isNonNum ? null : gradeNum},
+          centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
+          centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
+          centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
+          centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
+          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_centering)}::numeric, centering_score)`},
+          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_corners)}::numeric,   corners_score)`},
+          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
+          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
           grade_type          = ${isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric"},
-          corner_values       = ${b.corners ? JSON.stringify(b.corners) : null}::jsonb,
-          edge_values         = ${b.edges   ? JSON.stringify(b.edges)   : null}::jsonb,
-          surface_values      = ${b.surface ? JSON.stringify(b.surface) : null}::jsonb,
+          corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
+          edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
+          surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
           defects             = ${JSON.stringify(b.defects || [])}::jsonb,
           auth_status         = ${b.auth_status || "genuine"},
-          auth_notes          = ${b.auth_notes || null},
-          grade_explanation   = ${b.grade_explanation || null},
-          private_notes       = ${b.private_notes || null},
+          auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
+          grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
+          private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
           updated_at          = NOW()
         WHERE id = ${id}
       `);
@@ -6168,15 +6187,33 @@ export async function registerRoutes(
       const b = req.body;
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
-      const gradeNum = isNonNum ? null : parseFloat(overallGrade);
-      const gradeCentering = isNonNum ? null : parseFloat(b.grade_centering) || null;
-      const gradeCorners   = isNonNum ? null : parseFloat(b.grade_corners)   || null;
-      const gradeEdges     = isNonNum ? null : parseFloat(b.grade_edges)     || null;
-      const gradeSurface   = isNonNum ? null : parseFloat(b.grade_surface)   || null;
+
+      // P0 preservation helpers — see /grade handler for rationale.
+      const num = (v: unknown): number | null => {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        return isNaN(n) ? null : n;
+      };
+      const txt = (v: unknown): string | null => (v == null || v === "") ? null : String(v);
+      const jsn = (v: unknown): string | null => v != null ? JSON.stringify(v) : null;
+
+      const gradeNum       = isNonNum ? null : num(overallGrade);
+      const sentCentering  = isNonNum ? null : num(b.grade_centering);
+      const sentCorners    = isNonNum ? null : num(b.grade_corners);
+      const sentEdges      = isNonNum ? null : num(b.grade_edges);
+      const sentSurface    = isNonNum ? null : num(b.grade_surface);
+
+      // Final state for label_type computation: payload value if present, else existing.
+      // SQL COALESCE will produce the same final state in DB; we mirror it here so
+      // label_type reflects what's actually saved when a partial payload comes in.
+      const finalCentering = sentCentering ?? num(cert.gradeCentering);
+      const finalCorners   = sentCorners   ?? num(cert.gradeCorners);
+      const finalEdges     = sentEdges     ?? num(cert.gradeEdges);
+      const finalSurface   = sentSurface   ?? num(cert.gradeSurface);
 
       // Compute Black Label: all subgrades must be exactly 10.0
       const allTen = !isNonNum && gradeNum === 10 &&
-        gradeCentering === 10 && gradeCorners === 10 && gradeEdges === 10 && gradeSurface === 10;
+        finalCentering === 10 && finalCorners === 10 && finalEdges === 10 && finalSurface === 10;
       const labelType = allTen ? "black" : "Standard";
       const gradeType = isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric";
 
@@ -6184,22 +6221,22 @@ export async function registerRoutes(
         UPDATE certificates SET
           grade               = ${gradeNum},
           grade_type          = ${gradeType},
-          centering_score     = ${gradeCentering},
-          corners_score       = ${gradeCorners},
-          edges_score         = ${gradeEdges},
-          surface_score       = ${gradeSurface},
-          centering_front_lr  = ${b.centering_front_lr || null},
-          centering_front_tb  = ${b.centering_front_tb || null},
-          centering_back_lr   = ${b.centering_back_lr  || null},
-          centering_back_tb   = ${b.centering_back_tb  || null},
-          corner_values       = ${b.corners ? JSON.stringify(b.corners) : null}::jsonb,
-          edge_values         = ${b.edges   ? JSON.stringify(b.edges)   : null}::jsonb,
-          surface_values      = ${b.surface ? JSON.stringify(b.surface) : null}::jsonb,
+          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCentering}::numeric, centering_score)`},
+          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
+          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentEdges}::numeric,     edges_score)`},
+          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentSurface}::numeric,   surface_score)`},
+          centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
+          centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
+          centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
+          centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
+          corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
+          edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
+          surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
           defects             = ${JSON.stringify(b.defects || [])}::jsonb,
           auth_status         = ${b.auth_status || "genuine"},
-          auth_notes          = ${b.auth_notes || null},
-          grade_explanation   = ${b.grade_explanation || null},
-          private_notes       = ${b.private_notes || null},
+          auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
+          grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
+          private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
           label_type          = ${labelType},
           grade_approved_by   = ${"Cornelius Oliver"},
           grade_approved_at   = NOW(),
@@ -6248,10 +6285,10 @@ export async function registerRoutes(
               ${aiAnalysis.edges?.subgrade     != null ? String(aiAnalysis.edges.subgrade)     : null},
               ${aiAnalysis.surface?.subgrade   != null ? String(aiAnalysis.surface.subgrade)   : null},
               ${gradeNum},
-              ${gradeCentering != null ? Math.round(gradeCentering) : null},
-              ${gradeCorners   != null ? Math.round(gradeCorners)   : null},
-              ${gradeEdges     != null ? Math.round(gradeEdges)     : null},
-              ${gradeSurface   != null ? Math.round(gradeSurface)   : null},
+              ${finalCentering != null ? Math.round(finalCentering) : null},
+              ${finalCorners   != null ? Math.round(finalCorners)   : null},
+              ${finalEdges     != null ? Math.round(finalEdges)     : null},
+              ${finalSurface   != null ? Math.round(finalSurface)   : null},
               ${req.session.adminEmail || "admin"}
             )
           `);
