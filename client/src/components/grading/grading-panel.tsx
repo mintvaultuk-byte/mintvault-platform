@@ -398,17 +398,52 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
 
   function buildPayload() {
-    return {
-      centering_front_lr: frontLR, centering_front_tb: frontTB,
-      centering_back_lr: backLR,   centering_back_tb: backTB,
-      grade_centering: centering, grade_corners: cornersGrade, grade_edges: edgesGrade, grade_surface: surfaceGrade,
-      corners, edges, surface,
-      defects,
-      auth_status: authStatus, auth_notes: authNotes,
+    // Companion to server-side COALESCE fix (PR #14): omit fields that don't
+    // carry information so the server preserves the existing DB value.
+    // calcCornerSubgrade(DEFAULT_CORNERS) returns 0 when zone state is empty —
+    // sending 0 would overwrite real data since 0 ≠ NULL in SQL's COALESCE.
+    const out: Record<string, unknown> = {
+      overall_grade: finalGradeOverall,
+      auth_status: authStatus,
+      auth_notes: authNotes,
       grade_explanation: gradeExplanation,
       private_notes: privateNotes,
-      overall_grade: finalGradeOverall,
     };
+
+    // Subgrade scalars — omit if 0/null (zone state at empty default).
+    const sendNum = (key: string, val: number | null | undefined) => {
+      if (val != null && !isNaN(val) && val > 0) out[key] = val;
+    };
+    sendNum("grade_centering", centering);
+    sendNum("grade_corners",   cornersGrade);
+    sendNum("grade_edges",     edgesGrade);
+    sendNum("grade_surface",   surfaceGrade);
+
+    // Centering ratios — omit if empty.
+    const sendTxt = (key: string, val: string | null | undefined) => {
+      if (val != null && val !== "") out[key] = val;
+    };
+    sendTxt("centering_front_lr", frontLR);
+    sendTxt("centering_front_tb", frontTB);
+    sendTxt("centering_back_lr",  backLR);
+    sendTxt("centering_back_tb",  backTB);
+
+    // Zone JSONBs — only send if user has touched the panel (any non-default value).
+    const hasContent = (s: unknown): boolean => {
+      if (!s || typeof s !== "object") return false;
+      const vals = Object.values(s as Record<string, unknown>)
+        .filter(v => v != null && v !== 0 && v !== "" && v !== false);
+      return vals.length > 0;
+    };
+    if (hasContent(corners)) out.corners = corners;
+    if (hasContent(edges))   out.edges   = edges;
+    if (hasContent(surface)) out.surface = surface;
+
+    // Defects — server doesn't preserve this column yet (semantic ambiguity),
+    // so keep current send-always behaviour.
+    out.defects = defects || [];
+
+    return out;
   }
 
   async function saveDraft() {
