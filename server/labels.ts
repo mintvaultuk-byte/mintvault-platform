@@ -859,11 +859,11 @@ function drawContactlessIcon(
 async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
-  const qrSize = 150;
+  const qrSize = 170;                        // +13% from 150 — capped to leave room for cert ID below
   const qrPad  = 5;                          // quiet-zone padding on left & bottom
   const qrY    = I_TOP;                      // flush to top inner border
   const qrX    = I_RIGHT - qrSize;           // flush to right inner border
-  const qrCenterX = qrX + qrSize / 2;       // 737
+  const qrCenterX = qrX + qrSize / 2;       // 747
 
   // White box: top & right flush to inner borders; 5px pad on left & bottom
   const wbLeft   = qrX - qrPad;             // 657
@@ -893,15 +893,15 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // QR image on white background
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // Cert ID — readable below the QR box
-  ctx.textAlign    = "center";
+  // Cert ID — readable below the QR box, right-aligned to QR right edge.
+  ctx.textAlign    = "right";
   ctx.textBaseline = "middle";
   const certBackFit = fitFontSize(ctx, cert.certId, wbW - 8, certFontH, 14);
   ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
   ctx.fillStyle     = labelFg;
   ctx.shadowBlur    = 0;
   ctx.shadowColor   = "transparent";
-  ctx.fillText(cert.certId, qrCenterX, certMidY);
+  ctx.fillText(cert.certId, qrX + qrSize, certMidY);
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
