@@ -759,16 +759,40 @@ function SheetPrintingPanel() {
   const PRINT_BATCH_MAX = 5;
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   const downloadPrintBatch = useCallback(async (certIds: string[]) => {
+    // CRITICAL: open the print window IMMEDIATELY, synchronously, while
+    // we are still inside the click's user-gesture stack. Chrome/Safari
+    // only honour window.print() if the window was opened during a
+    // gesture; the v421 iframe approach broke that because the await on
+    // the API call elapsed before print() ran, so Chrome silently
+    // no-op'd and the PDF just landed in Downloads.
+    const printWindow = window.open("", "mintvault-print-batch", "width=900,height=1200");
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html><head><title>Preparing print…</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; color:#666; background:#fafafa; }
+        </style></head>
+        <body>Preparing print batch…</body></html>
+      `);
+    } else {
+      toast({
+        title: "Popup blocked",
+        description: "Allow popups for this site to print directly. Falling back to PDF download.",
+        variant: "destructive",
+      });
+    }
+
     setDownloadingBatch(true);
     try {
       const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
       if (!res.ok) {
+        printWindow?.close();
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
         throw new Error(error);
       }
       const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[]; mintedFor?: string[] };
 
-      // Decode base64 → Blob.
       const decode = (b64: string, mime: string) => {
         const bin = atob(b64);
         const buf = new Uint8Array(bin.length);
@@ -776,67 +800,66 @@ function SheetPrintingPanel() {
         return new Blob([buf], { type: mime });
       };
 
-      // SVG → save to disk (operator drags it onto the ScanNCut over USB).
-      const svgBlob = decode(data.svg, "image/svg+xml");
-      const svgUrl = URL.createObjectURL(svgBlob);
-      const svgAnchor = document.createElement("a");
-      svgAnchor.href = svgUrl;
-      svgAnchor.download = `mintvault-batch-${data.batchId}.svg`;
-      svgAnchor.click();
-      URL.revokeObjectURL(svgUrl);
+      const saveBlob = (blob: Blob, filename: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
 
-      // PDF → open in a hidden iframe and trigger the browser's native
-      // print dialog. macOS will show the system printer list (Epson
-      // ET-8700 over AirPrint/Bonjour). Same-origin Blob URL means
-      // contentWindow.print() is allowed; window.open() would be blocked
-      // as a popup in Safari. Cleanup runs after 60s so the print dialog
-      // has time to read the blob even if the user takes a moment.
+      // SVG always downloads — it goes to the ScanNCut over USB.
+      const svgBlob = decode(data.svg, "image/svg+xml");
+      saveBlob(svgBlob, `mintvault-batch-${data.batchId}.svg`);
+
       const pdfBlob = decode(data.pdf, "application/pdf");
       const pdfUrl = URL.createObjectURL(pdfBlob);
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = pdfUrl;
-      iframe.onload = () => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch {
-          // Fallback: same UX as v420 — drop the PDF in Downloads so
-          // the operator can print manually.
-          const a = document.createElement("a");
-          a.href = pdfUrl;
-          a.download = `mintvault-batch-${data.batchId}.pdf`;
-          a.click();
-        }
-      };
-      document.body.appendChild(iframe);
-      setTimeout(() => {
-        URL.revokeObjectURL(pdfUrl);
-        iframe.remove();
-      }, 60_000);
 
-      // Transient "opening" toast, then resolve to the success toast.
-      // TOAST_LIMIT=1 in use-toast.ts means the second call replaces
-      // the first.
-      toast({ title: "Opening print dialog…" });
+      if (printWindow && !printWindow.closed) {
+        // Navigate the pre-opened window to the PDF and arm print().
+        // replace() avoids polluting back-history with the placeholder.
+        printWindow.location.replace(pdfUrl);
+
+        let printed = false;
+        const tryPrint = () => {
+          if (printed || printWindow.closed) return;
+          printed = true;
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch (err) {
+            console.warn("[print-batch] print() threw, falling back to download:", err);
+            saveBlob(pdfBlob, `mintvault-batch-${data.batchId}.pdf`);
+          }
+        };
+        // Two-stage arming: Chrome's PDF viewer doesn't always fire
+        // onload reliably for blob URLs, so we also force after 1.5s.
+        printWindow.onload = tryPrint;
+        setTimeout(tryPrint, 1500);
+
+        // Long delay before revoking — print dialog may sit open for a
+        // while before the bytes are fully consumed.
+        setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
+      } else {
+        // No print window (popup blocked or user closed it during the
+        // API call) — same UX as v420: drop the PDF in Downloads.
+        saveBlob(pdfBlob, `mintvault-batch-${data.batchId}.pdf`);
+        URL.revokeObjectURL(pdfUrl);
+      }
+
       const mintedCount = data.mintedFor?.length ?? 0;
-      const cardCount = data.certIds.length;
-      const cardsLabel = `${cardCount} card${cardCount !== 1 ? "s" : ""}`;
-      setTimeout(() => {
-        toast({
-          title: mintedCount > 0
-            ? `Print batch ready — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}`
-            : "Print batch ready",
-          description: `${cardsLabel} — pick Epson in print dialog, then load SVG into CM300 (Direct Cut)`,
-        });
-      }, 1500);
+      const description = printWindow && !printWindow.closed
+        ? (mintedCount > 0
+            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick Epson in print dialog`
+            : "Pick Epson in print dialog. SVG downloaded for ScanNCut.")
+        : (mintedCount > 0
+            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG downloaded`
+            : "PDF + SVG downloaded.");
+      toast({ title: "Print batch ready", description });
     } catch (err: any) {
-      toast({ title: "Print batch failed", description: err.message, variant: "destructive" });
+      printWindow?.close();
+      toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
     } finally {
       setDownloadingBatch(false);
     }
