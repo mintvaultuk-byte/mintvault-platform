@@ -494,19 +494,15 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   // pendingAnalysis is passed through to AiPanel via externalAnalysis prop
 
-  const hasFront = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
-  const hasBack = !!(imageData?.urls?.back_display || imageData?.urls?.back_original);
-  const hasAnyImage = hasFront || hasBack;
-
-  if (!hasAnyImage) {
-    return (
-      <CaptureWizard
-        certId={certId}
-        onComplete={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
-        existingQuality={imageData?.quality}
-      />
-    );
-  }
+  // ── v416 — derived consts + buildPayload moved ABOVE the `if (!hasAnyImage)`
+  // early return. Pre-v416 these lived after the early return, which meant
+  // any render that took the early-return branch left `centering`,
+  // `cornersGrade`, …, `finalGradeOverall` in TDZ. Hoisted `buildPayload`
+  // (called from `autoSaveNow` via setTimeout) then crashed on first read of
+  // `finalGradeOverall` → minified `qt` → "Cannot access 'qt' before
+  // initialization". All these consts are pure derivations from state with
+  // initialised defaults (DEFAULT_CORNERS / nulls) — safe to compute even
+  // when no images are present yet.
 
   // Calculated subgrades
   const centeringCalc = (frontLR && frontTB && backLR && backTB)
@@ -589,6 +585,20 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     out.ai_defect_candidates = defectCandidates || [];
 
     return out;
+  }
+
+  const hasFront = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
+  const hasBack = !!(imageData?.urls?.back_display || imageData?.urls?.back_original);
+  const hasAnyImage = hasFront || hasBack;
+
+  if (!hasAnyImage) {
+    return (
+      <CaptureWizard
+        certId={certId}
+        onComplete={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+        existingQuality={imageData?.quality}
+      />
+    );
   }
 
   async function saveDraft() {
