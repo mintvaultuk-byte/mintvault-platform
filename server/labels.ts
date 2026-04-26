@@ -837,24 +837,28 @@ function drawContactlessIcon(
 async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
-  const qrSize = 187;                        // +25% from original 150 (170→187 with cert ID shrunk to fit)
+  // v425 — QR shrunk 187→160 and cert font max 28→24. Post-v424 the inner
+  // height (I_H=200) couldn't fit a 187px QR + 28px cert ID line below it,
+  // so the cert text was bleeding into the bottom of the QR. New geometry:
+  // QR ends y=178, cert ID centred at y=198 (text spans 186-210), 8px
+  // breathing room above and below.
+  const qrSize = 160;
   const qrPad  = 0;                          // QR's internal margin:1 (~6px) provides quiet zone — no external pad needed
   const qrY    = I_TOP;                      // flush to top inner border
-  const qrX    = I_RIGHT - qrSize;           // 645 — flush to right inner border
-  const qrCenterX = qrX + qrSize / 2;       // 738.5
+  const qrX    = I_RIGHT - qrSize;           // flush to right inner border
+  const qrCenterX = qrX + qrSize / 2;
 
   // White box matches QR dimensions exactly (no external pad).
-  const wbLeft   = qrX - qrPad;             // 645
-  const wbTop    = I_TOP;                   // 18
-  const wbW      = qrSize + qrPad;          // 187
-  const wbH      = qrSize + qrPad;          // 187
-  const wbBottom = wbTop + wbH;             // 205
+  const wbLeft   = qrX - qrPad;
+  const wbTop    = I_TOP;
+  const wbW      = qrSize + qrPad;
+  const wbH      = qrSize + qrPad;
+  const wbBottom = wbTop + wbH;
 
   // Cert ID: visually centred between the QR image bottom and the inner
-  // gold border. With qrPad=0, wbBottom == qrY+qrSize == 205, so both
-  // references converge — no white-on-white invisibility caveat needed.
-  const certFontH  = 28;
-  const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);      // (18 + 187 + 242) / 2 = 223.5 → 224
+  // gold border. With qrPad=0, wbBottom == qrY+qrSize.
+  const certFontH  = 24;
+  const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);
 
   // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
   const gfLeft = wbLeft;                    // 645 — alias kept for layout calc
@@ -906,13 +910,14 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     drawGoldFrame(ctx);
   }
 
-  // ── CENTRE TOP: website URL — v424 flat GOLD_DARK (was 5-stop gradient + glow) ──
+  // ── CENTRE TOP: website URL — v425 flat GOLD_LIGHT (v424 used GOLD_DARK
+  // which printed as muddy brown; matches the front MINTVAULT wordmark). ──
   {
     const urlY    = I_TOP + 24;
     const urlSz   = 38;
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_DARK;
+    ctx.fillStyle        = GOLD_LIGHT;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
     ctx.shadowBlur       = 0;
@@ -920,13 +925,13 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
   }
 
-  // ── CENTRE BOTTOM: tap instruction — v424 flat GOLD_DARK (was 5-stop gradient + glow) ──
+  // ── CENTRE BOTTOM: tap instruction — v425 flat GOLD_LIGHT (was GOLD_DARK) ──
   {
     const nfcY    = I_BOTTOM - 31;
     const nfcSz   = 34;
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${nfcSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_DARK;
+    ctx.fillStyle        = GOLD_LIGHT;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
     ctx.shadowBlur       = 0;
