@@ -235,7 +235,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                     <polygon points={polyPoints(quad)} fill="black" />
                   </mask>
                 </defs>
-                <rect width="100" height="100" fill="black" fillOpacity="0.55" mask="url(#quadMask)" />
+                <rect width="100" height="100" fill="#1A1A1A" fillOpacity="0.18" mask="url(#quadMask)" />
                 <polygon points={polyPoints(quad)} fill="none" stroke="#D4AF37" strokeWidth="0.4" opacity="0.9" />
               </svg>
             </div>
@@ -264,7 +264,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                     onMouseDown={(e) => startCornerDrag(k, e)}
                   >
                     {/* Visible 16px handle centered inside */}
-                    <div className="absolute bg-[#D4AF37] border-2 border-white rounded-sm shadow-lg hover:scale-125 transition-transform"
+                    <div className="absolute bg-[#D4AF37] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
                       style={{ inset: 8, pointerEvents: "none" }} />
                     {/* Label */}
                     <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none select-none">
