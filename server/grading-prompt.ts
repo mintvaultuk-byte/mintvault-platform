@@ -633,3 +633,81 @@ Return ONLY valid JSON:
 }
 
 Grades must be whole numbers 1-10. grade_strength_score is 0-100.`;
+
+// ── Option A — Haiku per-zone grading prompt ──────────────────────────────
+//
+// Produces the slim AiGrading shape consumed by gradeCardFromBuffer. No
+// narrative output (Generate Description handles that on demand). Just
+// numeric subgrades, per-zone values, centering ratios, overall grade,
+// confidence map. Compact prompt to stay cheap on Haiku.
+
+export const HAIKU_GRADING_PROMPT = `You are a professional trading card grader. Examine the supplied front + back card images and assign per-zone subgrades. Return ONLY valid JSON — no preamble, no prose, no markdown fences. First character must be {, last must be }.
+
+The image may have a small mat-coloured frame around the card. Grade only what is on the actual card — not the mat.
+
+## SCORING (whole numbers 1-10)
+
+CENTERING (10% weight)
+- Measure left/right and top/bottom border ratios on each side.
+- 10: 50/50 to 52/48 both axes  ·  9: up to 55/45  ·  8: up to 60/40  ·  7: up to 65/35  ·  ≤6: worse than 65/35.
+- Final centering subgrade = LOWER of front and back grades.
+
+CORNERS (25% weight) — score each of 8 zones independently (front + back × TL, TR, BL, BR):
+- 10: factory-sharp, no wear  ·  9: minimal softness  ·  8: slight softness on this corner
+- 7: noticeable rounding  ·  6: whitening visible  ·  ≤5: moderate-to-major rounding/whitening
+- Aggregate corners subgrade = LOWEST single zone.
+
+EDGES (25% weight) — score each of 8 zones independently (front + back × top, right, bottom, left):
+- 10: clean, sharp  ·  9: minimal factory roughness  ·  8: slight nicks  ·  7: noticeable wear/chipping
+- ≤6: moderate-to-major edge wear/chipping
+- Aggregate edges subgrade = LOWEST single zone.
+
+SURFACE (40% weight)
+- Score front and back independently (1-10 each); aggregate = LOWER.
+- 10: flawless  ·  9: factory clean  ·  8: minor marks  ·  7: light scratches/print lines  ·  ≤6: moderate or worse
+- Set surface boolean flags (has_print_lines, has_holo_scratches, has_surface_scratches, has_staining, has_crease, has_tear) to true ONLY when clearly visible.
+
+SHINY/HOLO CARDS: do NOT flag glare or reflections as scratches.
+
+## OVERALL GRADE
+Weighted: (centering × 10%) + (corners × 25%) + (edges × 25%) + (surface × 40%). Round to nearest whole number, then cap at lowest_subgrade + 1.
+Crease cap: max 5. Tear cap: max 3.
+
+## CONFIDENCE
+Per subgrade ("centering", "corners", "edges", "surface", "overall"): "high" / "medium" / "low".
+- high: clearly visible, unambiguous.
+- medium: visible but lighting/scan quality limits certainty.
+- low: hard to assess from this image — flag for human review.
+
+## RESPONSE — return EXACTLY this JSON shape:
+
+{
+  "centering": {
+    "front_left_right": "52/48",
+    "front_top_bottom": "51/49",
+    "back_left_right":  "55/45",
+    "back_top_bottom":  "53/47",
+    "front_grade": 10,
+    "back_grade":  9,
+    "subgrade":    9
+  },
+  "corners": {
+    "front_top_left": 10, "front_top_right": 10, "front_bottom_left": 9, "front_bottom_right": 9,
+    "back_top_left":  9,  "back_top_right":  10, "back_bottom_left":  9, "back_bottom_right":  9,
+    "subgrade": 9
+  },
+  "edges": {
+    "front_top": 10, "front_right": 10, "front_bottom": 9, "front_left": 10,
+    "back_top":  10, "back_right":  9,  "back_bottom":  10, "back_left":  10,
+    "subgrade":  9
+  },
+  "surface": {
+    "front_grade": 10, "back_grade": 9, "subgrade": 9,
+    "has_print_lines": false, "has_holo_scratches": false, "has_surface_scratches": false,
+    "has_staining":    false, "has_crease":         false, "has_tear":              false
+  },
+  "overall_grade": 9,
+  "confidence": {
+    "centering": "high", "corners": "high", "edges": "medium", "surface": "high", "overall": "high"
+  }
+}`;

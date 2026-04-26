@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2 } from "./r2";
-import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, suggestDefectsFromBuffer, type EnrichedCardData, type DefectCandidate } from "./ai-grading-service";
+import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, suggestDefectsFromBuffer, gradeCardFromBuffer, type EnrichedCardData, type DefectCandidate, type AiGrading } from "./ai-grading-service";
 
 /**
  * Create a new certificate for an admin scan.
@@ -169,12 +169,14 @@ export async function uploadImagesToCert(
 }
 
 /**
- * Option B: scan-time AI is identification + defect-candidate suggestion only.
- * No subgrade analysis — the admin grades manually, then optionally generates
- * a description via the separate /generate-description endpoint.
+ * Option A: scan-time AI runs three Haiku 4.5 calls in parallel —
+ * identification, defect candidates, and per-zone grading. The grading
+ * pre-populates the form so the admin reviews + verifies + approves
+ * rather than starting from zero. Marketing positioning: "AI-graded,
+ * human-verified".
  *
- * Returns identification fields for the response payload; grade is always
- * null on new scans (legacy callers fall back to null gracefully).
+ * Returns identification fields for the response payload; grade reflects
+ * the AI's overall_grade (admin can override pre-approve).
  */
 export async function runAiOnCert(
   certId: number,
@@ -189,11 +191,12 @@ export async function runAiOnCert(
     if (row?.certificate_number) certTag = row.certificate_number;
   } catch { /* best-effort — fall back to numeric id */ }
 
-  // Step 1+2 in parallel: identify (front only) and suggest defects (front+back).
-  // Both are Haiku — no shared rate-limit contention worth serialising for.
-  const [identification, defectCandidates] = await Promise.all([
+  // Three parallel Haiku calls. All three Haiku, no shared rate-limit
+  // contention beyond what rateLimit() already enforces.
+  const [identification, defectCandidates, aiGrading] = await Promise.all([
     identifyCardFromBuffer(frontCropped, "image/jpeg", certTag),
     suggestDefectsFromBuffer(frontCropped, backCropped, certTag),
+    gradeCardFromBuffer(frontCropped, backCropped, certTag),
   ]);
 
   const game = identification.detected_game?.toLowerCase() || "other";
@@ -261,13 +264,22 @@ export async function runAiOnCert(
     }
   }
 
-  // Step 4: Save to certificate. ai_analysis carries identification only —
-  // no `grading` payload (Option B leaves subgrade fields untouched). The
-  // client form initialises subgrades empty for new scans because the
-  // grading-panel hydration block now ignores ai_analysis.grading.
+  // Step 4: Save identification + defect candidates first (always safe to
+  // overwrite — these are non-graded metadata). ai_analysis carries the
+  // identification snapshot AND the AI grading payload (when successful)
+  // alongside the model/pipeline tag.
+  const aiAnalysisPayload: Record<string, unknown> = {
+    identification: enrichedId,
+    model: "claude-haiku-4-5-20251001",
+    pipeline: "option_a",
+  };
+  if (aiGrading) {
+    aiAnalysisPayload.grading = aiGrading;
+  }
+
   await db.execute(sql`
     UPDATE certificates SET
-      ai_analysis = ${JSON.stringify({ identification: enrichedId, model: "claude-haiku-4-5-20251001", pipeline: "option_b" })}::jsonb,
+      ai_analysis = ${JSON.stringify(aiAnalysisPayload)}::jsonb,
       ai_defect_candidates = ${JSON.stringify(defectCandidates)}::jsonb,
       card_name = CASE WHEN card_name IS NULL OR card_name = '' THEN ${cardName} ELSE card_name END,
       set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
@@ -278,6 +290,70 @@ export async function runAiOnCert(
       updated_at = NOW()
     WHERE id = ${certId}
   `);
+
+  // Step 5: Persist AI grading values into the per-zone columns. Gated on
+  // `grade_approved_at IS NULL` — re-scanning an already-approved cert
+  // must NEVER overwrite the published grade. The CASE WHEN is column-
+  // level too, but the WHERE gate is the durable safety net: if a row
+  // has been approved, this UPDATE simply doesn't fire.
+  let gradeWritten = false;
+  if (aiGrading) {
+    const cornerValues = {
+      frontTL: aiGrading.corners.front_top_left,
+      frontTR: aiGrading.corners.front_top_right,
+      frontBL: aiGrading.corners.front_bottom_left,
+      frontBR: aiGrading.corners.front_bottom_right,
+      backTL:  aiGrading.corners.back_top_left,
+      backTR:  aiGrading.corners.back_top_right,
+      backBL:  aiGrading.corners.back_bottom_left,
+      backBR:  aiGrading.corners.back_bottom_right,
+    };
+    const edgeValues = {
+      frontTop:    aiGrading.edges.front_top,
+      frontRight:  aiGrading.edges.front_right,
+      frontBottom: aiGrading.edges.front_bottom,
+      frontLeft:   aiGrading.edges.front_left,
+      backTop:     aiGrading.edges.back_top,
+      backRight:   aiGrading.edges.back_right,
+      backBottom:  aiGrading.edges.back_bottom,
+      backLeft:    aiGrading.edges.back_left,
+    };
+    const surfaceValues = {
+      front: aiGrading.surface.front_grade,
+      back:  aiGrading.surface.back_grade,
+      hasPrintLines:       aiGrading.surface.has_print_lines       || false,
+      hasHoloScratches:    aiGrading.surface.has_holo_scratches    || false,
+      hasSurfaceScratches: aiGrading.surface.has_surface_scratches || false,
+      hasStaining:         aiGrading.surface.has_staining          || false,
+      hasIndentation:      false,
+      hasRollerMarks:      false,
+      hasColorRegistration: false,
+      hasCrease:           aiGrading.surface.has_crease            || false,
+      hasTear:             aiGrading.surface.has_tear              || false,
+    };
+
+    const result = await db.execute(sql`
+      UPDATE certificates SET
+        corner_values        = ${JSON.stringify(cornerValues)}::jsonb,
+        edge_values          = ${JSON.stringify(edgeValues)}::jsonb,
+        surface_values       = ${JSON.stringify(surfaceValues)}::jsonb,
+        centering_score      = ${aiGrading.centering.subgrade}::numeric,
+        corners_score        = ${aiGrading.corners.subgrade}::numeric,
+        edges_score          = ${aiGrading.edges.subgrade}::numeric,
+        surface_score        = ${aiGrading.surface.subgrade}::numeric,
+        centering_front_lr   = COALESCE(${aiGrading.centering.front_left_right}, centering_front_lr),
+        centering_front_tb   = COALESCE(${aiGrading.centering.front_top_bottom}, centering_front_tb),
+        centering_back_lr    = COALESCE(${aiGrading.centering.back_left_right},  centering_back_lr),
+        centering_back_tb    = COALESCE(${aiGrading.centering.back_top_bottom},  centering_back_tb),
+        ai_draft_grade       = ${aiGrading.overall_grade}::numeric,
+        updated_at           = NOW()
+      WHERE id = ${certId} AND grade_approved_at IS NULL
+    `);
+    gradeWritten = (result.rowCount ?? 0) > 0;
+    if (!gradeWritten) {
+      console.log(`[scan-ingest] cert=${certId}: cert already approved — AI grading written to ai_analysis only, per-zone columns preserved`);
+    }
+  }
 
   // Audit row — model + per-call decision context. Keeps a paper trail of
   // what the cheaper Haiku pipeline actually wrote.
@@ -290,19 +366,25 @@ export async function runAiOnCert(
       'system',
       ${JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        operations: ["identify", "suggest_defects"],
+        operations: aiGrading
+          ? ["identify", "suggest_defects", "grade"]
+          : ["identify", "suggest_defects"],
         identification_confidence: aiConfidence,
         tcg_verified: tcgVerified,
         card_game: cardGame,
         card_name: cardName,
         defect_candidate_count: defectCandidates.length,
+        ai_grading_overall: aiGrading?.overall_grade ?? null,
+        ai_grading_overall_confidence: aiGrading?.confidence?.overall ?? null,
+        ai_grading_persisted: gradeWritten,
       })}::jsonb,
       NOW()
     )
   `);
 
-  console.log(`[scan-ingest] cert=${certId}: Option-B AI complete — card="${cardName}" game=${cardGame} candidates=${defectCandidates.length}`);
-  return { cardName, grade: null, strengthScore: null };
+  const overallReturned = aiGrading?.overall_grade ?? null;
+  console.log(`[scan-ingest] cert=${certId}: Option-A AI complete — card="${cardName}" game=${cardGame} candidates=${defectCandidates.length} overall=${overallReturned} graded=${gradeWritten}`);
+  return { cardName, grade: overallReturned, strengthScore: null };
 }
 
 // ── Auto-trigger gate ──────────────────────────────────────────────────────
