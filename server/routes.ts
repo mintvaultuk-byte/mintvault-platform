@@ -261,6 +261,36 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   };
 }
 
+// v424 — record once-per-deploy that label artwork was resized + de-gradiented.
+// Idempotent on the deterministic entity_id "label_artwork_v424".
+async function recordLabelArtworkV424Audit() {
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+      SELECT
+        'system',
+        'label_artwork_v424',
+        'label_artwork_updated',
+        'mintvaultuk@gmail.com',
+        ${JSON.stringify({
+          changes: ["dimensions_72x22_to_70x20", "gradient_fade_removed_solid_colours_only"],
+          reason: "physical_slab_cutout_70x20_and_readability_complaints",
+          endpoints_affected: [
+            "POST /api/admin/print-batch",
+            "POST /api/admin/printing/generate-sheet",
+            "GET /api/admin/certificates/:id/label/:side",
+          ],
+        })}::jsonb,
+        NOW()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM audit_log WHERE entity_id = 'label_artwork_v424'
+      )
+    `);
+  } catch (err: any) {
+    console.error("[v424-audit] insert failed:", err.message);
+  }
+}
+
 async function migrateServiceTiersV213() {
   // ── Phase 1: Add new columns — each in its own try/catch so one failure doesn't block others ──
   for (const stmt of [
@@ -682,6 +712,7 @@ export async function registerRoutes(
 ): Promise<Server> {
   // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
   migrateServiceTiersV213().catch(() => {});
+  recordLabelArtworkV424Audit().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});
   addRevealWrapColumn().catch(() => {});

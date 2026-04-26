@@ -38,23 +38,26 @@ import type { CertificateRecord } from "@shared/schema";
 const A4_W        = 595.28;  // pt (210 mm)
 const A4_H        = 841.89;  // pt (297 mm)
 
-const LABEL_W     = 204.09;  // pt (72 mm)
-const LABEL_H     =  62.36;  // pt (22 mm)
+// v424 — slab cutout is 70×20mm (was 72×22mm).
+const LABEL_W     = 198.43;  // pt (70 mm)
+const LABEL_H     =  56.69;  // pt (20 mm)
 
 const COLS        = 2;       // col 0 = front, col 1 = back
-const ROWS        = 9;       // 9 rows → 18 labels (taller labels, one fewer row than before)
+const ROWS        = 9;       // 9 rows → 18 labels. 10 rows would mathematically
+                              // fit at 70×20mm but only with ~0.04 pt of slack —
+                              // not safe given ScanNCut tracking tolerance.
 
 const H_GAP       =  28.35;  // pt (10 mm) — centre gap between columns
 const V_GAP       =  24.25;  // pt (8.56 mm) — row spacing for ScanNCut tracking (~9 mm)
 
 const MARGIN_TOP  =  28.35;  // pt (10 mm)
-const MARGIN_LEFT =  79.37;  // pt (28 mm) — (210 - 72 - 10 - 72) / 2
+const MARGIN_LEFT =  85.04;  // pt (30 mm) — (210 - 70 - 10 - 70) / 2
 
 // mm equivalents (for SVG cut guide — SVG uses mm units)
 const PT_TO_MM    = 1 / 2.83464567;
-const LW_MM       = LABEL_W * PT_TO_MM;  // 72.00 mm
-const LH_MM       = LABEL_H * PT_TO_MM;  // 22.00 mm
-const ML_MM       = MARGIN_LEFT * PT_TO_MM; // 28.00 mm
+const LW_MM       = LABEL_W * PT_TO_MM;  // 70.00 mm
+const LH_MM       = LABEL_H * PT_TO_MM;  // 20.00 mm
+const ML_MM       = MARGIN_LEFT * PT_TO_MM; // 30.00 mm
 const MT_MM       = MARGIN_TOP  * PT_TO_MM; // 10.00 mm
 const HG_MM       = H_GAP * PT_TO_MM;    // 10.00 mm
 const VG_MM       = V_GAP * PT_TO_MM;    // ~8.56 mm
