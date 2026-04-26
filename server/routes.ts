@@ -12,7 +12,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { uploadToR2, getR2SignedUrl, deleteFromR2, r2KeyForImage, r2KeyForLabel } from "./r2";
+import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -2475,18 +2475,38 @@ export async function registerRoutes(
       const forceRegenerate = req.query.regenerate === "true";
       const cacheKey = `logbooks/${certId}.pdf`;
 
-      // Serve from R2 cache unless ?regenerate=true
+      // ── Cert lookup FIRST ────────────────────────────────────────────────
+      // Cache must NEVER be served for hard/soft-deleted certs, even if a
+      // stale R2 object still exists (the MV1 reset bug). If the cert isn't
+      // findable, 404 immediately.
+      const dbCert = await findCertByIdFlex(certId);
+      if (!dbCert || dbCert.status === "voided") {
+        return res.status(404).json({ error: "Certificate not found" });
+      }
+      const certUpdatedAt = (dbCert as any).updatedAt instanceof Date
+        ? (dbCert as any).updatedAt
+        : new Date((dbCert as any).updatedAt || 0);
+
+      // ── Cache read with auto-stale-check ─────────────────────────────────
+      // Serve cached PDF only if cache exists AND cert hasn't been updated
+      // since the cache was written. Any failure (head error, missing object,
+      // stale comparison) falls through to regenerate.
       if (!forceRegenerate) {
-        try {
-          const cachedUrl = await getR2SignedUrl(cacheKey, 300);
-          const cached = await fetch(cachedUrl);
-          if (cached.ok) {
-            const buf = Buffer.from(await cached.arrayBuffer());
-            res.setHeader("Content-Type", "application/pdf");
-            res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
-            return res.send(buf);
-          }
-        } catch {} // cache miss
+        const cachedHead = await headR2(cacheKey);
+        const cacheIsFresh = !!cachedHead && certUpdatedAt <= cachedHead.lastModified;
+        console.log(`[logbook-cache] cert=${certId} certUpdated=${certUpdatedAt.toISOString()} cacheLastMod=${cachedHead?.lastModified.toISOString() || "none"} action=${cacheIsFresh ? "serve-cache" : "regenerate"}`);
+        if (cacheIsFresh) {
+          try {
+            const cachedUrl = await getR2SignedUrl(cacheKey, 300);
+            const cached = await fetch(cachedUrl);
+            if (cached.ok) {
+              const buf = Buffer.from(await cached.arrayBuffer());
+              res.setHeader("Content-Type", "application/pdf");
+              res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
+              return res.send(buf);
+            }
+          } catch {} // signed-url fetch failed → fall through to regenerate
+        }
       }
 
       const pdf = await generateLogbookPdf(certId, {});
