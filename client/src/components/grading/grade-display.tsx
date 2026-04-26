@@ -22,6 +22,11 @@ interface Props {
   edgesZonesSet?: number;
   cornersWorstKey?: string;
   edgesWorstKey?: string;
+  /** v413 — Option A: AI baseline subgrades (snapshot of what scan-time
+   *  Haiku originally graded). Used to surface "AI: X" when the admin has
+   *  overridden, and a low-confidence pip when AI flagged uncertainty. */
+  aiSubgrades?: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
+  aiConfidence?: { centering: "high" | "medium" | "low" | null; corners: "high" | "medium" | "low" | null; edges: "high" | "medium" | "low" | null; surface: "high" | "medium" | "low" | null };
 }
 
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -46,7 +51,7 @@ function strengthColor(s: number): string {
   return "#D97706"; // amber — weak
 }
 
-export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore, cornersZonesSet, edgesZonesSet, cornersWorstKey, edgesWorstKey }: Props) {
+export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore, cornersZonesSet, edgesZonesSet, cornersWorstKey, edgesWorstKey, aiSubgrades, aiConfidence }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const display = manualOverride ?? overall;
@@ -98,22 +103,28 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Subgrade summary — editable. Corners/Edges cells show a partial-zones
-          indicator + a "Limited by {worstKey}" tooltip when the calc is
-          dragged down by a specific zone. Helps the admin self-diagnose
-          which zone they need to revise to lift the subgrade. */}
+      {/* Subgrade summary — editable. Cells show:
+          - "(partial)" indicator + "Limited by …" tooltip from PR #46
+          - "AI: N" baseline subscript when admin has overridden the AI value
+          - amber low-confidence pip when AI flagged uncertainty on this subgrade */}
       <div className="grid grid-cols-4 gap-1.5">
         {([
-          { label: "Centering", key: "centering" as keyof SubGrades, val: sub.centering, zonesSet: undefined as number | undefined, worstKey: "" },
-          { label: "Corners",   key: "corners"   as keyof SubGrades, val: sub.corners,   zonesSet: cornersZonesSet, worstKey: cornersWorstKey || "" },
-          { label: "Edges",     key: "edges"     as keyof SubGrades, val: sub.edges,     zonesSet: edgesZonesSet,   worstKey: edgesWorstKey   || "" },
-          { label: "Surface",   key: "surface"   as keyof SubGrades, val: sub.surface,   zonesSet: undefined, worstKey: "" },
-        ]).map(({ label, key, val, zonesSet, worstKey }) => {
+          { label: "Centering", key: "centering" as keyof SubGrades, val: sub.centering, zonesSet: undefined as number | undefined, worstKey: "", aiBaseline: aiSubgrades?.centering ?? null, aiConf: aiConfidence?.centering ?? null },
+          { label: "Corners",   key: "corners"   as keyof SubGrades, val: sub.corners,   zonesSet: cornersZonesSet, worstKey: cornersWorstKey || "", aiBaseline: aiSubgrades?.corners ?? null, aiConf: aiConfidence?.corners ?? null },
+          { label: "Edges",     key: "edges"     as keyof SubGrades, val: sub.edges,     zonesSet: edgesZonesSet,   worstKey: edgesWorstKey   || "", aiBaseline: aiSubgrades?.edges ?? null, aiConf: aiConfidence?.edges ?? null },
+          { label: "Surface",   key: "surface"   as keyof SubGrades, val: sub.surface,   zonesSet: undefined, worstKey: "", aiBaseline: aiSubgrades?.surface ?? null, aiConf: aiConfidence?.surface ?? null },
+        ]).map(({ label, key, val, zonesSet, worstKey, aiBaseline, aiConf }) => {
           const isPartial = zonesSet != null && zonesSet > 0 && zonesSet < 8;
           const showWorstKey = val > 0 && val < 10 && worstKey !== "";
+          const aiOverridden = aiBaseline != null && val > 0 && val !== aiBaseline;
+          const aiMatched    = aiBaseline != null && val > 0 && val === aiBaseline;
+          const lowConfidence = aiConf === "low";
           const tooltipParts: string[] = [];
           if (showWorstKey) tooltipParts.push(`Limited by ${worstKey}`);
           if (isPartial)    tooltipParts.push(`${zonesSet} of 8 zones graded — set remaining for accurate subgrade`);
+          if (aiOverridden) tooltipParts.push(`AI suggested ${aiBaseline} — admin override`);
+          else if (aiMatched) tooltipParts.push(`AI graded ${aiBaseline} — admin confirmed`);
+          if (lowConfidence) tooltipParts.push("AI low confidence — review carefully");
           const tooltip = tooltipParts.join(" · ");
           return (
             <div
@@ -121,7 +132,15 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
               className="relative group bg-[#F7F7F5] border border-[#E8E4DC] rounded p-2 text-center"
               title={tooltip || undefined}
             >
-              <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider">{label}</p>
+              <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider flex items-center justify-center gap-1">
+                {label}
+                {lowConfidence && (
+                  <span
+                    className="inline-block w-3 h-3 rounded-full bg-amber-100 border border-amber-400 text-amber-700 text-[8px] leading-[10px] font-bold"
+                    title="AI low confidence — review carefully"
+                  >?</span>
+                )}
+              </p>
               <div className="flex items-center justify-center gap-1 mt-0.5">
                 {onSubgradeChange && (
                   <button type="button" onClick={() => onSubgradeChange(key, Math.max(1, val - 1))}
@@ -135,6 +154,12 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
                     className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▲</button>
                 )}
               </div>
+              {aiOverridden && (
+                <p className="text-[#888888] text-[8px] uppercase tracking-wider leading-none mt-0.5">AI: {aiBaseline}</p>
+              )}
+              {aiMatched && !aiOverridden && (
+                <p className="text-[#D4AF37]/60 text-[8px] uppercase tracking-wider leading-none mt-0.5">AI</p>
+              )}
               {isPartial && (
                 <p className="text-[#B8960C] text-[8px] uppercase tracking-wider leading-none mt-0.5">(partial)</p>
               )}

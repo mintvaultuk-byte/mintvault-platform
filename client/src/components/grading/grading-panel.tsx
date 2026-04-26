@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -141,6 +141,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [saving, setSaving]   = useState(false);
   const [approving, setApproving] = useState(false);
   const [generatingDescription, setGeneratingDescription] = useState(false);
+  // v413 auto-save: tracks the background save status. "saving" while a debounced
+  // PUT is in flight; "saved" after a successful save (cleared after a few seconds);
+  // "error" if the save failed. Idle = nothing to indicate.
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [gradeApprovedAt, setGradeApprovedAt] = useState<string | null>(null);
+  const [gradeApprovedBy, setGradeApprovedBy] = useState<string | null>(null);
   const [approved, setApproved]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -199,7 +205,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (gradingData.authNotes)  setAuthNotes(gradingData.authNotes);
     if (gradingData.privateNotes)   setPrivateNotes(gradingData.privateNotes);
     if (gradingData.gradeExplanation) setGradeExplanation(gradingData.gradeExplanation);
-    if (gradingData.gradeApprovedBy)  setApproved(true);
+    if (gradingData.gradeApprovedBy) {
+      setApproved(true);
+      setGradeApprovedBy(gradingData.gradeApprovedBy);
+    }
+    if ((gradingData as any).gradeApprovedAt) {
+      setGradeApprovedAt(String((gradingData as any).gradeApprovedAt));
+    }
     // Manual centering frame rects (persisted)
     if (gradingData.centeringOuterFront) setManualOuterFront(gradingData.centeringOuterFront);
     if (gradingData.centeringInnerFront) setManualInnerFront(gradingData.centeringInnerFront);
@@ -415,6 +427,37 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   const sub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
   const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+
+  // v413 — AI baseline derivations. Read the snapshot of what AI originally
+  // graded (stored in ai_analysis.grading) so the UI can flag which subgrades
+  // were AI-suggested vs admin-overridden, and surface low-confidence hints.
+  // Pre-Option-A certs (Option B / legacy) won't have a `grading` key here;
+  // everything below treats null as "no AI baseline available" and falls back
+  // to neutral (no badge, no diff cue).
+  const aiGradingBase = (gradingData as any)?.aiAnalysis?.grading as
+    | {
+        centering?: { subgrade?: number };
+        corners?: { subgrade?: number };
+        edges?: { subgrade?: number };
+        surface?: { subgrade?: number };
+        overall_grade?: number;
+        confidence?: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string };
+      }
+    | undefined;
+
+  const aiSubgrades = useMemo(() => ({
+    centering: aiGradingBase?.centering?.subgrade ?? null,
+    corners:   aiGradingBase?.corners?.subgrade   ?? null,
+    edges:     aiGradingBase?.edges?.subgrade     ?? null,
+    surface:   aiGradingBase?.surface?.subgrade   ?? null,
+  }), [aiGradingBase]);
+
+  const aiConfidenceMap = useMemo(() => ({
+    centering: (aiGradingBase?.confidence?.centering as "high" | "medium" | "low" | undefined) ?? null,
+    corners:   (aiGradingBase?.confidence?.corners   as "high" | "medium" | "low" | undefined) ?? null,
+    edges:     (aiGradingBase?.confidence?.edges     as "high" | "medium" | "low" | undefined) ?? null,
+    surface:   (aiGradingBase?.confidence?.surface   as "high" | "medium" | "low" | undefined) ?? null,
+  }), [aiGradingBase]);
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
   const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
@@ -477,6 +520,77 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
     return out;
   }
+
+  // v413 auto-save: silent background PUT to /grade, debounced 500ms after the
+  // last state change. Same endpoint that "Save Draft" used to hit, so
+  // post-approve edits naturally route through the post_approve_edit audit
+  // path on the server. No toast on success — the small "Saving…" / "Saved"
+  // indicator beside the action button is the only feedback. Toasts only on
+  // error so the admin notices when persistence fails.
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveSeqRef = useRef(0);
+  const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedOnceRef = useRef(false);
+
+  async function autoSaveNow(): Promise<boolean> {
+    const seq = ++autoSaveSeqRef.current;
+    setAutoSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      });
+      if (seq !== autoSaveSeqRef.current) return true; // a newer save started; let it own the status
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setAutoSaveStatus("saved");
+      // Auto-clear the "Saved" pip after 2.5s back to idle so the indicator
+      // doesn't stick around indefinitely.
+      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
+      autoSavedClearTimerRef.current = setTimeout(() => {
+        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
+      }, 2500);
+      return true;
+    } catch (e: any) {
+      if (seq !== autoSaveSeqRef.current) return false;
+      setAutoSaveStatus("error");
+      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+      return false;
+    }
+  }
+
+  // Schedule a debounced auto-save whenever any persisted state changes.
+  // The hydration useEffect above sets state from gradingData on initial
+  // load — we skip the very first render so we don't pointlessly POST
+  // back what we just GET'd.
+  useEffect(() => {
+    if (!certId) return;
+    if (!hydratedOnceRef.current) {
+      // First render after mount: skip auto-save firing.
+      hydratedOnceRef.current = true;
+      return;
+    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveNow();
+    }, 500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    certId,
+    frontLR, frontTB, backLR, backTB,
+    corners, edges, surface,
+    defects, defectCandidates,
+    authStatus, authNotes,
+    privateNotes, gradeExplanation,
+    centeringOverride, cornersOverride, edgesOverride, surfaceOverride, overallOverride,
+  ]);
 
   async function saveDraft() {
     setSaving(true);
@@ -542,6 +656,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   async function approveGrade() {
     setApproving(true);
     try {
+      // v413: flush any pending debounced auto-save before approving so the
+      // server reads the freshest payload. Cancel the debounce timer (if any)
+      // and POST the current state directly.
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
       const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
         method: "PUT",
         credentials: "include",
@@ -552,7 +673,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       if (!res.ok) throw new Error(data.error || "Approve failed");
       setApproved(true);
       setShowConfirm(false);
-      toast({ title: `${certIdStr || "Certificate"} approved — ${finalGradeOverall} ${label}` });
+      // Mirror server-side approve into local state so the post-approve
+      // banner appears immediately without waiting for the next gradingData
+      // refetch.
+      setGradeApprovedAt(new Date().toISOString());
+      setGradeApprovedBy("Cornelius Oliver");
+      toast({ title: `${certIdStr || "Certificate"} approved & published — ${finalGradeOverall} ${label}` });
       onGradeApproved?.(certIdStr, finalGradeOverall);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
@@ -850,6 +976,20 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
         {/* RIGHT — Grading inputs */}
         <div className="space-y-5 overflow-y-auto">
+          {/* v413 post-approve banner — appears once the cert is live, reminds
+              the admin that further edits go directly to the live record. */}
+          {gradeApprovedAt && (
+            <div className="bg-[#16A34A]/10 border border-[#16A34A]/40 rounded-lg p-3 space-y-1">
+              <p className="text-[#16A34A] text-xs font-bold uppercase tracking-widest">
+                ✓ Approved &amp; Live · {certIdStr || ""}
+              </p>
+              <p className="text-[#16A34A]/80 text-[10px] leading-relaxed">
+                Approved {gradeApprovedAt ? new Date(gradeApprovedAt).toLocaleString() : ""}
+                {gradeApprovedBy ? ` by ${gradeApprovedBy}` : ""}.
+                Edits below save automatically to the live record and are recorded in the audit log.
+              </p>
+            </div>
+          )}
           {/* AI source badges */}
           {aiAnalysis && (
             <div className="flex gap-1 flex-wrap">
@@ -892,6 +1032,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               edgesZonesSet={edgesZonesSet}
               cornersWorstKey={cornersOverride == null ? cornersCalc.worstKey : ""}
               edgesWorstKey={edgesOverride == null ? edgesCalc.worstKey : ""}
+              aiSubgrades={aiSubgrades}
+              aiConfidence={aiConfidenceMap}
               onSubgradeChange={(key, val) => {
                 if (key === "centering") setCenteringOverride(val);
                 else if (key === "corners") setCornersOverride(val);
@@ -1019,27 +1161,50 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             />
           </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-3 sticky bottom-0 pb-2 pt-1 bg-white">
-            <button
-              type="button"
-              onClick={saveDraft}
-              disabled={saving}
-              className="flex-1 flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37]/70 hover:border-[#D4AF37]/60 hover:text-[#D4AF37] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40"
-            >
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Save Draft
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowConfirm(true)}
-              disabled={approving || overall <= 0}
-              title={overall <= 0 ? "Set all subgrades before approving" : undefined}
-              className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
-            >
-              {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              {overall <= 0 ? "Set subgrades first" : "Approve Grade"}
-            </button>
+          {/* v413 — single-button approval. "Save Draft" is gone; auto-save
+              fires silently on every blur. The button gates on subgrades
+              present + overall > 0 + (post-approve, always enabled because
+              the cert is live and we want edits to flow through). The auto-
+              save status pip sits to the left of the button. */}
+          <div className="sticky bottom-0 pb-2 pt-1 bg-white space-y-2">
+            <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
+              <span className="text-[#888888]">
+                {autoSaveStatus === "saving" && (
+                  <span className="flex items-center gap-1.5"><Loader2 size={10} className="animate-spin" /> Saving…</span>
+                )}
+                {autoSaveStatus === "saved"  && (
+                  <span className="flex items-center gap-1.5 text-[#16A34A]"><CheckCircle2 size={10} /> Saved</span>
+                )}
+                {autoSaveStatus === "error"  && (
+                  <span className="text-red-600">Save failed — retrying on next change</span>
+                )}
+              </span>
+              {gradeApprovedAt && (
+                <span className="text-[#16A34A]">✓ Live</span>
+              )}
+            </div>
+            {!approved ? (
+              <button
+                type="button"
+                onClick={() => setShowConfirm(true)}
+                disabled={approving || overall <= 0 || subgradesIncomplete}
+                title={
+                  overall <= 0 || subgradesIncomplete
+                    ? "Set all four subgrades first"
+                    : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                }
+                data-testid="btn-approve-publish"
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
+              >
+                {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                {subgradesIncomplete ? "Set subgrades first" : "Approve & Publish"}
+              </button>
+            ) : (
+              <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">
+                <CheckCircle2 size={13} />
+                Approved & Live · {certIdStr || ""} · edits below save automatically
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1080,11 +1245,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       {showConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-[#111111] border border-[#333333] rounded-xl p-6 max-w-sm w-full space-y-4">
-            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Confirm Grade</p>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Approve &amp; Publish</p>
             <p className="text-[#CCCCCC] text-sm">
-              Confirm grade of <strong className="text-white">{finalGradeOverall} — {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}</strong> for <strong className="text-white">{cardName}</strong> ({cardSet})?
+              Publish grade of <strong className="text-white">{finalGradeOverall} — {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}</strong> for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
-            <p className="text-[#555555] text-xs">This grade will be published and the Digital Grading Report will be generated.</p>
+            <p className="text-[#555555] text-xs">The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to subgrades or notes will be live immediately (recorded in the audit log).</p>
             {isBlack && (
               <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
                 <span className="text-lg">★</span>
@@ -1099,7 +1264,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 disabled={approving}
                 className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
-                {approving ? "Approving…" : "Approve"}
+                {approving ? "Publishing…" : "Approve & Publish"}
               </button>
             </div>
           </div>

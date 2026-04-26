@@ -5,7 +5,7 @@
 
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
-import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT } from "./grading-prompt";
+import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT, HAIKU_GRADING_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
 import { anthropicFetch } from "./anthropic-fetch";
@@ -1082,6 +1082,228 @@ export async function suggestDefectsFromBuffer(
   }
   console.log(`[suggest-defects] cert=${certId}: ${cleaned.length} candidate(s) accepted (raw: ${raw.length})`);
   return cleaned;
+}
+
+// ── Option A — Haiku per-zone grading (scan-time pre-fill) ────────────────
+//
+// Produces numeric subgrades + per-zone values + centering ratios that
+// pre-populate the grading form. Admin reviews, overrides where wrong,
+// clicks "Approve & Publish". Marketing positioning: "AI-graded,
+// human-verified."
+//
+// Returns null on parse failure — caller (runAiOnCert) treats null as "no
+// AI grading data" and proceeds with the rest of the ingest. Does NOT
+// fail-stop the scan-ingest pipeline.
+
+export interface AiGrading {
+  centering: {
+    front_left_right: string | null;
+    front_top_bottom: string | null;
+    back_left_right:  string | null;
+    back_top_bottom:  string | null;
+    front_grade: number;
+    back_grade:  number;
+    subgrade:    number;
+  };
+  corners: {
+    front_top_left:     number;
+    front_top_right:    number;
+    front_bottom_left:  number;
+    front_bottom_right: number;
+    back_top_left:      number;
+    back_top_right:     number;
+    back_bottom_left:   number;
+    back_bottom_right:  number;
+    subgrade:           number;
+  };
+  edges: {
+    front_top:    number;
+    front_right:  number;
+    front_bottom: number;
+    front_left:   number;
+    back_top:     number;
+    back_right:   number;
+    back_bottom:  number;
+    back_left:    number;
+    subgrade:     number;
+  };
+  surface: {
+    front_grade: number;
+    back_grade:  number;
+    subgrade:    number;
+    has_print_lines?:       boolean;
+    has_holo_scratches?:    boolean;
+    has_surface_scratches?: boolean;
+    has_staining?:          boolean;
+    has_crease?:            boolean;
+    has_tear?:              boolean;
+  };
+  overall_grade: number;
+  confidence: {
+    centering: "high" | "medium" | "low";
+    corners:   "high" | "medium" | "low";
+    edges:     "high" | "medium" | "low";
+    surface:   "high" | "medium" | "low";
+    overall:   "high" | "medium" | "low";
+  };
+}
+
+const VALID_CONFIDENCE = new Set(["high", "medium", "low"]);
+
+/** Clamp to 1-10 integer; return null for non-finite or out-of-range. Stricter
+ *  variant of clampGrade() above (which defaults to 1) — used by Option-A
+ *  Haiku grading where missing/invalid values should bail rather than be
+ *  silently coerced to a real grade. */
+function clampGradeOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  if (!Number.isFinite(n)) return null;
+  const r = Math.round(n);
+  return r >= 1 && r <= 10 ? r : null;
+}
+
+/** Coerce confidence string to canonical enum, defaulting to "medium". */
+function coerceConfidence(v: unknown): "high" | "medium" | "low" {
+  const s = typeof v === "string" ? v.toLowerCase().trim() : "";
+  return VALID_CONFIDENCE.has(s) ? (s as "high" | "medium" | "low") : "medium";
+}
+
+export async function gradeCardFromBuffer(
+  frontBuffer: Buffer,
+  backBuffer: Buffer | null,
+  certId?: string | number,
+): Promise<AiGrading | null> {
+  await rateLimit();
+  const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
+  const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
+  if (backBuffer) {
+    const { buffer: backResized, mediaType: backMime } = await resizeForClaude(backBuffer);
+    content.push(imageBlock(backResized.toString("base64"), backMime));
+  }
+  content.push({ type: "text", text: "Grade this card. Return ONLY valid JSON matching the schema in the system prompt." });
+
+  let text: string;
+  try {
+    text = await callClaude(content, 3072, "claude-haiku-4-5-20251001", {
+      systemPrompt: HAIKU_GRADING_PROMPT,
+      label: "grade-haiku",
+      certId,
+    });
+  } catch (err: any) {
+    console.warn(`[grade-haiku] call failed for cert=${certId}: ${err.message}`);
+    return null;
+  }
+
+  let parsed: any;
+  try {
+    parsed = parseJson<any>(text);
+  } catch {
+    console.warn(`[grade-haiku] non-JSON response for cert=${certId}: ${text.slice(0, 200)}`);
+    return null;
+  }
+
+  // Validate + clamp every field. If any required subgrade is missing,
+  // bail to null — partial AI grading is worse than no AI grading.
+  try {
+    const c = parsed.centering || {};
+    const co = parsed.corners || {};
+    const ed = parsed.edges || {};
+    const su = parsed.surface || {};
+    const cf = parsed.confidence || {};
+
+    // Centering: ratios are strings like "52/48"; tolerate missing.
+    const txt = (v: unknown): string | null => (typeof v === "string" && /^\d+\/\d+$/.test(v.trim())) ? v.trim() : null;
+
+    const cFrontGrade = clampGradeOrNull(c.front_grade);
+    const cBackGrade  = clampGradeOrNull(c.back_grade);
+    const cSub        = clampGradeOrNull(c.subgrade);
+    if (cFrontGrade == null || cBackGrade == null || cSub == null) {
+      console.warn(`[grade-haiku] cert=${certId}: missing/invalid centering grades; bailing`);
+      return null;
+    }
+
+    const cornerKeys = ["front_top_left","front_top_right","front_bottom_left","front_bottom_right","back_top_left","back_top_right","back_bottom_left","back_bottom_right"] as const;
+    const corners: any = { subgrade: clampGradeOrNull(co.subgrade) };
+    if (corners.subgrade == null) {
+      console.warn(`[grade-haiku] cert=${certId}: missing corners subgrade; bailing`);
+      return null;
+    }
+    for (const k of cornerKeys) {
+      const g = clampGradeOrNull(co[k]);
+      if (g == null) {
+        console.warn(`[grade-haiku] cert=${certId}: missing/invalid corners.${k}; bailing`);
+        return null;
+      }
+      corners[k] = g;
+    }
+
+    const edgeKeys = ["front_top","front_right","front_bottom","front_left","back_top","back_right","back_bottom","back_left"] as const;
+    const edges: any = { subgrade: clampGradeOrNull(ed.subgrade) };
+    if (edges.subgrade == null) {
+      console.warn(`[grade-haiku] cert=${certId}: missing edges subgrade; bailing`);
+      return null;
+    }
+    for (const k of edgeKeys) {
+      const g = clampGradeOrNull(ed[k]);
+      if (g == null) {
+        console.warn(`[grade-haiku] cert=${certId}: missing/invalid edges.${k}; bailing`);
+        return null;
+      }
+      edges[k] = g;
+    }
+
+    const sFrontGrade = clampGradeOrNull(su.front_grade);
+    const sBackGrade  = clampGradeOrNull(su.back_grade);
+    const sSub        = clampGradeOrNull(su.subgrade);
+    if (sFrontGrade == null || sBackGrade == null || sSub == null) {
+      console.warn(`[grade-haiku] cert=${certId}: missing surface grades; bailing`);
+      return null;
+    }
+
+    const overall = clampGradeOrNull(parsed.overall_grade);
+    if (overall == null) {
+      console.warn(`[grade-haiku] cert=${certId}: missing overall_grade; bailing`);
+      return null;
+    }
+
+    const result: AiGrading = {
+      centering: {
+        front_left_right: txt(c.front_left_right),
+        front_top_bottom: txt(c.front_top_bottom),
+        back_left_right:  txt(c.back_left_right),
+        back_top_bottom:  txt(c.back_top_bottom),
+        front_grade: cFrontGrade,
+        back_grade:  cBackGrade,
+        subgrade:    cSub,
+      },
+      corners: corners as AiGrading["corners"],
+      edges:   edges   as AiGrading["edges"],
+      surface: {
+        front_grade: sFrontGrade,
+        back_grade:  sBackGrade,
+        subgrade:    sSub,
+        has_print_lines:       Boolean(su.has_print_lines),
+        has_holo_scratches:    Boolean(su.has_holo_scratches),
+        has_surface_scratches: Boolean(su.has_surface_scratches),
+        has_staining:          Boolean(su.has_staining),
+        has_crease:            Boolean(su.has_crease),
+        has_tear:              Boolean(su.has_tear),
+      },
+      overall_grade: overall,
+      confidence: {
+        centering: coerceConfidence(cf.centering),
+        corners:   coerceConfidence(cf.corners),
+        edges:     coerceConfidence(cf.edges),
+        surface:   coerceConfidence(cf.surface),
+        overall:   coerceConfidence(cf.overall),
+      },
+    };
+
+    console.log(`[grade-haiku] cert=${certId}: overall=${overall} centering=${cSub} corners=${corners.subgrade} edges=${edges.subgrade} surface=${sSub} overall_conf=${result.confidence.overall}`);
+    return result;
+  } catch (err: any) {
+    console.warn(`[grade-haiku] cert=${certId}: validation error — ${err.message}`);
+    return null;
+  }
 }
 
 // ── Card identification ────────────────────────────────────────────────────

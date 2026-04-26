@@ -6307,6 +6307,12 @@ Defects (admin-confirmed): ${defectLines}`;
         : null;
       const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
 
+      // Track approval state pre-write for the audit trail. Edits to an
+      // already-approved cert are LIVE-RECORD edits — same SQL path,
+      // different audit_log action so we can analyse post-launch which
+      // certs got changed after publication.
+      const wasApproved = (cert as any).gradeApprovedAt != null;
+
       await db.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
@@ -6339,7 +6345,30 @@ Defects (admin-confirmed): ${defectLines}`;
         WHERE id = ${id}
       `);
 
-      res.json({ ok: true });
+      // Audit — distinguish draft saves from post-approve live-record edits.
+      // Both fire the same SQL above, but the audit trail captures the
+      // semantic difference: pre-launch we want to know what % of certs
+      // get edited after publication, and which fields. Field list is the
+      // payload's top-level keys (not deep-diff — keeps the audit cheap).
+      try {
+        const fieldsChanged = Object.keys(b || {});
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+          VALUES (
+            'certificate',
+            ${String(id)},
+            ${wasApproved ? "post_approve_edit" : "draft_save"},
+            ${(req.session as any)?.adminEmail || "admin"},
+            ${JSON.stringify({ fields_changed: fieldsChanged, was_approved: wasApproved })}::jsonb,
+            NOW()
+          )
+        `);
+      } catch (auditErr: any) {
+        // Don't fail the save if audit insert fails — log and continue.
+        console.warn("[grade] audit_log insert failed:", auditErr.message);
+      }
+
+      res.json({ ok: true, wasApproved });
     } catch (error: any) {
       console.error("[grade] save error:", error.message);
       res.status(500).json({ error: error.message });
@@ -6442,8 +6471,14 @@ Defects (admin-confirmed): ${defectLines}`;
         console.warn("[approve] grading_sessions insert failed:", sessionErr);
       }
 
-      await storage.writeAuditLog("certificate", cert.certId, "approve_grade_v2", req.session.adminEmail || "admin", {
-        overall: overallGrade, labelType,
+      // Track whether this approval was AI-drafted (cert had `ai_draft_grade`
+      // populated by Option-A scan-ingest before the admin clicked approve).
+      // Useful post-launch metric: "what % of certs ship untouched-from-AI?"
+      const wasAiDrafted = (cert as any).aiDraftGrade != null;
+      await storage.writeAuditLog("certificate", cert.certId, "approve_and_publish", req.session.adminEmail || "admin", {
+        overall: overallGrade,
+        labelType,
+        was_ai_drafted: wasAiDrafted,
       });
 
       // Log AI vs human comparison if an AI draft grade exists for this certificate
