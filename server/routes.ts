@@ -6136,6 +6136,15 @@ export async function registerRoutes(
       const txt = (v: unknown): string | null => (v == null || v === "") ? null : String(v);
       const jsn = (v: unknown): string | null => v != null ? JSON.stringify(v) : null;
 
+      // Strength score is calibrated to the AI's overall grade. If the admin
+      // changes the grade manually here, the AI-derived score is stale and
+      // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
+      const fmt = (n: number | null) => n == null ? "" : n.toFixed(1);
+      const oldGradeNum = (cert as any).gradeOverall != null
+        ? parseFloat(String((cert as any).gradeOverall))
+        : null;
+      const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
+
       await db.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
@@ -6148,10 +6157,11 @@ export async function registerRoutes(
           surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
           grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
           grade_type          = ${isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric"},
+          grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
           surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
-          defects             = ${JSON.stringify(b.defects || [])}::jsonb,
+          defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
           auth_status         = ${b.auth_status || "genuine"},
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
@@ -6201,6 +6211,15 @@ export async function registerRoutes(
       const finalEdges     = sentEdges     ?? num(cert.gradeEdges);
       const finalSurface   = sentSurface   ?? num(cert.gradeSurface);
 
+      // Strength score is calibrated to the AI's overall grade. If the admin
+      // changes the grade manually here, the AI-derived score is stale and
+      // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
+      const fmt = (n: number | null) => n == null ? "" : n.toFixed(1);
+      const oldGradeNum = (cert as any).gradeOverall != null
+        ? parseFloat(String((cert as any).gradeOverall))
+        : null;
+      const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
+
       // Compute Black Label: all subgrades must be exactly 10.0
       const allTen = !isNonNum && gradeNum === 10 &&
         finalCentering === 10 && finalCorners === 10 && finalEdges === 10 && finalSurface === 10;
@@ -6215,6 +6234,7 @@ export async function registerRoutes(
           corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentEdges}::numeric,     edges_score)`},
           surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentSurface}::numeric,   surface_score)`},
+          grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
           centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
@@ -6222,7 +6242,7 @@ export async function registerRoutes(
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
           surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
-          defects             = ${JSON.stringify(b.defects || [])}::jsonb,
+          defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
           auth_status         = ${b.auth_status || "genuine"},
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
