@@ -768,33 +768,73 @@ function SheetPrintingPanel() {
       }
       const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[]; mintedFor?: string[] };
 
-      // Decode + download two files in one click. Use object URLs so the
-      // browser handles the actual filesystem dialog.
-      const saveBlob = (b64: string, mime: string, filename: string) => {
+      // Decode base64 → Blob.
+      const decode = (b64: string, mime: string) => {
         const bin = atob(b64);
         const buf = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        const blob = new Blob([buf], { type: mime });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
+        return new Blob([buf], { type: mime });
       };
 
-      saveBlob(data.pdf, "application/pdf", `mintvault-batch-${data.batchId}.pdf`);
-      saveBlob(data.svg, "image/svg+xml", `mintvault-batch-${data.batchId}.svg`);
+      // SVG → save to disk (operator drags it onto the ScanNCut over USB).
+      const svgBlob = decode(data.svg, "image/svg+xml");
+      const svgUrl = URL.createObjectURL(svgBlob);
+      const svgAnchor = document.createElement("a");
+      svgAnchor.href = svgUrl;
+      svgAnchor.download = `mintvault-batch-${data.batchId}.svg`;
+      svgAnchor.click();
+      URL.revokeObjectURL(svgUrl);
 
+      // PDF → open in a hidden iframe and trigger the browser's native
+      // print dialog. macOS will show the system printer list (Epson
+      // ET-8700 over AirPrint/Bonjour). Same-origin Blob URL means
+      // contentWindow.print() is allowed; window.open() would be blocked
+      // as a popup in Safari. Cleanup runs after 60s so the print dialog
+      // has time to read the blob even if the user takes a moment.
+      const pdfBlob = decode(data.pdf, "application/pdf");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = pdfUrl;
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch {
+          // Fallback: same UX as v420 — drop the PDF in Downloads so
+          // the operator can print manually.
+          const a = document.createElement("a");
+          a.href = pdfUrl;
+          a.download = `mintvault-batch-${data.batchId}.pdf`;
+          a.click();
+        }
+      };
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        URL.revokeObjectURL(pdfUrl);
+        iframe.remove();
+      }, 60_000);
+
+      // Transient "opening" toast, then resolve to the success toast.
+      // TOAST_LIMIT=1 in use-toast.ts means the second call replaces
+      // the first.
+      toast({ title: "Opening print dialog…" });
       const mintedCount = data.mintedFor?.length ?? 0;
       const cardCount = data.certIds.length;
       const cardsLabel = `${cardCount} card${cardCount !== 1 ? "s" : ""}`;
-      toast({
-        title: mintedCount > 0
-          ? `Print batch ready — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}`
-          : "Print batch ready",
-        description: `${cardsLabel} — print PDF, then load SVG into CM300 (Direct Cut)`,
-      });
+      setTimeout(() => {
+        toast({
+          title: mintedCount > 0
+            ? `Print batch ready — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}`
+            : "Print batch ready",
+          description: `${cardsLabel} — pick Epson in print dialog, then load SVG into CM300 (Direct Cut)`,
+        });
+      }, 1500);
     } catch (err: any) {
       toast({ title: "Print batch failed", description: err.message, variant: "destructive" });
     } finally {
@@ -995,7 +1035,7 @@ function SheetPrintingPanel() {
               ? `Select up to ${PRINT_BATCH_MAX} unclaimed certs`
               : selected.size > PRINT_BATCH_MAX
                 ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
-                : "Generate combined PDF + SVG cut guide for ScanNCut CM300"
+                : "Print PDF to your printer + download SVG cut guide for ScanNCut CM300"
           }
           className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
         >
