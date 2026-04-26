@@ -2965,36 +2965,6 @@ export async function registerRoutes(
     }
   });
 
-  // ── Admin: update tier capacity ───────────────────────────────────────────
-  app.put("/api/admin/capacity/:tierSlug", requireAdmin, async (req, res) => {
-    try {
-      const tierSlug = String(req.params.tierSlug);
-      const { maxActive, forceOpen } = req.body;
-
-      if (!["standard", "priority", "express"].includes(tierSlug)) {
-        return res.status(400).json({ error: "Invalid tier slug" });
-      }
-      if (maxActive !== undefined && (typeof maxActive !== "number" || maxActive < 0)) {
-        return res.status(400).json({ error: "maxActive must be a non-negative number" });
-      }
-
-      const fields: string[] = [];
-      if (maxActive !== undefined) fields.push(`max_active = ${parseInt(maxActive, 10)}`);
-      if (forceOpen !== undefined) fields.push(`force_open = ${Boolean(forceOpen)}`);
-      if (fields.length === 0) return res.status(400).json({ error: "Nothing to update" });
-
-      await db.execute(sql`
-        UPDATE tier_capacity
-        SET ${sql.raw(fields.join(", "))}, updated_at = NOW()
-        WHERE tier_slug = ${tierSlug}
-      `);
-      invalidateCapacityCache(tierSlug);
-      return res.json({ ok: true });
-    } catch (err: any) {
-      console.error("[capacity] PUT error:", err.message);
-      return res.status(500).json({ error: "Failed to update capacity" });
-    }
-  });
 
   // ── eBay price data for Vault report ─────────────────────────────────────
   // Returns current eBay UK fixed-price listings for the card on this cert.
