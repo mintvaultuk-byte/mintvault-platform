@@ -1218,6 +1218,21 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               ? (urls.front_cropped || urls.front_original || "")
               : (urls.back_cropped || urls.back_original || "")
           }
+          existingOuter={
+            manualCenteringSide === "front"
+              ? (manualOuterFront || (gradingData as any)?.centeringOuterFront || null)
+              : (manualOuterBack  || (gradingData as any)?.centeringOuterBack  || null)
+          }
+          existingInner={
+            manualCenteringSide === "front"
+              ? (manualInnerFront || (gradingData as any)?.centeringInnerFront || null)
+              : (manualInnerBack  || (gradingData as any)?.centeringInnerBack  || null)
+          }
+          aiRatios={
+            manualCenteringSide === "front"
+              ? { lr: (gradingData as any)?.centeringFrontLr ?? null, tb: (gradingData as any)?.centeringFrontTb ?? null }
+              : { lr: (gradingData as any)?.centeringBackLr  ?? null, tb: (gradingData as any)?.centeringBackTb  ?? null }
+          }
           onSave={(result) => {
             if (result.side === "front") {
               setFrontLR(result.leftRight);

@@ -10,6 +10,15 @@ interface Props {
   imageUrl: string;
   onSave: (result: CenteringResult) => void;
   onCancel: () => void;
+  /** v415 — pre-load admin-saved rects (from prior manual centering pass on
+   *  this side). When present, these win over aiRatios derivation. */
+  existingOuter?: Rect | null;
+  existingInner?: Rect | null;
+  /** v415 — pre-load AI-detected centering ratios (e.g. "51/49" + "52/48").
+   *  Used to derive starting rect positions when no admin-saved rects exist
+   *  yet. Admin nudges from the AI's position rather than starting from
+   *  centred defaults. Has no effect when existingOuter/Inner are present. */
+  aiRatios?: { lr: string | null; tb: string | null } | null;
 }
 
 export interface CenteringResult {
@@ -22,6 +31,59 @@ export interface CenteringResult {
 }
 
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
+
+const DEFAULT_OUTER: Rect = { left: 1, top: 1, right: 99, bottom: 99 };
+const DEFAULT_INNER: Rect = { left: 5, top: 4, right: 95, bottom: 96 };
+
+/**
+ * Derive a starting inner-rect from AI-supplied L/R + T/B ratios such as
+ * "51/49" + "52/48". The outer rect is always the full image (post-v406
+ * pipeline crops the card to fill the frame, so card edges ~= image edges).
+ *
+ * The Rect coordinates here are PERCENTAGES (0-100), not pixels — so the
+ * derivation is image-size-agnostic and runs synchronously at mount, no
+ * waiting for image-load.
+ *
+ * Border thickness assumption: ~6% inset per side, matching typical Pokémon
+ * card border-to-art ratio. Admin nudges from there.
+ */
+function deriveRectsFromRatios(lr: string | null, tb: string | null): { outer: Rect; inner: Rect } | null {
+  if (!lr || !tb) return null;
+  const parseRatio = (s: string): [number, number] | null => {
+    const parts = s.split("/").map(p => Number(p.trim()));
+    if (parts.length !== 2) return null;
+    const [a, b] = parts;
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0 || a + b === 0) return null;
+    return [a, b];
+  };
+  const lrParsed = parseRatio(lr);
+  const tbParsed = parseRatio(tb);
+  if (!lrParsed || !tbParsed) return null;
+  const [lPct, rPct] = lrParsed;
+  const [tPct, bPct] = tbParsed;
+
+  // Note: AI's lr is reported "larger/smaller" so 51/49 doesn't tell us which
+  // side has the wider margin in absolute terms. We ASSUME the first number
+  // is the LEFT margin. If the cert's lr was normalised to "max/min" form,
+  // some cases will mirror — admin can drag to correct. Cheap starting
+  // position; not authoritative.
+  const baseInsetPct = 6;          // per-side inset, % of image dimension
+  const totalH = baseInsetPct * 2;  // total horizontal margin
+  const totalV = baseInsetPct * 2;
+  const leftMargin = totalH * (lPct / (lPct + rPct));
+  const topMargin  = totalV * (tPct / (tPct + bPct));
+  const rightMargin  = totalH - leftMargin;
+  const bottomMargin = totalV - topMargin;
+
+  const inner: Rect = {
+    left:   leftMargin,
+    top:    topMargin,
+    right:  100 - rightMargin,
+    bottom: 100 - bottomMargin,
+  };
+  const outer: Rect = { left: 0, top: 0, right: 100, bottom: 100 };
+  return { outer, inner };
+}
 
 function computeCentering(outer: Rect, inner: Rect) {
   const leftB = inner.left - outer.left;
@@ -52,10 +114,29 @@ function computeCentering(outer: Rect, inner: Rect) {
 
 type DragTarget = "none" | "outer-tl" | "outer-tr" | "outer-br" | "outer-bl" | "outer-t" | "outer-r" | "outer-b" | "outer-l" | "outer-body" | "inner-tl" | "inner-tr" | "inner-br" | "inner-bl" | "inner-t" | "inner-r" | "inner-b" | "inner-l" | "inner-body";
 
-export default function ManualCentering({ certId, side, imageUrl, onSave, onCancel }: Props) {
+export default function ManualCentering({ certId, side, imageUrl, onSave, onCancel, existingOuter, existingInner, aiRatios }: Props) {
   const { toast } = useToast();
-  const [outer, setOuter] = useState<Rect>({ left: 1, top: 1, right: 99, bottom: 99 });
-  const [inner, setInner] = useState<Rect>({ left: 5, top: 4, right: 95, bottom: 96 });
+
+  // v415 starting-rect precedence:
+  //   1. Admin-saved rects (existingOuter/Inner JSONB from prior manual pass)
+  //   2. Derived from AI ratios (centering_*_lr / centering_*_tb text columns)
+  //   3. Centred default — what the modal used pre-v415
+  // Computed once at mount; subsequent re-opens with new props will create
+  // new state. We track which path was used so the hint banner can read it.
+  const initialRects = (() => {
+    if (existingOuter && existingInner) {
+      return { outer: existingOuter, inner: existingInner, source: "saved" as const };
+    }
+    const derived = aiRatios ? deriveRectsFromRatios(aiRatios.lr, aiRatios.tb) : null;
+    if (derived) {
+      return { outer: derived.outer, inner: derived.inner, source: "ai" as const };
+    }
+    return { outer: DEFAULT_OUTER, inner: DEFAULT_INNER, source: "default" as const };
+  })();
+
+  const [outer, setOuter] = useState<Rect>(initialRects.outer);
+  const [inner, setInner] = useState<Rect>(initialRects.inner);
+  const [rectSource] = useState<"saved" | "ai" | "default">(initialRects.source);
   const [zoom, setZoom] = useState(1);
   const [saving, setSaving] = useState(false);
   const [dragTarget, setDragTarget] = useState<DragTarget>("none");
@@ -181,6 +262,16 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
           <div>
             <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
             <p className="text-[#888888] text-[10px]">Drag the <span className="text-[#EF4444]">red outer</span> rect to card edges, <span className="text-[#16A34A]">green inner</span> rect to border interior</p>
+            {rectSource === "ai" && (
+              <p className="text-[#D4AF37]/70 text-[10px] mt-0.5">
+                Pre-loaded from AI centering ({aiRatios?.lr} L/R, {aiRatios?.tb} T/B) — drag to adjust
+              </p>
+            )}
+            {rectSource === "saved" && (
+              <p className="text-[#16A34A]/70 text-[10px] mt-0.5">
+                Loaded from previous manual pass — drag to adjust
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <div className="text-center">
