@@ -641,7 +641,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
-          <div style={{ margin: "0 60px" }}>
+          <div style={{ margin: "32px 60px 0" }}>
             <div className="relative" style={{ overflow: "visible" }}>
               <ImageViewer
                 urls={urls}
@@ -709,23 +709,28 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 };
                 return (
                   <>
-                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, left: -56 }}>
+                    {/* TL / T / TR all anchored above the card (top:-28) so the
+                        labels are NOT on the card art. Horizontal anchors put TL
+                        flush at the card-left edge, T centred, TR at the card-right
+                        edge — clear separation, plenty of horizontal gap. The
+                        outer wrapper carries 32px top margin to make room. */}
+                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: 0 }}>
                       <span className="text-[8px] font-bold text-[#555555]">TL</span>
                       <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
                     </div>
-                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 32, right: -56 }}>
+                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, right: 0 }}>
                       <span className="text-[8px] font-bold text-[#555555]">TR</span>
                       <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
                     </div>
-                    <div className="absolute z-20 flex flex-col items-center gap-0.5" style={{ top: 16, left: "50%", transform: "translateX(-50%)" }}>
+                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: "50%", transform: "translateX(-50%)" }}>
                       <span className="text-[8px] font-bold text-[#555555]">T</span>
                       <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
                     </div>
-                    <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}>
+                    <div className="absolute z-20 flex items-center gap-1" style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}>
                       <span className="text-[8px] font-bold text-[#555555]">L</span>
                       <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
                     </div>
-                    <div className="absolute z-20 flex items-center gap-0.5" style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}>
+                    <div className="absolute z-20 flex items-center gap-1" style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}>
                       <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
                       <span className="text-[8px] font-bold text-[#555555]">R</span>
                     </div>
@@ -756,19 +761,19 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               const eLow = Math.min(...allEdges);
               const isELow = eeBot === eLow && eLow < 10;
               return (
-                <div className="flex items-start justify-between mt-1 px-1">
-                  <div className="flex flex-col items-center gap-0.5">
+                <div className="flex items-start justify-between mt-3 px-1">
+                  <div className="flex flex-col items-center gap-1">
                     <CornerSelect value={cc.bl} onChange={v => setCBot("bl", v)} isLowest={isCLow(cc.bl)} />
                     <span className="text-[8px] font-bold text-[#555555]">BL</span>
                   </div>
-                  <div className="flex flex-col items-center gap-0.5">
+                  <div className="flex flex-col items-center gap-1">
                     <EdgeSelect value={eeBot} onChange={v => {
                       const key = viewerSide === "back" ? "backBottom" : "frontBottom";
                       setEdges(prev => ({ ...prev, [key]: v }));
                     }} isLowest={isELow} />
                     <span className="text-[8px] font-bold text-[#555555]">B</span>
                   </div>
-                  <div className="flex flex-col items-center gap-0.5">
+                  <div className="flex flex-col items-center gap-1">
                     <CornerSelect value={cc.br} onChange={v => setCBot("br", v)} isLowest={isCLow(cc.br)} />
                     <span className="text-[8px] font-bold text-[#555555]">BR</span>
                   </div>
