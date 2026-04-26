@@ -56,14 +56,18 @@ const PAGE_W_MM = 210;
 const PAGE_H_MM = 297;
 
 // ── Layout (mm) ──────────────────────────────────────────────────────────────
+// v424 — slab cutout 70×20mm (was 72×22mm). Insert reflows to fill the row:
+// width 116mm (190 - 70 - 4), height 44mm (= 20 + 4 + 20). 5 rows × 48mm
+// pitch = 240mm easily fits inside the 297-2×10 = 277mm available height,
+// so MAX_CERTS_PER_BATCH stays at 5.
 const MARGIN_MM    = 10;
 const GAP_MM       = 4;          // universal cut gap
-const LABEL_W_MM   = 72;
-const LABEL_H_MM   = 22;
-const INSERT_W_MM  = 114;
-const INSERT_H_MM  = 48;          // = label_H × 2 + gap = 22+4+22
-const ROW_H_MM     = 48;          // label-block height = insert height
-const ROW_PITCH_MM = ROW_H_MM + GAP_MM;  // 52
+const LABEL_W_MM   = 70;
+const LABEL_H_MM   = 20;
+const INSERT_W_MM  = 116;
+const INSERT_H_MM  = 44;          // = label_H × 2 + gap = 20+4+20
+const ROW_H_MM     = 44;          // label-block height = insert height
+const ROW_PITCH_MM = ROW_H_MM + GAP_MM;  // 48
 
 export const MAX_CERTS_PER_BATCH = 5;
 
@@ -147,8 +151,10 @@ async function drawInsert(
   doc.rect(x + 1, y + 1, w - 2, h - 2).stroke();
 
   // ── Right-side QR block ────────────────────────────────────────────────────
-  // v423: QR bumped 38→42mm. Vertically centred, flush right inside padding.
-  const qrSizeMm = 42;
+  // v424: QR sized 38mm. Insert is 44mm tall; with QR at 38mm and caption
+  // (5pt ≈ 1.76mm) below, the caption bottom sits at y+43.76mm — safely
+  // inside the 44mm cut path. A 40mm QR would push the caption beyond.
+  const qrSizeMm = 38;
   const qrX = x + w - mm(qrSizeMm) - pad;
   const qrY = y + (h - mm(qrSizeMm)) / 2;
 
@@ -175,24 +181,25 @@ async function drawInsert(
   const tx = x + pad;
   const tw = qrX - tx - mm(2); // 2mm gutter between text col and QR tile
 
-  // Zone 1 — Title at top (y + 4mm)
-  const titleY = y + mm(4);
+  // v424 — zone offsets shifted up to fit the new 44mm insert height (was 48mm).
+  // Zone 1 — Title at top (y + 3.5mm)
+  const titleY = y + mm(3.5);
   doc.fillColor(GOLD);
   doc.font("Helvetica-Bold");
   doc.fontSize(11);
   doc.text("CLAIM YOUR CARD", tx, titleY, { width: tw });
 
-  // Thin gold divider directly under title (y + 9mm). 50mm wide, 0.4pt.
-  const dividerY1 = y + mm(9);
+  // Thin gold divider directly under title (y + 8mm). 50mm wide, 0.4pt.
+  const dividerY1 = y + mm(8);
   doc.lineWidth(0.4);
   doc.strokeColor(GOLD);
   doc.moveTo(tx, dividerY1).lineTo(tx + mm(50), dividerY1).stroke();
 
-  // Zone 2 — Data block (cert + claim code, side-by-side) at y + 13mm.
+  // Zone 2 — Data block (cert + claim code, side-by-side) at y + 12mm.
   // Cream-tinted background behind the data block to make it the focal
-  // point. ~14mm tall, spans the full text column.
-  const dataY = y + mm(13);
-  const dataH = mm(14);
+  // point. 13mm tall (was 14mm in v423), spans the full text column.
+  const dataY = y + mm(12);
+  const dataH = mm(13);
   doc.fillColor(CREAM);
   doc.rect(tx - mm(0.5), dataY - mm(0.5), tw + mm(1), dataH).fill();
 
@@ -222,15 +229,15 @@ async function drawInsert(
   doc.fontSize(10);
   doc.text(formattedCode, codeColX, dataY + mm(5.5), { width: codeColW });
 
-  // Zone 3 — Instructions strip at bottom. Thin grey divider above
-  // (y + 30mm), instructions begin y + 32.5mm.
-  const dividerY2 = y + mm(30);
+  // v424 — Zone 3 shifted up for 44mm insert. Grey divider at y+27mm,
+  // instructions begin y+30mm. Step pitch tightened 3.8mm → 3.5mm so
+  // three lines end at y+30 + 2*3.5 = y+37mm baseline (last step bottom
+  // ≈ y+39mm), well within the 44mm bottom edge.
+  const dividerY2 = y + mm(27);
   doc.lineWidth(0.3);
   doc.strokeColor(GRAY_LT);
   doc.moveTo(tx, dividerY2).lineTo(tx + mm(50), dividerY2).stroke();
 
-  // Three steps inline at 6pt — step 3 absorbs the single-use note so we
-  // free up a row.
   doc.fillColor(GRAY);
   doc.font("Helvetica");
   doc.fontSize(6);
@@ -239,10 +246,10 @@ async function drawInsert(
     "2. Enter cert no. & claim code",
     "3. Verify email • Code is single-use",
   ];
-  let stepY = y + mm(32.5);
+  let stepY = y + mm(30);
   for (const step of steps) {
     doc.text(step, tx, stepY, { width: tw });
-    stepY += mm(3.8);
+    stepY += mm(3.5);
   }
 
   doc.restore();

@@ -24,11 +24,17 @@ export function applyLabelOverrides(
   };
 }
 
-const PX_W = 850;   // 72mm × 300 DPI / 25.4
-const PX_H = 260;   // 22mm × 300 DPI / 25.4
+// v424 — slab cutout is 70×20mm (was 72×22mm). Canvas pixel dims recomputed
+// from new physical size at 300 DPI. Most internal layout constants are
+// derived from PX_W/PX_H (I_RIGHT, I_BOTTOM, panelX, stripY etc.) and so
+// re-flow automatically; absolute font sizes stay put — they occupy a
+// slightly larger fraction of the smaller canvas which compensates for
+// the loss of physical real estate.
+const PX_W = 826;   // 70mm × 300 DPI / 25.4
+const PX_H = 236;   // 20mm × 300 DPI / 25.4
 const MM_TO_PT = 2.83465;
-const PDF_W = 72 * MM_TO_PT;
-const PDF_H = 22 * MM_TO_PT;
+const PDF_W = 70 * MM_TO_PT;
+const PDF_H = 20 * MM_TO_PT;
 
 // ── Border geometry ────────────────────────────────────────────────────────
 // Gold frame fills from canvas edge inward FRAME_W pixels — no white gap.
@@ -41,14 +47,9 @@ const GOLD_LIGHT = "#D4AF37";
 const BLACK      = "#000000";
 const WHITE      = "#FFFFFF";
 
-// Frame gradient stops (diagonal TL→BR gives dimension without looking flat)
-const FRAME_GRAD_STOPS: [number, string][] = [
-  [0,    "#F0CC50"],  // bright TL
-  [0.25, "#C9A227"],  // warm mid-gold
-  [0.50, "#9E7518"],  // deep rich center
-  [0.75, "#C9A227"],  // warm mid-gold
-  [1,    "#F0CC50"],  // bright BR
-];
+// v424 — frame gradient removed in favour of a flat GOLD fill. The diagonal
+// 5-stop gradient looked rich on screen but printed muddy on label stock and
+// fought with the wordmark/grade panel readability.
 
 // Inner safe edge coordinates (inside gold frame)
 const I_LEFT   = FRAME_W;           // 18
@@ -315,11 +316,8 @@ function buildLine4(cert: CertificateRecord): string {
 function drawGoldFrame(ctx: any) {
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
-  const grad = ctx.createLinearGradient(0, 0, PX_W, PX_H);
-  for (const [stop, color] of FRAME_GRAD_STOPS) {
-    grad.addColorStop(stop, color);
-  }
-  ctx.fillStyle = grad;
+  // v424 — flat GOLD fill (was 5-stop diagonal gradient).
+  ctx.fillStyle = GOLD;
   // Four strips — top, bottom, left, right
   ctx.fillRect(0,               0,               PX_W,   FRAME_W);
   ctx.fillRect(0,               PX_H - FRAME_W,  PX_W,   FRAME_W);
@@ -493,26 +491,13 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const DARK    = "#1A1000";
 
   if (!isNonNum) {
-    // Premium 5-stop metallic gold gradient
-    const grad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-    grad.addColorStop(0,    "#FFF3B0");
-    grad.addColorStop(0.25, "#F5D06F");
-    grad.addColorStop(0.55, "#D4AF37");
-    grad.addColorStop(0.75, "#B8962E");
-    grad.addColorStop(1,    "#A67C00");
-    ctx.fillStyle = grad;
+    // v424 — flat GOLD_LIGHT fill (was 5-stop metallic gradient + shine
+    // overlay). Solid gold prints reliably and the grade digit sits on a
+    // uniform background instead of competing with a fade.
+    ctx.fillStyle = GOLD_LIGHT;
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
-    // Shine overlay — top 12% gloss
-    const shineH = Math.round(panelH * 0.12);
-    const shine  = ctx.createLinearGradient(panelX, panelY, panelX, panelY + shineH);
-    shine.addColorStop(0,   "rgba(255,255,255,0.35)");
-    shine.addColorStop(0.5, "rgba(255,255,255,0.05)");
-    shine.addColorStop(1,   "rgba(255,255,255,0)");
-    ctx.fillStyle = shine as any;
-    ctx.fillRect(panelX, panelY, PANEL_W, shineH);
-
-    // Bottom edge — crisp 3px darker line for depth
+    // Bottom edge — crisp 3px darker line for depth (kept; not a gradient).
     ctx.fillStyle = "#9A7F1F";
     ctx.fillRect(panelX, panelY + panelH - 3, PANEL_W, 3);
 
@@ -672,28 +657,18 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.shadowColor = "transparent";
   ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
 
-  // Step 4 — draw gold gradient text.
-  //   textBaseline="middle" + y=BOX_CY → text is vertically centred inside box.
-  //   textAlign="left"      + x=BOX_X+BOX_PX → text starts at left padding,
-  //   filling the box exactly and centred in the left panel (horizontal fix preserved).
+  // Step 4 — v424 — solid GOLD_LIGHT fill replaces the 5-stop gradient and
+  // glow shadow. The gradient was washing out the centre of each letter on
+  // physical labels; flat gold reads cleanly at the new 70mm width.
   try { (ctx as any).letterSpacing = `${MV_LS}px`; } catch {}
   ctx.textAlign    = "left";
   ctx.textBaseline = "middle";
   const mvTextX    = BOX_X + BOX_PX;
 
-  // Gradient spans the full em height centred on BOX_CY
-  const mvGrad = ctx.createLinearGradient(0, BOX_CY - MV_HDR_SZ / 2, 0, BOX_CY + MV_HDR_SZ / 2);
-  mvGrad.addColorStop(0,    "#FFF3B0");
-  mvGrad.addColorStop(0.25, "#F5D06F");
-  mvGrad.addColorStop(0.55, "#D4AF37");
-  mvGrad.addColorStop(0.75, "#B8962E");
-  mvGrad.addColorStop(1,    "#A67C00");
-  ctx.fillStyle   = mvGrad;
-  ctx.shadowColor = "rgba(255, 215, 0, 0.2)";
-  ctx.shadowBlur  = 4;
-  ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
+  ctx.fillStyle   = GOLD_LIGHT;
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
+  ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
 
   // ── 4. LEFT PANEL TEXT ────────────────────────────────────────────────────
@@ -931,52 +906,32 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     drawGoldFrame(ctx);
   }
 
-  // ── CENTRE TOP: website URL — full gradient + glow matching front MINTVAULT ─────
+  // ── CENTRE TOP: website URL — v424 flat GOLD_DARK (was 5-stop gradient + glow) ──
   {
     const urlY    = I_TOP + 24;
     const urlSz   = 38;
-    const urlGrad = ctx.createLinearGradient(0, urlY - urlSz / 2, 0, urlY + urlSz / 2);
-    urlGrad.addColorStop(0,    "#FFF3B0");
-    urlGrad.addColorStop(0.25, "#F5D06F");
-    urlGrad.addColorStop(0.55, "#D4AF37");
-    urlGrad.addColorStop(0.75, "#B8962E");
-    urlGrad.addColorStop(1,    "#A67C00");
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = urlGrad;
+    ctx.fillStyle        = GOLD_DARK;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
-    ctx.shadowColor      = "rgba(255, 215, 0, 0.25)";
-    ctx.shadowBlur       = 6;
-    ctx.shadowOffsetX    = 0;
-    ctx.shadowOffsetY    = 0;
-    ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
     ctx.shadowBlur       = 0;
     ctx.shadowColor      = "transparent";
+    ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
   }
 
-  // ── CENTRE BOTTOM: tap instruction — full gradient + glow matching front MINTVAULT ────
+  // ── CENTRE BOTTOM: tap instruction — v424 flat GOLD_DARK (was 5-stop gradient + glow) ──
   {
     const nfcY    = I_BOTTOM - 31;
     const nfcSz   = 34;
-    const nfcGrad = ctx.createLinearGradient(0, nfcY - nfcSz / 2, 0, nfcY + nfcSz / 2);
-    nfcGrad.addColorStop(0,    "#FFF3B0");
-    nfcGrad.addColorStop(0.25, "#F5D06F");
-    nfcGrad.addColorStop(0.55, "#D4AF37");
-    nfcGrad.addColorStop(0.75, "#B8962E");
-    nfcGrad.addColorStop(1,    "#A67C00");
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${nfcSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = nfcGrad;
+    ctx.fillStyle        = GOLD_DARK;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
-    ctx.shadowColor      = "rgba(255, 215, 0, 0.25)";
-    ctx.shadowBlur       = 6;
-    ctx.shadowOffsetX    = 0;
-    ctx.shadowOffsetY    = 0;
-    ctx.fillText("Tap NFC to verify", NFC_ICON_CX - 12, nfcY);
     ctx.shadowBlur       = 0;
     ctx.shadowColor      = "transparent";
+    ctx.fillText("Tap NFC to verify", NFC_ICON_CX - 12, nfcY);
   }
 
   // ── CENTRE MIDDLE: NFC hand-tap icon — tinted gold ─────────────────────────
