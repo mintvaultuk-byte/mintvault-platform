@@ -286,6 +286,24 @@ export const certificates = pgTable("certificates", {
   logbookLastIssuedAt: timestamp("logbook_last_issued_at"),
   // DVLA-parity: first keeper declaration — set at initial claim time only
   declaredNew: boolean("declared_new").notNull().default(false),
+  // Grading pipeline R2 keys — per-side, per-variant. These are populated by
+  // scan-ingest / upload-images and read by /recrop, /reprocess-images, and
+  // /api/admin/certificates/:id/images. Without these in the schema, Drizzle
+  // returns undefined for `c.gradingFrontOriginal` etc., and recrop falls
+  // through to `c.frontImagePath` — i.e. the already-cropped display image,
+  // not the raw scanner buffer.
+  gradingFrontOriginal:      text("grading_front_original"),
+  gradingFrontCropped:       text("grading_front_cropped"),
+  gradingFrontGreyscale:     text("grading_front_greyscale"),
+  gradingFrontHighcontrast:  text("grading_front_highcontrast"),
+  gradingFrontEdgeenhanced:  text("grading_front_edgeenhanced"),
+  gradingFrontInverted:      text("grading_front_inverted"),
+  gradingBackOriginal:       text("grading_back_original"),
+  gradingBackCropped:        text("grading_back_cropped"),
+  gradingBackGreyscale:      text("grading_back_greyscale"),
+  gradingBackHighcontrast:   text("grading_back_highcontrast"),
+  gradingBackEdgeenhanced:   text("grading_back_edgeenhanced"),
+  gradingBackInverted:       text("grading_back_inverted"),
 });
 
 export const certificateImages = pgTable("certificate_images", {

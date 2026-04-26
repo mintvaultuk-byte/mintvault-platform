@@ -5598,11 +5598,14 @@ export async function registerRoutes(
 
           // 3. Yellow border crop (precise), then fallback to autoCrop
           const yellowResult = await cropToYellowBorder(deskewedBuf);
-          const { buffer: rectCropped, cropped } = yellowResult || await autoCrop(deskewedBuf);
+          const cropResult = yellowResult || await autoCrop(deskewedBuf);
+          const { buffer: rectCropped, cropped, matRgb } = cropResult;
 
           // 3a. Deterministic re-centre — measure actual card edges against
           // mat colour and shift card to centre inside the bitmap (Fix 2).
-          const centreResult = await reCentreBitmap(rectCropped, { certId });
+          // matRgb is plumbed in from the cropper so reCentreBitmap doesn't
+          // misdetect the cropped buffer's yellow card border as mat.
+          const centreResult = await reCentreBitmap(rectCropped, { certId, matRgb });
           cropGeometryByAngle[angle] = { pre_padding_px: centreResult.pre_padding_px, post_asymmetry_px: centreResult.post_asymmetry_px, extended: centreResult.extended };
 
           // 4. Rounded corner mask (card-shaped output with transparent corners)
