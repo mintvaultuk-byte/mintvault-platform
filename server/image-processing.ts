@@ -211,23 +211,34 @@ function isCardPixel(r: number, g: number, b: number, mat: MatProfile): boolean 
  * Samples corners to learn background colour, then finds bounding box of all non-background pixels.
  * Falls back to fixed black threshold if adaptive detection fails.
  */
+export interface BoundaryDetection {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  nonBlackPct: number;
+  matRgb: { r: number; g: number; b: number };
+}
+
 export function detectCardBoundary(
   pixels: Uint8Array, w: number, h: number, ch: number, certId?: string | number
-): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } | null {
+): BoundaryDetection | null {
   const certTag = certId != null ? ` cert=${certId}` : "";
 
   // Primary: mat-distance detector (works against any mat colour)
   const mat = computeMatProfile(pixels, w, h, ch);
+  const matRgb = { r: mat.matR, g: mat.matG, b: mat.matB };
   console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}${certTag}`);
   const matIsBg = (r: number, g: number, b: number) => !isCardPixel(r, g, b, mat);
   const matBased = detectBoundaryWithTest(pixels, w, h, ch, matIsBg);
   if (matBased) {
     console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
-    return tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag);
+    return { ...tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag), matRgb };
   }
 
   // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
   const bg = computeBackgroundProfile(pixels, w, h, ch);
+  const bgRgb = { r: Math.round(bg.avgR), g: Math.round(bg.avgG), b: Math.round(bg.avgB) };
   console.log(`[card-detect] adaptive-luma: mat_luma=${bg.avgLuma.toFixed(1)} threshold=${bg.threshold.toFixed(1)} (${bg.mode} mode)${certTag}`);
   if (bg.mode === "ambiguous") {
     console.warn(`[card-detect] ambiguous mat luma (60–180) — defaulting to bright-mat formula${certTag}`);
@@ -235,14 +246,14 @@ export function detectCardBoundary(
   const adaptive = detectBoundaryWithTest(pixels, w, h, ch, bg.isBackground);
   if (adaptive) {
     console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
-    return tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag);
+    return { ...tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag), matRgb: bgRgb };
   }
 
   // Fallback 2: fixed black threshold
   console.log(`[card-detect] adaptive-luma failed, falling back to fixed black threshold${certTag}`);
   const fixed = detectBoundaryWithTest(pixels, w, h, ch, isBackground);
   if (!fixed) return null;
-  return tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag);
+  return { ...tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag), matRgb: { r: 0, g: 0, b: 0 } };
 }
 
 /** Core boundary detection with a pluggable background test */
@@ -470,7 +481,7 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
  * Works on ANY card colour as long as scanner uses a black background mat.
  * Returns null if detection fails (caller should fall back to autoCrop).
  */
-export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | number): Promise<{ buffer: Buffer; cropped: boolean } | null> {
+export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | number): Promise<{ buffer: Buffer; cropped: boolean; matRgb: { r: number; g: number; b: number } } | null> {
   try {
     console.log(`[card-detect] START non-black detection (${(inputBuffer.length / 1024).toFixed(0)}KB input)${certId != null ? ` cert=${certId}` : ""}`);
     const meta = await sharp(inputBuffer).metadata();
@@ -516,7 +527,7 @@ export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | 
 
     const ratio = cropW / cropH;
     console.log(`[card-detect] ${meta.width}x${meta.height} → ${cropW}x${cropH} (non-black ${boundary.nonBlackPct.toFixed(1)}%, ratio=${ratio.toFixed(3)})`);
-    return { buffer: cropped, cropped: true };
+    return { buffer: cropped, cropped: true, matRgb: boundary.matRgb };
   } catch (err: any) {
     console.warn(`[card-detect] detection failed: ${err.message}`);
     return null;
@@ -531,10 +542,14 @@ export const cropToYellowBorder = cropToCardBoundary;
  * Two-pass approach: aggressive trim first, then validate white border %.
  * Falls back to softer trim if aggressive is too tight.
  */
-export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean }> {
+export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean; matRgb: { r: number; g: number; b: number } }> {
+  // autoCrop's pass-1 trim assumes a near-white background ({255,255,255}
+  // threshold 80). Surface that as matRgb so reCentreBitmap fills extend
+  // padding with white rather than misdetecting the card border as mat.
+  const matRgb = { r: 255, g: 255, b: 255 };
   try {
     const meta = await sharp(inputBuffer).metadata();
-    if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false };
+    if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false, matRgb };
 
     // Downscale huge scanner images first to prevent OOM
     let workBuffer = inputBuffer;
@@ -568,7 +583,7 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     const trimArea = trimInfo.width * trimInfo.height;
     if (trimArea / origArea < 0.15 || trimInfo.width < 100 || trimInfo.height < 100) {
       console.warn(`[crop] trim too aggressive: ${trimInfo.width}x${trimInfo.height} (${((trimArea / origArea) * 100).toFixed(1)}% of original)`);
-      return { buffer: workBuffer, cropped: false };
+      return { buffer: workBuffer, cropped: false, matRgb };
     }
 
     // Measure the proportion of near-white pixels in the 5-px border ring.
@@ -615,9 +630,9 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     const ringNote = borderRingWhitePct > 90 ? " (likely card margin)" : retrimApplied ? " (post re-trim)" : "";
     console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} border_ring_white=${borderRingWhitePct.toFixed(1)}%${ringNote}`);
 
-    return { buffer: padded, cropped: true };
+    return { buffer: padded, cropped: true, matRgb };
   } catch {
-    return { buffer: inputBuffer, cropped: false };
+    return { buffer: inputBuffer, cropped: false, matRgb };
   }
 }
 
@@ -694,28 +709,33 @@ export async function reCentreBitmap(
   const px = new Uint8Array(data);
   const w = info.width, h = info.height, ch = info.channels;
 
-  // Mat colour: prefer caller-supplied; else sample outer 2% strip (fallback).
+  // Mat colour: prefer caller-supplied; else sample only the four corner blocks
+  // of the input. The outer-perimeter strip on a tightly-cropped card is mostly
+  // the card's outer border (often saturated yellow on Pokémon cards), which
+  // skews the median and causes extend padding to be filled with card-border
+  // colour instead of mat — visible as a "wraparound" strip below the card.
+  // The four corners are mat-on-mat even after card-detect tightening because
+  // a Pokémon card's rounded corners cut to mat at the bitmap corners.
   let matR: number, matG: number, matB: number;
   if (options?.matRgb) {
     matR = options.matRgb.r; matG = options.matRgb.g; matB = options.matRgb.b;
   } else {
-    // Sample outer-strip median — same approach as computeMatProfile, but on
-    // the full buffer (post-crop). If the crop was aggressive and the strip
-    // is mostly card, the resulting "mat" colour won't match real mat; callers
-    // should pass matRgb explicitly for that case.
-    const strip = Math.max(3, Math.round(Math.min(w, h) * 0.02));
+    const block = Math.min(30, Math.floor(Math.min(w, h) / 4));
     const rs: number[] = [], gs: number[] = [], bs: number[] = [];
     const pushAt = (x: number, y: number) => {
       const i = (y * w + x) * ch;
       if (ch === 4 && px[i + 3] < 128) return;
       rs.push(px[i]); gs.push(px[i + 1]); bs.push(px[i + 2]);
     };
-    for (let y = 0; y < strip; y++) for (let x = 0; x < w; x++) pushAt(x, y);
-    for (let y = h - strip; y < h; y++) for (let x = 0; x < w; x++) pushAt(x, y);
-    for (let y = strip; y < h - strip; y++) {
-      for (let x = 0; x < strip; x++) pushAt(x, y);
-      for (let x = w - strip; x < w; x++) pushAt(x, y);
-    }
+    const sampleBlock = (x0: number, y0: number) => {
+      for (let y = y0; y < y0 + block && y < h; y++) {
+        for (let x = x0; x < x0 + block && x < w; x++) pushAt(x, y);
+      }
+    };
+    sampleBlock(0, 0);
+    sampleBlock(w - block, 0);
+    sampleBlock(0, h - block);
+    sampleBlock(w - block, h - block);
     const median = (arr: number[]) => { arr.sort((a, b) => a - b); return arr.length ? arr[Math.floor(arr.length / 2)] : 0; };
     if (rs.length > 0) {
       matR = median(rs); matG = median(gs); matB = median(bs);

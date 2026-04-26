@@ -193,11 +193,24 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
 
   // Step 2: tight card-boundary crop (mat-agnostic); fall back to sharp.trim-based autoCrop
   const yellowResult = await cropToYellowBorder(deskewed, certId);
-  const rectCropped = yellowResult ? yellowResult.buffer : (await autoCrop(deskewed)).buffer;
+  let rectCropped: Buffer;
+  let matRgb: { r: number; g: number; b: number };
+  if (yellowResult) {
+    rectCropped = yellowResult.buffer;
+    matRgb = yellowResult.matRgb;
+  } else {
+    const ac = await autoCrop(deskewed);
+    rectCropped = ac.buffer;
+    matRgb = ac.matRgb;
+  }
 
   // Step 3: deterministic re-centre — measure actual card edges vs mat colour
-  // and shift to centre (Fix 2). Pass certId for traceability.
-  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId });
+  // and shift to centre (Fix 2). matRgb is sourced from the pre-crop buffer
+  // (where the outer strip is reliably mat); without it, the fallback samples
+  // the cropped buffer's outer strip — which is the card's yellow border, not
+  // mat — and extend padding gets filled with yellow ⇒ bogus "wraparound"
+  // strip below the card.
+  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId, matRgb });
   const cropped = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
 
   // Step 4: derive the four analysis variants from the centred flat image
