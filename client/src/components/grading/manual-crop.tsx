@@ -205,7 +205,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   const derivedAngle = quadRotation(quad);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-[#F7F7F5]/95 flex flex-col select-none">
+    <div className="fixed inset-0 z-[100] bg-[#F7F7F5] flex flex-col select-none">
       {/* Top bar */}
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#D4D0C8]">
         <div>
