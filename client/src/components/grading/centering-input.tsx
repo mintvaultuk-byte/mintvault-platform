@@ -104,7 +104,7 @@ export default function CenteringInput({ frontLR, frontTB, backLR, backTB, subgr
               type="text"
               value={f.value}
               onChange={e => onChange(f.key, e.target.value)}
-              placeholder="52/48"
+              placeholder="—"
               className={`w-full bg-[#F7F7F5] border rounded px-2 py-1.5 text-xs font-mono text-[#1A1A1A] ${
                 f.value && !validateRatio(f.value) ? "border-red-500" : "border-[#D4D0C8]"
               }`}
