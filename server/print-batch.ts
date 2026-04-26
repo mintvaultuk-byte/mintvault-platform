@@ -79,6 +79,7 @@ const DARK     = "#1A1A1A";
 const GRAY     = "#555555";
 const GRAY_LT  = "#888888";
 const GRAY_BG  = "#F5F0E8";
+const CREAM    = "#FAF6ED"; // light tint behind the v423 cert+code data block
 
 const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
@@ -129,7 +130,7 @@ async function drawInsert(
   const y = mm(yMm);
   const w = mm(INSERT_W_MM);
   const h = mm(INSERT_H_MM);
-  const pad = mm(3); // 3 mm padding
+  const pad = mm(2.5); // v423: tightened from 3mm to buy 1mm extra usable width
 
   const nCertId = normaliseCertId(certId);
   const formattedCode = formatClaimCode(claimCode);
@@ -146,8 +147,8 @@ async function drawInsert(
   doc.rect(x + 1, y + 1, w - 2, h - 2).stroke();
 
   // ── Right-side QR block ────────────────────────────────────────────────────
-  // QR is 38×38 mm per spec; sits flush with the right edge inside padding.
-  const qrSizeMm = 38;
+  // v423: QR bumped 38→42mm. Vertically centred, flush right inside padding.
+  const qrSizeMm = 42;
   const qrX = x + w - mm(qrSizeMm) - pad;
   const qrY = y + (h - mm(qrSizeMm)) / 2;
 
@@ -155,7 +156,7 @@ async function drawInsert(
   doc.fillColor(GRAY_BG);
   doc.rect(qrX - 2, qrY - 2, mm(qrSizeMm) + 4, mm(qrSizeMm) + 4).fill();
 
-  const qrBuf = await qrPng(claimUrl, 600); // 600px QR rendered at 38mm = ~400dpi
+  const qrBuf = await qrPng(claimUrl, 600);
   doc.image(qrBuf, qrX, qrY, { width: mm(qrSizeMm), height: mm(qrSizeMm) });
 
   // "Scan to claim" caption under the QR
@@ -168,60 +169,81 @@ async function drawInsert(
   });
 
   // ── Left-side text column ──────────────────────────────────────────────────
+  // v423: explicit-Y zoned layout (title / data block / instructions) instead
+  // of cumulative ty increments. Hardcoded offsets in mm so the visual
+  // rhythm is predictable regardless of font metric drift.
   const tx = x + pad;
-  const tw = qrX - tx - pad;
-  let ty = y + pad;
+  const tw = qrX - tx - mm(2); // 2mm gutter between text col and QR tile
 
-  // Title
+  // Zone 1 — Title at top (y + 4mm)
+  const titleY = y + mm(4);
   doc.fillColor(GOLD);
   doc.font("Helvetica-Bold");
-  doc.fontSize(9);
-  doc.text("CLAIM YOUR CARD", tx, ty, { width: tw });
-  ty += 11;
+  doc.fontSize(11);
+  doc.text("CLAIM YOUR CARD", tx, titleY, { width: tw });
 
-  // Cert No. label + value
+  // Thin gold divider directly under title (y + 9mm). 50mm wide, 0.4pt.
+  const dividerY1 = y + mm(9);
+  doc.lineWidth(0.4);
+  doc.strokeColor(GOLD);
+  doc.moveTo(tx, dividerY1).lineTo(tx + mm(50), dividerY1).stroke();
+
+  // Zone 2 — Data block (cert + claim code, side-by-side) at y + 13mm.
+  // Cream-tinted background behind the data block to make it the focal
+  // point. ~14mm tall, spans the full text column.
+  const dataY = y + mm(13);
+  const dataH = mm(14);
+  doc.fillColor(CREAM);
+  doc.rect(tx - mm(0.5), dataY - mm(0.5), tw + mm(1), dataH).fill();
+
+  // Two columns inside the data block:
+  //   Cert No. on the left (~22mm wide), Claim Code on the right (~46mm wide)
+  const certColX = tx + mm(1);
+  const certColW = mm(22);
+  const codeColX = certColX + certColW + mm(2);
+  const codeColW = tw - (codeColX - tx) - mm(1);
+
+  // Labels (5.5pt grey)
   doc.fillColor(GRAY_LT);
   doc.font("Helvetica-Bold");
-  doc.fontSize(5);
-  doc.text("CERT NO.", tx, ty, { width: tw });
-  ty += 5;
+  doc.fontSize(5.5);
+  doc.text("CERT NO.", certColX, dataY + mm(1), { width: certColW });
+  doc.text("CLAIM CODE", codeColX, dataY + mm(1), { width: codeColW });
+
+  // Cert No. value (14pt bold Courier dark)
   doc.fillColor(DARK);
   doc.font("Courier-Bold");
-  doc.fontSize(12);
-  doc.text(nCertId, tx, ty, { width: tw });
-  ty += 13;
+  doc.fontSize(14);
+  doc.text(nCertId, certColX, dataY + mm(4.5), { width: certColW });
 
-  // Claim Code label + value
-  doc.fillColor(GRAY_LT);
-  doc.font("Helvetica-Bold");
-  doc.fontSize(5);
-  doc.text("CLAIM CODE", tx, ty, { width: tw });
-  ty += 5;
+  // Claim Code value (10pt bold Courier gold-dark)
   doc.fillColor(GOLD_DK);
   doc.font("Courier-Bold");
-  doc.fontSize(9);
-  doc.text(formattedCode, tx, ty, { width: tw });
-  ty += 11;
+  doc.fontSize(10);
+  doc.text(formattedCode, codeColX, dataY + mm(5.5), { width: codeColW });
 
-  // 3-step instructions
+  // Zone 3 — Instructions strip at bottom. Thin grey divider above
+  // (y + 30mm), instructions begin y + 32.5mm.
+  const dividerY2 = y + mm(30);
+  doc.lineWidth(0.3);
+  doc.strokeColor(GRAY_LT);
+  doc.moveTo(tx, dividerY2).lineTo(tx + mm(50), dividerY2).stroke();
+
+  // Three steps inline at 6pt — step 3 absorbs the single-use note so we
+  // free up a row.
   doc.fillColor(GRAY);
   doc.font("Helvetica");
   doc.fontSize(6);
   const steps = [
     "1. Visit mintvaultuk.com/claim",
     "2. Enter cert no. & claim code",
-    "3. Verify email to claim ownership",
+    "3. Verify email • Code is single-use",
   ];
+  let stepY = y + mm(32.5);
   for (const step of steps) {
-    doc.text(step, tx, ty, { width: tw });
-    ty += 7;
+    doc.text(step, tx, stepY, { width: tw });
+    stepY += mm(3.8);
   }
-
-  // Single-use note
-  doc.fillColor(GRAY_LT);
-  doc.font("Helvetica-Oblique");
-  doc.fontSize(5);
-  doc.text("Claim code is single-use.", tx, ty, { width: tw });
 
   doc.restore();
 }
