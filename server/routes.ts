@@ -5867,7 +5867,11 @@ export async function registerRoutes(
       let workBuf = origBuf;
       if (typeof rotation_deg === "number" && Math.abs(rotation_deg) > 0.1) {
         workBuf = await sharpFn(origBuf)
-          .rotate(rotation_deg, { background: { r: 0, g: 0, b: 0, alpha: 1 } })
+          // Rotate-bounding-box wedges fill with white to match scanner mat
+          // (Epson V850 Pro, confirmed). Black previously baked black wedges
+          // into the JPEG when the extract overlapped them — see PR fixing
+          // recrop black-corners regression.
+          .rotate(rotation_deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
           .toBuffer();
         console.log(`[recrop] ${certIdStr} ${side}: rotated ${rotation_deg.toFixed(1)}°`);
       }
@@ -5885,6 +5889,10 @@ export async function registerRoutes(
 
       const cropped = await sharpFn(workBuf)
         .extract({ left, top, width: w, height: h })
+        // Belt-and-braces: flatten any residual alpha/transparency to white
+        // before JPEG encoding (which would otherwise default to black for
+        // transparent pixels — root cause of earlier black-corners bug).
+        .flatten({ background: "#ffffff" })
         .jpeg({ quality: 85, progressive: true, mozjpeg: true })
         .toBuffer();
 
