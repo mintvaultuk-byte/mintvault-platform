@@ -65,7 +65,14 @@ export function calcCornerSubgrade(v: CornerValues): { grade: number; worstKey: 
     ["Back Bottom-Left",   v.backBL],
     ["Back Bottom-Right",  v.backBR],
   ];
-  const worst = entries.reduce((a, b) => a[1] <= b[1] ? a : b);
+  // Treat 0 as "unset" (the minimum legitimate grade in MintVault's scale is 1).
+  // Without this, partial input (e.g. only the visible front zones graded)
+  // produces a min of 0 and the summary stepper renders "—" — a regression
+  // surfaced when PR #45 removed the ai_analysis fallback that used to
+  // pre-fill all 8 zones from Opus output.
+  const set = entries.filter(([, g]) => g > 0);
+  if (set.length === 0) return { grade: 0, worstKey: "" };
+  const worst = set.reduce((a, b) => a[1] <= b[1] ? a : b);
   return { grade: worst[1], worstKey: worst[0] };
 }
 

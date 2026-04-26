@@ -64,7 +64,10 @@ export function calcEdgeSubgrade(v: EdgeValues): { grade: number; worstKey: stri
     ["Back Left",    v.backLeft],
     ["Back Right",   v.backRight],
   ];
-  const worst = entries.reduce((a, b) => a[1] <= b[1] ? a : b);
+  // Treat 0 as "unset" — see calcCornerSubgrade for rationale.
+  const set = entries.filter(([, g]) => g > 0);
+  if (set.length === 0) return { grade: 0, worstKey: "" };
+  const worst = set.reduce((a, b) => a[1] <= b[1] ? a : b);
   return { grade: worst[1], worstKey: worst[0] };
 }
 

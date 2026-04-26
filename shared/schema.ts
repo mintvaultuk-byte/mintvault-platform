@@ -328,6 +328,26 @@ export const certificates = pgTable("certificates", {
     x_percent: number;
     y_percent: number;
   }>>(),
+  // Per-zone grading values. corner_values / edge_values / surface_values
+  // already exist in DB; these schema entries surface them via Drizzle so
+  // the GET /grading endpoint can return them on cert reload. Same gap-class
+  // as the v406 grading_* fix — values were being written by raw-SQL PUTs
+  // but never came back out via db.select(). Result: per-zone dropdowns
+  // reset to zeros on every page reload, even when data was saved.
+  cornerValues: jsonb("corner_values").$type<{
+    frontTL: number; frontTR: number; frontBL: number; frontBR: number;
+    backTL: number; backTR: number; backBL: number; backBR: number;
+  } | null>(),
+  edgeValues: jsonb("edge_values").$type<{
+    frontTop: number; frontBottom: number; frontLeft: number; frontRight: number;
+    backTop: number; backBottom: number; backLeft: number; backRight: number;
+  } | null>(),
+  surfaceValues: jsonb("surface_values").$type<{
+    front: number; back: number;
+    hasPrintLines?: boolean; hasHoloScratches?: boolean; hasSurfaceScratches?: boolean;
+    hasStaining?: boolean; hasIndentation?: boolean; hasRollerMarks?: boolean;
+    hasColorRegistration?: boolean; hasCrease?: boolean; hasTear?: boolean;
+  } | null>(),
 });
 
 export const certificateImages = pgTable("certificate_images", {

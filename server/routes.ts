@@ -5568,7 +5568,7 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality, reCentreBitmap } = await import("./image-processing");
+        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality, reCentreBitmap, padWithMat } = await import("./image-processing");
         const cropGeometryByAngle: Record<string, any> = {};
 
         const id = parseInt(String(req.params.id), 10);
@@ -5608,8 +5608,13 @@ export async function registerRoutes(
           const centreResult = await reCentreBitmap(rectCropped, { certId, matRgb });
           cropGeometryByAngle[angle] = { pre_padding_px: centreResult.pre_padding_px, post_asymmetry_px: centreResult.post_asymmetry_px, extended: centreResult.extended };
 
-          // 4. Rounded corner mask (card-shaped output with transparent corners)
-          const croppedBuf = await maskRoundedCorners(centreResult.buffer);
+          // 4. Rounded corner mask + mat padding. Order matters: mask FIRST
+          // so the rounded-corner alpha sits on the card's corners, then
+          // pad with mat so the final display image has a passport-style
+          // frame with the card visibly framed. Without this order the
+          // mask would clip the bitmap corners (now far from the card).
+          const maskedBuf = await maskRoundedCorners(centreResult.buffer);
+          const croppedBuf = await padWithMat(maskedBuf, matRgb);
           const ext2 = "png"; // PNG for transparency support
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
           await uploadToR2(cropKey, croppedBuf, "image/png");
@@ -6221,33 +6226,41 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       const c = cert as any;
       res.json({
-        centeringFrontLr: c.centeringFrontLr || c.centering_front_lr || null,
-        centeringFrontTb: c.centeringFrontTb || c.centering_front_tb || null,
-        centeringBackLr:  c.centeringBackLr  || c.centering_back_lr  || null,
-        centeringBackTb:  c.centeringBackTb  || c.centering_back_tb  || null,
-        centeringOuterFront: (c as any).centering_outer_front || null,
-        centeringInnerFront: (c as any).centering_inner_front || null,
-        centeringOuterBack:  (c as any).centering_outer_back  || null,
-        centeringInnerBack:  (c as any).centering_inner_back  || null,
-        centeringMethod:     (c as any).centering_method      || null,
+        centeringFrontLr:    c.centeringFrontLr    || null,
+        centeringFrontTb:    c.centeringFrontTb    || null,
+        centeringBackLr:     c.centeringBackLr     || null,
+        centeringBackTb:     c.centeringBackTb     || null,
+        centeringOuterFront: c.centeringOuterFront || null,
+        centeringInnerFront: c.centeringInnerFront || null,
+        centeringOuterBack:  c.centeringOuterBack  || null,
+        centeringInnerBack:  c.centeringInnerBack  || null,
+        centeringMethod:     c.centeringMethod     || null,
+        // Per-zone JSONB columns (now exposed via schema — was returning null
+        // pre-v408 because Drizzle didn't know about these columns).
         corners: c.cornerValues  || null,
         edges:   c.edgeValues    || null,
         surface: c.surfaceValues || null,
         defects: c.defects       || [],
-        authStatus:       c.authStatus      || "genuine",
-        authNotes:        c.authNotes       || "",
+        authStatus:       c.authStatus       || "genuine",
+        authNotes:        c.authNotes        || "",
         gradeExplanation: c.gradeExplanation || "",
         privateNotes:     c.privateNotes     || "",
         gradeApprovedBy:  c.gradeApprovedBy  || null,
         gradeApprovedAt:  c.gradeApprovedAt  || null,
-        gradeStrengthScore: c.gradeStrengthScore ?? (c as any).grade_strength_score ?? null,
-        // Saved aggregate subgrades for hydration on reload
-        centeringScore: c.centeringScore ?? (c as any).centering_score ?? null,
-        cornersScore:   c.cornersScore   ?? (c as any).corners_score   ?? null,
-        edgesScore:     c.edgesScore     ?? (c as any).edges_score     ?? null,
-        surfaceScore:   c.surfaceScore   ?? (c as any).surface_score   ?? null,
-        grade:          c.gradeOverall   ?? (c as any).grade           ?? null,
-        aiDraftGrade:   c.aiDraftGrade   ?? (c as any).ai_draft_grade  ?? null,
+        gradeStrengthScore: c.gradeStrengthScore ?? null,
+        // Saved aggregate subgrades for hydration on reload. Field names below
+        // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
+        // map to corners_score/edges_score/surface_score). Pre-v408 the
+        // handler accessed c.cornersScore (undefined — no such schema field),
+        // falling through to (c as any).corners_score (also undefined since
+        // Drizzle returns camelCase JS keys, not snake_case), so scores never
+        // round-tripped on reload.
+        centeringScore: c.gradeCentering ?? null,
+        cornersScore:   c.gradeCorners   ?? null,
+        edgesScore:     c.gradeEdges     ?? null,
+        surfaceScore:   c.gradeSurface   ?? null,
+        grade:          c.gradeOverall   ?? null,
+        aiDraftGrade:   c.aiDraftGrade   ?? null,
         // Full AI analysis JSONB — under Option B this only contains the
         // identification payload (no `grading` key on new scans). Legacy
         // certs may still have `grading` here; the client ignores it.
