@@ -401,9 +401,17 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     ? getCenteringGrade(frontLR, frontTB, backLR, backTB)
     : null;
   const centering = centeringOverride ?? centeringCalc ?? 10;
-  const cornersGrade  = cornersOverride  ?? calcCornerSubgrade(corners).grade;
-  const edgesGrade    = edgesOverride    ?? calcEdgeSubgrade(edges).grade;
+  const cornersCalc = calcCornerSubgrade(corners);
+  const edgesCalc   = calcEdgeSubgrade(edges);
+  const cornersGrade  = cornersOverride  ?? cornersCalc.grade;
+  const edgesGrade    = edgesOverride    ?? edgesCalc.grade;
   const surfaceGrade  = surfaceOverride  ?? calcSurfaceSubgrade(surface);
+
+  // Zone-set counts for the partial-zones indicator + worstKey for the
+  // "Limited by …" tooltip on the summary stepper. Surfaced post-PR-#45
+  // when admins can no longer rely on AI pre-fill across all 8 zones.
+  const cornersZonesSet = Object.values(corners).filter(v => typeof v === "number" && v > 0).length;
+  const edgesZonesSet   = Object.values(edges).filter(v => typeof v === "number" && v > 0).length;
 
   const sub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
   const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
@@ -822,6 +830,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               gradeLabel={label}
               isBlack={isBlack}
               strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
+              cornersZonesSet={cornersZonesSet}
+              edgesZonesSet={edgesZonesSet}
+              cornersWorstKey={cornersOverride == null ? cornersCalc.worstKey : ""}
+              edgesWorstKey={edgesOverride == null ? edgesCalc.worstKey : ""}
               onSubgradeChange={(key, val) => {
                 if (key === "centering") setCenteringOverride(val);
                 else if (key === "corners") setCornersOverride(val);

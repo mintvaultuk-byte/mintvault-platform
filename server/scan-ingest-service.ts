@@ -52,7 +52,7 @@ export async function uploadImagesToCert(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { maskRoundedCorners } = await import("./image-processing");
+  const { maskRoundedCorners, padWithMat } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -73,9 +73,25 @@ export async function uploadImagesToCert(
   const frontVariants = await generateImageVariants(frontResized, certNumber);
   const backVariants = backResized ? await generateImageVariants(backResized, certNumber) : null;
 
-  // Derive display-ready masked PNGs from the flat cropped output
-  const frontMaskedPng = await maskRoundedCorners(frontVariants.cropped);
-  const backMaskedPng = backVariants ? await maskRoundedCorners(backVariants.cropped) : null;
+  // Derive display-ready masked PNGs. Order matters: mask the un-padded
+  // centred buffer (so the rounded-corner alpha mask sits on the actual
+  // card corners, not pushed out to the bitmap corners after padding),
+  // THEN pad the masked PNG with mat. Without this order, the rounded
+  // corners would be invisible in the final image because the bitmap
+  // edges are now far from the card.
+  const frontMatRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
+  const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
+  const frontMaskedPng = frontUnpadded
+    ? await padWithMat(await maskRoundedCorners(frontUnpadded), frontMatRgb)
+    : await maskRoundedCorners(frontVariants.cropped); // fallback: pre-padding buffer absent (shouldn't happen on Option B path)
+
+  const backMatRgb = backVariants ? ((backVariants as any).matRgb || { r: 255, g: 255, b: 255 }) : null;
+  const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
+  const backMaskedPng = backVariants
+    ? (backUnpadded
+        ? await padWithMat(await maskRoundedCorners(backUnpadded), backMatRgb!)
+        : await maskRoundedCorners(backVariants.cropped))
+    : null;
 
   // Upload all to R2 — explicit extension map per variant kind
   const prefix = `images/grading/${certId}`;

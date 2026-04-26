@@ -13,6 +13,15 @@ interface Props {
   gradeLabel: string;
   isBlack: boolean;
   strengthScore?: number | null;
+  /** Optional partial-zone diagnostics surfaced on the summary stepper.
+   *  cornersZonesSet / edgesZonesSet count non-zero entries (max 8 each).
+   *  cornersWorstKey / edgesWorstKey identify the worst-graded zone for the
+   *  "Limited by …" tooltip. Empty string means no worst-key (e.g. all-10
+   *  case, or override is in effect — we suppress the tooltip then). */
+  cornersZonesSet?: number;
+  edgesZonesSet?: number;
+  cornersWorstKey?: string;
+  edgesWorstKey?: string;
 }
 
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -37,7 +46,7 @@ function strengthColor(s: number): string {
   return "#D97706"; // amber — weak
 }
 
-export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore }: Props) {
+export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore, cornersZonesSet, edgesZonesSet, cornersWorstKey, edgesWorstKey }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const display = manualOverride ?? overall;
@@ -89,31 +98,54 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Subgrade summary — editable */}
+      {/* Subgrade summary — editable. Corners/Edges cells show a partial-zones
+          indicator + a "Limited by {worstKey}" tooltip when the calc is
+          dragged down by a specific zone. Helps the admin self-diagnose
+          which zone they need to revise to lift the subgrade. */}
       <div className="grid grid-cols-4 gap-1.5">
         {([
-          { label: "Centering", key: "centering" as keyof SubGrades, val: sub.centering },
-          { label: "Corners", key: "corners" as keyof SubGrades, val: sub.corners },
-          { label: "Edges", key: "edges" as keyof SubGrades, val: sub.edges },
-          { label: "Surface", key: "surface" as keyof SubGrades, val: sub.surface },
-        ]).map(({ label, key, val }) => (
-          <div key={label} className="bg-[#F7F7F5] border border-[#E8E4DC] rounded p-2 text-center">
-            <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider">{label}</p>
-            <div className="flex items-center justify-center gap-1 mt-0.5">
-              {onSubgradeChange && (
-                <button type="button" onClick={() => onSubgradeChange(key, Math.max(1, val - 1))}
-                  className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▼</button>
+          { label: "Centering", key: "centering" as keyof SubGrades, val: sub.centering, zonesSet: undefined as number | undefined, worstKey: "" },
+          { label: "Corners",   key: "corners"   as keyof SubGrades, val: sub.corners,   zonesSet: cornersZonesSet, worstKey: cornersWorstKey || "" },
+          { label: "Edges",     key: "edges"     as keyof SubGrades, val: sub.edges,     zonesSet: edgesZonesSet,   worstKey: edgesWorstKey   || "" },
+          { label: "Surface",   key: "surface"   as keyof SubGrades, val: sub.surface,   zonesSet: undefined, worstKey: "" },
+        ]).map(({ label, key, val, zonesSet, worstKey }) => {
+          const isPartial = zonesSet != null && zonesSet > 0 && zonesSet < 8;
+          const showWorstKey = val > 0 && val < 10 && worstKey !== "";
+          const tooltipParts: string[] = [];
+          if (showWorstKey) tooltipParts.push(`Limited by ${worstKey}`);
+          if (isPartial)    tooltipParts.push(`${zonesSet} of 8 zones graded — set remaining for accurate subgrade`);
+          const tooltip = tooltipParts.join(" · ");
+          return (
+            <div
+              key={label}
+              className="relative group bg-[#F7F7F5] border border-[#E8E4DC] rounded p-2 text-center"
+              title={tooltip || undefined}
+            >
+              <p className="text-[#555555] text-[10px] font-semibold uppercase tracking-wider">{label}</p>
+              <div className="flex items-center justify-center gap-1 mt-0.5">
+                {onSubgradeChange && (
+                  <button type="button" onClick={() => onSubgradeChange(key, Math.max(1, val - 1))}
+                    className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▼</button>
+                )}
+                <p className="text-sm font-black min-w-[1.5em]" style={{ color: val > 0 ? subgradeColor(val) : "#888888" }}>
+                  {val > 0 ? val : "—"}
+                </p>
+                {onSubgradeChange && (
+                  <button type="button" onClick={() => onSubgradeChange(key, Math.min(10, val + 1))}
+                    className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▲</button>
+                )}
+              </div>
+              {isPartial && (
+                <p className="text-[#B8960C] text-[8px] uppercase tracking-wider leading-none mt-0.5">(partial)</p>
               )}
-              <p className="text-sm font-black min-w-[1.5em]" style={{ color: val > 0 ? subgradeColor(val) : "#888888" }}>
-                {val > 0 ? val : "—"}
-              </p>
-              {onSubgradeChange && (
-                <button type="button" onClick={() => onSubgradeChange(key, Math.min(10, val + 1))}
-                  className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▲</button>
+              {tooltip && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-48 bg-[#F0EEE8] border border-[#D4D0C8] rounded p-2 text-[9px] text-[#333333] leading-relaxed hidden group-hover:block z-20">
+                  {tooltip}
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Calculation details */}

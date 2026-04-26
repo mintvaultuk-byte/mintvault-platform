@@ -161,7 +161,13 @@ async function rateLimit(): Promise<void> {
 
 export interface ImageVariants {
   original: Buffer;
+  /** Padded JPEG: cropped + reCentred + extended with mat-coloured border.
+   *  Used as both display storage (front_cropped.jpg) and AI variant source. */
   cropped: Buffer;
+  /** Un-padded JPEG: cropped + reCentred only. Surfaced so the caller can
+   *  apply maskRoundedCorners on the actual card corners (not on the mat
+   *  bitmap corners after padding) and then pad the masked PNG. */
+  centredUnpadded: Buffer;
   greyscale: Buffer;
   highcontrast: Buffer;
   edgeenhanced: Buffer;
@@ -184,8 +190,8 @@ export interface ImageVariants {
  * Kept the old `autoCropCard` export in place for any non-variant callers
  * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
-export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } }> {
-  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap } = await import("./image-processing");
+export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean }; matRgb?: { r: number; g: number; b: number } }> {
+  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap, padWithMat } = await import("./image-processing");
 
   // Step 1: deskew small rotations before cropping
   const { buffer: deskewed, angle } = await deskewCard(buffer);
@@ -211,9 +217,22 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // mat — and extend padding gets filled with yellow ⇒ bogus "wraparound"
   // strip below the card.
   const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId, matRgb });
-  const cropped = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
 
-  // Step 4: derive the four analysis variants from the centred flat image
+  // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
+  // `centredUnpadded` so the caller can mask rounded corners on the actual
+  // card (not on the bitmap corners after padding).
+  const centredUnpadded = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
+
+  // Step 5: extend with mat-coloured padding so the final cropped output has
+  // a passport-style frame around the card (CARD_MAT_PADDING_PCT). The AI
+  // variants are derived from the padded buffer because they're consumed by
+  // the manual "Run AI" admin endpoints, where seeing the card framed in mat
+  // doesn't degrade grading meaningfully (Claude handles framed photos
+  // routinely). The display PNG flow lives in scan-ingest's
+  // uploadImagesToCert: maskRoundedCorners(centredUnpadded) → padWithMat.
+  const cropped = await padWithMat(centredUnpadded, matRgb);
+
+  // Step 6: derive the four analysis variants from the padded flat image
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
     sharp(cropped).grayscale().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
     sharp(cropped).linear(1.5, -30).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
@@ -231,11 +250,13 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   return {
     original: buffer,
     cropped,
+    centredUnpadded,
     greyscale,
     highcontrast,
     edgeenhanced,
     inverted,
     cropGeometry: { pre_padding_px, post_asymmetry_px, extended },
+    matRgb,
   };
 }
 

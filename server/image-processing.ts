@@ -615,12 +615,11 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
       }
     }
 
-    // Minimal padding (0.5% each side — just enough to avoid clipping card edge)
-    const padW = Math.max(1, Math.round(trimInfo.width * 0.005));
-    const padH = Math.max(1, Math.round(trimInfo.height * 0.005));
-
-    const padded = await sharp(trimBuf)
-      .extend({ top: padH, bottom: padH, left: padW, right: padW, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    // No internal padding — the downstream padWithMat step in
+    // generateImageVariants/upload-images applies the canonical mat
+    // padding (CARD_MAT_PADDING_PCT). Re-encode at JPEG q85 to keep the
+    // size sensible without doubling-up padding here.
+    const reencoded = await sharp(trimBuf)
       .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer();
 
@@ -630,7 +629,7 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
     const ringNote = borderRingWhitePct > 90 ? " (likely card margin)" : retrimApplied ? " (post re-trim)" : "";
     console.log(`[crop] ${trimInfo.width}x${trimInfo.height} ratio=${ratio.toFixed(3)} ${ratioDiff < 0.1 ? "✓" : "⚠ off-ratio"} border_ring_white=${borderRingWhitePct.toFixed(1)}%${ringNote}`);
 
-    return { buffer: padded, cropped: true, matRgb };
+    return { buffer: reencoded, cropped: true, matRgb };
   } catch {
     return { buffer: inputBuffer, cropped: false, matRgb };
   }
@@ -824,6 +823,48 @@ export async function reCentreBitmap(
     post_asymmetry_px: { horizontal: dx, vertical: dy },
     extended: false,
   };
+}
+
+// ── Mat padding (final pipeline step) ──────────────────────────────────────
+// reCentreBitmap preserves bitmap dimensions — its job is centring, not
+// adding mat space. Without an explicit padding step the cropped output is
+// edge-to-edge card with essentially zero mat margin. padWithMat extends the
+// bitmap on all four sides with the sampled mat colour, giving the final
+// image a passport-style frame.
+//
+// Apply AFTER maskRoundedCorners so the rounded-corner alpha mask is on the
+// card's actual corners (not pushed out to the bitmap corners far from the
+// card by the new padding).
+
+/** Per-side padding as a fraction of min(input width, height). 0.30 ≈ 1.5×
+ *  total output dims for a roughly square aspect. Tunable. */
+export const CARD_MAT_PADDING_PCT = 0.30;
+
+/**
+ * Extend an image with mat-coloured padding on all four sides.
+ *
+ * Per-side padding = round(min(w,h) * CARD_MAT_PADDING_PCT). Using min(w,h)
+ * keeps padding proportional to the smaller dimension so portrait cards
+ * don't get massively over-padded vertically.
+ *
+ * Output keeps the input's encoding family — PNG in, PNG out (preserves
+ * alpha for the masked display); JPEG in, JPEG out.
+ */
+export async function padWithMat(
+  inputBuffer: Buffer,
+  matRgb: { r: number; g: number; b: number },
+): Promise<Buffer> {
+  const meta = await sharp(inputBuffer).metadata();
+  if (!meta.width || !meta.height) return inputBuffer;
+  const padPx = Math.max(0, Math.round(Math.min(meta.width, meta.height) * CARD_MAT_PADDING_PCT));
+  if (padPx === 0) return inputBuffer;
+  const isPng = meta.format === "png";
+  const pipeline = sharp(inputBuffer)
+    .extend({ top: padPx, bottom: padPx, left: padPx, right: padPx, background: { r: matRgb.r, g: matRgb.g, b: matRgb.b, alpha: isPng ? 1 : 1 } });
+  const out = isPng
+    ? await pipeline.png().toBuffer()
+    : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
+  return out;
 }
 
 /**
