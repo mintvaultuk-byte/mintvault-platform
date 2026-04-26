@@ -281,6 +281,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   // ── Shared image area ───────────────────────────────────────────────────
   function renderImageArea(maxH: string | number) {
     return (
+      <>
       <div
         ref={containerRef}
         className={`relative overflow-hidden rounded-lg select-none ${
@@ -403,9 +404,13 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             <p className="text-[#888888] text-xs">No image</p>
           </div>
         )}
+      </div>
 
-        {/* Zoom toolbar */}
-        <div className="absolute bottom-2 right-2 z-10 flex items-center gap-0.5 bg-black/70 rounded-full px-1 py-0.5">
+      {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
+          art. Right-aligned row directly under the image, matching the
+          existing "Mark Defects / Manual Crop" button row pattern. */}
+      <div className="mt-2 flex items-center justify-end">
+        <div className="flex items-center gap-0.5 bg-[#1A1A1A] border border-[#333333] rounded-full px-1 py-0.5">
           <button type="button" onClick={(e) => { e.stopPropagation(); zoomOut(); }} disabled={zoom <= 1}
             className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
             <ZoomOut size={14} />
@@ -423,6 +428,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           )}
         </div>
       </div>
+      </>
     );
   }
 
