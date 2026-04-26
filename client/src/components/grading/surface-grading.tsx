@@ -87,6 +87,7 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
             className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1.5 text-xs font-bold"
             style={{ color: gradeColor(values.front) }}
           >
+            <option value={0} disabled hidden>—</option>
             {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
@@ -98,6 +99,7 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
             className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1.5 text-xs font-bold"
             style={{ color: gradeColor(values.back) }}
           >
+            <option value={0} disabled hidden>—</option>
             {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
@@ -142,7 +144,8 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
               className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
             >
               <option value="">Auto</option>
-              {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+              <option value={0} disabled hidden>—</option>
+            {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
             <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
           </div>

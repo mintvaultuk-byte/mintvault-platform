@@ -6106,6 +6106,10 @@ export async function registerRoutes(
         surfaceScore:   c.surfaceScore   ?? (c as any).surface_score   ?? null,
         grade:          c.gradeOverall   ?? (c as any).grade           ?? null,
         aiDraftGrade:   c.aiDraftGrade   ?? (c as any).ai_draft_grade  ?? null,
+        // Full AI analysis JSONB — used by the grading panel to fallback-hydrate
+        // zone state when DB columns (corners/edges/surface) are still null after
+        // a fresh AI run but before any save.
+        aiAnalysis:     c.aiAnalysis     ?? (c as any).ai_analysis     ?? null,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

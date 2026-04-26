@@ -111,11 +111,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [manualOuterBack, setManualOuterBack] = useState<any>(null);
   const [manualInnerBack, setManualInnerBack] = useState<any>(null);
 
-  // State
-  const [frontLR, setFrontLR] = useState("50/50");
-  const [frontTB, setFrontTB] = useState("50/50");
-  const [backLR, setBackLR]   = useState("50/50");
-  const [backTB, setBackTB]   = useState("50/50");
+  // State — centering ratios start empty so they don't leak to DB as
+  // "50/50" placeholders. Hydrated from AI/saved data; if empty at save
+  // time, the PR #15 client guard omits them and the server preserves.
+  const [frontLR, setFrontLR] = useState("");
+  const [frontTB, setFrontTB] = useState("");
+  const [backLR, setBackLR]   = useState("");
+  const [backTB, setBackTB]   = useState("");
   const [corners, setCorners] = useState<CornerValues>(DEFAULT_CORNERS);
   const [viewerSide, setViewerSide] = useState("front");
   const [viewerZoom, setViewerZoom] = useState(1);
@@ -211,6 +213,55 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                                   gradingData.centeringBackLr  && gradingData.centeringBackTb);
     if (!hasCenteringRatios && gradingData.centeringScore != null) {
       setCenteringOverride(Number(gradingData.centeringScore));
+    }
+
+    // Fallback hydration from AI analysis JSONB — covers the cold-reload case
+    // where AI ran in a previous session, populated ai_analysis, but the cert
+    // was never saved so DB columns (corners/edges/surface/centering_*_lr) are
+    // still null. handleAiComplete only fires on fresh AI run during this
+    // session, so without this fallback the admin would see empty defaults.
+    // Each branch is gated on the corresponding DB column being absent so we
+    // never overwrite saved data.
+    const ai = (gradingData as any).aiAnalysis?.grading;
+    if (ai) {
+      if (!gradingData.corners && ai.corners) {
+        setCorners({
+          frontTL: ai.corners.front_top_left?.grade     ?? 0,
+          frontTR: ai.corners.front_top_right?.grade    ?? 0,
+          frontBL: ai.corners.front_bottom_left?.grade  ?? 0,
+          frontBR: ai.corners.front_bottom_right?.grade ?? 0,
+          backTL:  ai.corners.back_top_left?.grade      ?? 0,
+          backTR:  ai.corners.back_top_right?.grade     ?? 0,
+          backBL:  ai.corners.back_bottom_left?.grade   ?? 0,
+          backBR:  ai.corners.back_bottom_right?.grade  ?? 0,
+        });
+        if (ai.corners.subgrade > 0 && gradingData.cornersScore == null) setCornersOverride(ai.corners.subgrade);
+      }
+      if (!gradingData.edges && ai.edges) {
+        setEdges({
+          frontTop:    ai.edges.front_top?.grade    ?? 0,
+          frontBottom: ai.edges.front_bottom?.grade ?? 0,
+          frontLeft:   ai.edges.front_left?.grade   ?? 0,
+          frontRight:  ai.edges.front_right?.grade  ?? 0,
+          backTop:     ai.edges.back_top?.grade     ?? 0,
+          backBottom:  ai.edges.back_bottom?.grade  ?? 0,
+          backLeft:    ai.edges.back_left?.grade    ?? 0,
+          backRight:   ai.edges.back_right?.grade   ?? 0,
+        });
+        if (ai.edges.subgrade > 0 && gradingData.edgesScore == null) setEdgesOverride(ai.edges.subgrade);
+      }
+      if (!gradingData.surface && ai.surface) {
+        setSurface(prev => ({
+          ...prev,
+          front: ai.surface.front_grade ?? 0,
+          back:  ai.surface.back_grade  ?? 0,
+        }));
+        if (ai.surface.subgrade > 0 && gradingData.surfaceScore == null) setSurfaceOverride(ai.surface.subgrade);
+      }
+      if (!gradingData.centeringFrontLr && ai.centering?.front_left_right) setFrontLR(ai.centering.front_left_right);
+      if (!gradingData.centeringFrontTb && ai.centering?.front_top_bottom) setFrontTB(ai.centering.front_top_bottom);
+      if (!gradingData.centeringBackLr  && ai.centering?.back_left_right)  setBackLR(ai.centering.back_left_right);
+      if (!gradingData.centeringBackTb  && ai.centering?.back_top_bottom)  setBackTB(ai.centering.back_top_bottom);
     }
   }, [gradingData]);
 

@@ -30,6 +30,7 @@ function GradeSelect({ value, onChange, isLowest }: { value: number; onChange: (
       className={`text-[10px] rounded px-1 py-0.5 font-bold border ${isLowest ? "border-red-500" : "border-[#D4D0C8]"} bg-[#F7F7F5]`}
       style={{ color: gradeColor(value) }}
     >
+      <option value={0} disabled hidden>—</option>
       {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
     </select>
   );
@@ -46,6 +47,7 @@ export function EdgeSelect({ value, onChange, isLowest = false }: { value: numbe
       style={{ color: gradeColor(value) }}
       onClick={e => e.stopPropagation()}
     >
+      <option value={0} disabled hidden>—</option>
       {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
     </select>
   );
@@ -143,7 +145,8 @@ export default function EdgeGrading({ values, onChange, overrideGrade, onOverrid
               className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
             >
               <option value="">Auto</option>
-              {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+              <option value={0} disabled hidden>—</option>
+      {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
             </select>
             <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
           </div>
