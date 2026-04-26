@@ -753,6 +753,50 @@ function SheetPrintingPanel() {
     }
   }, [toast]);
 
+  // v419 — single-sheet print-and-cut batch (front + back + insert per row,
+  // up to 5 cards per sheet). Returns a JSON envelope with PDF and SVG as
+  // base64 blobs; we save both files in one click.
+  const PRINT_BATCH_MAX = 5;
+  const [downloadingBatch, setDownloadingBatch] = useState(false);
+  const downloadPrintBatch = useCallback(async (certIds: string[]) => {
+    setDownloadingBatch(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(error);
+      }
+      const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[] };
+
+      // Decode + download two files in one click. Use object URLs so the
+      // browser handles the actual filesystem dialog.
+      const saveBlob = (b64: string, mime: string, filename: string) => {
+        const bin = atob(b64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        const blob = new Blob([buf], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      saveBlob(data.pdf, "application/pdf", `mintvault-batch-${data.batchId}.pdf`);
+      saveBlob(data.svg, "image/svg+xml", `mintvault-batch-${data.batchId}.svg`);
+
+      toast({
+        title: "Print batch downloaded",
+        description: `${data.certIds.length} card${data.certIds.length !== 1 ? "s" : ""} — print PDF, then load SVG into CM300 (Direct Cut)`,
+      });
+    } catch (err: any) {
+      toast({ title: "Print batch failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloadingBatch(false);
+    }
+  }, [toast]);
+
   // Mark printed
   const markPrintedMutation = useMutation({
     mutationFn: (sheetRef: string) =>
@@ -934,6 +978,25 @@ function SheetPrintingPanel() {
           {downloadingInserts
             ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
             : <><FileDown className="h-4 w-4 mr-2" /> Claim Inserts ({selected.size})</>}
+        </Button>
+        {/* v419 — combined batch: 1-5 cards/sheet with front + back + insert
+            laid out + matching cut SVG. One ScanNCut pass cuts everything. */}
+        <Button
+          onClick={() => downloadPrintBatch(Array.from(selected))}
+          disabled={selected.size === 0 || selected.size > PRINT_BATCH_MAX || downloadingBatch}
+          data-testid="btn-print-batch"
+          title={
+            selected.size === 0
+              ? `Select up to ${PRINT_BATCH_MAX} unclaimed certs`
+              : selected.size > PRINT_BATCH_MAX
+                ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
+                : "Generate combined PDF + SVG cut guide for ScanNCut CM300"
+          }
+          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
+        >
+          {downloadingBatch
+            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
+            : <><FileDown className="h-4 w-4 mr-2" /> Print Batch CM300 ({selected.size} / {PRINT_BATCH_MAX})</>}
         </Button>
         {selected.size > CERTS_PER_SHEET && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">

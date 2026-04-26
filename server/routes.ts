@@ -4198,6 +4198,87 @@ export async function registerRoutes(
     }
   });
 
+  // v419 — single-sheet print-and-cut batch (up to 5 cards: front + back +
+  // claim insert per row, all cuts in one ScanNCut CM300 pass). Returns
+  // both the printable PDF and the cut-path SVG as base64-encoded blobs
+  // so the client can save two files in one click.
+  app.post("/api/admin/print-batch", requireAdmin, async (req, res) => {
+    try {
+      const { certIds } = req.body as { certIds: unknown };
+      if (!Array.isArray(certIds) || certIds.length === 0) {
+        return res.status(400).json({ error: "Provide certIds array with at least 1 entry" });
+      }
+      const { MAX_CERTS_PER_BATCH } = await import("./print-batch");
+      if (certIds.length > MAX_CERTS_PER_BATCH) {
+        return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
+      }
+      const ids = certIds.map(String);
+
+      // Resolve each cert. Reject if any not found, or if any is claimed,
+      // or if any has no claim_code yet.
+      const allCerts = await storage.listCertificates();
+      const items: { cert: any; claimCode: string }[] = [];
+      const missing: string[] = [];
+      const claimed: string[] = [];
+      const noCode: string[] = [];
+      for (const id of ids) {
+        const cert = allCerts.find((c: any) => c.certId === id);
+        if (!cert) { missing.push(id); continue; }
+        if ((cert as any).ownershipStatus !== "unclaimed") { claimed.push(id); continue; }
+        const code = (cert as any).claimCode || (cert as any).claim_code;
+        if (!code) { noCode.push(id); continue; }
+        items.push({ cert, claimCode: String(code) });
+      }
+      if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
+      if (claimed.length) return res.status(409).json({ error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")})` });
+      if (noCode.length)  return res.status(409).json({ error: `Generate claim codes first for: ${noCode.join(", ")}` });
+
+      const { generatePrintBatchPDF, generatePrintBatchCutSVG } = await import("./print-batch");
+      const [pdfBuf, svgStr] = await Promise.all([
+        generatePrintBatchPDF(items),
+        Promise.resolve(generatePrintBatchCutSVG(items.length)),
+      ]);
+
+      const { randomUUID } = await import("crypto");
+      const batchId = randomUUID();
+      const generatedAt = new Date().toISOString();
+
+      // Audit row — one per batch generated.
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+          VALUES (
+            'system',
+            ${`print_batch_${batchId}`},
+            'print_batch_generated',
+            ${(req.session as any)?.adminEmail || "admin"},
+            ${JSON.stringify({
+              batch_id: batchId,
+              cert_ids: ids,
+              cert_count: items.length,
+              pdf_size_bytes: pdfBuf.length,
+              svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
+            })}::jsonb,
+            NOW()
+          )
+        `);
+      } catch (auditErr: any) {
+        console.warn("[print-batch] audit_log insert failed:", auditErr.message);
+      }
+
+      res.json({
+        pdf: pdfBuf.toString("base64"),
+        svg: Buffer.from(svgStr, "utf8").toString("base64"),
+        batchId,
+        certIds: ids,
+        generatedAt,
+      });
+    } catch (err: any) {
+      console.error("[print-batch] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/admin/printing/mark-printed", requireAdmin, async (req, res) => {
     try {
       const { sheetRef } = req.body as { sheetRef: string };
