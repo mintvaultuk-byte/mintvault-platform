@@ -4214,24 +4214,28 @@ export async function registerRoutes(
       }
       const ids = certIds.map(String);
 
-      // Resolve each cert. Reject if any not found, or if any is claimed,
-      // or if any has no claim_code yet.
+      // Resolve each cert. Reject if any not found or already claimed.
+      // For unclaimed certs that lack a claim_code, mint one on the fly so
+      // the operator can print in a single click without a separate
+      // "generate codes" step.
       const allCerts = await storage.listCertificates();
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const claimed: string[] = [];
-      const noCode: string[] = [];
+      const mintedFor: string[] = [];
       for (const id of ids) {
         const cert = allCerts.find((c: any) => c.certId === id);
         if (!cert) { missing.push(id); continue; }
         if ((cert as any).ownershipStatus !== "unclaimed") { claimed.push(id); continue; }
-        const code = (cert as any).claimCode || (cert as any).claim_code;
-        if (!code) { noCode.push(id); continue; }
+        let code: string | undefined = (cert as any).claimCode || (cert as any).claim_code;
+        if (!code) {
+          code = await storage.getOrGenerateClaimCode(id);
+          mintedFor.push(id);
+        }
         items.push({ cert, claimCode: String(code) });
       }
       if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
       if (claimed.length) return res.status(409).json({ error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")})` });
-      if (noCode.length)  return res.status(409).json({ error: `Generate claim codes first for: ${noCode.join(", ")}` });
 
       const { generatePrintBatchPDF, generatePrintBatchCutSVG } = await import("./print-batch");
       const [pdfBuf, svgStr] = await Promise.all([
@@ -4242,6 +4246,7 @@ export async function registerRoutes(
       const { randomUUID } = await import("crypto");
       const batchId = randomUUID();
       const generatedAt = new Date().toISOString();
+      const adminUser = (req.session as any)?.adminEmail || "admin";
 
       // Audit row — one per batch generated.
       try {
@@ -4251,13 +4256,14 @@ export async function registerRoutes(
             'system',
             ${`print_batch_${batchId}`},
             'print_batch_generated',
-            ${(req.session as any)?.adminEmail || "admin"},
+            ${adminUser},
             ${JSON.stringify({
               batch_id: batchId,
               cert_ids: ids,
               cert_count: items.length,
               pdf_size_bytes: pdfBuf.length,
               svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
+              auto_generated_codes_for: mintedFor,
             })}::jsonb,
             NOW()
           )
@@ -4266,11 +4272,37 @@ export async function registerRoutes(
         console.warn("[print-batch] audit_log insert failed:", auditErr.message);
       }
 
+      // Separate audit row when codes were minted on the fly, so the
+      // claim_codes_auto_generated event is independently queryable.
+      if (mintedFor.length > 0) {
+        try {
+          await db.execute(sql`
+            INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+            VALUES (
+              'system',
+              ${`print_batch_autocode_${batchId}`},
+              'claim_codes_auto_generated',
+              ${adminUser},
+              ${JSON.stringify({
+                batch_id: batchId,
+                cert_ids: mintedFor,
+                count: mintedFor.length,
+                reason: "missing_at_print_batch_request",
+              })}::jsonb,
+              NOW()
+            )
+          `);
+        } catch (auditErr: any) {
+          console.warn("[print-batch] auto-code audit_log insert failed:", auditErr.message);
+        }
+      }
+
       res.json({
         pdf: pdfBuf.toString("base64"),
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
         batchId,
         certIds: ids,
+        mintedFor,
         generatedAt,
       });
     } catch (err: any) {
