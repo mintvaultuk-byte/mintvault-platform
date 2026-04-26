@@ -340,9 +340,10 @@ Return ONLY valid JSON with no other text:
 }
 
 REQUIRED FIELDS — never omit:
+- detected_game: Use one of these exact slugs: "pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other". This is REQUIRED — never null. Pick the closest match if unsure; "other" is allowed only when the card is clearly not in any listed game.
 - set_code: Read from bottom of card (e.g. "M24 EN", "OBF", "PAR"). If you cannot see it clearly, return null but explain in reasoning.
 - copyright_year: Read from bottom copyright line (e.g. ©2024 → "2024"). If not visible, return null.
-These two fields are CRITICAL for preventing wrong matches. The server uses them to verify against the TCG database.
+set_code and copyright_year are CRITICAL for preventing wrong matches. The server uses them to verify against the TCG database.
 
 STEP 1 — READ THE SET CODE FIRST:
 Before anything else, look at the BOTTOM-LEFT or BOTTOM-RIGHT corner for a SET CODE. Common codes: M24 EN, OBF, PAR, PAL, TEF, SSP, SVI, BRS, FST, EVS, CRZ, SIT, LOR, PGO, ASR, SVP, SVPja, S-P, SP.
@@ -375,9 +376,8 @@ To find the correct set:
 3. A card number HIGHER than the set total (e.g. 212/197) means it is a secret rare
 4. CRITICAL: Do NOT guess set_name from memory or artwork. Only return a set_name if you can see the FULL set name written on the card OR if the set_code you read matches a set you are 100% certain of. If you only have a set_code, return detected_set as null — the server will handle the name lookup. Returning null is ALWAYS better than guessing wrong. Never return "Temporal Forces", "Surging Sparks", etc. unless you can actually SEE that text or its exact set code on the card
 
-For detected_game, use one of: "pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"
 For confidence, use: "high", "medium", "low"
-If you cannot identify the card, set confidence to "low" and fill in what you can detect.`;
+If you cannot identify the card, set confidence to "low" and fill in what you can detect — but detected_game must still be one of the listed slugs (use "other" only as last resort).`;
 
 // LEARNING SYSTEM: In future, query ai_grade_corrections table
 // to build a "common mistakes" section that gets injected into

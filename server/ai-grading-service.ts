@@ -660,6 +660,27 @@ const CLAUDE_TIMEOUT_MS = 120_000;
 const CLAUDE_RETRY_BACKOFF_MS = [0, 1000, 3000]; // index = attempt number (1, 2, 3)
 const CLAUDE_MAX_ATTEMPTS = 3;
 
+// Per-million-token USD pricing. cacheWrite default is input × 1.25 per
+// Anthropic's pricing structure; cacheRead is input × 0.10. Used by the cost
+// logger so Haiku/Sonnet calls don't get logged at Opus rates.
+interface ModelPricing { input: number; output: number; cacheWrite: number; cacheRead: number; }
+const MODEL_PRICING: Record<string, ModelPricing> = {
+  "claude-opus-4-7":          { input: 5,  output: 25, cacheWrite: 6.25,  cacheRead: 0.5  },
+  "claude-sonnet-4-6":        { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3  },
+  "claude-haiku-4-5-20251001":{ input: 1,  output: 5,  cacheWrite: 1.25,  cacheRead: 0.1  },
+};
+const DEFAULT_PRICING: ModelPricing = MODEL_PRICING["claude-opus-4-7"];
+function pricingFor(model: string): ModelPricing {
+  const exact = MODEL_PRICING[model];
+  if (exact) return exact;
+  // Loose fallback by family substring so a future date-suffixed model still
+  // logs sensible numbers until the map is updated.
+  if (model.includes("haiku"))  return MODEL_PRICING["claude-haiku-4-5-20251001"];
+  if (model.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
+  if (model.includes("opus"))   return MODEL_PRICING["claude-opus-4-7"];
+  return DEFAULT_PRICING;
+}
+
 function isRetryableClaudeError(err: any, response?: Response | null): { retry: boolean; reason: string } {
   if (response && !response.ok) {
     if (response.status >= 500) return { retry: true, reason: `HTTP ${response.status}` };
@@ -751,15 +772,15 @@ async function callClaude(
   const cacheCreation = usage?.cache_creation_input_tokens || 0;
   const cacheRead = usage?.cache_read_input_tokens || 0;
   const outputTokens = usage?.output_tokens || 0;
-  // Opus 4.7 pricing: input $5/M, cache-write $6.25/M, cache-read $0.50/M, output $25/M
+  const pricing = pricingFor(model);
   const costUsd =
-    (inputTokens / 1_000_000) * 5 +
-    (cacheCreation / 1_000_000) * 6.25 +
-    (cacheRead / 1_000_000) * 0.5 +
-    (outputTokens / 1_000_000) * 25;
+    (inputTokens / 1_000_000) * pricing.input +
+    (cacheCreation / 1_000_000) * pricing.cacheWrite +
+    (cacheRead / 1_000_000) * pricing.cacheRead +
+    (outputTokens / 1_000_000) * pricing.output;
   const costGbp = costUsd * 0.79; // approximate USD→GBP
   const label = options?.label || "unknown";
-  console.log(`[ai-cost] ${label}: input=${inputTokens} cached=${cacheRead} cache-write=${cacheCreation} output=${outputTokens} → £${costGbp.toFixed(4)} ($${costUsd.toFixed(4)})`);
+  console.log(`[ai-cost] ${label} (${model}): input=${inputTokens} cached=${cacheRead} cache-write=${cacheCreation} output=${outputTokens} → £${costGbp.toFixed(4)} ($${costUsd.toFixed(4)})`);
   // ── End cost logging ──────────────────────────────────────────────────────
 
   const contentArr = data.content as { type: string; text?: string; thinking?: string }[] | undefined;
@@ -898,13 +919,148 @@ export async function identifyCardFromBuffer(
   let claudeResult: CardIdentification;
   try {
     claudeResult = normalizeCardNumber(parseJson<CardIdentification>(claudeText));
-    console.log(`[identify-debug] raw Claude response: name="${claudeResult.detected_name}" set="${claudeResult.detected_set}" number="${claudeResult.detected_number}" year="${claudeResult.detected_year}" set_code="${claudeResult.set_code}" copyright_year="${claudeResult.copyright_year}" confidence="${claudeResult.confidence}"`);
+    console.log(`[identify-debug] raw Claude response: name="${claudeResult.detected_name}" set="${claudeResult.detected_set}" number="${claudeResult.detected_number}" year="${claudeResult.detected_year}" set_code="${claudeResult.set_code}" copyright_year="${claudeResult.copyright_year}" game="${claudeResult.detected_game}" confidence="${claudeResult.confidence}"`);
   } catch {
     throw new Error(`Card identification returned invalid JSON: ${claudeText.slice(0, 200)}`);
   }
 
+  // Coerce detected_game to a known slug — Haiku occasionally returns the
+  // display label ("Pokémon", "Magic: The Gathering") or null. Fall back to
+  // "other" so downstream lookups still work; the admin can correct in form.
+  claudeResult.detected_game = normaliseGameSlug(claudeResult.detected_game);
+
   // Reconcile the two opinions
   return reconcileIdentifications(claudeResult, gptResult);
+}
+
+const KNOWN_GAME_SLUGS = ["pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"] as const;
+type KnownGameSlug = typeof KNOWN_GAME_SLUGS[number];
+
+/**
+ * Map any Claude/GPT-supplied game string to a canonical slug. Returns
+ * "other" rather than throwing so a malformed identification doesn't
+ * fail-stop the whole scan-ingest pipeline.
+ */
+export function normaliseGameSlug(raw: unknown): KnownGameSlug {
+  if (typeof raw !== "string" || !raw.trim()) return "other";
+  const s = raw.trim().toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  if ((KNOWN_GAME_SLUGS as readonly string[]).includes(s)) return s as KnownGameSlug;
+  // Common label variants
+  if (s === "magic" || s === "magicthegathering" || s === "mtgcards") return "mtg";
+  if (s === "yugiohtcg" || s === "yugiohcards") return "yugioh";
+  if (s === "pokemontcg" || s === "pokemoncards") return "pokemon";
+  return "other";
+}
+
+// ── Defect-candidate suggestion (Option B: scan-time Haiku pass) ──────────
+//
+// Surface-level defect detection on the front+back buffers. Output format
+// matches the existing client-side `Defect` shape (severity: significant,
+// x_percent/y_percent) so confirming a candidate is a one-line copy into
+// the persisted defects array — no translation layer.
+//
+// Conservative by design: the prompt instructs Haiku to under-flag rather
+// than over-flag, since false-positives create grader friction.
+
+const DEFECT_SUGGESTION_PROMPT = `You are an assistant for a professional card grader. Examine the supplied card image(s) and list any visible defects you suspect. Be CONSERVATIVE — only flag defects clearly visible in the image. The grader will confirm or reject each candidate, so under-flagging is safer than over-flagging.
+
+Return ONLY valid JSON with this exact shape, no other text:
+
+{
+  "defectCandidates": [
+    {
+      "type": "Whitening",
+      "severity": "minor",
+      "description": "Whitening on top-left corner where blue paint has worn",
+      "location": "front",
+      "image_side": "front",
+      "x_percent": 5,
+      "y_percent": 5
+    }
+  ]
+}
+
+Field rules:
+- type: One of "Scratch", "Print Line", "Whitening", "Silvering", "Corner Softness", "Corner Rounding", "Edge Chip", "Edge Roughness", "Indentation", "Stain", "Crease", "Ink Spot", "Foil Peel", "Roller Mark", "Colour Fade", "Registration Error", "Holo Scratch", "Missing Ink", "Other"
+- severity: "minor" | "moderate" | "significant" — significant means it clearly limits the grade
+- description: One short sentence, neutral grading language, plain English
+- location: "front" | "back" — which side of the card the defect is on
+- image_side: same as location (kept for compatibility with the existing Defect shape)
+- x_percent: 0–100, horizontal position on the card (0 = left edge, 100 = right edge)
+- y_percent: 0–100, vertical position on the card (0 = top edge, 100 = bottom edge)
+
+If no defects are clearly visible, return { "defectCandidates": [] }. Do not invent defects.
+
+SHINY CARDS: Reflective/holographic surfaces produce light glare and reflections that are NOT defects. Only report physical wear, scratches, prints, or damage.`;
+
+export interface DefectCandidate {
+  type: string;
+  severity: "minor" | "moderate" | "significant";
+  description: string;
+  location: string;
+  image_side: string;
+  x_percent: number;
+  y_percent: number;
+}
+
+export async function suggestDefectsFromBuffer(
+  frontBuffer: Buffer,
+  backBuffer: Buffer | null,
+  certId?: string | number,
+): Promise<DefectCandidate[]> {
+  await rateLimit();
+  const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
+  const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
+  if (backBuffer) {
+    const { buffer: backResized, mediaType: backMime } = await resizeForClaude(backBuffer);
+    content.push(imageBlock(backResized.toString("base64"), backMime));
+  }
+  content.push({ type: "text", text: DEFECT_SUGGESTION_PROMPT });
+
+  let text: string;
+  try {
+    text = await callClaude(content, 2048, "claude-haiku-4-5-20251001", { label: "suggest-defects-haiku", certId });
+  } catch (err: any) {
+    console.warn(`[suggest-defects] call failed for cert=${certId}: ${err.message}`);
+    return [];
+  }
+
+  let parsed: { defectCandidates?: unknown };
+  try {
+    parsed = parseJson<{ defectCandidates?: unknown }>(text);
+  } catch {
+    console.warn(`[suggest-defects] non-JSON response for cert=${certId}: ${text.slice(0, 200)}`);
+    return [];
+  }
+
+  const raw = Array.isArray(parsed.defectCandidates) ? parsed.defectCandidates : [];
+  const validSeverity = new Set(["minor", "moderate", "significant"]);
+  const validLocation = new Set(["front", "back"]);
+
+  const cleaned: DefectCandidate[] = [];
+  for (const c of raw) {
+    if (typeof c !== "object" || c === null) continue;
+    const r = c as Record<string, unknown>;
+    const severity = typeof r.severity === "string" ? r.severity.toLowerCase() : "";
+    const location = typeof r.location === "string" ? r.location.toLowerCase() : "";
+    if (!validSeverity.has(severity)) continue;
+    if (!validLocation.has(location)) continue;
+    const x = Number(r.x_percent);
+    const y = Number(r.y_percent);
+    if (!Number.isFinite(x) || x < 0 || x > 100) continue;
+    if (!Number.isFinite(y) || y < 0 || y > 100) continue;
+    cleaned.push({
+      type:        typeof r.type === "string" && r.type.trim() ? r.type.trim() : "Other",
+      severity:    severity as DefectCandidate["severity"],
+      description: typeof r.description === "string" ? r.description.trim() : "",
+      location,
+      image_side:  typeof r.image_side === "string" ? r.image_side.toLowerCase() : location,
+      x_percent:   Math.round(x),
+      y_percent:   Math.round(y),
+    });
+  }
+  console.log(`[suggest-defects] cert=${certId}: ${cleaned.length} candidate(s) accepted (raw: ${raw.length})`);
+  return cleaned;
 }
 
 // ── Card identification ────────────────────────────────────────────────────

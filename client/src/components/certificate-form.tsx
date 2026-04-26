@@ -20,11 +20,50 @@ interface Props {
   onExternalIdentificationConsumed?: () => void;
 }
 
-const cardGames = [
-  "Pokémon", "Yu-Gi-Oh!", "Magic: The Gathering", "Dragon Ball Super",
-  "One Piece", "Digimon", "Flesh and Blood", "Lorcana",
-  "Panini", "Topps", "Upper Deck", "Other",
+/**
+ * Card-game options. Slug = canonical DB value (matches the AI identification
+ * pipeline's `detected_game` enum + the server's `lookupCard` branches).
+ * Label = human display name. Slug is what round-trips to the DB; label is
+ * what the dropdown shows.
+ *
+ * Legacy migration: certs saved before this refactor may have stored the
+ * label string ("Pokémon") in the card_game column. `slugifyCardGame()`
+ * below normalises both forms back to the slug at form-load time.
+ */
+const cardGames: { value: string; label: string }[] = [
+  { value: "pokemon",  label: "Pokémon" },
+  { value: "yugioh",   label: "Yu-Gi-Oh!" },
+  { value: "mtg",      label: "Magic: The Gathering" },
+  { value: "onepiece", label: "One Piece" },
+  { value: "digimon",  label: "Digimon" },
+  { value: "lorcana",  label: "Lorcana" },
+  { value: "sports",   label: "Sports" },
+  { value: "other",    label: "Other" },
 ];
+
+/**
+ * Map a stored card_game value to its canonical slug. Accepts:
+ *  - Already-slug form ("pokemon", "mtg") → returned as-is
+ *  - Legacy display labels ("Pokémon", "Magic: The Gathering") → mapped to slug
+ *  - Empty/unknown → ""
+ */
+function slugifyCardGame(stored: string | null | undefined): string {
+  if (!stored) return "";
+  const s = String(stored).trim();
+  if (!s) return "";
+  // Already a known slug
+  if (cardGames.some(g => g.value === s)) return s;
+  // Match against label (case-insensitive, normalise é/è and punctuation)
+  const norm = (x: string) => x.toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  const target = norm(s);
+  const byLabel = cardGames.find(g => norm(g.label) === target);
+  if (byLabel) return byLabel.value;
+  // Last-ditch: aliases used historically in the codebase
+  if (target === "magic" || target === "magicthegathering") return "mtg";
+  if (target === "pokemontcg") return "pokemon";
+  if (target === "yugiohtcg") return "yugioh";
+  return "";
+}
 
 const AUTOFILL_FIELDS = ["cardName", "rarity", "variant", "year"] as const;
 
@@ -78,7 +117,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     gradeType: (certificate as any)?.gradeType || "numeric",
     serviceTier: "",
     submissionItemId: (certificate as any)?.submissionItemId || "",
-    cardGame: certificate?.cardGame || "",
+    cardGame: slugifyCardGame(certificate?.cardGame),
     setName: certificate?.setName || "",
     cardName: (certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)") ? "" : (certificate?.cardName || ""),
     cardNumber: certificate?.cardNumber || "",
@@ -123,7 +162,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       if (isEmpty(prev.setName) && clean(certificate.setName))  { next.setName = clean(certificate.setName); changed = true; }
       if (isEmpty(prev.cardNumber) && clean(certificate.cardNumber)) { next.cardNumber = clean(certificate.cardNumber); changed = true; }
       if (isEmpty(prev.year) && yr)                  { next.year = yr; changed = true; }
-      if (isEmpty(prev.cardGame) && clean(certificate.cardGame)) { next.cardGame = clean(certificate.cardGame); changed = true; }
+      if (isEmpty(prev.cardGame) && slugifyCardGame(certificate.cardGame)) { next.cardGame = slugifyCardGame(certificate.cardGame); changed = true; }
       if (isEmpty(prev.language) && clean(certificate.language)) { next.language = clean(certificate.language); changed = true; }
       if (isEmpty(prev.rarity) && clean((certificate as any)?.rarity)) { next.rarity = clean((certificate as any).rarity); changed = true; }
       if (isEmpty(prev.variant) && clean((certificate as any)?.variant)) { next.variant = clean((certificate as any).variant); changed = true; }
@@ -264,7 +303,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
         const newNumber = id?.officialNumber || id?.detected_number || c?.cardNumber || null;
         const rawYear = id?.detected_year || id?.copyright_year || c?.year || null;
         const newYear = String(rawYear || "").match(/\d{4}/)?.[0] || null;
-        const newGame = id?.detected_game || c?.cardGame || null;
+        const newGame = slugifyCardGame(id?.detected_game || c?.cardGame || null) || null;
         const newRarity = id?.detected_rarity || c?.rarity || null;
         const newLanguage = id?.detected_language || c?.language || null;
 
@@ -734,7 +773,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               ...f,
               submissionItemId: itemId,
               ...(item ? {
-                cardGame: item.game || f.cardGame,
+                cardGame: slugifyCardGame(item.game) || f.cardGame,
                 setName: item.card_set || f.setName,
                 cardName: (item.card_name || "").toUpperCase() || f.cardName,
                 cardNumber: item.card_number || f.cardNumber,
@@ -1752,13 +1791,15 @@ function FormInput({
   );
 }
 
+type SelectOption = string | { value: string; label: string };
+
 function FormSelect({
   label, value, onChange, options, testId,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  options: SelectOption[];
   testId: string;
 }) {
   return (
@@ -1771,9 +1812,11 @@ function FormSelect({
         data-testid={testId}
       >
         <option value="">Select...</option>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
+        {options.map((opt) => {
+          const v = typeof opt === "string" ? opt : opt.value;
+          const l = typeof opt === "string" ? opt : opt.label;
+          return <option key={v} value={v}>{l}</option>;
+        })}
       </select>
     </div>
   );

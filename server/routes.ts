@@ -5928,6 +5928,137 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/certificates/:id/generate-description — Option B
+  //
+  // Synthesise the grade-rationale paragraph from the admin's manual subgrades
+  // + confirmed defects. Haiku 4.5 text-only call. Idempotent: each invocation
+  // overwrites grade_explanation; the audit_log row records every call.
+  app.post("/api/admin/certificates/:id/generate-description", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid certificate id" });
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      const c = cert as any;
+      if (c.deletedAt) return res.status(410).json({ error: "Certificate is deleted" });
+
+      // Validate all four subgrades present. Empty/0 means "not set" — the
+      // calculator never produces 0 for a real grade (1 is the floor).
+      const centeringScore = c.centeringScore ?? c.gradeCentering ?? null;
+      const cornersScore   = c.cornersScore   ?? c.gradeCorners   ?? null;
+      const edgesScore     = c.edgesScore     ?? c.gradeEdges     ?? null;
+      const surfaceScore   = c.surfaceScore   ?? c.gradeSurface   ?? null;
+      const overallGrade   = c.gradeOverall   ?? null;
+      const missing: string[] = [];
+      if (centeringScore == null) missing.push("centering");
+      if (cornersScore   == null) missing.push("corners");
+      if (edgesScore     == null) missing.push("edges");
+      if (surfaceScore   == null) missing.push("surface");
+      if (missing.length > 0) {
+        return res.status(422).json({
+          error: `Set all four subgrades before generating description. Missing: ${missing.join(", ")}`,
+        });
+      }
+
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
+
+      // Confirmed defects (admin-curated). Skip ai_defect_candidates — those
+      // are unconfirmed suggestions.
+      const defects = Array.isArray(c.defects) ? c.defects as Array<Record<string, unknown>> : [];
+      const defectLines = defects.length === 0
+        ? "none"
+        : defects.map((d) => {
+            const loc = d.location || d.image_side || "front";
+            const type = d.type || "defect";
+            const sev = d.severity || "minor";
+            return `${loc} ${type} (${sev})`;
+          }).join("; ");
+
+      const overallLabel = typeof overallGrade === "number" || (typeof overallGrade === "string" && /^\d/.test(overallGrade))
+        ? gradeLabel(typeof overallGrade === "number" ? overallGrade : parseFloat(String(overallGrade)))
+        : (overallGrade || "—");
+
+      const certIdStr = normalizeCertId(cert.certId);
+      const cardName  = c.cardName  || "Unknown card";
+      const setName   = c.setName   || "Unknown set";
+      const cardNumber = c.cardNumber || "";
+      const year      = c.year      || "";
+      const variant   = c.variant   || "";
+      const language  = c.language  || "English";
+
+      const prompt = `Write a professional grading description for this trading card. Output 3–5 sentences in this structure: (1) one-line card identification, (2) per-zone observations for centering / corners / edges / surface using the supplied subgrades and defects, (3) a closing summary sentence. Use precise, neutral grading language. Do NOT invent defects not in the input. Do NOT include the certificate number. Output plain text only — no markdown, no headings, no bullets.
+
+Card: ${cardName} — ${setName}${cardNumber ? ` — #${cardNumber}` : ""}${year ? ` — ${year}` : ""}${variant ? ` (${variant})` : ""} (${language})
+Overall grade: ${overallGrade ?? "—"} (${overallLabel})
+Subgrades: Centering ${centeringScore}, Corners ${cornersScore}, Edges ${edgesScore}, Surface ${surfaceScore}
+Defects (admin-confirmed): ${defectLines}`;
+
+      const body = {
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 600,
+        messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      };
+
+      let anthRes: Response;
+      try {
+        anthRes = await anthropicFetch(body, { apiKey, timeoutMs: 60_000 });
+      } catch (err: any) {
+        return res.status(502).json({ error: `Claude API call failed: ${err.message}` });
+      }
+      if (!anthRes.ok) {
+        const errText = await anthRes.text();
+        return res.status(502).json({ error: `Claude API error ${anthRes.status}: ${errText.slice(0, 200)}` });
+      }
+      const data = await anthRes.json() as Record<string, unknown>;
+      const content = data.content as Array<{ type: string; text?: string }> | undefined;
+      const textBlock = content?.find(b => b.type === "text");
+      const description = (textBlock?.text || "").trim();
+      if (!description) {
+        return res.status(502).json({ error: "Claude returned empty description" });
+      }
+
+      // Cost estimate (Haiku 4.5: $1/M input, $5/M output)
+      const usage = (data.usage as any) || {};
+      const inputTokens = usage.input_tokens || 0;
+      const outputTokens = usage.output_tokens || 0;
+      const costUsd = (inputTokens / 1_000_000) * 1 + (outputTokens / 1_000_000) * 5;
+      const costGbp = costUsd * 0.79;
+
+      // Persist + audit
+      await db.execute(sql`
+        UPDATE certificates SET
+          grade_explanation = ${description},
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES (
+          'certificate',
+          ${String(id)},
+          'generate_description',
+          ${(req as any).adminUser?.email || 'admin'},
+          ${JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            cost_estimate_gbp: Number(costGbp.toFixed(4)),
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cert_id: certIdStr,
+            override: false,
+          })}::jsonb,
+          NOW()
+        )
+      `);
+
+      console.log(`[generate-description] ${certIdStr}: wrote ${description.length} chars (£${costGbp.toFixed(4)})`);
+      res.json({ description, costEstimate: Number(costGbp.toFixed(4)) });
+    } catch (err: any) {
+      console.error("[generate-description] error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/admin/certificates/:id/detect-card-bounds — auto-detect card edges in raw image
   app.post("/api/admin/certificates/:id/detect-card-bounds", requireAdmin, async (req, res) => {
     try {
@@ -6117,10 +6248,13 @@ export async function registerRoutes(
         surfaceScore:   c.surfaceScore   ?? (c as any).surface_score   ?? null,
         grade:          c.gradeOverall   ?? (c as any).grade           ?? null,
         aiDraftGrade:   c.aiDraftGrade   ?? (c as any).ai_draft_grade  ?? null,
-        // Full AI analysis JSONB — used by the grading panel to fallback-hydrate
-        // zone state when DB columns (corners/edges/surface) are still null after
-        // a fresh AI run but before any save.
+        // Full AI analysis JSONB — under Option B this only contains the
+        // identification payload (no `grading` key on new scans). Legacy
+        // certs may still have `grading` here; the client ignores it.
         aiAnalysis:     c.aiAnalysis     ?? (c as any).ai_analysis     ?? null,
+        // Option B: Haiku-suggested defects from scan-ingest, awaiting admin
+        // confirm/reject. Distinct from the persisted `defects` array.
+        aiDefectCandidates: c.aiDefectCandidates ?? (c as any).ai_defect_candidates ?? [],
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -6177,6 +6311,13 @@ export async function registerRoutes(
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
           surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
           defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
+          ai_defect_candidates = ${
+            // Overwriteable — client is source of truth for confirm/reject state.
+            // Skip when key absent (legacy clients); apply when present (incl. []).
+            Array.isArray(b.ai_defect_candidates)
+              ? sql`${JSON.stringify(b.ai_defect_candidates)}::jsonb`
+              : sql`ai_defect_candidates`
+          },
           auth_status         = ${b.auth_status || "genuine"},
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
