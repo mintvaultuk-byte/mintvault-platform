@@ -360,6 +360,29 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v417-pii-audit] audit row skipped:", e.message);
   }
 
+  // ── v418 privacy-policy alignment audit row — one-shot, idempotent ───────
+  // Records the addition of the grader-attribution sub-clause (11.3) that
+  // brings the privacy policy into alignment with v417's PII-redaction
+  // behaviour. Same gating pattern as v417 above. The policy itself stays
+  // unpublished — LEGAL_PAGES_LIVE remains false until Stage B bundles
+  // Companies-House + ICO + solicitor review + flag flip in one deploy.
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+      SELECT 'system', 'v418_privacy_policy_v417_alignment', 'legal_content_update', 'mintvaultuk@gmail.com',
+             ${JSON.stringify({
+               change: "Added grader-attribution sub-clause 11.3 aligning with v417 PII redaction",
+               flag_state: "LEGAL_PAGES_LIVE remains false",
+               terms_version_bumped: false,
+             })}::jsonb,
+             NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE entity_id = 'v418_privacy_policy_v417_alignment')
+    `);
+    console.log("[v418-privacy-policy-audit] alignment audit row ensured");
+  } catch (e: any) {
+    console.log("[v418-privacy-policy-audit] audit row skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`
