@@ -205,16 +205,16 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   const derivedAngle = quadRotation(quad);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col select-none">
+    <div className="fixed inset-0 z-[100] bg-[#F7F7F5]/95 flex flex-col select-none">
       {/* Top bar */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
+      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#D4D0C8]">
         <div>
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Perspective Crop \u2014 {side}
           </p>
-          <p className="text-[#888888] text-[10px]">Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.</p>
+          <p className="text-[#555555] text-[10px]">Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.</p>
         </div>
-        <button type="button" onClick={onCancel} className="text-[#888888] hover:text-white p-1"><X size={20} /></button>
+        <button type="button" onClick={onCancel} className="text-[#555555] hover:text-[#1A1A1A] p-1"><X size={20} /></button>
       </div>
 
       {/* Image area */}
@@ -222,7 +222,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         <div className="relative" style={{ maxHeight: "80vh", maxWidth: "90vw" }}>
           <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
             {/* Image + overlay container — NO overflow-hidden so handles aren't clipped */}
-            <div ref={containerRef} className="relative rounded-lg bg-[#0A0A0A]"
+            <div ref={containerRef} className="relative rounded-lg bg-[#F7F7F5]"
               onMouseDown={startBodyDrag}>
               <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[75vh] w-auto" draggable={false} />
 
@@ -279,7 +279,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       </div>
 
       {/* Controls below image — always visible, no scrolling */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-[#333333] space-y-3">
+      <div className="flex-shrink-0 px-4 py-3 border-t border-[#D4D0C8] space-y-3">
         {/* Row 1: Quick actions */}
         <div className="flex items-center gap-2">
           <button type="button" onClick={handleAutoDetect} disabled={detecting}
@@ -288,29 +288,29 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
             {detecting ? "Detecting..." : "Auto-Detect"} <span className="text-[#555555] text-[9px]">A</span>
           </button>
           <button type="button" onClick={() => { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }}
-            className="flex items-center gap-1 text-[#888888] text-xs border border-[#333333] px-3 py-1.5 rounded-lg hover:bg-[#1A1A1A] transition-colors">
+            className="flex items-center gap-1 text-[#555555] text-xs border border-[#D4D0C8] px-3 py-1.5 rounded-lg hover:bg-[#E8E4DC] transition-colors">
             <RotateCcw size={12} /> Reset <span className="text-[#555555] text-[9px]">R</span>
           </button>
           <div className="flex-1" />
-          <span className="text-[#888888] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
+          <span className="text-[#555555] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
           {Math.abs(derivedAngle) > 0.3 && <span className="text-[#D4AF37]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>}
         </div>
 
         {/* Row 2: Rotation slider */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-[#888888]">Rotate</span>
+          <span className="text-[#555555]">Rotate</span>
           <input type="range" min="-15" max="15" step="0.5" value={rotation}
             onChange={(e) => setRotation(Number(e.target.value))}
             className="flex-1 max-w-[200px] accent-[#D4AF37]" />
           <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
           {Math.abs(rotation) > 0.1 && (
-            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#888888] hover:text-[#D4AF37] underline">Zero <span className="text-[#555555]">0</span></button>
+            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline">Zero <span className="text-[#555555]">0</span></button>
           )}
         </div>
 
         {/* Row 3: Cancel + Apply */}
         <div className="flex items-center justify-between">
-          <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">
+          <button type="button" onClick={onCancel} className="border border-[#D4D0C8] text-[#555555] text-xs px-4 py-2 rounded-lg hover:bg-[#E8E4DC]">
             Cancel <span className="text-[#555555] text-[9px]">Esc</span>
           </button>
           <button type="button" onClick={handleApply} disabled={saving}
