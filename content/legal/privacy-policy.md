@@ -321,7 +321,9 @@ We rely on these contractual commitments as part of our transfer risk assessment
 
 **11.2** AI-assisted grading includes automated image analysis as part of the grading process, but all grading outcomes are reviewed or confirmed by human graders before issuance. The human grader is the decision-maker; AI output is a tool supporting that decision. Our internal grading procedures require graders to assess AI output independently against MintVault's published grading standards rather than rubber-stamping the AI's recommendation.
 
-**11.3** If we introduce solely automated decision-making in future, we will update this Policy and provide the information required under Article 22 and Article 13(2)(f).
+**11.3** Grader attribution. Grading is performed by qualified MintVault staff. The individual grader's identity is recorded internally for audit purposes and is not disclosed on public certificate pages. Owners receive a private logbook PDF that may include grader attribution.
+
+**11.4** If we introduce solely automated decision-making in future, we will update this Policy and provide the information required under Article 22 and Article 13(2)(f).
 
 > **SOLICITOR REVIEW FLAG — Section 11:** Please confirm human review of AI grading output is sufficient to avoid Art. 22, given ICO guidance on "meaningful" review. If graders accept AI output above a certain percentage without independent assessment, does Art. 22 apply regardless of the policy wording?
 
