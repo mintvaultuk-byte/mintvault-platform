@@ -2175,11 +2175,14 @@ export async function registerRoutes(
         population = { totalGraded, sameGradeCount, higherGradeCount, percentile };
       } catch { /* non-critical */ }
 
+      // v417 — sanitise free-text descriptions on the way out (defence-in-depth
+      // against admin paste-of-PII into a public-surface field).
+      const { stripEmailsFromText: stripEmailsR } = await import("./lib/sanitise-pii");
       const defects = (c.defects || []).map((d: any) => ({
         id: d.id,
         type: d.type,
         severity: d.severity,
-        description: d.description,
+        description: stripEmailsR(d.description),
         location: d.location,
         imageSide: d.image_side || d.imageSide || "front",
         xPercent: d.x_percent ?? d.xPercent ?? 50,
@@ -2200,7 +2203,9 @@ export async function registerRoutes(
           rarity: rarityDisplayLabel(c.rarity, c.rarityOther) || c.rarity || null,
           variant: variantDisplayLabel(c.variant, c.variantOther) || null,
           gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
-          gradedBy: c.gradeApprovedBy || "MintVault UK",
+          // v417 — public surface shows brand only; real grader name stays
+          // in the DB and admin endpoints.
+          gradedBy: "MintVault UK",
           status: c.status || "active",
         },
         grade: {
@@ -2208,8 +2213,9 @@ export async function registerRoutes(
           label: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
           labelType,
           isBlackLabel: isBlack,
-          explanation: c.gradeExplanation || ai.grade_explanation || null,
-          approvedBy: c.gradeApprovedBy || null,
+          explanation: stripEmailsR(c.gradeExplanation || ai.grade_explanation || ""),
+          // v417 — drop approver name from public report; date is fine.
+          approvedBy: null,
           approvedAt: c.gradeApprovedAt || null,
         },
         subgrades: {
@@ -2230,7 +2236,8 @@ export async function registerRoutes(
         defects,
         authentication: {
           status: c.authStatus || "genuine",
-          notes:  c.authNotes  || ai.authentication_notes || null,
+          // v417 — auth notes are free-text; sanitise on public surface.
+          notes:  stripEmailsR(c.authNotes || ai.authentication_notes || "") || null,
         },
         images: {
           front: frontUrl,
@@ -2312,7 +2319,8 @@ export async function registerRoutes(
       doc.moveDown(0.3);
       const gradedDateFmt = c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }) : "—";
       doc.fontSize(9).fillColor(isBlack ? "#888888" : "#888888")
-        .text(`Graded: ${gradedDateFmt}  ·  By: ${c.gradeApprovedBy || "MintVault UK"}`);
+        // v417 — public DGR PDF: brand only, no individual grader name.
+        .text(`Graded: ${gradedDateFmt}  ·  By: MintVault UK`);
       doc.moveDown(0.8);
 
       // Grade hero
@@ -2663,6 +2671,11 @@ export async function registerRoutes(
 
       const c = dbCert as any;
       const certId = normalizeCertId(c.certId);
+      // v417 — viewer gate: matches the pattern used by certToPublic. Only the
+      // verified current owner sees owner-scoped fields like nfcUid; everyone
+      // else gets null.
+      const viewerUserId = (req.session as any)?.userId as string | undefined;
+      const viewerIsOwner = !!(viewerUserId && c.currentOwnerUserId && viewerUserId === c.currentOwnerUserId);
       const gradeType = c.gradeType || "numeric";
       const isNonNum = isNonNumericGrade(gradeType);
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
@@ -2720,19 +2733,34 @@ export async function registerRoutes(
         } catch { /* non-critical */ }
       }
 
-      // Ownership history
+      // Ownership history — v417 PII fix.
+      // Replaces the prior `h.ownerName || h.toEmail || "Anonymous Owner"`
+      // fallback (which leaked raw to_email when no display name was set)
+      // with the GDPR-correct `getOwnerChain` redactor + numbered labels.
+      // No display names or emails are ever surfaced here, even for owners
+      // who opted into `public_name` — until a proper consent UX ships,
+      // we keep the door closed entirely. Method labels normalise to
+      // "Original Issuance" or "Verified Transfer" so we don't imply that
+      // email is part of the public-facing attestation chain.
       let ownership: Array<{ owner: string; date: string; method: string; verified: boolean }> = [];
       try {
-        const hist = await storage.getOwnershipHistory(certId);
-        ownership = hist.map((h: any) => ({
-          owner: h.ownerName || h.toEmail || "Anonymous Owner",
-          date: h.createdAt ? new Date(h.createdAt).toISOString().split("T")[0] : "",
-          method: h.eventType === "initial_claim" ? "Original Owner" : "Email Verified Transfer",
+        const { getOwnerChain } = await import("./ownership-service");
+        const chain = await getOwnerChain(certId);
+        ownership = chain.map(entry => ({
+          owner: `Verified Owner #${entry.ownerNumber}`,
+          date: entry.claimedAt ? entry.claimedAt.split("T")[0] : "",
+          method: (entry.claimMethod === "initial_claim" || entry.claimMethod === "auto_submission")
+            ? "Original Issuance"
+            : "Verified Transfer",
           verified: true,
         }));
-      } catch { /* non-critical */ }
+      } catch { /* non-critical — empty array on failure, never falls back to raw history */ }
 
-      // Verified defects — prefer verifiedDefects column, fallback to defects column
+      // Verified defects — prefer verifiedDefects column, fallback to defects column.
+      // v417 — sanitise free-text descriptions on the way out (admin paste-of-PII
+      // defence-in-depth). Admin endpoints get the original text; only public
+      // surfaces redact.
+      const { stripEmailsFromText } = await import("./lib/sanitise-pii");
       const rawDefects = (c.verifiedDefects?.length ? c.verifiedDefects : c.defects) || [];
       const defects = rawDefects.map((d: any, i: number) => ({
         id: i + 1,
@@ -2740,7 +2768,7 @@ export async function registerRoutes(
         severity: d.severity,
         x: d.x ?? d.position?.x_percent ?? 50,
         y: d.y ?? d.position?.y_percent ?? 50,
-        description: d.description,
+        description: stripEmailsFromText(d.description),
       }));
 
       // Centering
@@ -2802,14 +2830,20 @@ export async function registerRoutes(
         population,
         authentication: {
           nfcActive: c.nfcEnabled ?? false,
-          nfcUid: c.nfcUid || null,
+          // v417 — nfcUid is owner-scoped; non-owners get null. The chip's
+          // hardware ID enables physical-scan correlation tracking, so it
+          // shouldn't be public.
+          nfcUid: viewerIsOwner ? (c.nfcUid || null) : null,
           qrVerified: true,
           certId,
           slabSerial: c.slabSerial || null,
           tamperSealIntact: true,
         },
         gradedAt: c.createdAt || null,
-        gradedBy: c.gradeApprovedBy || "MintVault UK",
+        // v417 — grader's actual identity stays internal. Public surfaces show
+        // the brand name. The real `gradeApprovedBy` is preserved in the DB
+        // and visible to admins via /api/admin/certificates/:id/grading.
+        gradedBy: "MintVault UK",
         status: c.status || "active",
         stolenStatus: c.stolenStatus || null,
         stolenReportedAt: c.stolenReportedAt || null,
