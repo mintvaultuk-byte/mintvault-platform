@@ -248,6 +248,106 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // Track which subgrades were set by AI (key) vs manually changed
   const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>({});
 
+  // ── v413/v414 — hooks moved here from below the `if (!hasAnyImage)` early
+  // return. Originally PR #51 placed these inline near the related logic; the
+  // early return at `hasAnyImage` meant first-render (imageData still loading)
+  // skipped them, second-render called them — different hook count → React
+  // bailout → white screen. Keep ALL hooks above any conditional return.
+
+  // AI baseline derivations — used to flag AI-suggested vs admin-overridden
+  // subgrades and surface low-confidence hints. Pre-Option-A certs (Option B
+  // / legacy) won't have a `grading` key here; everything below treats null
+  // as "no AI baseline available".
+  const aiGradingBase = (gradingData as any)?.aiAnalysis?.grading as
+    | {
+        centering?: { subgrade?: number };
+        corners?: { subgrade?: number };
+        edges?: { subgrade?: number };
+        surface?: { subgrade?: number };
+        overall_grade?: number;
+        confidence?: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string };
+      }
+    | undefined;
+
+  const aiSubgrades = useMemo(() => ({
+    centering: aiGradingBase?.centering?.subgrade ?? null,
+    corners:   aiGradingBase?.corners?.subgrade   ?? null,
+    edges:     aiGradingBase?.edges?.subgrade     ?? null,
+    surface:   aiGradingBase?.surface?.subgrade   ?? null,
+  }), [aiGradingBase]);
+
+  const aiConfidenceMap = useMemo(() => ({
+    centering: (aiGradingBase?.confidence?.centering as "high" | "medium" | "low" | undefined) ?? null,
+    corners:   (aiGradingBase?.confidence?.corners   as "high" | "medium" | "low" | undefined) ?? null,
+    edges:     (aiGradingBase?.confidence?.edges     as "high" | "medium" | "low" | undefined) ?? null,
+    surface:   (aiGradingBase?.confidence?.surface   as "high" | "medium" | "low" | undefined) ?? null,
+  }), [aiGradingBase]);
+
+  // Auto-save refs + debounced effect. autoSaveNow is a plain function
+  // declaration (hoisted within this scope) so it can call setters / refs
+  // declared just above it, and reference buildPayload() which is declared
+  // further down (also hoisted).
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveSeqRef = useRef(0);
+  const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedOnceRef = useRef(false);
+
+  async function autoSaveNow(): Promise<boolean> {
+    const seq = ++autoSaveSeqRef.current;
+    setAutoSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      });
+      if (seq !== autoSaveSeqRef.current) return true;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setAutoSaveStatus("saved");
+      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
+      autoSavedClearTimerRef.current = setTimeout(() => {
+        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
+      }, 2500);
+      return true;
+    } catch (e: any) {
+      if (seq !== autoSaveSeqRef.current) return false;
+      setAutoSaveStatus("error");
+      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+      return false;
+    }
+  }
+
+  // Schedule a debounced auto-save whenever any persisted state changes.
+  // First render skips (hydratedOnceRef false → set to true) so we don't
+  // pointlessly POST back what we just GET'd.
+  useEffect(() => {
+    if (!certId) return;
+    if (!hydratedOnceRef.current) {
+      hydratedOnceRef.current = true;
+      return;
+    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveNow();
+    }, 500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    certId,
+    frontLR, frontTB, backLR, backTB,
+    corners, edges, surface,
+    defects, defectCandidates,
+    authStatus, authNotes,
+    privateNotes, gradeExplanation,
+    centeringOverride, cornersOverride, edgesOverride, surfaceOverride, overallOverride,
+  ]);
+
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
     setAiAnalysis(prev => analysis.overall_grade ? analysis : prev);
     setAiIdentification(identification);
@@ -428,36 +528,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const sub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
   const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
 
-  // v413 — AI baseline derivations. Read the snapshot of what AI originally
-  // graded (stored in ai_analysis.grading) so the UI can flag which subgrades
-  // were AI-suggested vs admin-overridden, and surface low-confidence hints.
-  // Pre-Option-A certs (Option B / legacy) won't have a `grading` key here;
-  // everything below treats null as "no AI baseline available" and falls back
-  // to neutral (no badge, no diff cue).
-  const aiGradingBase = (gradingData as any)?.aiAnalysis?.grading as
-    | {
-        centering?: { subgrade?: number };
-        corners?: { subgrade?: number };
-        edges?: { subgrade?: number };
-        surface?: { subgrade?: number };
-        overall_grade?: number;
-        confidence?: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string };
-      }
-    | undefined;
-
-  const aiSubgrades = useMemo(() => ({
-    centering: aiGradingBase?.centering?.subgrade ?? null,
-    corners:   aiGradingBase?.corners?.subgrade   ?? null,
-    edges:     aiGradingBase?.edges?.subgrade     ?? null,
-    surface:   aiGradingBase?.surface?.subgrade   ?? null,
-  }), [aiGradingBase]);
-
-  const aiConfidenceMap = useMemo(() => ({
-    centering: (aiGradingBase?.confidence?.centering as "high" | "medium" | "low" | undefined) ?? null,
-    corners:   (aiGradingBase?.confidence?.corners   as "high" | "medium" | "low" | undefined) ?? null,
-    edges:     (aiGradingBase?.confidence?.edges     as "high" | "medium" | "low" | undefined) ?? null,
-    surface:   (aiGradingBase?.confidence?.surface   as "high" | "medium" | "low" | undefined) ?? null,
-  }), [aiGradingBase]);
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
   const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
@@ -520,77 +590,6 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
     return out;
   }
-
-  // v413 auto-save: silent background PUT to /grade, debounced 500ms after the
-  // last state change. Same endpoint that "Save Draft" used to hit, so
-  // post-approve edits naturally route through the post_approve_edit audit
-  // path on the server. No toast on success — the small "Saving…" / "Saved"
-  // indicator beside the action button is the only feedback. Toasts only on
-  // error so the admin notices when persistence fails.
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoSaveSeqRef = useRef(0);
-  const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hydratedOnceRef = useRef(false);
-
-  async function autoSaveNow(): Promise<boolean> {
-    const seq = ++autoSaveSeqRef.current;
-    setAutoSaveStatus("saving");
-    try {
-      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      if (seq !== autoSaveSeqRef.current) return true; // a newer save started; let it own the status
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      setAutoSaveStatus("saved");
-      // Auto-clear the "Saved" pip after 2.5s back to idle so the indicator
-      // doesn't stick around indefinitely.
-      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
-      autoSavedClearTimerRef.current = setTimeout(() => {
-        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
-      }, 2500);
-      return true;
-    } catch (e: any) {
-      if (seq !== autoSaveSeqRef.current) return false;
-      setAutoSaveStatus("error");
-      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
-      return false;
-    }
-  }
-
-  // Schedule a debounced auto-save whenever any persisted state changes.
-  // The hydration useEffect above sets state from gradingData on initial
-  // load — we skip the very first render so we don't pointlessly POST
-  // back what we just GET'd.
-  useEffect(() => {
-    if (!certId) return;
-    if (!hydratedOnceRef.current) {
-      // First render after mount: skip auto-save firing.
-      hydratedOnceRef.current = true;
-      return;
-    }
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      autoSaveNow();
-    }, 500);
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    certId,
-    frontLR, frontTB, backLR, backTB,
-    corners, edges, surface,
-    defects, defectCandidates,
-    authStatus, authNotes,
-    privateNotes, gradeExplanation,
-    centeringOverride, cornersOverride, edgesOverride, surfaceOverride, overallOverride,
-  ]);
 
   async function saveDraft() {
     setSaving(true);
