@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2 } from "./r2";
-import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, analyzeCardFromBuffers, type EnrichedCardData } from "./ai-grading-service";
+import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, suggestDefectsFromBuffer, type EnrichedCardData, type DefectCandidate } from "./ai-grading-service";
 
 /**
  * Create a new certificate for an admin scan.
@@ -153,8 +153,12 @@ export async function uploadImagesToCert(
 }
 
 /**
- * Run AI identification + grading on a certificate's images.
- * Uses cropped variants already uploaded to R2.
+ * Option B: scan-time AI is identification + defect-candidate suggestion only.
+ * No subgrade analysis — the admin grades manually, then optionally generates
+ * a description via the separate /generate-description endpoint.
+ *
+ * Returns identification fields for the response payload; grade is always
+ * null on new scans (legacy callers fall back to null gracefully).
  */
 export async function runAiOnCert(
   certId: number,
@@ -162,7 +166,6 @@ export async function runAiOnCert(
   backCropped: Buffer | null,
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
   // Resolve the MV-number for diagnostic context (retry logs, error traces).
-  // One extra lookup on a path that already takes 30-90s — negligible.
   let certTag: string | number = certId;
   try {
     const r = await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`);
@@ -170,10 +173,14 @@ export async function runAiOnCert(
     if (row?.certificate_number) certTag = row.certificate_number;
   } catch { /* best-effort — fall back to numeric id */ }
 
-  // Step 1: Identify the card
-  const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg", certTag);
-  const game = identification.detected_game?.toLowerCase();
+  // Step 1+2 in parallel: identify (front only) and suggest defects (front+back).
+  // Both are Haiku — no shared rate-limit contention worth serialising for.
+  const [identification, defectCandidates] = await Promise.all([
+    identifyCardFromBuffer(frontCropped, "image/jpeg", certTag),
+    suggestDefectsFromBuffer(frontCropped, backCropped, certTag),
+  ]);
 
+  const game = identification.detected_game?.toLowerCase() || "other";
   let enrichedId = await verifyAndEnrichCardData(identification);
   let tcgVerified = false;
 
@@ -202,21 +209,22 @@ export async function runAiOnCert(
     }
   }
 
-  // Step 2: Full grading analysis
-  const analysis = await analyzeCardFromBuffers(frontCropped, backCropped, game, certTag);
-
-  // Step 3: Extract strength score
-  const strengthScore = typeof (analysis as any).grade_strength_score === "number"
-    ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
-    : null;
-
-  // Step 4: Determine card details to write
+  // Step 3: Determine which identification fields are confident enough to
+  // write through to the DB. Most fields gate on (tcgVerified || high
+  // confidence). card_game is special — it's a closed enum derived from the
+  // AI's view of the card type, and even at "medium" confidence it's
+  // overwhelmingly correct ("is this a Pokémon card?" is much easier than
+  // "exact set / number"). Always write card_game when the AI returned a
+  // known slug, so the form's Card Game dropdown auto-populates and "Search
+  // TCG" gates unblock — even when set/number weren't confident.
   const aiConfidence = identification.confidence || "low";
   const shouldWriteDetails = tcgVerified || aiConfidence === "high";
   const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
   const setName = tcgVerified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
   const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
-  const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
+  const cardGame = enrichedId.detected_game && enrichedId.detected_game !== "other"
+    ? enrichedId.detected_game
+    : (shouldWriteDetails ? (enrichedId.detected_game || null) : null);
   const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
 
   // Year derivation — kept consistent with routes.ts identify-and-analyze.
@@ -237,26 +245,48 @@ export async function runAiOnCert(
     }
   }
 
-  // Step 5: Save to certificate
+  // Step 4: Save to certificate. ai_analysis carries identification only —
+  // no `grading` payload (Option B leaves subgrade fields untouched). The
+  // client form initialises subgrades empty for new scans because the
+  // grading-panel hydration block now ignores ai_analysis.grading.
   await db.execute(sql`
     UPDATE certificates SET
-      ai_analysis = ${JSON.stringify({ identification: enrichedId, grading: analysis })}::jsonb,
-      ai_draft_grade = ${typeof analysis.overall_grade === "number" ? analysis.overall_grade : null},
+      ai_analysis = ${JSON.stringify({ identification: enrichedId, model: "claude-haiku-4-5-20251001", pipeline: "option_b" })}::jsonb,
+      ai_defect_candidates = ${JSON.stringify(defectCandidates)}::jsonb,
       card_name = CASE WHEN card_name IS NULL OR card_name = '' THEN ${cardName} ELSE card_name END,
       set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
       card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
       card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
       rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
       year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
-      grade_strength_score = ${strengthScore},
       updated_at = NOW()
     WHERE id = ${certId}
   `);
 
-  const gradeValue = typeof analysis.overall_grade === "number" ? analysis.overall_grade : null;
-  console.log(`[scan-ingest] cert=${certId}: AI complete — card="${cardName}" grade=${gradeValue} strength=${strengthScore}`);
+  // Audit row — model + per-call decision context. Keeps a paper trail of
+  // what the cheaper Haiku pipeline actually wrote.
+  await db.execute(sql`
+    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+    VALUES (
+      'certificate',
+      ${String(certId)},
+      'ai_scan_ingest',
+      'system',
+      ${JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        operations: ["identify", "suggest_defects"],
+        identification_confidence: aiConfidence,
+        tcg_verified: tcgVerified,
+        card_game: cardGame,
+        card_name: cardName,
+        defect_candidate_count: defectCandidates.length,
+      })}::jsonb,
+      NOW()
+    )
+  `);
 
-  return { cardName, grade: gradeValue, strengthScore };
+  console.log(`[scan-ingest] cert=${certId}: Option-B AI complete — card="${cardName}" game=${cardGame} candidates=${defectCandidates.length}`);
+  return { cardName, grade: null, strengthScore: null };
 }
 
 // ── Auto-trigger gate ──────────────────────────────────────────────────────

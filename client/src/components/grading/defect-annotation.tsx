@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Check } from "lucide-react";
 
 export interface Defect {
   id: number;
@@ -12,11 +12,19 @@ export interface Defect {
   y_percent: number;
 }
 
+/** AI-suggested defect candidate. Same field shape as Defect but unconfirmed
+ *  and id-less; admin promotes to Defect on confirm. */
+export type DefectCandidate = Omit<Defect, "id">;
+
 interface Props {
   defects: Defect[];
   onChange: (defects: Defect[]) => void;
   highlightId: number | null;
   onHighlight: (id: number | null) => void;
+  /** Unconfirmed AI candidates surfaced from scan-ingest's Haiku defect pass.
+   *  Optional — undefined/empty = legacy / no candidates. */
+  candidates?: DefectCandidate[];
+  onCandidatesChange?: (next: DefectCandidate[]) => void;
 }
 
 const DEFECT_TYPES = [
@@ -125,7 +133,7 @@ export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormPr
   );
 }
 
-export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight }: Props) {
+export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight, candidates, onCandidatesChange }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [pending, setPending] = useState<PendingDefect>({
     type: "Scratch",
@@ -147,6 +155,20 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
   function removeDefect(id: number) {
     onChange(defects.filter(d => d.id !== id));
     if (highlightId === id) onHighlight(null);
+  }
+
+  function confirmCandidate(idx: number) {
+    if (!candidates || !onCandidatesChange) return;
+    const c = candidates[idx];
+    if (!c) return;
+    const nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
+    onChange([...defects, { ...c, id: nextId }]);
+    onCandidatesChange(candidates.filter((_, i) => i !== idx));
+  }
+
+  function rejectCandidate(idx: number) {
+    if (!candidates || !onCandidatesChange) return;
+    onCandidatesChange(candidates.filter((_, i) => i !== idx));
   }
 
   return (
@@ -189,7 +211,52 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
         </div>
       )}
 
-      {defects.length === 0 && !showForm && (
+      {/* AI-suggested candidates — confirm or reject each */}
+      {candidates && candidates.length > 0 && (
+        <div className="space-y-1.5 border-t border-dashed border-[#D4AF37]/30 pt-2">
+          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length})</p>
+          {candidates.map((c, i) => (
+            <div
+              key={`cand-${i}`}
+              className="flex items-start gap-2 rounded-lg px-3 py-2 border border-dashed border-[#D4AF37]/40 bg-[#FBF8EE]"
+            >
+              <span className="flex-shrink-0 w-5 h-5 rounded-full border border-dashed border-[#D4AF37] bg-white flex items-center justify-center text-[#D4AF37] text-[9px] font-bold mt-0.5">
+                ?
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[#1A1A1A] text-[10px] font-bold">{c.type}</span>
+                  <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_COLOR[c.severity]}`}>
+                    {c.severity}
+                  </span>
+                  <span className="text-[#555555] text-[9px]">{c.location}</span>
+                </div>
+                {c.description && <p className="text-[#333333] text-[10px] mt-0.5 leading-relaxed">{c.description}</p>}
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => confirmCandidate(i)}
+                  title="Confirm — add to defect list"
+                  className="text-[#16A34A] hover:bg-green-50 rounded p-1"
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => rejectCandidate(i)}
+                  title="Reject"
+                  className="text-[#888888] hover:text-red-600 hover:bg-red-50 rounded p-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {defects.length === 0 && (!candidates || candidates.length === 0) && !showForm && (
         <p className="text-[#555555] text-xs text-center py-2">No defects marked. Click on the image or use Add Defect.</p>
       )}
 

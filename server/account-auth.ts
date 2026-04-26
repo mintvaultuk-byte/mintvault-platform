@@ -317,6 +317,17 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v234-migrate] crop_geometry column skipped:", e.message);
   }
 
+  // ── v235 (Option B): ai_defect_candidates column for Haiku defect pass ────
+  // Populated by scan-ingest's suggestDefectsFromBuffer call. Admin confirms
+  // or rejects each candidate; confirmed ones move into the persisted
+  // `defects` array. Nullable; pre-Option-B certs leave it null.
+  try {
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_defect_candidates JSONB`);
+    console.log("[v235-migrate] certificates.ai_defect_candidates column ensured");
+  } catch (e: any) {
+    console.log("[v235-migrate] ai_defect_candidates column skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`

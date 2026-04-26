@@ -304,6 +304,30 @@ export const certificates = pgTable("certificates", {
   gradingBackHighcontrast:   text("grading_back_highcontrast"),
   gradingBackEdgeenhanced:   text("grading_back_edgeenhanced"),
   gradingBackInverted:       text("grading_back_inverted"),
+  // Grading commentary + scoring metadata. All exist in the live DB but were
+  // missing from the schema — same gap-class as the grading_* columns above.
+  // Without these, raw-SQL writes succeed but Drizzle reads return undefined,
+  // so the values never round-trip on cert load.
+  gradeExplanation:        text("grade_explanation"),
+  gradeStrengthScore:      integer("grade_strength_score"),
+  centeringOuterFront:     jsonb("centering_outer_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
+  centeringOuterBack:      jsonb("centering_outer_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
+  centeringInnerFront:     jsonb("centering_inner_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
+  centeringInnerBack:      jsonb("centering_inner_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
+  centeringMethod:         text("centering_method"),
+  // AI defect-candidate suggestions surfaced by the Haiku scan-time defect
+  // pass. Admin confirms or rejects each candidate; confirmed ones move to
+  // the `defects` array. Distinct column so the candidate list survives
+  // independent of the persisted defects.
+  aiDefectCandidates: jsonb("ai_defect_candidates").$type<Array<{
+    type: string;
+    severity: "minor" | "moderate" | "significant";
+    description: string;
+    location: string;
+    image_side: string;
+    x_percent: number;
+    y_percent: number;
+  }>>(),
 });
 
 export const certificateImages = pgTable("certificate_images", {

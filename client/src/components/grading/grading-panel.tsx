@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, Save, Zap } from "lucide-react";
+import { CheckCircle2, Loader2, Save, Zap, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer from "./image-viewer";
-import DefectAnnotation, { type Defect } from "./defect-annotation";
+import DefectAnnotation, { type Defect, type DefectCandidate } from "./defect-annotation";
 import CenteringInput from "./centering-input";
 import CornerGrading, { calcCornerSubgrade, CornerSelect, type CornerValues } from "./corner-grading";
 import EdgeGrading, { calcEdgeSubgrade, EdgeSelect, type EdgeValues } from "./edge-grading";
@@ -125,6 +125,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [edges, setEdges]     = useState<EdgeValues>(DEFAULT_EDGES);
   const [surface, setSurface] = useState<SurfaceValues>(DEFAULT_SURFACE);
   const [defects, setDefects] = useState<Defect[]>([]);
+  const [defectCandidates, setDefectCandidates] = useState<DefectCandidate[]>([]);
   const [authStatus, setAuthStatus]   = useState<AuthStatus>("genuine");
   const [authNotes, setAuthNotes]     = useState("");
   const [privateNotes, setPrivateNotes]         = useState("");
@@ -139,6 +140,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   const [saving, setSaving]   = useState(false);
   const [approving, setApproving] = useState(false);
+  const [generatingDescription, setGeneratingDescription] = useState(false);
   const [approved, setApproved]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -190,6 +192,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (gradingData.edges)   setEdges(gradingData.edges);
     if (gradingData.surface) setSurface(gradingData.surface);
     if (gradingData.defects && Array.isArray(gradingData.defects)) setDefects(gradingData.defects);
+    if ((gradingData as any).aiDefectCandidates && Array.isArray((gradingData as any).aiDefectCandidates)) {
+      setDefectCandidates((gradingData as any).aiDefectCandidates as DefectCandidate[]);
+    }
     if (gradingData.authStatus) setAuthStatus(gradingData.authStatus);
     if (gradingData.authNotes)  setAuthNotes(gradingData.authNotes);
     if (gradingData.privateNotes)   setPrivateNotes(gradingData.privateNotes);
@@ -215,54 +220,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       setCenteringOverride(Number(gradingData.centeringScore));
     }
 
-    // Fallback hydration from AI analysis JSONB — covers the cold-reload case
-    // where AI ran in a previous session, populated ai_analysis, but the cert
-    // was never saved so DB columns (corners/edges/surface/centering_*_lr) are
-    // still null. handleAiComplete only fires on fresh AI run during this
-    // session, so without this fallback the admin would see empty defaults.
-    // Each branch is gated on the corresponding DB column being absent so we
-    // never overwrite saved data.
-    const ai = (gradingData as any).aiAnalysis?.grading;
-    if (ai) {
-      if (!gradingData.corners && ai.corners) {
-        setCorners({
-          frontTL: ai.corners.front_top_left?.grade     ?? 0,
-          frontTR: ai.corners.front_top_right?.grade    ?? 0,
-          frontBL: ai.corners.front_bottom_left?.grade  ?? 0,
-          frontBR: ai.corners.front_bottom_right?.grade ?? 0,
-          backTL:  ai.corners.back_top_left?.grade      ?? 0,
-          backTR:  ai.corners.back_top_right?.grade     ?? 0,
-          backBL:  ai.corners.back_bottom_left?.grade   ?? 0,
-          backBR:  ai.corners.back_bottom_right?.grade  ?? 0,
-        });
-        if (ai.corners.subgrade > 0 && gradingData.cornersScore == null) setCornersOverride(ai.corners.subgrade);
-      }
-      if (!gradingData.edges && ai.edges) {
-        setEdges({
-          frontTop:    ai.edges.front_top?.grade    ?? 0,
-          frontBottom: ai.edges.front_bottom?.grade ?? 0,
-          frontLeft:   ai.edges.front_left?.grade   ?? 0,
-          frontRight:  ai.edges.front_right?.grade  ?? 0,
-          backTop:     ai.edges.back_top?.grade     ?? 0,
-          backBottom:  ai.edges.back_bottom?.grade  ?? 0,
-          backLeft:    ai.edges.back_left?.grade    ?? 0,
-          backRight:   ai.edges.back_right?.grade   ?? 0,
-        });
-        if (ai.edges.subgrade > 0 && gradingData.edgesScore == null) setEdgesOverride(ai.edges.subgrade);
-      }
-      if (!gradingData.surface && ai.surface) {
-        setSurface(prev => ({
-          ...prev,
-          front: ai.surface.front_grade ?? 0,
-          back:  ai.surface.back_grade  ?? 0,
-        }));
-        if (ai.surface.subgrade > 0 && gradingData.surfaceScore == null) setSurfaceOverride(ai.surface.subgrade);
-      }
-      if (!gradingData.centeringFrontLr && ai.centering?.front_left_right) setFrontLR(ai.centering.front_left_right);
-      if (!gradingData.centeringFrontTb && ai.centering?.front_top_bottom) setFrontTB(ai.centering.front_top_bottom);
-      if (!gradingData.centeringBackLr  && ai.centering?.back_left_right)  setBackLR(ai.centering.back_left_right);
-      if (!gradingData.centeringBackTb  && ai.centering?.back_top_bottom)  setBackTB(ai.centering.back_top_bottom);
-    }
+    // Option B: subgrade hydration reads ONLY from persisted cert columns.
+    // The previous fallback to `ai_analysis.grading` is removed — under
+    // Option B, scan-ingest does not write a `grading` payload at all, so
+    // new scans must initialise empty and wait for the admin's manual
+    // grading. Legacy certs (the 145 TEST cards + the Opus-graded MV1 from
+    // v406 validation) keep working: their persisted columns hold the
+    // graded values. Anything that lived only in ai_analysis JSONB will
+    // now load empty — accepted trade-off per the Option B rework.
   }, [gradingData]);
 
   // AI analysis state
@@ -442,6 +407,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   const sub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
   const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+  // Generate Description gate: every subgrade must have a real value (>0).
+  // Mirrors the server-side 422 check so the button stays disabled until ready.
+  const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
   const label   = getGradeLabel(overall);
   const isBlack = checkBlackLabel(sub, overall);
 
@@ -494,6 +462,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // so keep current send-always behaviour.
     out.defects = defects || [];
 
+    // AI defect candidates — send the current (post confirm/reject) array so
+    // the unconfirmed remainder is persisted. Sending an empty array clears
+    // the column on server side.
+    out.ai_defect_candidates = defectCandidates || [];
+
     return out;
   }
 
@@ -515,6 +488,46 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Option B "Generate Description" — Haiku 4.5 text-only call. Server validates
+   * that all four subgrades are present and writes the result to grade_explanation,
+   * then we mirror it into the form state so the admin can edit before save.
+   */
+  async function generateDescription() {
+    if (subgradesIncomplete) {
+      toast({ title: "Set all four subgrades first", description: "Centering, corners, edges, and surface must each have a value." });
+      return;
+    }
+    setGeneratingDescription(true);
+    try {
+      // Persist current state first so the server's read of the cert reflects
+      // the admin's just-set subgrades + confirmed defects.
+      await fetch(`/api/admin/certificates/${certId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      });
+      const res = await fetch(`/api/admin/certificates/${certId}/generate-description`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (res.status === 422) {
+        toast({ title: "Cannot generate yet", description: data.error || "Set all four subgrades first." });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || "Generation failed");
+      setGradeExplanation(data.description);
+      toast({ title: "Description generated", description: `Cost ≈ £${(data.costEstimate || 0).toFixed(4)}. Edit before saving if needed.` });
+    } catch (e: any) {
+      toast({ title: "Generate failed", description: e.message, variant: "destructive" });
+    } finally {
+      setGeneratingDescription(false);
     }
   }
 
@@ -763,6 +776,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               onChange={setDefects}
               highlightId={highlightDefect}
               onHighlight={setHighlightDefect}
+              candidates={defectCandidates}
+              onCandidatesChange={setDefectCandidates}
             />
           </div>
         </div>
@@ -904,6 +919,22 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               notes={authNotes}
               onChange={(s, n) => { setAuthStatus(s); setAuthNotes(n); }}
             />
+          </div>
+
+          {/* Generate Description (Option B — Haiku writes grade rationale
+              from the admin's manual subgrades + confirmed defects). */}
+          <div>
+            <button
+              type="button"
+              onClick={generateDescription}
+              disabled={generatingDescription || subgradesIncomplete}
+              title={subgradesIncomplete ? "Set all four subgrades first" : "Write a grade rationale paragraph using the current subgrades + confirmed defects"}
+              className="w-full flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37] hover:border-[#D4AF37]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              data-testid="btn-generate-description"
+            >
+              {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {generatingDescription ? "Writing description…" : "Generate Description"}
+            </button>
           </div>
 
           {/* Notes */}
