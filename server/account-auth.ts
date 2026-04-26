@@ -328,6 +328,38 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[v235-migrate] ai_defect_candidates column skipped:", e.message);
   }
 
+  // ── v417 PII redaction audit row — one-shot, idempotent ──────────────────
+  // Records the security-fix deploy in the audit_log so post-launch we can
+  // point ICO / customers at when the public-endpoint PII-leak class was
+  // closed. WHERE NOT EXISTS keeps this idempotent across boot cycles —
+  // audit_log has no unique constraint on entity_id, so we gate manually.
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+      SELECT 'system', 'v417_pii_redaction', 'security_fix', 'mintvaultuk@gmail.com',
+             ${JSON.stringify({
+               summary: "Public-endpoint PII redaction (v417 Phase 2)",
+               fixes: [
+                 "Replaced /api/vault ownership[].owner email-fallback with getOwnerChain + numbered labels",
+                 "Replaced gradedBy / approvedBy with 'MintVault UK' on /api/vault, /api/cert/:id/report, public DGR PDF",
+                 "Gated nfcUid on /api/vault behind viewerIsOwner check",
+                 "Added stripEmailsFromText sanitiser; applied to defect descriptions, gradeExplanation, authNotes on public endpoints",
+               ],
+               risks_closed: {
+                 critical: 1,
+                 medium: 2,
+                 low: 0,
+               },
+               source: "v417-phase-1-audit",
+             })}::jsonb,
+             NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE entity_id = 'v417_pii_redaction')
+    `);
+    console.log("[v417-pii-audit] redaction-deploy audit row ensured");
+  } catch (e: any) {
+    console.log("[v417-pii-audit] audit row skipped:", e.message);
+  }
+
   // Add user_id column to estimate_credits for logged-in users
   // (additive migration — anonymous email-based flow unchanged)
   await db.execute(sql`
