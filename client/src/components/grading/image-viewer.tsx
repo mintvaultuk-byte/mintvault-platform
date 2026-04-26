@@ -50,6 +50,15 @@ interface Props {
   onSideChange?: (side: string) => void;
   onZoomChange?: (zoom: number) => void;
   onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
+  /** Optional controlled side. When provided, the parent owns the side state
+   *  and ImageViewer becomes a controlled component for this prop. Falls back
+   *  to internal state if undefined (preserves backward compat). */
+  side?: Side;
+  /** Hide the FRONT/BACK chip row in the inline (non-fullscreen) tab bar.
+   *  Used when the parent renders its own chip row in a different layout
+   *  position (e.g. above an absolute-positioning anchor wrapper). The
+   *  fullscreen-mode renderTabs is unaffected. */
+  omitSideTabs?: boolean;
 }
 
 const SIDES: Side[] = ["front", "back"];
@@ -91,8 +100,10 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange }: Props) {
-  const [side, setSideRaw] = useState<Side>("front");
+export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange, side: controlledSide, omitSideTabs }: Props) {
+  const [internalSide, setSideRaw] = useState<Side>("front");
+  // Controlled when `side` prop supplied; otherwise falls back to internal state.
+  const side: Side = controlledSide ?? internalSide;
   const [variant, setVariant] = useState<Variant>("original");
   const [showReference, setShowReference] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
@@ -104,7 +115,28 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const [markMode, setMarkModeRaw] = useState(false);
   const [fullscreen, setFullscreenRaw] = useState(false);
 
-  function setSide(s: Side) { setSideRaw(s); onSideChange?.(s); }
+  function setSide(s: Side) {
+    // Only mutate internal state when uncontrolled. Controlled callers
+    // own the state — they must call onSideChange's value back into props.
+    if (controlledSide === undefined) setSideRaw(s);
+    onSideChange?.(s);
+  }
+
+  // Side-effects on side change (zoomReset + clear reference view) need to
+  // fire on EVERY transition, not just clicks of the internal chip row —
+  // otherwise a controlled-side change from the parent's external chips
+  // would leave the zoom/reference state stale. Mirrors what the inline
+  // chip onClick used to do directly.
+  const prevSideRef = useRef<Side>(side);
+  useEffect(() => {
+    if (prevSideRef.current !== side) {
+      prevSideRef.current = side;
+      setShowReference(false);
+      setZoomRaw(1);
+      setPan({ x: 0, y: 0 });
+      onZoomChange?.(1);
+    }
+  }, [side, onZoomChange]);
   function setZoom(z: number | ((prev: number) => number)) {
     setZoomRaw(prev => { const next = typeof z === "function" ? z(prev) : z; onZoomChange?.(next); return next; });
   }
@@ -218,9 +250,16 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const transitionStyle = dragging ? "none" : "transform 0.15s";
 
   // ── Shared tab bar ──────────────────────────────────────────────────────
+  // The chip row (FRONT/BACK + trash) is suppressed when `omitSideTabs` is
+  // true — used by the normal-inline grading-panel layout where the parent
+  // renders a chip row in its own dedicated location above the absolute-
+  // anchor wrapper for TL/T/TR labels. Fullscreen mode forces the chip row
+  // ON regardless (its own self-contained layout has no external chip row).
   function renderTabs() {
+    const showSideTabs = fullscreen || !omitSideTabs;
     return (
       <div className="space-y-1">
+        {showSideTabs && (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {SIDES.map(s => {
             const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
@@ -261,6 +300,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             >Reference</button>
           )}
         </div>
+        )}
         <div className="flex gap-1 overflow-x-auto">
           {VARIANTS.filter(v => {
             // Original is always available (falls back to cropped or original)

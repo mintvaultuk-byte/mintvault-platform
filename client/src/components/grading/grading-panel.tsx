@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, Save, Zap, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer from "./image-viewer";
 import DefectAnnotation, { type Defect, type DefectCandidate } from "./defect-annotation";
@@ -641,6 +641,57 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
         {/* LEFT — Image viewer + defect list */}
         <div className="space-y-4">
+          {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
+              wrapper for TL/T/TR labels. Pulled out of ImageViewer so the
+              wrapper's `top: 0` (anchor for TL/T/TR at top:-28) is the variant
+              tabs row, not the chip row — stops the dropdowns colliding with
+              the chips. ImageViewer is told to omit its own chip row via
+              `omitSideTabs` and to use `viewerSide` as controlled state. */}
+          <div className="px-[60px] mb-2">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {(["front", "back"] as const).map(s => {
+                const count = defects.filter(d => d.image_side === s).length;
+                const hasImage = !!(urls[`${s}_cropped` as keyof typeof urls] || urls[`${s}_original` as keyof typeof urls]);
+                const isActive = viewerSide === s;
+                return (
+                  <div key={s} className="flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setViewerSide(s)}
+                      disabled={!hasImage}
+                      data-testid={`btn-side-${s}`}
+                      className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                        isActive
+                          ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                          : hasImage
+                            ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
+                            : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
+                      }`}
+                    >{s}{count > 0 ? ` (${count})` : ""}</button>
+                    {hasImage && certId && (
+                      <button
+                        type="button"
+                        title={`Delete ${s} image`}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
+                          try {
+                            const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, { method: "DELETE", credentials: "include" });
+                            if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+                            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
+                          } catch {}
+                        }}
+                        className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                      >
+                        <Trash2 size={10} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div style={{ margin: "32px 60px 0" }}>
             <div className="relative" style={{ overflow: "visible" }}>
               <ImageViewer
@@ -649,6 +700,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 onDefectAdded={d => setDefects(prev => [...prev, d])}
                 highlightId={highlightDefect}
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
+                side={viewerSide as "front" | "back"}
+                omitSideTabs
                 centeringFront={frontLR ? {
                   ratioLR: frontLR,
                   ratioTB: frontTB,
