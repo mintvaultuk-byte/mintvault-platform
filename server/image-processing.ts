@@ -838,7 +838,7 @@ export async function reCentreBitmap(
 
 /** Per-side padding as a fraction of min(input width, height). 0.30 ≈ 1.5×
  *  total output dims for a roughly square aspect. Tunable. */
-export const CARD_MAT_PADDING_PCT = 0.30;
+export const CARD_MAT_PADDING_PCT = 0.10;
 
 /**
  * Extend an image with mat-coloured padding on all four sides.
