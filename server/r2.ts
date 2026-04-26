@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let s3Client: S3Client | null = null;
@@ -59,6 +59,25 @@ export async function deleteFromR2(key: string): Promise<void> {
     Bucket: getBucket(),
     Key: key,
   }));
+}
+
+/**
+ * HEAD an R2 object — returns LastModified or null on any error.
+ * Used by the logbook PDF cache stale-check (compare against cert.updated_at).
+ * Failure modes (404, network, no creds) all return null → caller treats as
+ * "no cache" and regenerates, which is the safe default.
+ */
+export async function headR2(key: string): Promise<{ lastModified: Date } | null> {
+  try {
+    const client = getClient();
+    const result = await client.send(new HeadObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    }));
+    return result.LastModified ? { lastModified: result.LastModified } : null;
+  } catch {
+    return null;
+  }
 }
 
 export function r2KeyForImage(certId: string, side: "front" | "back", ext: string): string {
