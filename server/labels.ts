@@ -863,28 +863,26 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
   const qrSize = 187;                        // +25% from original 150 (170→187 with cert ID shrunk to fit)
-  const qrPad  = 5;                          // quiet-zone padding on left & bottom
+  const qrPad  = 0;                          // QR's internal margin:1 (~6px) provides quiet zone — no external pad needed
   const qrY    = I_TOP;                      // flush to top inner border
-  const qrX    = I_RIGHT - qrSize;           // flush to right inner border
-  const qrCenterX = qrX + qrSize / 2;       // 747
+  const qrX    = I_RIGHT - qrSize;           // 645 — flush to right inner border
+  const qrCenterX = qrX + qrSize / 2;       // 738.5
 
-  // White box: top & right flush to inner borders; 5px pad on left & bottom
-  const wbLeft   = qrX - qrPad;             // 657
-  const wbTop    = I_TOP;                   // 15
-  const wbW      = qrSize + qrPad;          // 155
-  const wbH      = qrSize + qrPad;          // 155
-  const wbBottom = wbTop + wbH;             // 170
+  // White box matches QR dimensions exactly (no external pad).
+  const wbLeft   = qrX - qrPad;             // 645
+  const wbTop    = I_TOP;                   // 18
+  const wbW      = qrSize + qrPad;          // 187
+  const wbH      = qrSize + qrPad;          // 187
+  const wbBottom = wbTop + wbH;             // 205
 
   // Cert ID: visually centred between the QR image bottom and the inner
-  // gold border. Note: the white box (wbBottom=210) extends 5px past the
-  // QR for quiet-zone padding, but on a white label that 5px is invisible
-  // (white-on-white with the label background). The visible reference is
-  // the QR image bottom (qrY + qrSize), not wbBottom.
+  // gold border. With qrPad=0, wbBottom == qrY+qrSize == 205, so both
+  // references converge — no white-on-white invisibility caveat needed.
   const certFontH  = 28;
   const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);      // (18 + 187 + 242) / 2 = 223.5 → 224
 
   // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
-  const gfLeft = wbLeft;                    // 657 — alias kept for layout calc
+  const gfLeft = wbLeft;                    // 645 — alias kept for layout calc
 
   const certUrl = getCertUrl(cert.certId);
   const qrBuf   = await generateQRBuffer(certUrl, qrSize);
