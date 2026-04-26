@@ -766,7 +766,7 @@ function SheetPrintingPanel() {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
         throw new Error(error);
       }
-      const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[] };
+      const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[]; mintedFor?: string[] };
 
       // Decode + download two files in one click. Use object URLs so the
       // browser handles the actual filesystem dialog.
@@ -786,9 +786,14 @@ function SheetPrintingPanel() {
       saveBlob(data.pdf, "application/pdf", `mintvault-batch-${data.batchId}.pdf`);
       saveBlob(data.svg, "image/svg+xml", `mintvault-batch-${data.batchId}.svg`);
 
+      const mintedCount = data.mintedFor?.length ?? 0;
+      const cardCount = data.certIds.length;
+      const cardsLabel = `${cardCount} card${cardCount !== 1 ? "s" : ""}`;
       toast({
-        title: "Print batch downloaded",
-        description: `${data.certIds.length} card${data.certIds.length !== 1 ? "s" : ""} — print PDF, then load SVG into CM300 (Direct Cut)`,
+        title: mintedCount > 0
+          ? `Print batch ready — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}`
+          : "Print batch ready",
+        description: `${cardsLabel} — print PDF, then load SVG into CM300 (Direct Cut)`,
       });
     } catch (err: any) {
       toast({ title: "Print batch failed", description: err.message, variant: "destructive" });
