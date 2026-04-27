@@ -450,7 +450,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
   const PANEL_W = 148;                        // right grade panel (≈ 18%, -5.7%)
-  const STRIP_H = 28;                         // v429: 38→28 — frees 10px for the text zone; cert ID still fits via fitFontSize.
+  const STRIP_H = 44;                         // v432: 28→44 — taller strip hosts rarity (left) + cert ID (right) at matched main-line size.
   const panelX  = I_RIGHT - PANEL_W;          // 651
   const stripY  = I_BOTTOM - STRIP_H;         // 179
 
@@ -613,6 +613,26 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2) + 3);
   }
 
+  // v432 — rarity (+ variant) on the LEFT half of the strip, sized to match
+  // the main lines above (TARGET=32, floor 18 for long combinations like
+  // "REVERSE HOLO · UNCOMMON"). Same colour and centring approach as MV5
+  // so they read as a matched pair.
+  {
+    const rarityVariantStrip = [buildVariantLine(cert), cert.rarity ? buildRarityText(cert) : ""]
+      .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
+    if (rarityVariantStrip.trim().length > 0) {
+      const leftHalfCX  = I_LEFT + Math.round((panelX - I_LEFT) / 2);
+      const rarityMaxW  = (panelX - I_LEFT) - 16;   // 8px padding each side
+      const rarityFamily = '"Arial Black", Arial, Helvetica, sans-serif';
+      const rarityFit   = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 32, 18, "700", rarityFamily);
+      ctx.font          = `700 ${rarityFit}px ${rarityFamily}`;
+      ctx.fillStyle     = labelFg;
+      ctx.textAlign     = "center";
+      ctx.textBaseline  = "middle";
+      ctx.fillText(rarityVariantStrip, leftHalfCX, stripY + Math.round(STRIP_H / 2) + 3);
+    }
+  }
+
   // ── 3b. MINTVAULT wordmark lockup — Bodoni Moda 900, gold border box ────────
   // Perfectly centred in the left text panel (I_LEFT → panelX).
   //
@@ -682,29 +702,19 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
   const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 42;   // v431: 48→42 — drops ~12% so descenders don't crowd the bottom-left rarity zone
-  const MIN_SIZE        = 24;
+  const TARGET_SIZE     = 32;   // v432: 42→32 — main lines shrink to roughly match COMMON in the taller strip
+  const MIN_SIZE        = 22;   // v432: 24→22 — slightly more headroom for long names
   const MIN_GAP_FACTOR  = 0.1;
 
-  // v431 — reserve a fixed-height zone at the bottom of the white panel for
-  // the rarity line; main block is constrained to the area above it. Without
-  // this, with N=2 the main block could grow tall enough to collide with
-  // the absolutely-positioned rarity line.
-  const RARITY_ZONE_H      = 24;   // pixels reserved below main block
-  const RARITY_TARGET_SIZE = 22;   // v431: was 16
-  const RARITY_MIN_SIZE    = 14;
-  const mainBlockZoneH     = textZoneH - RARITY_ZONE_H;
+  // v432 — rarity moves OUT of the white panel and into the bottom strip,
+  // so the main block uses the full textZoneH (no RARITY_ZONE_H reservation).
+  const mainBlockZoneH = textZoneH;
 
-  // v430 — main block now has only TWO lines (card name + year+set). Rarity
-  // (and variant) move out and render as a smaller line at the bottom-left
-  // of the white panel. With one fewer line, the existing vertical-fit
-  // guard naturally lets PORYGON / 1999 BASE grow into the freed space.
+  // v432 — main block has TWO lines (card name + year+set). Rarity moved
+  // into the bottom strip alongside the cert ID (rendered earlier).
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   const yearSetText  = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
     .filter(Boolean).join(" ");
-  const variantText  = buildVariantLine(cert);
-  const rarityText   = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
-  const rarityVariantText = [variantText, rarityText].filter(Boolean).join(" · ");
 
   const lines = [cardNameText, yearSetText]
     .filter(s => s.trim().length > 0);
@@ -740,29 +750,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillText(lines[i], textLeft, baseline);
   }
 
-  // v431 — rarity (and variant if present) at bottom-left of the white
-  // panel inside the reserved RARITY_ZONE_H. Bumped target 16→22 for
-  // readability, width clamp 0.45→0.5 so longer rarities like
-  // "REVERSE HOLO · UNCOMMON" fit cleanly. Rendered absolutely; never
-  // collides with the main block since the main block was constrained
-  // to mainBlockZoneH = textZoneH - RARITY_ZONE_H above.
-  if (rarityVariantText.trim().length > 0) {
-    const rarityFitSize = fitFontSize(
-      ctx,
-      rarityVariantText,
-      Math.round(textMaxW * 0.5),
-      RARITY_TARGET_SIZE,
-      RARITY_MIN_SIZE,
-      TXT_WEIGHT,
-      TXT_FAMILY,
-    );
-    ctx.font          = `${TXT_WEIGHT} ${rarityFitSize}px ${TXT_FAMILY}`;
-    ctx.fillStyle     = labelFg;
-    ctx.textAlign     = "left";
-    ctx.textBaseline  = "alphabetic";
-    // 6px above the gold bottom strip for visual margin from the border.
-    ctx.fillText(rarityVariantText, textLeft, stripY - 6);
-  }
+  // v432 — rarity moved into the bottom strip (rendered earlier alongside
+  // the cert ID). Nothing more to draw in the white panel.
 }
 
 /**
