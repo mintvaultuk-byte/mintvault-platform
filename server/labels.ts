@@ -896,7 +896,15 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     const nfcImg  = await loadImage(NFC_ICON_PATH);
     const iconSz  = 165;                                  // rendered square size (px)
     const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
-    const iconY   = Math.round(PX_H / 2 - iconSz / 2);
+    // v436 — vertically centre between the URL baseline (above) and the
+    // tap-text baseline (below) instead of the canvas midpoint. The two
+    // text rows aren't symmetric about PX_H/2, so canvas-midpoint
+    // centring read visibly low. Mirrors the URL/tap-text Y constants
+    // defined in the blocks above.
+    const urlY    = I_TOP + 24;
+    const nfcY    = I_BOTTOM - 31;
+    const visualMidY = (urlY + nfcY) / 2;
+    const iconY   = Math.round(visualMidY - iconSz / 2);
     console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
 
     // PNG is opaque RGB (black icon on white background), no alpha channel —
