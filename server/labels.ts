@@ -682,9 +682,18 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
   const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 48;   // v429: 36→48 to fill the expanded text zone (~33% larger; vertical-fit will land typical 3-line carts around 38-40px)
-  const MIN_SIZE        = 24;   // v429: 18→24 — larger zone supports a higher floor before long names hit the truncation edge
-  const MIN_GAP_FACTOR  = 0.1;  // v429: 0.3→0.1 — tighter minimum gap so vertical-fit lets the font run larger
+  const TARGET_SIZE     = 42;   // v431: 48→42 — drops ~12% so descenders don't crowd the bottom-left rarity zone
+  const MIN_SIZE        = 24;
+  const MIN_GAP_FACTOR  = 0.1;
+
+  // v431 — reserve a fixed-height zone at the bottom of the white panel for
+  // the rarity line; main block is constrained to the area above it. Without
+  // this, with N=2 the main block could grow tall enough to collide with
+  // the absolutely-positioned rarity line.
+  const RARITY_ZONE_H      = 24;   // pixels reserved below main block
+  const RARITY_TARGET_SIZE = 22;   // v431: was 16
+  const RARITY_MIN_SIZE    = 14;
+  const mainBlockZoneH     = textZoneH - RARITY_ZONE_H;
 
   // v430 — main block now has only TWO lines (card name + year+set). Rarity
   // (and variant) move out and render as a smaller line at the bottom-left
@@ -707,23 +716,23 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     if (sz < fitSize) fitSize = sz;
   }
 
-  // Vertical fit (even-distribution model): zone must fit N line heights
-  // plus N+1 minimum gaps. Shrink uniformly if not.
+  // Vertical fit operates on the rarity-reduced main-block zone so
+  // descenders never extend into the rarity line below.
   const requiredHeight = (lines.length * fitSize) + ((lines.length + 1) * fitSize * MIN_GAP_FACTOR);
-  if (requiredHeight > textZoneH) {
-    const vScale = textZoneH / requiredHeight;
+  if (requiredHeight > mainBlockZoneH) {
+    const vScale = mainBlockZoneH / requiredHeight;
     fitSize = Math.max(MIN_SIZE, Math.floor(fitSize * vScale));
   }
 
   // Even distribution: gaps above first line, between lines, and below
-  // last line are all equal.
+  // last line are all equal — within the rarity-reduced zone.
   ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
   ctx.fillStyle     = labelFg;
   ctx.textAlign     = "left";
   ctx.textBaseline  = "alphabetic";
 
   const totalLineHeight = lines.length * fitSize;
-  const totalGapSpace   = textZoneH - totalLineHeight;
+  const totalGapSpace   = mainBlockZoneH - totalLineHeight;
   const gapSize         = totalGapSpace / (lines.length + 1);
 
   for (let i = 0; i < lines.length; i++) {
@@ -731,19 +740,19 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillText(lines[i], textLeft, baseline);
   }
 
-  // v430 — rarity (and variant if present) as a small line at bottom-left
-  // of the white panel, just above the gold strip. Width-clamped to the
-  // left half of the available area so it doesn't crowd the right grade
-  // panel. Rendered absolutely; doesn't interact with the block math above.
+  // v431 — rarity (and variant if present) at bottom-left of the white
+  // panel inside the reserved RARITY_ZONE_H. Bumped target 16→22 for
+  // readability, width clamp 0.45→0.5 so longer rarities like
+  // "REVERSE HOLO · UNCOMMON" fit cleanly. Rendered absolutely; never
+  // collides with the main block since the main block was constrained
+  // to mainBlockZoneH = textZoneH - RARITY_ZONE_H above.
   if (rarityVariantText.trim().length > 0) {
-    const RARITY_TARGET = 16;
-    const RARITY_FLOOR  = 12;
     const rarityFitSize = fitFontSize(
       ctx,
       rarityVariantText,
-      Math.round(textMaxW * 0.45),
-      RARITY_TARGET,
-      RARITY_FLOOR,
+      Math.round(textMaxW * 0.5),
+      RARITY_TARGET_SIZE,
+      RARITY_MIN_SIZE,
       TXT_WEIGHT,
       TXT_FAMILY,
     );
@@ -751,9 +760,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillStyle     = labelFg;
     ctx.textAlign     = "left";
     ctx.textBaseline  = "alphabetic";
-    // 4px above the bottom strip to maintain visual margin from the gold
-    // border underneath.
-    ctx.fillText(rarityVariantText, textLeft, stripY - 4);
+    // 6px above the gold bottom strip for visual margin from the border.
+    ctx.fillText(rarityVariantText, textLeft, stripY - 6);
   }
 }
 
