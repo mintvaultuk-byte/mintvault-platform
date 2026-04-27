@@ -613,23 +613,22 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2) + 3);
   }
 
-  // v432 — rarity (+ variant) on the LEFT half of the strip, sized to match
-  // the main lines above (TARGET=32, floor 18 for long combinations like
-  // "REVERSE HOLO · UNCOMMON"). Same colour and centring approach as MV5
-  // so they read as a matched pair.
+  // v433 — rarity left-aligned at the same X as the main text block above
+  // (textLeft), and sized smaller than the main lines so the visual
+  // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
+  // left-to-right and top-to-bottom.
   {
     const rarityVariantStrip = [buildVariantLine(cert), cert.rarity ? buildRarityText(cert) : ""]
       .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
-      const leftHalfCX  = I_LEFT + Math.round((panelX - I_LEFT) / 2);
-      const rarityMaxW  = (panelX - I_LEFT) - 16;   // 8px padding each side
+      const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
       const rarityFamily = '"Arial Black", Arial, Helvetica, sans-serif';
-      const rarityFit   = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 32, 18, "700", rarityFamily);
-      ctx.font          = `700 ${rarityFit}px ${rarityFamily}`;
-      ctx.fillStyle     = labelFg;
-      ctx.textAlign     = "center";
-      ctx.textBaseline  = "middle";
-      ctx.fillText(rarityVariantStrip, leftHalfCX, stripY + Math.round(STRIP_H / 2) + 3);
+      const rarityFit    = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 22, 14, "700", rarityFamily);
+      ctx.font           = `700 ${rarityFit}px ${rarityFamily}`;
+      ctx.fillStyle      = labelFg;
+      ctx.textAlign      = "left";
+      ctx.textBaseline   = "middle";
+      ctx.fillText(rarityVariantStrip, textLeft, stripY + Math.round(STRIP_H / 2) + 3);
     }
   }
 
@@ -702,8 +701,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
   const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 32;   // v432: 42→32 — main lines shrink to roughly match COMMON in the taller strip
-  const MIN_SIZE        = 22;   // v432: 24→22 — slightly more headroom for long names
+  const TARGET_SIZE     = 40;   // v433: 32→40 — main lines bump back up so they're clearly bigger than rarity below
+  const MIN_SIZE        = 24;   // v433: 22→24 — raised floor preserves hierarchy on long-name shrinks
   const MIN_GAP_FACTOR  = 0.1;
 
   // v432 — rarity moves OUT of the white panel and into the bottom strip,
