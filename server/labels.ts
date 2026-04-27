@@ -625,7 +625,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MV_HDR_PAD   = 21;                           // top padding from content area (was 8 — +13 for breathing room from gold border)
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
-  const MV_BELOW_GAP = 10;                           // gap below lockup before card text
+  const MV_BELOW_GAP = 4;                            // v426: 10→4 to reclaim vertical room for card name (PSA-style hero scale)
   const MV_LS        = 2;                            // letter-spacing px
   const MV_TEXT      = "MINTVAULT";
 
@@ -673,19 +673,25 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── 4. LEFT PANEL TEXT ────────────────────────────────────────────────────
   // Card text vertically centred in zone below MINTVAULT header.
+  // v426 — MV_BELOW_GAP shrunk 10→4 and TOP_PAD ratio 12%→4% to reclaim
+  // ~13px of vertical headroom. Combined with smaller secondary base sizes
+  // (below) this lets the card name actually render at its full 48px hero
+  // size on standard 3-line carts (NAME / YEAR+SET / RARITY) instead of
+  // being uniformly compressed to ~16-20px by the overflow guard.
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
   const textZoneH = contentB - textZoneT;
 
-  // Top padding — push first line down from the MintVault header band.
-  // Mild (12%) so the SZ_NM bump survives auto-shrink on 3-line cards.
-  const TOP_PAD       = Math.round(textZoneH * 0.12);
+  const TOP_PAD       = Math.round(textZoneH * 0.04);
   const adjTextZoneT  = textZoneT + TOP_PAD;
   const adjTextZoneH  = textZoneH - TOP_PAD;
 
   // ── Base font sizes ───────────────────────────────────────────────────────
+  // v426 — secondary line sizes reduced (34→22 for year+set, 34→18 for
+  // variant/rarity) so the card name reads as the dominant "hero" element
+  // PSA-style instead of competing visually with the supporting lines.
   const SZ_NM  = 48;   // Line 1: Card Name — hero, 900 weight
-  const SZ_YS  = 34;   // Line 2: Year + Set
-  const SZ_VAR = 34;   // Line 3: Variant (and Line 4: Rarity reuse this size)
+  const SZ_YS  = 22;   // Line 2: Year + Set
+  const SZ_VAR = 18;   // Line 3: Variant (and Line 4: Rarity reuse this size)
   const LG     = 2;    // intra-block line gap
 
   // Inter-block gaps — computed dynamically below to distribute lines
@@ -747,16 +753,18 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   };
 
   // Overflow guard: if even the tightest possible stack (lines + minGap*count)
-  // exceeds zone, shrink fonts proportionally. Floor is 16px so headlines
-  // remain legible even with all 4 lines + a 2-line wrapped name.
-  const maxStack = adjTextZoneH * 0.94;
+  // exceeds zone, shrink fonts proportionally. v426 — per-line floors so
+  // card name stays hero-sized (≥28) while supporting lines floor at the
+  // PSA-comparable minimums (16/14/14). maxStack ratio bumped 0.94→0.98 to
+  // give the card name extra room before triggering the shrink.
+  const maxStack = adjTextZoneH * 0.98;
   const tightestStack = () => totalLineHeights() + MIN_GAP * activeGapCount();
   if (tightestStack() > maxStack) {
     const s = maxStack / tightestStack();
-    nmSzR  = Math.max(16, Math.round(nmSzR  * s));
+    nmSzR  = Math.max(28, Math.round(nmSzR  * s));
     ysSzR  = Math.max(16, Math.round(ysSzR  * s));
-    varSzR = Math.max(16, Math.round(varSzR * s));
-    rarSzR = Math.max(16, Math.round(rarSzR * s));
+    varSzR = Math.max(14, Math.round(varSzR * s));
+    rarSzR = Math.max(14, Math.round(rarSzR * s));
   }
 
   // Distribute remaining vertical space evenly across active gaps.
