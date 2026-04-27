@@ -680,11 +680,11 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
   const textZoneH = contentB - textZoneT;
 
-  const TXT_FAMILY  = '"Arial Black", Arial, Helvetica, sans-serif';
-  const TXT_WEIGHT  = "700";
-  const TARGET_SIZE = 32;   // GEODUDE-comfortable target — tune to taste post-deploy
-  const MIN_SIZE    = 18;   // hard floor; below this, very long names overflow horizontally
-  const LINE_LEADING = 1.25;
+  const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
+  const TXT_WEIGHT      = "700";
+  const TARGET_SIZE     = 36;   // v428 — bumped 32→36 (~12.5% larger per Cornelius review)
+  const MIN_SIZE        = 18;   // hard floor; below this, very long names overflow horizontally
+  const MIN_GAP_FACTOR  = 0.3;  // gap floor as a fraction of font size — keeps gaps from collapsing on tight zones
 
   // Build the three logical lines — variant + rarity collapse onto one
   // line so the block is always 3 max (or fewer if rarity/variant absent).
@@ -705,27 +705,29 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     if (sz < fitSize) fitSize = sz;
   }
 
-  // Vertical fit: shrink uniformly if the resulting stack overflows the
-  // zone. Floors at MIN_SIZE — better to clip horizontally than to render
-  // the block at an unreadably tiny size.
-  const stackHeightAt = (sz: number) => lines.length * sz * LINE_LEADING;
-  if (stackHeightAt(fitSize) > textZoneH) {
-    const vScale = textZoneH / stackHeightAt(fitSize);
+  // v428 — vertical fit using the new even-distribution model: zone must
+  // fit N line heights plus N+1 minimum gaps (one above the first line,
+  // one below the last, plus the gaps between). Shrink uniformly if not.
+  const requiredHeight = (lines.length * fitSize) + ((lines.length + 1) * fitSize * MIN_GAP_FACTOR);
+  if (requiredHeight > textZoneH) {
+    const vScale = textZoneH / requiredHeight;
     fitSize = Math.max(MIN_SIZE, Math.floor(fitSize * vScale));
   }
 
-  // Render every line with identical size/weight/colour/spacing, block
-  // vertically centred inside the text zone.
+  // v428 — even distribution: compute gap so that whitespace above line 1,
+  // between each pair of lines, and below the last line are all equal.
+  // With N lines we have N+1 equal gaps separating N line slots.
   ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
   ctx.fillStyle     = labelFg;
   ctx.textAlign     = "left";
   ctx.textBaseline  = "alphabetic";
 
-  const finalLineHeight = fitSize * LINE_LEADING;
-  const blockHeight = lines.length * finalLineHeight;
-  const blockTop = textZoneT + (textZoneH - blockHeight) / 2;
+  const totalLineHeight = lines.length * fitSize;
+  const totalGapSpace   = textZoneH - totalLineHeight;
+  const gapSize         = totalGapSpace / (lines.length + 1);
+
   for (let i = 0; i < lines.length; i++) {
-    const baseline = blockTop + fitSize + i * finalLineHeight;
+    const baseline = textZoneT + gapSize * (i + 1) + fitSize * (i + 1);
     ctx.fillText(lines[i], textLeft, baseline);
   }
 }
