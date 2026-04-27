@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Shield, Mail, CheckCircle, AlertCircle, Loader2, Key } from "lucide-react";
+import { Shield, Mail, CheckCircle, AlertCircle, Loader2, Key, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,15 @@ export default function ClaimPage() {
   const [fullName, setFullName] = useState("");
   const [declaredNew, setDeclaredNew] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [result, setResult] = useState<{ type: "success" | "error"; message: string; showBuyerInit?: boolean } | null>(null);
+  const [transferFlowLive, setTransferFlowLive] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/config/public-flags")
+      .then(r => r.json())
+      .then(d => setTransferFlowLive(!!d?.transferFlowLive))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -49,11 +57,16 @@ export default function ClaimPage() {
       setResult({ type: "success", message: data.message });
     } catch (err: any) {
       let msg = "An error occurred. Please try again.";
+      let code: string | undefined;
       try {
         const body = await err.json?.();
         if (body?.error) msg = body.error;
+        if (body?.code) code = body.code;
       } catch {}
-      setResult({ type: "error", message: msg });
+      // v435 — when the cert is already claimed, offer the buyer-init path
+      // instead of leaving the user with a dead-end error.
+      const showBuyerInit = code === "ALREADY_CLAIMED" && transferFlowLive;
+      setResult({ type: "error", message: msg, showBuyerInit });
     } finally {
       setLoading(false);
     }
@@ -83,9 +96,20 @@ export default function ClaimPage() {
             ) : (
               <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
             )}
-            <p className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`} data-testid="text-claim-result">
-              {result.message}
-            </p>
+            <div className="flex-1">
+              <p className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`} data-testid="text-claim-result">
+                {result.message}
+              </p>
+              {result.showBuyerInit && (
+                <a
+                  href={`/transfer/claim-by-code${certId ? `?certId=${encodeURIComponent(certId)}` : ""}`}
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#D4AF37] hover:underline"
+                  data-testid="link-request-transfer"
+                >
+                  Request transfer instead <ArrowRight size={14} />
+                </a>
+              )}
+            </div>
           </div>
         )}
 

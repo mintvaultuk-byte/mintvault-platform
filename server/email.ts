@@ -632,6 +632,124 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
   }
 }
 
+/**
+ * v435 — Buyer-initiated transfer: notifies the current owner that a new
+ * claimant has used the printed claim code to start a transfer. Owner has
+ * 14 days to dispute or confirm. Default psychological framing favours
+ * DISPUTE (safer action) — the confirm link is secondary.
+ *
+ * If the owner takes no action within 14 days the transfer expires and
+ * the original ownership is preserved (silence ≠ consent for buyer-init,
+ * unlike the seller-init dispute window).
+ */
+export async function sendTransferV2OwnerInvitedByBuyer(data: {
+  ownerEmail: string;
+  certId: string;
+  maskedClaimantEmail: string;       // e.g. "n***@example.com"
+  ownerExpiresAt: Date;              // 14-day deadline
+  disputeUrl: string;
+  confirmUrl: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED v2 buyer-init owner email to ${data.ownerEmail} (no Resend client)`);
+    return;
+  }
+
+  const deadlineIso = data.ownerExpiresAt.toISOString();
+  const deadlineHuman = data.ownerExpiresAt.toUTCString();
+
+  const extraRows = `
+<span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">New Claimant</span>
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${data.maskedClaimantEmail}</span>
+<span style="display:block;color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-top:10px;font-family:'Courier New',Courier,monospace;">Respond By</span>
+<span style="display:block;color:rgba(255,255,255,0.65);font-size:13px;margin-top:3px;">${deadlineHuman} (${deadlineIso})</span>`;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">Someone has requested to transfer keepership of the certificate below to themselves, using the claim code from your physical claim insert.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;"><strong style="color:rgba(255,255,255,0.65);">If you did NOT sell or give away this card, dispute this transfer immediately.</strong> If in doubt — dispute. You can always start a fresh transfer later if you change your mind.</p>
+${certBlock(data.certId, extraRows)}
+${ctaButton(data.disputeUrl, "Dispute this transfer")}
+<p style="color:rgba(255,255,255,0.55);font-size:12px;line-height:1.6;margin:14px 0 6px;text-align:center;">Only if you DID sell or give this card to the new claimant:</p>
+<p style="text-align:center;margin:0 0 18px;"><a href="${data.confirmUrl}" style="color:rgba(255,255,255,0.55);font-size:12px;text-decoration:underline;">Confirm transfer</a></p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">If you take no action by <strong style="color:rgba(255,255,255,0.45);">${deadlineHuman}</strong>, this transfer will <strong style="color:rgba(255,255,255,0.45);">expire</strong> and you will remain the Registered Keeper. Silence does not transfer the certificate.</p>
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:0 0 6px;">If your claim insert was lost or stolen, dispute this transfer and contact <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong>.</p>
+<p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:8px 0 0;word-break:break-all;font-family:'Courier New',Courier,monospace;">DISPUTE: ${data.disputeUrl}<br/>CONFIRM: ${data.confirmUrl}</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.ownerEmail,
+      subject: `Transfer requested for your MintVault certificate ${data.certId}`,
+      html: ownershipBaseHtml("Transfer Requested — Action Required", body),
+    });
+    console.log(`[email] v2 buyer-init owner email sent to ${data.ownerEmail} for ${data.certId}`);
+  } catch (err: any) {
+    console.error(`[email] Failed v2 buyer-init owner email to ${data.ownerEmail}:`, err.message);
+  }
+}
+
+/**
+ * v435 — Notifies the new claimant that the owner has confirmed their
+ * buyer-initiated transfer. Transfer now enters the standard 14-day
+ * dispute window before auto-finalising.
+ */
+export async function sendTransferV2BuyerInitOwnerConfirmed(data: {
+  claimantEmail: string;
+  certId: string;
+  disputeDeadline: Date;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const deadlineHuman = data.disputeDeadline.toUTCString();
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The current Registered Keeper has confirmed the transfer of the certificate below to you.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;">A 14-day dispute window is now active. If neither party disputes, the transfer will finalise automatically on <strong style="color:rgba(255,255,255,0.55);">${deadlineHuman}</strong>.</p>
+${certBlock(data.certId)}`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.claimantEmail,
+      subject: `MintVault — Transfer of ${data.certId} confirmed by previous keeper`,
+      html: ownershipBaseHtml("Owner confirmed your transfer — dispute window started", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 buyer-init owner-confirmed email to ${data.claimantEmail}:`, err.message);
+  }
+}
+
+/**
+ * v435 — Notifies the new claimant that the owner has rejected their
+ * buyer-initiated transfer. Cert ownership reverts to original keeper.
+ */
+export async function sendTransferV2BuyerInitOwnerRejected(data: {
+  claimantEmail: string;
+  certId: string;
+  reason?: string;
+}): Promise<void> {
+  const resend = getResend();
+  if (!resend) return;
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">The current Registered Keeper has disputed the transfer of the certificate below.</p>
+<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:0 0 4px;">No transfer of ownership has occurred. The original keeper remains on record.</p>
+${certBlock(data.certId)}
+${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-height:1.6;margin:8px 0 4px;">Reason: ${data.reason}</p>` : ""}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">If you believe you are the rightful owner, contact <strong style="color:rgba(255,255,255,0.45);">support@mintvaultuk.com</strong>.</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(), replyTo: REPLY_TO, to: data.claimantEmail,
+      subject: `MintVault — Transfer of ${data.certId} disputed`,
+      html: ownershipBaseHtml("Transfer disputed by current keeper", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Failed v2 buyer-init owner-rejected email to ${data.claimantEmail}:`, err.message);
+  }
+}
+
 export async function sendTransferV2IncomingConfirmation(data: {
   toEmail: string; fromEmail: string; certId: string; confirmUrl: string; previousOwnersCount: number;
 }): Promise<void> {

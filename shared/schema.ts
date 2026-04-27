@@ -562,15 +562,16 @@ export const transferVerifications = pgTable("transfer_verifications", {
 
 export type TransferVerification = typeof transferVerifications.$inferSelect;
 
-// v2 transfer statuses — DVLA-style flow
+// v2 transfer statuses — DVLA-style flow + v435 buyer-initiated entry point
 export const TRANSFER_V2_STATUSES = [
-  "pending_owner",        // Outgoing keeper has initiated, awaiting their email confirmation
-  "pending_incoming",     // Outgoing confirmed, awaiting incoming keeper confirmation + ref number
-  "pending_dispute",      // Both confirmed, in 14-day dispute window
-  "completed",            // Dispute window passed or skipped, transfer finalised
-  "disputed",             // One party raised a dispute during the window
-  "cancelled",            // Cancelled by outgoing keeper or expired
-  "expired",              // Token expired without action
+  "pending_owner",                    // Seller-init: outgoing keeper has initiated, awaiting their email confirmation
+  "pending_incoming",                 // Seller-init: outgoing confirmed, awaiting incoming keeper confirmation + ref number
+  "pending_owner_invited_by_buyer",   // v435 buyer-init: incoming keeper has claimed via claim code; owner has 14 days to confirm or dispute
+  "pending_dispute",                  // Both parties confirmed (or buyer-init owner confirmed); 14-day dispute window
+  "completed",                        // Dispute window passed or skipped, transfer finalised
+  "disputed",                         // One party raised a dispute during the window (or buyer-init owner rejected)
+  "cancelled",                        // Cancelled by outgoing keeper
+  "expired",                          // Token/owner-deadline expired without action — buyer-init expiry preserves original ownership (no auto-complete on owner silence)
 ] as const;
 export type TransferV2Status = typeof TRANSFER_V2_STATUSES[number];
 
