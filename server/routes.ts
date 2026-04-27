@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
@@ -16,7 +16,7 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyF
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendTransferV2OwnerInvitedByBuyer, sendTransferV2BuyerInitOwnerConfirmed, sendTransferV2BuyerInitOwnerRejected, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
 import { getOwnerChain } from "./ownership-service";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
@@ -739,7 +739,10 @@ export async function registerRoutes(
   // ── Public flags endpoint ──────────────────────────────────────────────────
   app.get("/api/config/public-flags", (_req, res) => {
     const { FEATURE_FLAGS } = require("./config/feature-flags");
-    res.json({ legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE });
+    res.json({
+      legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
+      transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
+    });
   });
 
   // ── v2 Homepage Stats ──────────────────────────────────────────────────────
@@ -4596,7 +4599,19 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
       if (cert.ownershipStatus === "claimed") {
-        return res.status(400).json({ error: "This certificate has already been registered to an owner. To transfer ownership, please use the Transfer Ownership page." });
+        // v435 — surface a machine-readable code so the client can offer
+        // the buyer-init transfer path when TRANSFER_FLOW_LIVE is true.
+        return res.status(400).json({
+          error: "This certificate has already been registered to an owner. If you are the new owner with the printed claim insert, you can request a transfer.",
+          code: "ALREADY_CLAIMED",
+          buyerInitPath: "/transfer/claim-by-code",
+        });
+      }
+      if (cert.ownershipStatus === "transfer_pending") {
+        return res.status(400).json({
+          error: "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
+          code: "TRANSFER_IN_PROGRESS",
+        });
       }
 
       // ── SECOND FACTOR: validate claim code ──────────────────────────────────
@@ -4775,6 +4790,17 @@ export async function registerRoutes(
   });
 
   // ── V2 TRANSFER FLOW (DVLA-style: ref number + 14-day dispute window) ────
+  // v435 — public transfer endpoints are gated by TRANSFER_FLOW_LIVE. When
+  // false (default), they return 503. Admin endpoints are NOT gated so we
+  // can inspect/resolve regardless of the public switch.
+  const requireTransferFlowLive = (_req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    if (!FEATURE_FLAGS.TRANSFER_FLOW_LIVE) {
+      return res.status(503).json({ error: "Transfer flow not yet available — coming soon." });
+    }
+    next();
+  };
+
   // Rate limiter: max 5 attempts per IP per 15 minutes (shared concept, separate instance)
   const transferV2RateLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -4794,7 +4820,7 @@ export async function registerRoutes(
   });
 
   // Step 1: outgoing keeper initiates transfer
-  app.post("/api/v2/transfers/initiate", transferV2RateLimit, async (req, res) => {
+  app.post("/api/v2/transfers/initiate", requireTransferFlowLive, transferV2RateLimit, async (req, res) => {
     try {
       const { certId, fromEmail, toEmail, newOwnerName } = req.body;
       if (!certId || !fromEmail || !toEmail) {
@@ -4874,7 +4900,7 @@ export async function registerRoutes(
   });
 
   // Step 2: outgoing keeper clicks email link → generates incoming keeper token
-  app.get("/api/v2/transfers/outgoing-confirm", async (req, res) => {
+  app.get("/api/v2/transfers/outgoing-confirm", requireTransferFlowLive, async (req, res) => {
     try {
       const token = req.query.token as string;
       if (!token) return res.redirect("/transfer?error=missing_token&v=2");
@@ -4900,6 +4926,11 @@ export async function registerRoutes(
         previousOwnersCount,
       });
 
+      // v435 — audit log the outgoing-keeper confirmation step transition.
+      await storage.writeAuditLog("transfer", result.certId || "", "transfer_v2.outgoing_confirmed", null, {
+        fromEmail: result.fromEmail, toEmail: result.toEmail,
+      });
+
       return res.redirect(`/transfer?step=outgoing_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
     } catch (err: any) {
       console.error("[transfer-v2] Error outgoing confirm:", err);
@@ -4908,7 +4939,7 @@ export async function registerRoutes(
   });
 
   // Step 3: incoming keeper submits ref number + token → enters dispute window
-  app.post("/api/v2/transfers/incoming-confirm", transferV2RateLimit, refNumberRateLimit, async (req, res) => {
+  app.post("/api/v2/transfers/incoming-confirm", requireTransferFlowLive, transferV2RateLimit, refNumberRateLimit, async (req, res) => {
     try {
       const { token, referenceNumber } = req.body;
       if (!token || !referenceNumber) {
@@ -4964,7 +4995,7 @@ export async function registerRoutes(
   });
 
   // Status check for a v2 transfer
-  app.get("/api/v2/transfers/status/:certId", async (req, res) => {
+  app.get("/api/v2/transfers/status/:certId", requireTransferFlowLive, async (req, res) => {
     try {
       const normalizedId = normalizeCertId(String(req.params.certId));
       const transfer = await storage.getTransferV2ByCertId(normalizedId);
@@ -4991,7 +5022,7 @@ export async function registerRoutes(
   });
 
   // Dispute a v2 transfer during the 14-day window
-  app.post("/api/v2/transfers/dispute", transferActionRateLimit, async (req, res) => {
+  app.post("/api/v2/transfers/dispute", requireTransferFlowLive, transferActionRateLimit, async (req, res) => {
     try {
       const { certId, email, reason } = req.body;
       if (!certId || !email || !reason) {
@@ -5039,7 +5070,7 @@ export async function registerRoutes(
   });
 
   // Cancel a v2 transfer (outgoing keeper only, before completion)
-  app.post("/api/v2/transfers/cancel", transferActionRateLimit, async (req, res) => {
+  app.post("/api/v2/transfers/cancel", requireTransferFlowLive, transferActionRateLimit, async (req, res) => {
     try {
       const { certId, email } = req.body;
       if (!certId || !email) {
@@ -5076,6 +5107,213 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[transfer-v2] Error cancelling:", err);
       return res.status(500).json({ error: "An error occurred." });
+    }
+  });
+
+  // v435 — masks an email for audit log use: alice@example.com → a***@example.com
+  const maskEmailForAudit = (email: string): string => {
+    const trimmed = email.trim().toLowerCase();
+    const at = trimmed.indexOf("@");
+    if (at <= 0) return "***";
+    const head = trimmed.slice(0, at);
+    const domain = trimmed.slice(at);
+    if (head.length <= 1) return `${head}***${domain}`;
+    return `${head.charAt(0)}***${domain}`;
+  };
+
+  // ── V435 BUYER-INITIATED TRANSFER (eBay buyer with claim insert) ────────
+  // The new claimant types cert ID + claim code from the printed insert
+  // into /transfer/claim-by-code; we verify the claim_code_hash, lock the
+  // cert into transfer_pending, and notify the current owner with 14 days
+  // to either CONFIRM (transfer proceeds via the standard pending_dispute
+  // window) or DISPUTE (transfer rejected, original ownership preserved).
+  // Silence is treated as REJECTION (sweep auto-expires) — explicit
+  // confirmation is required for ownership to change.
+
+  app.post("/api/v2/transfers/claim-by-code", requireTransferFlowLive, transferV2RateLimit, claimRateLimit, async (req, res) => {
+    try {
+      const { certId, claimCode, claimantEmail, claimantName } = req.body as {
+        certId?: unknown; claimCode?: unknown; claimantEmail?: unknown; claimantName?: unknown;
+      };
+      if (typeof certId !== "string" || typeof claimCode !== "string" || typeof claimantEmail !== "string") {
+        return res.status(400).json({ error: "Certificate number, claim code, and your email are all required." });
+      }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(claimantEmail.trim())) {
+        return res.status(400).json({ error: "Please provide a valid email address." });
+      }
+
+      const normalizedCertId = normalizeCertId(certId.trim());
+      const cert = await storage.getCertificateByCertId(normalizedCertId);
+      if (!cert) {
+        return res.status(404).json({ error: "Certificate not found." });
+      }
+
+      // Path discrimination — buyer-init only handles already-claimed certs.
+      // Unclaimed → redirect to the existing first-claim flow.
+      if (cert.ownershipStatus === "unclaimed") {
+        return res.status(409).json({
+          error: "This certificate has not yet been claimed. Use the first-time claim flow.",
+          redirect: "/api/claim/request",
+        });
+      }
+      if (cert.ownershipStatus === "transfer_pending") {
+        // Race-condition guard: another transfer is already in progress.
+        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
+          reason: "Another transfer in progress",
+          claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+        });
+        return res.status(409).json({ error: "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved." });
+      }
+      if (cert.ownershipStatus !== "claimed") {
+        return res.status(400).json({ error: "This certificate is not in a state that supports transfer." });
+      }
+
+      // Validate the claim code (constant-time hash compare at DB layer)
+      const validation = await storage.validateClaimCodeForTransfer(normalizedCertId, claimCode.trim());
+      if (!validation.valid || !validation.currentOwnerEmail || !validation.currentOwnerUserId) {
+        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_bad_code", null, {
+          claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+        });
+        return res.status(401).json({ error: "Invalid certificate number or claim code." });
+      }
+
+      // Self-transfer guard
+      if (claimantEmail.toLowerCase().trim() === validation.currentOwnerEmail) {
+        return res.status(400).json({ error: "You're already the registered keeper of this certificate." });
+      }
+
+      // Final race check — if a transfer was inserted between our status read
+      // and now, getTransferV2ByCertId returns it and we reject.
+      const existing = await storage.getTransferV2ByCertId(normalizedCertId);
+      if (existing) {
+        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
+          reason: "Active transfer detected on second check",
+          claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+          existingTransferId: existing.id,
+        });
+        return res.status(409).json({ error: "A transfer is already in progress for this certificate." });
+      }
+
+      const { ownerToken, transferId } = await storage.createTransferV2BuyerInit({
+        certId: normalizedCertId,
+        claimantEmail: claimantEmail.trim(),
+        claimantName: typeof claimantName === "string" ? claimantName.trim() : undefined,
+        currentOwnerEmail: validation.currentOwnerEmail,
+        currentOwnerUserId: validation.currentOwnerUserId,
+      });
+
+      const baseUrl = APP_BASE_URL;
+      const disputeUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-dispute?token=${ownerToken}`;
+      const confirmUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-confirm?token=${ownerToken}`;
+      const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+      await sendTransferV2OwnerInvitedByBuyer({
+        ownerEmail: validation.currentOwnerEmail,
+        certId: normalizedCertId,
+        maskedClaimantEmail: maskEmailForAudit(claimantEmail.trim()),
+        ownerExpiresAt,
+        disputeUrl,
+        confirmUrl,
+      });
+
+      await storage.writeAuditLog("transfer", String(transferId), "transfer_v2.buyer_init_initiated", null, {
+        certId: normalizedCertId,
+        claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+        currentOwnerEmailMasked: maskEmailForAudit(validation.currentOwnerEmail),
+        ownerExpiresAt: ownerExpiresAt.toISOString(),
+      });
+
+      return res.json({
+        success: true,
+        message: "Transfer requested. The current keeper has been notified and has 14 days to confirm or dispute.",
+        transferId,
+      });
+    } catch (err: any) {
+      console.error("[transfer-v2-buyer-init] Error:", err);
+      return res.status(500).json({ error: "An error occurred. Please try again." });
+    }
+  });
+
+  // Owner clicks CONFIRM link in buyer-init notification email
+  app.get("/api/v2/transfers/buyer-init/owner-confirm", requireTransferFlowLive, async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token&v=2&path=buyer-init");
+
+      const result = await storage.confirmBuyerInitTransfer(token);
+      if (!result.success) {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2&path=buyer-init`);
+      }
+
+      // Notify the buyer that the owner confirmed and the dispute window has started.
+      try {
+        await sendTransferV2BuyerInitOwnerConfirmed({
+          claimantEmail: result.claimantEmail!,
+          certId: result.certId!,
+          disputeDeadline: result.disputeDeadline!,
+        });
+        // Also send the standard dispute-window-started email to both parties
+        // so they get the same dispute UX as the seller-init flow.
+        await sendTransferV2DisputeWindowStarted({
+          email: result.ownerEmail!,
+          certId: result.certId!,
+          role: "outgoing",
+          disputeDeadline: result.disputeDeadline!,
+        });
+        await sendTransferV2DisputeWindowStarted({
+          email: result.claimantEmail!,
+          certId: result.certId!,
+          role: "incoming",
+          disputeDeadline: result.disputeDeadline!,
+        });
+      } catch (emailErr: any) {
+        console.error("[transfer-v2-buyer-init] confirm emails failed (non-fatal):", emailErr.message);
+      }
+
+      await storage.writeAuditLog("transfer", String(result.transferId), "transfer_v2.buyer_init_owner_confirmed", null, {
+        certId: result.certId,
+        disputeDeadline: result.disputeDeadline?.toISOString(),
+      });
+
+      return res.redirect(`/transfer?step=buyer_init_owner_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+    } catch (err: any) {
+      console.error("[transfer-v2-buyer-init] owner-confirm error:", err);
+      return res.redirect("/transfer?error=server_error&v=2&path=buyer-init");
+    }
+  });
+
+  // Owner clicks DISPUTE link in buyer-init notification email — this rejects
+  // the transfer immediately. Cert ownership is preserved.
+  app.get("/api/v2/transfers/buyer-init/owner-dispute", requireTransferFlowLive, async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.redirect("/transfer?error=missing_token&v=2&path=buyer-init");
+
+      const result = await storage.disputeBuyerInitTransfer(token);
+      if (!result.success) {
+        return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2&path=buyer-init`);
+      }
+
+      // Notify the buyer that the owner rejected.
+      try {
+        await sendTransferV2BuyerInitOwnerRejected({
+          claimantEmail: result.claimantEmail!,
+          certId: result.certId!,
+        });
+      } catch (emailErr: any) {
+        console.error("[transfer-v2-buyer-init] reject email failed (non-fatal):", emailErr.message);
+      }
+
+      await storage.writeAuditLog("transfer", String(result.transferId), "transfer_v2.buyer_init_owner_disputed", null, {
+        certId: result.certId,
+      });
+
+      return res.redirect(`/transfer?step=buyer_init_owner_disputed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+    } catch (err: any) {
+      console.error("[transfer-v2-buyer-init] owner-dispute error:", err);
+      return res.redirect("/transfer?error=server_error&v=2&path=buyer-init");
     }
   });
 

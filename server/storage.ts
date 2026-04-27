@@ -136,7 +136,15 @@ export interface IStorage {
   cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }>;
   finaliseTransferV2(transferId: number, opts?: { skipStatusCheck?: boolean }): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
   getTransfersReadyToFinalise(): Promise<TransferVerification[]>;
-  expireStaleTransfersV2(): Promise<number>;
+  expireStaleTransfersV2(): Promise<Array<{ transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string }>>;
+
+  // ── v435 buyer-initiated transfer entry point ─────────────────────────────
+  validateClaimCodeForTransfer(certId: string, claimCode: string): Promise<{ valid: boolean; currentOwnerEmail?: string; currentOwnerUserId?: string }>;
+  createTransferV2BuyerInit(data: {
+    certId: string; claimantEmail: string; claimantName?: string; currentOwnerEmail: string; currentOwnerUserId: string;
+  }): Promise<{ ownerToken: string; transferId: number }>;
+  confirmBuyerInitTransfer(token: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string }>;
+  disputeBuyerInitTransfer(token: string, reason?: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; error?: string }>;
 
   // ── Customer dashboard queries ──────────────────────────────────────────────
   getSubmissionsByEmail(email: string): Promise<any[]>;
@@ -2065,39 +2073,260 @@ export class DatabaseStorage implements IStorage {
       ));
   }
 
-  async expireStaleTransfersV2(): Promise<number> {
-    // Expire pending_owner transfers where ownerExpiresAt has passed
+  async expireStaleTransfersV2(): Promise<Array<{
+    transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
+  }>> {
+    // Expire pending_owner transfers where ownerExpiresAt has passed (24h seller-init)
     const expiredOwner = await db.execute(sql`
       UPDATE transfer_verifications
       SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Outgoing keeper did not confirm within 24 hours'
       WHERE flow_version = 'v2'
         AND transfer_status = 'pending_owner'
         AND owner_expires_at < NOW()
-      RETURNING id, cert_id
+      RETURNING id, cert_id, from_email, to_email
     `);
 
-    // Expire pending_incoming transfers where incoming_confirm_deadline has passed
+    // Expire pending_incoming transfers where incoming_confirm_deadline has passed (14d seller-init)
     const expiredIncoming = await db.execute(sql`
       UPDATE transfer_verifications
       SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Incoming keeper did not confirm within 14 days'
       WHERE flow_version = 'v2'
         AND transfer_status = 'pending_incoming'
         AND incoming_confirm_deadline < NOW()
-      RETURNING id, cert_id
+      RETURNING id, cert_id, from_email, to_email
     `);
 
-    // Reset cert ownership status for expired transfers
-    const allExpired = [...(expiredOwner.rows as any[]), ...(expiredIncoming.rows as any[])];
-    for (const row of allExpired) {
+    // v435 — Expire pending_owner_invited_by_buyer (buyer-init) where the
+    // owner's 14-day deadline has passed. SILENCE = REJECTION here. We do
+    // NOT auto-complete buyer-init transfers when the owner ignores the
+    // email — the owner must explicitly confirm to transfer.
+    const expiredBuyerInit = await db.execute(sql`
+      UPDATE transfer_verifications
+      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Current keeper did not respond to buyer-initiated transfer within 14 days; original ownership preserved'
+      WHERE flow_version = 'v2'
+        AND transfer_status = 'pending_owner_invited_by_buyer'
+        AND owner_expires_at < NOW()
+      RETURNING id, cert_id, from_email, to_email
+    `);
+
+    const collected: Array<{
+      transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
+    }> = [];
+    const map = (rows: any[], reason: string) => {
+      for (const r of rows) {
+        collected.push({
+          transferId: r.id,
+          certId: r.cert_id,
+          fromEmail: r.from_email,
+          toEmail: r.to_email,
+          reason,
+        });
+      }
+    };
+    map(expiredOwner.rows as any[], "Outgoing keeper did not confirm within 24 hours.");
+    map(expiredIncoming.rows as any[], "Incoming keeper did not verify the Document Reference Number within 14 days.");
+    map(expiredBuyerInit.rows as any[], "The current keeper did not respond to a buyer-initiated transfer within 14 days. Original ownership has been preserved.");
+
+    // Reset cert ownership status for any expired transfers
+    for (const row of collected) {
       await db.execute(sql`
         UPDATE certificates
         SET ownership_status = 'claimed', updated_at = NOW()
-        WHERE certificate_number = ${row.cert_id}
+        WHERE certificate_number = ${row.certId}
           AND ownership_status = 'transfer_pending'
       `);
     }
 
-    return allExpired.length;
+    return collected;
+  }
+
+  // ── v435 buyer-initiated transfer entry point ─────────────────────────────
+  // The new claimant has the printed claim insert and types cert ID + claim
+  // code into /transfer/claim-by-code. This validates the code (constant-time
+  // hash compare on claim_code_hash) and pivots into a new state machine
+  // branch that requires the current owner's explicit confirmation.
+
+  /**
+   * Validates a claim code against `claim_code_hash` for a cert that is
+   * already CLAIMED (i.e. transfer scenario). Returns the current owner's
+   * email + user ID on success so the caller can route them into the
+   * buyer-init flow. Differs from `validateClaimCode` (which only accepts
+   * unclaimed certs) — this is for the transfer path only.
+   *
+   * Constant-time comparison via SHA-256 hash equality at the DB layer
+   * (the hash comparison is internal to the Postgres engine, not the
+   * Node process — same pattern as v420's `validateClaimCode`).
+   */
+  async validateClaimCodeForTransfer(
+    certId: string,
+    claimCode: string,
+  ): Promise<{ valid: boolean; currentOwnerEmail?: string; currentOwnerUserId?: string }> {
+    const hash = this._hashClaimCode(claimCode);
+    const result = await db.execute(sql`
+      SELECT c.current_owner_user_id, c.owner_email, u.email as user_email
+      FROM certificates c
+      LEFT JOIN users u ON u.id = c.current_owner_user_id
+      WHERE c.certificate_number = ${certId}
+        AND c.claim_code_hash = ${hash}
+        AND c.ownership_status = 'claimed'
+        AND c.deleted_at IS NULL
+        AND c.status = 'active'
+      LIMIT 1
+    `);
+    if (result.rows.length === 0) return { valid: false };
+    const row = result.rows[0] as any;
+    const ownerEmail = (row.user_email || row.owner_email || "").toLowerCase().trim();
+    return {
+      valid: true,
+      currentOwnerEmail: ownerEmail,
+      currentOwnerUserId: row.current_owner_user_id,
+    };
+  }
+
+  async createTransferV2BuyerInit(data: {
+    certId: string; claimantEmail: string; claimantName?: string;
+    currentOwnerEmail: string; currentOwnerUserId: string;
+  }): Promise<{ ownerToken: string; transferId: number }> {
+    const ownerToken = crypto.randomBytes(32).toString("hex");
+    const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
+    // Owner has 14 days to confirm or dispute before the transfer expires.
+    const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    const inserted = await db.insert(transferVerifications).values({
+      certId: data.certId,
+      // For buyer-init, fromEmail = current owner (the keeper losing the cert),
+      // toEmail = new claimant (the buyer who used the claim code).
+      fromEmail: data.currentOwnerEmail.toLowerCase().trim(),
+      toEmail: data.claimantEmail.toLowerCase().trim(),
+      ownerTokenHash,
+      ownerExpiresAt,
+      newOwnerName: data.claimantName?.trim() || null,
+      flowVersion: "v2",
+      status: "pending_owner_invited_by_buyer",
+      outgoingKeeperUserId: data.currentOwnerUserId,
+      // Mark that the buyer (incoming keeper) initiated this with the claim
+      // code, so admin reviewers can see at a glance which path was used.
+      referenceNumberProvided: "BUYER_INIT_VIA_CLAIM_CODE",
+    }).returning({ id: transferVerifications.id });
+
+    // Mark cert as transfer_pending — atomically guarded against any other
+    // active transfer on the same cert. The select-then-insert sequence
+    // upstream is wrapped by the caller, which checks `getTransferV2ByCertId`
+    // before calling us.
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'transfer_pending', updated_at = NOW()
+      WHERE certificate_number = ${data.certId}
+    `);
+
+    return { ownerToken, transferId: inserted[0].id };
+  }
+
+  /**
+   * Owner clicks the CONFIRM link in the buyer-init notification. This
+   * pivots the transfer into the standard `pending_dispute` state and
+   * starts the 14-day dispute window — both parties can then dispute
+   * before the existing sweep auto-finalises.
+   */
+  async confirmBuyerInitTransfer(token: string): Promise<{
+    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string;
+  }> {
+    const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!verification) return { success: false, error: "Invalid confirmation link." };
+    if (verification.status !== "pending_owner_invited_by_buyer") {
+      return { success: false, error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).` };
+    }
+    if (new Date() > verification.ownerExpiresAt) {
+      return { success: false, error: "This confirmation link has expired (14-day deadline passed)." };
+    }
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+    if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+
+    // Pre-create the incoming keeper user so finaliseTransferV2 can assign
+    // ownership cleanly when the dispute window expires.
+    let incomingUser = await this.getUserByEmail(verification.toEmail);
+    if (!incomingUser) {
+      incomingUser = await this.createUser({ email: verification.toEmail });
+    }
+
+    // 14-day dispute window starts now.
+    const disputeDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+    await db.update(transferVerifications)
+      .set({
+        status: "pending_dispute",
+        ownerConfirmedAt: new Date(),
+        disputeDeadline,
+        incomingKeeperUserId: incomingUser.id,
+      })
+      .where(eq(transferVerifications.id, verification.id));
+
+    return {
+      success: true,
+      transferId: verification.id,
+      certId: verification.certId,
+      claimantEmail: verification.toEmail,
+      ownerEmail: verification.fromEmail,
+      disputeDeadline,
+    };
+  }
+
+  /**
+   * Owner clicks the DISPUTE link in the buyer-init notification. The
+   * transfer is rejected immediately and cert ownership returns to
+   * 'claimed' (original keeper unchanged).
+   */
+  async disputeBuyerInitTransfer(token: string, reason?: string): Promise<{
+    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; error?: string;
+  }> {
+    const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const [verification] = await db.select()
+      .from(transferVerifications)
+      .where(and(
+        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
+        eq(transferVerifications.flowVersion, "v2"),
+      ));
+
+    if (!verification) return { success: false, error: "Invalid dispute link." };
+    if (verification.status !== "pending_owner_invited_by_buyer") {
+      return { success: false, error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).` };
+    }
+    if (new Date() > verification.ownerExpiresAt) {
+      return { success: false, error: "This dispute link has expired (14-day deadline passed)." };
+    }
+    if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
+    if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+
+    await db.update(transferVerifications)
+      .set({
+        status: "disputed",
+        disputedAt: new Date(),
+        disputedBy: "outgoing",
+        disputeReason: (reason || "Disputed by current keeper via buyer-init notification email").trim().slice(0, 2000),
+      })
+      .where(eq(transferVerifications.id, verification.id));
+
+    // Reset cert ownership status — original keeper retains the cert.
+    await db.execute(sql`
+      UPDATE certificates
+      SET ownership_status = 'claimed', updated_at = NOW()
+      WHERE certificate_number = ${verification.certId}
+    `);
+
+    return {
+      success: true,
+      transferId: verification.id,
+      certId: verification.certId,
+      claimantEmail: verification.toEmail,
+      ownerEmail: verification.fromEmail,
+    };
   }
 }
 

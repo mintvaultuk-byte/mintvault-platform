@@ -304,14 +304,37 @@ async function runVaultClubGraceSweep() {
 // ── Transfer v2 auto-finalise cron ──────────────────────────────────────────
 async function runTransferV2Sweep() {
   try {
-    // 1. Expire stale transfers (outgoing 24h, incoming 14d)
+    // 1. Expire stale transfers — seller-init (outgoing 24h, incoming 14d)
+    //    AND v435 buyer-init (owner 14d, silence = REJECTION not consent).
     const { storage } = await import("./storage");
     const expired = await storage.expireStaleTransfersV2();
-    if (expired > 0) {
-      log(`[transfer-v2] Expired ${expired} stale transfer(s)`, "transfer-v2");
+    if (expired.length > 0) {
+      log(`[transfer-v2] Expired ${expired.length} stale transfer(s)`, "transfer-v2");
+
+      // v435 — wire the previously-orphaned sendTransferV2Expired email so
+      // both parties learn the transfer didn't go through. Inline try/catch
+      // per recipient so one failed send doesn't skip the rest.
+      const { sendTransferV2Expired } = await import("./email");
+      const { storage: storageForAudit } = await import("./storage");
+      for (const row of expired) {
+        try { await sendTransferV2Expired({ email: row.fromEmail, certId: row.certId, reason: row.reason }); } catch (e: any) {
+          log(`[transfer-v2] Expired email to fromEmail failed: ${e.message}`, "transfer-v2");
+        }
+        try { await sendTransferV2Expired({ email: row.toEmail, certId: row.certId, reason: row.reason }); } catch (e: any) {
+          log(`[transfer-v2] Expired email to toEmail failed: ${e.message}`, "transfer-v2");
+        }
+        try {
+          await storageForAudit.writeAuditLog("transfer", String(row.transferId), "transfer_v2.expired", null, {
+            certId: row.certId, reason: row.reason, fromEmail: row.fromEmail, toEmail: row.toEmail,
+          });
+        } catch {}
+      }
     }
 
-    // 2. Auto-finalise transfers past dispute deadline
+    // 2. Auto-finalise transfers past dispute deadline.
+    //    NOTE: this only finalises status='pending_dispute'. Buyer-init
+    //    transfers in 'pending_owner_invited_by_buyer' are NOT auto-completed
+    //    here — they expire instead (handled in step 1).
     const ready = await storage.getTransfersReadyToFinalise();
     for (const transfer of ready) {
       try {

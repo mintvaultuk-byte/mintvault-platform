@@ -129,6 +129,7 @@ import StolenCardProtectionPage from "@/pages/stolen-card-protection";
 import ClaimPage from "@/pages/claim";
 import TransferPage from "@/pages/transfer";
 import TransferAcceptPage from "@/pages/transfer-accept";
+import TransferClaimByCodePage from "@/pages/transfer-claim-by-code";
 import OwnershipPage from "@/pages/ownership";
 import DashboardPage from "@/pages/dashboard";
 import PopulationPage from "@/pages/population";
@@ -230,6 +231,7 @@ function Router() {
               <Route path="/claim" component={ClaimPage} />
               <Route path="/transfer" component={TransferPage} />
               <Route path="/transfer/accept" component={TransferAcceptPage} />
+              <Route path="/transfer/claim-by-code" component={TransferClaimByCodePage} />
               <Route path="/dashboard" component={DashboardPage} />
               <Route path="/population" component={PopulationPage} />
               <Route path="/population/certs" component={PopCertsPage} />
