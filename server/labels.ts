@@ -671,145 +671,63 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
   try { (ctx as any).letterSpacing = "0px"; } catch {}
 
-  // ── 4. LEFT PANEL TEXT ────────────────────────────────────────────────────
-  // Card text vertically centred in zone below MINTVAULT header.
-  // v426 — MV_BELOW_GAP shrunk 10→4 and TOP_PAD ratio 12%→4% to reclaim
-  // ~13px of vertical headroom. Combined with smaller secondary base sizes
-  // (below) this lets the card name actually render at its full 48px hero
-  // size on standard 3-line carts (NAME / YEAR+SET / RARITY) instead of
-  // being uniformly compressed to ~16-20px by the overflow guard.
+  // ── 4. LEFT PANEL TEXT — v427 uniform 3-line block ───────────────────────
+  // Cornelius's review of v426 PSA-hierarchy: he prefers the opposite — all
+  // three lines identical in size, weight, colour, spacing. Reference cert
+  // is GEODUDE / 1999 FOSSIL / COMMON; "GEODUDE"-comfortable size is the
+  // target. Longer-named carts shrink the whole 3-line block proportionally
+  // so within a single label every line still matches.
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
   const textZoneH = contentB - textZoneT;
 
-  const TOP_PAD       = Math.round(textZoneH * 0.04);
-  const adjTextZoneT  = textZoneT + TOP_PAD;
-  const adjTextZoneH  = textZoneH - TOP_PAD;
+  const TXT_FAMILY  = '"Arial Black", Arial, Helvetica, sans-serif';
+  const TXT_WEIGHT  = "700";
+  const TARGET_SIZE = 32;   // GEODUDE-comfortable target — tune to taste post-deploy
+  const MIN_SIZE    = 18;   // hard floor; below this, very long names overflow horizontally
+  const LINE_LEADING = 1.25;
 
-  // ── Base font sizes ───────────────────────────────────────────────────────
-  // v426 — secondary line sizes reduced (34→22 for year+set, 34→18 for
-  // variant/rarity) so the card name reads as the dominant "hero" element
-  // PSA-style instead of competing visually with the supporting lines.
-  const SZ_NM  = 48;   // Line 1: Card Name — hero, 900 weight
-  const SZ_YS  = 22;   // Line 2: Year + Set
-  const SZ_VAR = 18;   // Line 3: Variant (and Line 4: Rarity reuse this size)
-  const LG     = 2;    // intra-block line gap
-
-  // Inter-block gaps — computed dynamically below to distribute lines
-  // across the zone instead of clustering.
-  const MIN_GAP = 6;   // floor: keeps adjacent lines from touching
-  const MAX_GAP = 22;  // ceiling: prevents gappy look on 2-line cards
-
-  // Line 1 — Card Name (shrinks 48→24px before wrapping to fit max width)
-  // Uses 900 weight + Arial Black family for the heaviest available system
-  // weight; falls back to Arial bold if Arial Black isn't installed.
-  const NM_FAMILY = '"Arial Black", Arial, Helvetica, sans-serif';
+  // Build the three logical lines — variant + rarity collapse onto one
+  // line so the block is always 3 max (or fewer if rarity/variant absent).
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
-  ctx.font = `900 ${SZ_NM}px ${NM_FAMILY}`;
-  let nameSz = SZ_NM;
-  if (cardNameText && ctx.measureText(cardNameText).width > textMaxW) {
-    nameSz = fitFontSize(ctx, cardNameText, textMaxW, SZ_NM, 24, "900", NM_FAMILY);
-  }
-  ctx.font = `900 ${nameSz}px ${NM_FAMILY}`;
-  const nmLines = cardNameText ? wrapText(ctx, cardNameText, textMaxW, 2) : [];
-
-  // Line 2 — Year + Set Name
-  const yearSetText = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
-    .filter(Boolean).join("  ");
-  ctx.font = `bold ${SZ_YS}px Arial, Helvetica, sans-serif`;
-  const ysLines = balancedWrap(ctx, yearSetText, textMaxW);
-
-  // Line 3 — Variant (only if present)
+  const yearSetText  = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
+    .filter(Boolean).join(" ");
   const variantText = buildVariantLine(cert);
-  ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
-  const varLines = variantText ? wrapText(ctx, variantText.toUpperCase(), textMaxW, 1) : [];
+  const rarityText  = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
+  const rarityVariantText = [variantText, rarityText].filter(Boolean).join(" · ");
 
-  // Line 4 — Rarity (only if present)
-  const rarityText = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
-  ctx.font = `bold ${SZ_VAR}px Arial, Helvetica, sans-serif`;
-  const rarLines = rarityText ? wrapText(ctx, rarityText, textMaxW, 1) : [];
+  const lines = [cardNameText, yearSetText, rarityVariantText]
+    .filter(s => s.trim().length > 0);
 
-  // ── VERTICAL DISTRIBUTION ─────────────────────────────────────────────────
-  // Distribute lines across the zone rather than clustering with fixed gaps:
-  // first line near top, last line near bottom, remainder split evenly across
-  // active inter-line gaps (clamped to MIN_GAP..MAX_GAP).
-  function lh(sz: number, n: number): number { return n > 0 ? n * sz + (n - 1) * LG : 0; }
-
-  let nmSzR = nameSz, ysSzR = SZ_YS, varSzR = SZ_VAR, rarSzR = SZ_VAR;
-
-  const totalLineHeights = () =>
-      lh(nmSzR,  nmLines.length)
-    + lh(ysSzR,  ysLines.length)
-    + lh(varSzR, varLines.length)
-    + lh(rarSzR, rarLines.length);
-
-  // Active inter-line gap = a non-empty block followed by another non-empty
-  // block (skipping any empty blocks in between).
-  const activeGapCount = () => {
-    let n = 0;
-    if (nmLines.length  > 0 && (ysLines.length > 0 || varLines.length > 0 || rarLines.length > 0)) n++;
-    if (ysLines.length  > 0 && (varLines.length > 0 || rarLines.length > 0)) n++;
-    if (varLines.length > 0 && rarLines.length > 0) n++;
-    return n;
-  };
-
-  // Overflow guard: if even the tightest possible stack (lines + minGap*count)
-  // exceeds zone, shrink fonts proportionally. v426 — per-line floors so
-  // card name stays hero-sized (≥28) while supporting lines floor at the
-  // PSA-comparable minimums (16/14/14). maxStack ratio bumped 0.94→0.98 to
-  // give the card name extra room before triggering the shrink.
-  const maxStack = adjTextZoneH * 0.98;
-  const tightestStack = () => totalLineHeights() + MIN_GAP * activeGapCount();
-  if (tightestStack() > maxStack) {
-    const s = maxStack / tightestStack();
-    nmSzR  = Math.max(28, Math.round(nmSzR  * s));
-    ysSzR  = Math.max(16, Math.round(ysSzR  * s));
-    varSzR = Math.max(14, Math.round(varSzR * s));
-    rarSzR = Math.max(14, Math.round(rarSzR * s));
+  // Horizontal fit: pick the smallest size that satisfies the widest line.
+  let fitSize = TARGET_SIZE;
+  for (const line of lines) {
+    const sz = fitFontSize(ctx, line, textMaxW, fitSize, MIN_SIZE, TXT_WEIGHT, TXT_FAMILY);
+    if (sz < fitSize) fitSize = sz;
   }
 
-  // Distribute remaining vertical space evenly across active gaps.
-  const gapCount = activeGapCount();
-  const availableForGaps = adjTextZoneH - totalLineHeights();
-  const gapSize = gapCount > 0
-    ? Math.max(MIN_GAP, Math.min(MAX_GAP, availableForGaps / gapCount))
-    : 0;
+  // Vertical fit: shrink uniformly if the resulting stack overflows the
+  // zone. Floors at MIN_SIZE — better to clip horizontally than to render
+  // the block at an unreadably tiny size.
+  const stackHeightAt = (sz: number) => lines.length * sz * LINE_LEADING;
+  if (stackHeightAt(fitSize) > textZoneH) {
+    const vScale = textZoneH / stackHeightAt(fitSize);
+    fitSize = Math.max(MIN_SIZE, Math.floor(fitSize * vScale));
+  }
 
-  // Start at top of (padded) text zone — first block sits near the top,
-  // last near the bottom, gaps spread between.
-  let curY = adjTextZoneT;
+  // Render every line with identical size/weight/colour/spacing, block
+  // vertically centred inside the text zone.
+  ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
+  ctx.fillStyle     = labelFg;
+  ctx.textAlign     = "left";
+  ctx.textBaseline  = "alphabetic";
 
-  // ── RENDER ────────────────────────────────────────────────────────────────
-  ctx.textAlign    = "left";
-  ctx.textBaseline = "top";
-
-  const renderBlock = (lines: string[], sz: number, weight: string, color: string, family: string = "Arial, Helvetica, sans-serif") => {
-    if (!lines.length) return;
-    ctx.font      = `${weight} ${sz}px ${family}`;
-    ctx.fillStyle = color;
-    for (const line of lines) {
-      ctx.fillText(line, textLeft, curY);
-      curY += sz + LG;
-    }
-    curY -= LG;
-  };
-
-  const secondaryFg = labelFg === WHITE ? "rgba(255,255,255,0.95)" : "#000000";
-  renderBlock(nmLines, nmSzR, "900", labelFg, NM_FAMILY);
-  if (nmLines.length > 0 && (ysLines.length > 0 || varLines.length > 0 || rarLines.length > 0)) curY += gapSize;
-  try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(ysLines, ysSzR, "bold", secondaryFg);
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-  if (ysLines.length > 0 && (varLines.length > 0 || rarLines.length > 0)) curY += gapSize;
-  try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(varLines, varSzR, "bold", secondaryFg);
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-  if (varLines.length > 0 && rarLines.length > 0) curY += gapSize;
-  try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-  renderBlock(rarLines, rarSzR, "bold", secondaryFg);
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-  ctx.textAlign    = "left";
-  ctx.textBaseline = "alphabetic";
+  const finalLineHeight = fitSize * LINE_LEADING;
+  const blockHeight = lines.length * finalLineHeight;
+  const blockTop = textZoneT + (textZoneH - blockHeight) / 2;
+  for (let i = 0; i < lines.length; i++) {
+    const baseline = blockTop + fitSize + i * finalLineHeight;
+    ctx.fillText(lines[i], textLeft, baseline);
+  }
 }
 
 /**
