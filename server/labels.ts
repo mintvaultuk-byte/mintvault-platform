@@ -623,7 +623,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
       const rarityFamily = '"Arial Black", Arial, Helvetica, sans-serif';
-      const rarityFit    = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 22, 14, "700", rarityFamily);
+      const rarityFit    = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 28, 16, "700", rarityFamily);
       ctx.font           = `700 ${rarityFit}px ${rarityFamily}`;
       ctx.fillStyle      = labelFg;
       ctx.textAlign      = "left";
