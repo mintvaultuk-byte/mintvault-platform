@@ -450,7 +450,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
   const PANEL_W = 148;                        // right grade panel (≈ 18%, -5.7%)
-  const STRIP_H = 38;                         // bottom strip height
+  const STRIP_H = 28;                         // v429: 38→28 — frees 10px for the text zone; cert ID still fits via fitFontSize.
   const panelX  = I_RIGHT - PANEL_W;          // 651
   const stripY  = I_BOTTOM - STRIP_H;         // 179
 
@@ -621,11 +621,11 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   //   2. Add the letter-spacing contribution manually (n-1 gaps × LS px)
   //   3. Use textAlign="left" with an explicit x so the text lands exactly
   //      in the centre of the correctly-sized border box.
-  const MV_HDR_SZ    = 42;                           // font size
-  const MV_HDR_PAD   = 21;                           // top padding from content area (was 8 — +13 for breathing room from gold border)
+  const MV_HDR_SZ    = 32;                           // v429: 42→32 (~24% smaller) — wordmark is no longer the dominant element; the 3-line text block below is.
+  const MV_HDR_PAD   = 8;                            // v429: 21→8 — wordmark hugs the gold frame more closely; frees 13px for text zone.
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
-  const MV_BELOW_GAP = 4;                            // v426: 10→4 to reclaim vertical room for card name (PSA-style hero scale)
+  const MV_BELOW_GAP = 2;                            // v429: 4→2 — every pixel matters for the expanded text zone.
   const MV_LS        = 2;                            // letter-spacing px
   const MV_TEXT      = "MINTVAULT";
 
@@ -682,9 +682,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
   const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 36;   // v428 — bumped 32→36 (~12.5% larger per Cornelius review)
-  const MIN_SIZE        = 18;   // hard floor; below this, very long names overflow horizontally
-  const MIN_GAP_FACTOR  = 0.3;  // gap floor as a fraction of font size — keeps gaps from collapsing on tight zones
+  const TARGET_SIZE     = 48;   // v429: 36→48 to fill the expanded text zone (~33% larger; vertical-fit will land typical 3-line carts around 38-40px)
+  const MIN_SIZE        = 24;   // v429: 18→24 — larger zone supports a higher floor before long names hit the truncation edge
+  const MIN_GAP_FACTOR  = 0.1;  // v429: 0.3→0.1 — tighter minimum gap so vertical-fit lets the font run larger
 
   // Build the three logical lines — variant + rarity collapse onto one
   // line so the block is always 3 max (or fewer if rarity/variant absent).
@@ -815,24 +815,26 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
   //   LEFT   — Logo        : fits within inner content area (~24% of label width)
-  //   CENTRE — NFC + txt   : NFC_ICON_CX = midpoint of (logo-right … qr-left)
-  //   RIGHT  — QR code     : unchanged (150px, flush top-right)
+  //   CENTRE — NFC + txt   : horizontally centred between logo's right edge and QR's left edge
+  //   RIGHT  — QR code     : flush top-right (qrSize set above)
   //
-  // Logo must fit within PX_H=260 canvas. Using I_H-10=214px keeps it inside
-  // the inner content area (I_TOP=15 to I_BOTTOM=221) with 5px margin each side.
-  const LOGO_DRAW    = I_H - 10;                  // 196px — fits within inner area
-  const LOGO_LX      = I_LEFT + 4;                // 19px — tight to left gold border
-  const NFC_ICON_CX  = Math.round((LOGO_LX + LOGO_DRAW + gfLeft) / 2); // midpoint of (logo-right … gold-frame-left)
+  const LOGO_DRAW    = I_H - 10;                  // logo target HEIGHT (px)
+  const LOGO_LX      = I_LEFT + 4;                // logo left X — tight to left gold border
+
+  // v429 — derive the logo's actual rendered WIDTH from its aspect ratio
+  // so NFC_ICON_CX correctly centres in the gap between logo-right and
+  // qr-left. The pre-v429 calc used LOGO_DRAW (height) as a proxy for
+  // width, which only worked for square logos and pushed the icon /
+  // URL / NFC text noticeably leftward when the logo was wider than tall.
+  const logoAspect   = logo ? (logo.width / logo.height) : 1;
+  const LOGO_DRAW_W  = Math.round(LOGO_DRAW * logoAspect);
+  const logoRightX   = LOGO_LX + LOGO_DRAW_W;
+  const NFC_ICON_CX  = Math.round((logoRightX + gfLeft) / 2);
 
   // ── LEFT: MintVault logo — primary visual anchor ──────────────────────────
   if (logo) {
-    const aspect = logo.width / logo.height;
-    const drawH = LOGO_DRAW;
-    const drawW = Math.round(drawH * aspect);
-    const lx = LOGO_LX;
-    const ly = I_TOP + Math.round((I_H - drawH) / 2); // vertically centred within inner area
-
-    ctx.drawImage(logo, lx, ly, drawW, drawH);
+    const ly = I_TOP + Math.round((I_H - LOGO_DRAW) / 2); // vertically centred within inner area
+    ctx.drawImage(logo, LOGO_LX, ly, LOGO_DRAW_W, LOGO_DRAW);
 
     // Redraw gold frame on top so logo never bleeds into the border.
     drawGoldFrame(ctx);
@@ -864,7 +866,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.textBaseline     = "middle";
     ctx.shadowBlur       = 0;
     ctx.shadowColor      = "transparent";
-    ctx.fillText("Tap NFC to verify", NFC_ICON_CX - 12, nfcY);
+    ctx.fillText("Tap NFC to verify", NFC_ICON_CX, nfcY);
   }
 
   // ── CENTRE MIDDLE: NFC hand-tap icon — tinted gold ─────────────────────────
