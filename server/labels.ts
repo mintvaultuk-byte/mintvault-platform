@@ -686,16 +686,18 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MIN_SIZE        = 24;   // v429: 18→24 — larger zone supports a higher floor before long names hit the truncation edge
   const MIN_GAP_FACTOR  = 0.1;  // v429: 0.3→0.1 — tighter minimum gap so vertical-fit lets the font run larger
 
-  // Build the three logical lines — variant + rarity collapse onto one
-  // line so the block is always 3 max (or fewer if rarity/variant absent).
+  // v430 — main block now has only TWO lines (card name + year+set). Rarity
+  // (and variant) move out and render as a smaller line at the bottom-left
+  // of the white panel. With one fewer line, the existing vertical-fit
+  // guard naturally lets PORYGON / 1999 BASE grow into the freed space.
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   const yearSetText  = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
     .filter(Boolean).join(" ");
-  const variantText = buildVariantLine(cert);
-  const rarityText  = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
+  const variantText  = buildVariantLine(cert);
+  const rarityText   = cert.rarity ? buildRarityText(cert).toUpperCase() : "";
   const rarityVariantText = [variantText, rarityText].filter(Boolean).join(" · ");
 
-  const lines = [cardNameText, yearSetText, rarityVariantText]
+  const lines = [cardNameText, yearSetText]
     .filter(s => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.
@@ -705,18 +707,16 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     if (sz < fitSize) fitSize = sz;
   }
 
-  // v428 — vertical fit using the new even-distribution model: zone must
-  // fit N line heights plus N+1 minimum gaps (one above the first line,
-  // one below the last, plus the gaps between). Shrink uniformly if not.
+  // Vertical fit (even-distribution model): zone must fit N line heights
+  // plus N+1 minimum gaps. Shrink uniformly if not.
   const requiredHeight = (lines.length * fitSize) + ((lines.length + 1) * fitSize * MIN_GAP_FACTOR);
   if (requiredHeight > textZoneH) {
     const vScale = textZoneH / requiredHeight;
     fitSize = Math.max(MIN_SIZE, Math.floor(fitSize * vScale));
   }
 
-  // v428 — even distribution: compute gap so that whitespace above line 1,
-  // between each pair of lines, and below the last line are all equal.
-  // With N lines we have N+1 equal gaps separating N line slots.
+  // Even distribution: gaps above first line, between lines, and below
+  // last line are all equal.
   ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
   ctx.fillStyle     = labelFg;
   ctx.textAlign     = "left";
@@ -729,6 +729,31 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   for (let i = 0; i < lines.length; i++) {
     const baseline = textZoneT + gapSize * (i + 1) + fitSize * (i + 1);
     ctx.fillText(lines[i], textLeft, baseline);
+  }
+
+  // v430 — rarity (and variant if present) as a small line at bottom-left
+  // of the white panel, just above the gold strip. Width-clamped to the
+  // left half of the available area so it doesn't crowd the right grade
+  // panel. Rendered absolutely; doesn't interact with the block math above.
+  if (rarityVariantText.trim().length > 0) {
+    const RARITY_TARGET = 16;
+    const RARITY_FLOOR  = 12;
+    const rarityFitSize = fitFontSize(
+      ctx,
+      rarityVariantText,
+      Math.round(textMaxW * 0.45),
+      RARITY_TARGET,
+      RARITY_FLOOR,
+      TXT_WEIGHT,
+      TXT_FAMILY,
+    );
+    ctx.font          = `${TXT_WEIGHT} ${rarityFitSize}px ${TXT_FAMILY}`;
+    ctx.fillStyle     = labelFg;
+    ctx.textAlign     = "left";
+    ctx.textBaseline  = "alphabetic";
+    // 4px above the bottom strip to maintain visual margin from the gold
+    // border underneath.
+    ctx.fillText(rarityVariantText, textLeft, stripY - 4);
   }
 }
 
