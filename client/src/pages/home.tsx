@@ -28,36 +28,140 @@ interface HomepageStats {
 type RecentCert = HomepageStats["recent_certs"][number];
 
 
-// ── Animated counter ───────────────────────────────────────────────────────
+// ── Animated counter — REMOVED 2026-04-27 ──────────────────────────────────
+// The CountUp helper and the homepage stats trio (cards graded / sets
+// represented / average grade) were removed in favour of a founding-members
+// CTA + 3-step process strip. PSA/Beckett/SGC don't run public counters and
+// pre-launch volume undermines trust. Original implementation preserved at
+// client/src/archive/home-stats-counters-archived.tsx for restoration.
 
-function CountUp({ end, decimals = 0, duration = 1800 }: { end: number; decimals?: number; duration?: number }) {
-  const [value, setValue] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  const started = useRef(false);
+// ── Founding members CTA + 3-step process strip ────────────────────────────
+// Renders side-by-side on md+ screens, stacked on mobile. CTA posts to
+// /api/v2/waitlist; success/error states inline. The 3-step strip uses the
+// same Fraunces display + sans body conventions as the rest of section B.
 
-  useEffect(() => {
-    if (!ref.current) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !started.current) {
-          started.current = true;
-          const start = performance.now();
-          function tick(now: number) {
-            const progress = Math.min((now - start) / duration, 1);
-            const eased = 1 - Math.pow(1 - progress, 3);
-            setValue(eased * end);
-            if (progress < 1) requestAnimationFrame(tick);
-          }
-          requestAnimationFrame(tick);
+const PROCESS_STEPS: { num: string; title: string; desc: string }[] = [
+  { num: "01", title: "Submit",  desc: "Send your card insured to our UK grading facility." },
+  { num: "02", title: "Grade",   desc: "Our team grades, photographs, and slabs your card." },
+  { num: "03", title: "Track",   desc: "Every slab links to a live logbook with NFC." },
+];
+
+function FoundingMembersStrip() {
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [status, setStatus] = useState<{ kind: "idle" | "success" | "error"; message?: string }>({ kind: "idle" });
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (submitting) return;
+    const trimmed = email.trim();
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setStatus({ kind: "error", message: "Please enter a valid email address." });
+      return;
+    }
+    setSubmitting(true);
+    setStatus({ kind: "idle" });
+    try {
+      const res = await fetch("/api/v2/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      });
+      if (!res.ok) {
+        if (res.status === 429) {
+          setStatus({ kind: "error", message: "Too many attempts from this device. Please try again later." });
+        } else {
+          const body = await res.json().catch(() => ({}));
+          setStatus({ kind: "error", message: body?.error || "We couldn't add you right now. Please try again." });
         }
-      },
-      { threshold: 0.3 }
-    );
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [end, duration]);
+        return;
+      }
+      setEmail("");
+      setStatus({ kind: "success", message: "You're on the list — we'll be in touch." });
+    } catch {
+      setStatus({ kind: "error", message: "Network error. Please try again." });
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-  return <span ref={ref}>{value.toFixed(decimals)}</span>;
+  return (
+    <div className="grid md:grid-cols-2 gap-8 md:gap-12 mb-12 md:mb-16 items-start">
+      {/* Block A — Founding Members CTA */}
+      <div>
+        <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+          Founding members · Limited cohort
+        </p>
+        <h3 className="font-display italic font-medium text-2xl md:text-3xl leading-tight mb-3" style={{ color: "var(--v2-ink)" }}>
+          Founding member submissions now open
+        </h3>
+        <p className="font-body text-sm md:text-base leading-relaxed mb-5" style={{ color: "var(--v2-ink-soft)" }}>
+          Join the first cohort of UK collectors grading with MintVault.
+        </p>
+        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-2" data-testid="form-waitlist">
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); if (status.kind !== "idle") setStatus({ kind: "idle" }); }}
+            placeholder="you@email.com"
+            disabled={submitting}
+            data-testid="input-waitlist-email"
+            className="flex-1 font-body text-sm px-4 py-3 rounded-md border focus:outline-none focus:ring-2"
+            style={{
+              borderColor: "var(--v2-line)",
+              backgroundColor: "var(--v2-paper)",
+              color: "var(--v2-ink)",
+            }}
+            maxLength={254}
+            required
+          />
+          <button
+            type="submit"
+            disabled={submitting || !email.trim()}
+            data-testid="button-waitlist-submit"
+            className="font-body text-sm font-semibold px-5 py-3 rounded-md transition-opacity disabled:opacity-60"
+            style={{
+              backgroundColor: "var(--v2-gold)",
+              color: "var(--v2-panel-dark)",
+            }}
+          >
+            {submitting ? "Joining…" : "Join the waitlist"}
+          </button>
+        </form>
+        {status.kind === "success" && (
+          <p className="mt-3 font-body text-sm" style={{ color: "var(--v2-gold)" }} data-testid="text-waitlist-success">
+            {status.message}
+          </p>
+        )}
+        {status.kind === "error" && (
+          <p className="mt-3 font-body text-sm" style={{ color: "#B23B3B" }} data-testid="text-waitlist-error">
+            {status.message}
+          </p>
+        )}
+      </div>
+
+      {/* Block B — 3-step process strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 sm:gap-6">
+        {PROCESS_STEPS.map((step) => (
+          <div key={step.num} data-testid={`process-step-${step.num}`}>
+            <div className="flex items-baseline gap-3 mb-2">
+              <span className="font-mono-v2 text-xs tracking-widest" style={{ color: "var(--v2-gold)" }}>
+                {step.num}
+              </span>
+              <span className="font-display italic font-medium text-base md:text-lg" style={{ color: "var(--v2-ink)" }}>
+                {step.title}
+              </span>
+            </div>
+            <p className="font-body text-xs md:text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+              {step.desc}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ── Section fade-in ────────────────────────────────────────────────────────
@@ -103,9 +207,9 @@ export default function HomeV2() {
     if (statsError) console.error("Homepage stats fetch failed:", statsError);
   }, [statsError]);
 
-  const totalGraded = stats?.total_graded ?? 132;
+  // totalGraded + avgGrade removed with the stats trio (2026-04-27).
+  // uniqueSets stays — still consumed below in the AI-grade copy line.
   const uniqueSets = stats?.unique_sets ?? 71;
-  const avgGrade = stats?.avg_grade ?? 8.9;
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
@@ -187,23 +291,10 @@ export default function HomeV2() {
       <FadeIn>
         <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
           <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
-            {/* Stats row */}
-            <div className="grid grid-cols-3 gap-6 md:gap-12 mb-12 md:mb-16 text-center">
-              {[
-                { value: totalGraded, label: "cards graded", decimals: 0 },
-                { value: uniqueSets, label: "sets represented", decimals: 0 },
-                { value: avgGrade, label: "average grade", decimals: 1 },
-              ].map((stat) => (
-                <div key={stat.label}>
-                  <p className="font-display italic font-medium text-3xl md:text-5xl" style={{ color: "var(--v2-ink)" }}>
-                    <CountUp end={stat.value} decimals={stat.decimals} />
-                  </p>
-                  <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mt-2" style={{ color: "var(--v2-ink-mute)" }}>
-                    {stat.label}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {/* Founding members CTA + 3-step process strip
+                Replaces the original stats trio (2026-04-27). */}
+            <FoundingMembersStrip />
+
 
             {/* Promises row */}
             <div className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8" style={{ borderColor: "var(--v2-line)" }}>

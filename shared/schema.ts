@@ -408,9 +408,23 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Founding-member homepage waitlist (replaces the old stats trio CTA).
+// Soft-delete only (deleted_at) per project rules. Email is normalised
+// case-insensitively at the index level.
+export const waitlistSignups = pgTable("waitlist_signups", {
+  id:         serial("id").primaryKey(),
+  email:      text("email").notNull(),
+  source:     text("source").notNull().default("homepage_founding_member"),
+  ipAddress:  text("ip_address"),
+  userAgent:  text("user_agent"),
+  createdAt:  timestamp("created_at").notNull().defaultNow(),
+  deletedAt:  timestamp("deleted_at"),
+});
+
 export type CardSet = typeof cardSets.$inferSelect;
 export type CardMaster = typeof cardMaster.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 
 export const insertCertificateSchema = createInsertSchema(certificates).omit({
   id: true,

@@ -500,4 +500,26 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS on_receipt_photo_urls TEXT,
       ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb
   `);
+
+  // ── Homepage founding-members waitlist (replaces stats trio CTA, 2026-04-27) ─
+  // Idempotent additive migration. Soft-delete only (deleted_at). Email
+  // uniqueness enforced case-insensitively via lower(email) partial index
+  // so callers can keep the original capitalisation while still being
+  // collision-checked.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS waitlist_signups (
+      id          SERIAL PRIMARY KEY,
+      email       TEXT NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'homepage_founding_member',
+      ip_address  TEXT,
+      user_agent  TEXT,
+      created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+      deleted_at  TIMESTAMP
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS waitlist_signups_email_lower_idx
+      ON waitlist_signups (LOWER(email))
+      WHERE deleted_at IS NULL
+  `);
 }

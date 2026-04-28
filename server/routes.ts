@@ -802,6 +802,75 @@ export async function registerRoutes(
     }
   });
 
+  // ── v2 Founding-members waitlist (homepage CTA, replaces stats trio) ───────
+  // Rate limit: 10 attempts per IP per hour. Idempotent insert — repeat
+  // submissions of the same email return the same success message without
+  // revealing whether the address was already on the list. Audit logged
+  // only on first insert (entity_type='waitlist_signup').
+  const waitlistRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many attempts from this device. Please try again later." },
+  });
+
+  app.post("/api/v2/waitlist", waitlistRateLimit, async (req, res) => {
+    try {
+      const { email } = req.body as { email?: unknown };
+      if (typeof email !== "string") {
+        return res.status(400).json({ error: "Email is required." });
+      }
+      const trimmed = email.trim();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!trimmed || trimmed.length > 254 || !emailRegex.test(trimmed)) {
+        return res.status(400).json({ error: "Please enter a valid email address." });
+      }
+
+      const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+        || req.socket.remoteAddress
+        || null;
+      const userAgent = (req.headers["user-agent"] as string | undefined) || null;
+
+      // Atomic insert. The partial unique index on LOWER(email) WHERE
+      // deleted_at IS NULL means duplicates are caught at the DB layer.
+      // Treat unique-violation as "already on the list" → same success
+      // response, no audit row, no enumeration leak.
+      try {
+        const inserted = await db.execute(sql`
+          INSERT INTO waitlist_signups (email, source, ip_address, user_agent)
+          VALUES (${trimmed}, 'homepage_founding_member', ${ip}, ${userAgent ? userAgent.slice(0, 500) : null})
+          RETURNING id
+        `);
+        const newId = (inserted.rows[0] as any)?.id;
+        if (newId != null) {
+          await storage.writeAuditLog("waitlist_signup", String(newId), "created", null, {
+            source: "homepage_founding_member",
+            ip,
+          });
+        }
+      } catch (insertErr: any) {
+        // Postgres unique violation = "23505". Anything else is a real error.
+        if (insertErr?.code !== "23505" && !/duplicate key/i.test(insertErr?.message || "")) {
+          throw insertErr;
+        }
+        // Duplicate — refresh the existing row's created_at so admin queues
+        // can sort by latest interest. Do not write a new audit log row;
+        // the original one remains intact per spec.
+        await db.execute(sql`
+          UPDATE waitlist_signups
+          SET created_at = NOW()
+          WHERE LOWER(email) = LOWER(${trimmed}) AND deleted_at IS NULL
+        `);
+      }
+
+      return res.json({ success: true, message: "You're on the list — we'll be in touch." });
+    } catch (err: any) {
+      console.error("[v2/waitlist] error:", err.message);
+      return res.status(500).json({ error: "We couldn't add you right now. Please try again." });
+    }
+  });
+
   // ── Legal page API routes ─────────────────────────────────────────────────
   app.get("/api/legal/:slug", (req, res) => {
     const { FEATURE_FLAGS } = require("./config/feature-flags");
