@@ -3,12 +3,13 @@
  * Claude Vision API integration for card identification and grading analysis.
  */
 
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT, HAIKU_GRADING_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
 import { anthropicFetch } from "./anthropic-fetch";
+import { getR2Client } from "./r2";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -628,18 +629,11 @@ export async function analyzeCardFromBuffers(
 // ── R2 image fetching ──────────────────────────────────────────────────────
 
 async function fetchR2Buffer(key: string): Promise<Buffer> {
-  const endpoint  = process.env.R2_ENDPOINT;
-  const accessKey = process.env.R2_ACCESS_KEY_ID;
-  const secretKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucket    = process.env.R2_BUCKET_NAME;
-  if (!endpoint || !accessKey || !secretKey || !bucket) {
-    throw new Error("R2 credentials not configured");
-  }
-  const client = new S3Client({
-    region: "auto",
-    endpoint,
-    credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
-  });
+  const bucket = process.env.R2_BUCKET_NAME;
+  if (!bucket) throw new Error("R2_BUCKET_NAME not set");
+  // Shared client carries the WHEN_REQUIRED checksum overrides that keep
+  // R2 GetObject responses out of the broken flexible-checksums path.
+  const client = getR2Client();
   const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
   const result = await client.send(cmd);
   if (!result.Body) throw new Error(`Empty body for R2 key: ${key}`);

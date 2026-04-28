@@ -2066,15 +2066,8 @@ export async function registerRoutes(
         if (!key) return null;
         try {
           const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-          const { S3Client } = await import("@aws-sdk/client-s3");
-          const s3 = new S3Client({
-            region: "auto",
-            endpoint: process.env.R2_ENDPOINT,
-            credentials: {
-              accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-            },
-          });
+          const { getR2Client } = await import("./r2");
+          const s3 = getR2Client();
           const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
           const chunks: Buffer[] = [];
           for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));
@@ -2448,8 +2441,9 @@ export async function registerRoutes(
       async function fetchBuffer(key: string | null | undefined): Promise<Buffer | null> {
         if (!key) return null;
         try {
-          const { GetObjectCommand, S3Client } = await import("@aws-sdk/client-s3");
-          const s3 = new S3Client({ region: "auto", endpoint: process.env.R2_ENDPOINT!, credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID!, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY! } });
+          const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+          const { getR2Client } = await import("./r2");
+          const s3 = getR2Client();
           const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
           const chunks: Buffer[] = [];
           for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));

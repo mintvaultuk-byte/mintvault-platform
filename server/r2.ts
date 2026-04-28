@@ -3,6 +3,10 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let s3Client: S3Client | null = null;
 
+export function getR2Client(): S3Client {
+  return getClient();
+}
+
 function getClient(): S3Client {
   if (s3Client) return s3Client;
   const endpoint = process.env.R2_ENDPOINT;
@@ -15,6 +19,13 @@ function getClient(): S3Client {
     region: "auto",
     endpoint,
     credentials: { accessKeyId, secretAccessKey },
+    // Cloudflare R2 doesn't require AWS's flexible-checksums protocol and
+    // its body framing trips @smithy/hash-stream-node ("Unable to calculate
+    // hash for flowing readable stream") on GetObject responses. Both
+    // defaults flipped to WHEN_SUPPORTED around AWS SDK 3.729 — pin them
+    // back to WHEN_REQUIRED so the middleware doesn't attach to R2 calls.
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
   return s3Client;
 }
