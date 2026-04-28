@@ -149,6 +149,7 @@ ${data.labelToken ? `
     console.log(`[email] Submission confirmation sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send confirmation to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -219,6 +220,7 @@ ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">Yo
     console.log(`[email] Submission confirmation v2 sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send v2 confirmation to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -263,6 +265,7 @@ ${photosHtml}
     console.log(`[email] Cards received email sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send cards received to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -298,6 +301,7 @@ export async function sendGradingComplete(data: {
     console.log(`[email] Grading complete email sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send grading complete to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -350,6 +354,7 @@ ${rmTrackingBtn}
     console.log(`[email] Shipped email sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send shipped email to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -383,6 +388,7 @@ export async function sendSubmissionDelivered(data: {
     console.log(`[email] Delivered email sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send delivered email to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -516,6 +522,7 @@ ${ctaButton(data.verifyUrl, "Verify &amp; Register Ownership")}
     console.log(`[email] Claim verification email sent to ${data.email} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send claim verification to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -554,6 +561,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
     console.log(`[email] Transfer confirmation email sent to ${data.fromEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send transfer confirmation to ${data.fromEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -592,6 +600,7 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
     console.log(`[email] New owner transfer email sent to ${data.toEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send new owner transfer email to ${data.toEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -629,6 +638,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
     console.log(`[email] v2 transfer outgoing email sent to ${data.fromEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer outgoing to ${data.fromEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -687,6 +697,7 @@ ${ctaButton(data.disputeUrl, "Dispute this transfer")}
     console.log(`[email] v2 buyer-init owner email sent to ${data.ownerEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed v2 buyer-init owner email to ${data.ownerEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -717,6 +728,7 @@ ${certBlock(data.certId)}`;
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 buyer-init owner-confirmed email to ${data.claimantEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -747,6 +759,7 @@ ${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-heig
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 buyer-init owner-rejected email to ${data.claimantEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -784,6 +797,7 @@ ${ctaButton(data.confirmUrl, "Accept &amp; Verify")}
     console.log(`[email] v2 transfer incoming email sent to ${data.toEmail} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer incoming to ${data.toEmail}:`, err.message);
+    throw err;
   }
 }
 
@@ -817,6 +831,7 @@ ${certBlock(data.certId)}
     console.log(`[email] v2 dispute-window email sent to ${data.email} (${data.role}) for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed v2 dispute-window email to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -851,6 +866,7 @@ ${certBlock(data.certId)}
     console.log(`[email] v2 transfer complete email sent to ${data.email} (${data.role}) for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer complete to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -874,6 +890,7 @@ ${certBlock(data.certId)}
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer cancelled to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -897,6 +914,7 @@ ${certBlock(data.certId)}
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer disputed to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -920,6 +938,7 @@ ${certBlock(data.certId)}
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer expired to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -943,6 +962,7 @@ ${ctaButton(data.confirmUrl, "Verify & Accept")}
     });
   } catch (err: any) {
     console.error(`[email] Failed v2 transfer reminder to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -971,6 +991,7 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
     console.log(`[email] Magic link sent to ${data.email}`);
   } catch (err: any) {
     console.error(`[email] Failed to send magic link to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -1024,6 +1045,7 @@ export async function sendCertificatePdf(data: {
     console.log(`[email] Certificate PDF sent to ${data.email} for ${data.certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send certificate PDF to ${data.email}:`, err.message);
+    throw err;
   }
 }
 
@@ -1071,6 +1093,7 @@ export async function sendStolenVerificationEmail(
     console.log(`[email] Stolen verification email sent to ${email} for ${certId}`);
   } catch (err: any) {
     console.error(`[email] Failed to send stolen verification to ${email}:`, err.message);
+    throw err;
   }
 }
 

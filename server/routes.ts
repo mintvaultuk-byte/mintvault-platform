@@ -4689,7 +4689,19 @@ export async function registerRoutes(
       const baseUrl = APP_BASE_URL;
       const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;
 
-      await sendClaimVerification({ email: email.trim(), certId: normalizedId, verifyUrl });
+      // Surface email-send failures explicitly. Pre-fix the helper swallowed
+      // every Resend error and the route returned success regardless ("lying
+      // green banner"). Now the helper re-throws and we return a 500 with a
+      // user-actionable message.
+      try {
+        await sendClaimVerification({ email: email.trim(), certId: normalizedId, verifyUrl });
+      } catch (sendErr: any) {
+        console.error("[claim] sendClaimVerification failed:", sendErr.message);
+        return res.status(500).json({
+          success: false,
+          error: "Could not send verification email. Please try again or contact support@mintvaultuk.com.",
+        });
+      }
 
       return res.json({ success: true, message: "Verification email sent! Please check your inbox and click the link to complete your ownership registration." });
     } catch (err: any) {
@@ -5840,7 +5852,15 @@ export async function registerRoutes(
       const baseUrl = APP_BASE_URL;
       const loginUrl = `${baseUrl}/api/customer/verify/${token}`;
 
-      await sendMagicLink({ email: normalEmail, loginUrl });
+      try {
+        await sendMagicLink({ email: normalEmail, loginUrl });
+      } catch (sendErr: any) {
+        console.error("[magic-link] sendMagicLink failed:", sendErr.message);
+        return res.status(500).json({
+          success: false,
+          error: "Could not send login link. Please try again or contact support@mintvaultuk.com.",
+        });
+      }
       res.json({ message: "Login link sent. Check your inbox." });
     } catch (err) {
       console.error("[customer] magic-link error:", err);
