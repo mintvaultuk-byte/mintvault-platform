@@ -217,7 +217,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-yellow-500" />
-          <span className="font-semibold text-sm text-yellow-400">NFC Verification</span>
+          <span className="font-semibold text-sm text-yellow-400">NFC Tracking</span>
         </div>
         <Badge variant={status.color} className="gap-1 text-xs">
           {status.icon}

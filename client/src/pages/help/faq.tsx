@@ -30,7 +30,7 @@ const FAQ_DATA: FAQGroup[] = [
     category: "Slabs",
     items: [
       { q: "Are your slabs tamper-evident?", a: "Yes. Each slab is sealed with a tamper-evident bond. Once closed, the slab cannot be opened without leaving visible damage. The grade label is inscribed — there are no paper inserts that can be swapped." },
-      { q: "How does NFC verification work?", a: "Every slab contains an embedded NFC chip. Tap it with any NFC-capable smartphone to instantly open the card's certificate record. The chip is embedded during encapsulation — it can't be lifted or swapped without damaging the slab." },
+      { q: "How does NFC tracking work?", a: "Every slab contains an embedded NFC chip. Tap it with any NFC-capable smartphone to instantly open the card's certificate record. The chip is embedded during encapsulation — it can't be lifted or swapped without damaging the slab." },
       { q: "What sizes/thicknesses do you support?", a: "We currently support card thicknesses of 35pt, 75pt, 130pt, and 180pt. If you have cards outside these ranges, contact us before submitting." },
       { q: "Can I crack open a slab?", a: "Technically yes, but doing so voids the grade and certificate. The slab is designed to be permanent. If you need your card re-encapsulated or regraded, submit it as a reholder service." },
     ],

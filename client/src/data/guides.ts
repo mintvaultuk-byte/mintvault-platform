@@ -590,12 +590,12 @@ export const guides: Guide[] = [
   },
   {
     slug: "nfc-verification",
-    title: "NFC Verification: How It Works and Why It Matters",
+    title: "NFC Tracking: How It Works and Why It Matters",
     excerpt: "Every MintVault slab contains an embedded NFC chip. Here's what it does, how to tap it, and why it adds a layer over a QR code alone.",
     publishedDate: "2026-04-01",
     author: "MintVault UK",
-    metaTitle: "NFC Card Verification Explained | MintVault UK",
-    metaDescription: "Learn how the NFC chip in every MintVault slab works. How to tap your phone to verify a graded card, what information it shows, and why NFC is more secure than QR alone.",
+    metaTitle: "NFC Card Tracking Explained | MintVault UK",
+    metaDescription: "Learn how the NFC chip in every MintVault slab works. How to tap your phone to look up a graded card, what information it shows, and how NFC complements the QR code on each slab.",
     body: `
 <h2>What Is NFC?</h2>
 <p>NFC stands for Near Field Communication — the same technology used in contactless card payments. It allows two devices to exchange data when they are held within a few centimetres of each other. Every modern smartphone (iPhone 7 and later, most Android phones from 2015 onward) can read NFC chips without any additional app.</p>
@@ -620,9 +620,9 @@ export const guides: Guide[] = [
   <li>Photos of the card front and back (if uploaded)</li>
 </ul>
 
-<h2>Why NFC Is More Secure Than QR Alone</h2>
-<p>QR codes can be photographed and reprinted onto any surface. A counterfeit slab with a photocopied QR code would pass a visual scan. NFC chips cannot be copied this way — they are physically embedded during slab encapsulation and can't be lifted or swapped without damaging the slab.</p>
-<p>MintVault slabs contain both a QR code (for quick scanning with a camera) and an NFC chip (for higher-security verification). Together, they provide layered authentication.</p>
+<h2>How NFC Adds to QR</h2>
+<p>QR codes can be photographed and reprinted onto any surface. The NFC chip is physically embedded during slab encapsulation and can't be lifted or swapped without damaging the slab — so the chip itself can't be moved from a genuine slab onto a counterfeit one.</p>
+<p>MintVault slabs contain both a QR code (for quick scanning with a camera) and an NFC chip (for an additional tap-to-look-up route). Together, they provide multiple ways to reach the certificate record.</p>
 
 <h2>Ownership and NFC</h2>
 <p>The NFC chip also supports MintVault's ownership registry. When you claim ownership of a graded card, the certificate record is linked to your identity. Anyone tapping the slab can see the registry status and, if ownership has been claimed, that the card has a verified owner. Ownership details are kept private — only the status is shown publicly.</p>

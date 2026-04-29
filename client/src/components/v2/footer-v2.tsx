@@ -33,7 +33,7 @@ const FOOTER_COLS = [
     title: "Technology",
     links: [
       { label: "How it works", href: "/technology" },
-      { label: "NFC verification", href: "/verify" },
+      { label: "NFC tracking", href: "/verify" },
       { label: "Population report", href: "/registry" },
     ],
   },
