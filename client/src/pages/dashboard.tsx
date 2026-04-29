@@ -673,7 +673,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             </span>
           ) : (
             <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-              Reserved · <Link href="/vault-club" className="font-semibold hover:text-amber-800">Activate with Vault Club →</Link>
+              Reserved · <a href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist" className="font-semibold hover:text-amber-800">Join the Vault Club waitlist →</a>
             </span>
           )}
         </div>
