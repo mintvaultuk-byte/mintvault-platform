@@ -60,6 +60,48 @@ interface CustomerCert {
   ownershipStatus: string;
   ownerEmail: string | null;
   submissionItemId: number | null;
+  // Added in the v45x Graded Cards redesign — see /api/customer/certificates.
+  cardNumber: string | null;
+  gradeCentering: string | null;
+  gradeCorners: string | null;
+  gradeEdges: string | null;
+  gradeSurface: string | null;
+  frontImageUrl: string | null;
+}
+
+// ── Graded-card list helpers ───────────────────────────────────────────────────
+function gradeLabel(grade: string | null): string {
+  if (!grade) return "";
+  const n = Number(grade);
+  if (Number.isNaN(n)) return "";
+  if (n === 10) return "GEM MINT";
+  if (n >= 9) return "MINT";
+  if (n >= 8) return "NM-MT";
+  if (n >= 7) return "NM";
+  if (n >= 6) return "EX-MT";
+  if (n >= 5) return "EX";
+  if (n >= 4) return "VG-EX";
+  if (n >= 3) return "VG";
+  if (n >= 2) return "GOOD";
+  if (n >= 1) return "FAIR";
+  return "POOR";
+}
+
+function formatDate(iso: string | Date | null): string {
+  if (!iso) return "";
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function SubgradeChip({ label, value }: { label: string; value: string | null }) {
+  if (!value) return null;
+  return (
+    <span className="text-[10px] px-2 py-0.5 rounded bg-[#F1EFE8] text-[#5F5E5A]">
+      <span className="text-[#888] mr-1">{label}</span>
+      <span className="font-medium">{value}</span>
+    </span>
+  );
 }
 
 // ── Submission tracking helpers ────────────────────────────────────────────────
@@ -1003,29 +1045,71 @@ export default function DashboardPage() {
               <p className="text-[#999999] text-sm">No graded cards found for this email yet.</p>
             </div>
           ) : (
-            <div className="border border-[#E8E4DC] rounded-xl overflow-hidden">
-              {linkedCerts.map((cert, i) => (
-                <div key={cert.id} className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-[#E8E4DC]" : ""}`}>
-                  <div className="w-10 text-center shrink-0">
-                    <GradeBadge cert={cert} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#1A1A1A] font-medium truncate">{cert.cardName ?? "—"}</p>
-                    <p className="text-xs text-[#999999] truncate">
-                      {cert.setName ?? ""}
-                      {cert.year ? ` (${cert.year})` : ""}
-                      {cert.cardGame ? ` · ${cert.cardGame}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Link href={`/cert/${cert.certId}`}>
-                      <span className="text-[10px] font-mono text-[#999999] hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors cursor-pointer">
-                        {cert.certId}
-                        <ExternalLink size={10} />
-                      </span>
-                    </Link>
-                  </div>
-                </div>
+            <div>
+              {linkedCerts.map((cert) => (
+                <Link key={cert.certId} href={`/cert/${cert.certId}`}>
+                  <a className="block bg-[#FAFAF8] hover:bg-[#F5F1E8] transition-colors border border-[#E8E4DC] rounded-xl p-4 mb-3 group">
+                    <div className="flex gap-4">
+                      {/* 90×124 card thumbnail */}
+                      <div className="flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
+                        {cert.frontImageUrl ? (
+                          <img
+                            src={cert.frontImageUrl}
+                            alt={cert.cardName ?? cert.certId}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-[#888] tracking-wider">
+                            NO IMAGE
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Body */}
+                      <div className="flex-1 min-w-0 flex flex-col">
+                        <div className="flex items-start justify-between gap-3 mb-1">
+                          <div className="min-w-0">
+                            <p className="text-base font-medium text-[#1A1A1A] truncate">
+                              {cert.cardName ?? "Unnamed card"}
+                            </p>
+                            <p className="text-xs text-[#888] mt-0.5">
+                              {[cert.setName, cert.cardNumber && `#${cert.cardNumber}`, cert.year].filter(Boolean).join(" · ")}
+                            </p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-2xl font-medium text-[#D4AF37] leading-none">
+                              {cert.gradeOverall ?? "–"}
+                            </div>
+                            <div className="text-[9px] tracking-widest text-[#888] font-medium mt-1">
+                              {gradeLabel(cert.gradeOverall)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Subgrade chips — only render if at least one is set */}
+                        {(cert.gradeCentering || cert.gradeCorners || cert.gradeEdges || cert.gradeSurface) && (
+                          <div className="flex gap-1.5 mt-2 flex-wrap">
+                            <SubgradeChip label="CEN" value={cert.gradeCentering} />
+                            <SubgradeChip label="COR" value={cert.gradeCorners} />
+                            <SubgradeChip label="EDG" value={cert.gradeEdges} />
+                            <SubgradeChip label="SUR" value={cert.gradeSurface} />
+                          </div>
+                        )}
+
+                        {/* Footer: cert ID + issue date */}
+                        <div className="mt-auto pt-3 flex items-center justify-between">
+                          <span className="text-[11px] text-[#B8960C] font-medium tracking-wide group-hover:text-[#D4AF37]">
+                            {cert.certId} <ExternalLink size={10} className="inline" />
+                          </span>
+                          <span className="text-[10px] text-[#888]">
+                            issued {formatDate(cert.createdAt)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </a>
+                </Link>
               ))}
             </div>
           )}

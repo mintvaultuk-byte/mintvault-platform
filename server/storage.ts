@@ -1655,6 +1655,7 @@ export class DatabaseStorage implements IStorage {
         ownershipTokenGeneratedAt: row.ownership_token_generated_at,
         ownerName: row.owner_name,
         ownerEmail: row.owner_email,
+        frontImagePath: row.front_image_path,
         createdAt: row.issued_at,
       } as unknown as CertificateRecord);
     }

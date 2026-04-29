@@ -6019,8 +6019,11 @@ export async function registerRoutes(
     try {
       const email = req.session.customerEmail!;
       const certs = await storage.getCertificatesByEmail(email);
-      // Strip sensitive fields before sending to client
-      const safe = certs.map((c) => ({
+      // Strip sensitive fields, expose subgrades + signed front-image URL.
+      // 1-hour TTL on the signed URL matches the /cert/:id page (certToPublic).
+      // R2 sign calls run in parallel via Promise.all — typical dashboard
+      // returns 1-20 certs so the per-cert sign doesn't dominate latency.
+      const safe = await Promise.all(certs.map(async (c) => ({
         id: c.id,
         certId: c.certId,
         cardName: c.cardName,
@@ -6035,7 +6038,15 @@ export async function registerRoutes(
         ownershipStatus: c.ownershipStatus,
         ownerEmail: c.ownerEmail,
         submissionItemId: c.submissionItemId,
-      }));
+        cardNumber: c.cardNumber ?? null,
+        gradeCentering: c.gradeCentering ?? null,
+        gradeCorners: c.gradeCorners ?? null,
+        gradeEdges: c.gradeEdges ?? null,
+        gradeSurface: c.gradeSurface ?? null,
+        frontImageUrl: (c as any).frontImagePath
+          ? await getR2SignedUrl((c as any).frontImagePath, 3600).catch(() => null)
+          : null,
+      })));
       res.json(safe);
     } catch (err) {
       console.error("[customer] certificates error:", err);
