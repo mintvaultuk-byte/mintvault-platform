@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, Mail, Loader2, CheckCircle, AlertCircle,
@@ -875,6 +875,7 @@ function AccountBanner({ authMe }: { authMe: AuthMe }) {
 // ── Main dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [loginError, setLoginError] = useState("");
 
@@ -957,7 +958,8 @@ export default function DashboardPage() {
     );
   }
 
-  const ownedCerts = certs?.filter(c => c.ownershipStatus === "claimed" && c.ownerEmail?.toLowerCase() === me.email.toLowerCase()) ?? [];
+  // Note: `ownedCerts` filter removed when Section 3 was unified into Section 2.
+  // Per-card `isOwnedByViewer` is computed inside the linkedCerts map below.
   const linkedCerts = certs ?? [];
 
   return (
@@ -1035,7 +1037,7 @@ export default function DashboardPage() {
         <section className="mb-8">
           <div className="flex items-center gap-2 mb-4">
             <Award size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Graded Cards</h2>
+            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Your Cards</h2>
           </div>
 
           {certsLoading ? (
@@ -1046,9 +1048,22 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div>
-              {linkedCerts.map((cert) => (
-                <Link key={cert.certId} href={`/cert/${cert.certId}`}>
-                  <a className="block bg-[#FAFAF8] hover:bg-[#F5F1E8] transition-colors border border-[#E8E4DC] rounded-xl p-4 mb-3 group">
+              {linkedCerts.map((cert) => {
+                // Same logic as the old `ownedCerts` filter — viewer is the
+                // current registered owner of this cert.
+                const isOwnedByViewer =
+                  cert.ownershipStatus === "claimed" &&
+                  cert.ownerEmail?.toLowerCase() === me.email?.toLowerCase();
+                // Cert was linked to viewer (e.g. they were the submitter)
+                // but ownership has since transferred elsewhere.
+                const transferredAway =
+                  !isOwnedByViewer && cert.ownershipStatus === "claimed";
+                return (
+                  <div
+                    key={cert.certId}
+                    onClick={() => setLocation(`/cert/${cert.certId}`)}
+                    className="block bg-[#FAFAF8] hover:bg-[#F5F1E8] transition-colors border border-[#E8E4DC] rounded-xl p-4 mb-3 group cursor-pointer"
+                  >
                     <div className="flex gap-4">
                       {/* 90×124 card thumbnail */}
                       <div className="flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
@@ -1108,80 +1123,58 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     </div>
-                  </a>
-                </Link>
-              ))}
+
+                    {/* Owner-action footer (owned-by-viewer only). Wrapped in
+                        a stopPropagation onClick so the inner buttons/links
+                        don't trigger the outer card-navigation handler. */}
+                    {isOwnedByViewer && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-3 pt-3 border-t border-black/[0.08] flex items-center justify-between gap-2.5 flex-wrap"
+                      >
+                        <a
+                          href={`/logbook/${cert.certId}/owner.pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[12px] text-[#B8960C] hover:text-[#D4AF37] font-medium inline-flex items-center gap-1.5"
+                        >
+                          <Lock size={11} />
+                          Download Owner Copy
+                        </a>
+                        <span className="text-[10px] text-[#888] italic flex-1 text-right min-w-0">
+                          Includes your reference number — keep private
+                        </span>
+                        <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
+                          <a className="text-[11px] text-[#B8960C] hover:bg-[#FAF7F0] border border-[#D4AF37]/40 rounded-md py-1.5 px-3 font-medium transition-colors inline-flex items-center gap-1.5">
+                            <ArrowRightLeft size={11} />
+                            Transfer
+                          </a>
+                        </Link>
+                      </div>
+                    )}
+
+                    {/* Transferred-away note (linked-but-not-owned). */}
+                    {transferredAway && (
+                      <div className="mt-3 pt-3 border-t border-black/[0.08]">
+                        <span className="text-[10px] text-[#888] italic">
+                          submitted by you · transferred to another owner
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
 
-        {/* ── Section 3: Ownership & Transfers ──────────────────────────── */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <ArrowRightLeft size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Ownership & Transfers</h2>
-          </div>
-
-          {certsLoading ? (
-            <div className="animate-pulse h-20 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
-          ) : !ownedCerts.length ? (
-            <div className="border border-[#E8E4DC] rounded-xl p-6 text-center">
-              <p className="text-[#999999] text-sm">No ownership registrations found.</p>
-              <p className="text-xs text-[#999999] mt-2">
-                Once you claim a card, it will appear here.{" "}
-                <Link href="/claim">
-                  <span className="text-[#D4AF37] hover:underline cursor-pointer">Register Ownership →</span>
-                </Link>
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {ownedCerts.map((cert) => (
-                <OwnedCertRow key={cert.id} cert={cert} />
-              ))}
-            </div>
-          )}
-        </section>
+        {/* ── Section 3: Ownership & Transfers — REMOVED.
+              Owner-action footer (Download Owner Copy + Transfer) is now
+              rendered conditionally at the bottom of each cert card in
+              "Your Cards" above. The standalone OwnedCertRow component +
+              the duplicated cert metadata it displayed were collapsed in
+              favour of one card per cert. ──────────────────────────── */}
       </div>
     </>
-  );
-}
-
-// ── Owned cert row ─────────────────────────────────────────────────────────────
-function OwnedCertRow({ cert }: { cert: CustomerCert }) {
-  return (
-    <div className="border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-xl p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <span className="font-mono text-[#D4AF37] text-sm font-bold">{cert.certId}</span>
-          <p className="text-sm text-[#1A1A1A] mt-0.5">{cert.cardName ?? "—"}</p>
-          <p className="text-xs text-[#999999]">{cert.setName ?? ""}{cert.year ? ` (${cert.year})` : ""}</p>
-        </div>
-        <div className="flex flex-col items-end gap-2 shrink-0">
-          {cert.ownershipStatus === "claimed" && (
-            <div className="flex flex-col items-end gap-0.5">
-              <a
-                href={`/logbook/${cert.certId}/owner.pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
-              >
-                <Lock size={12} />
-                Download Owner Copy
-              </a>
-              <span className="text-[10px] text-[#B8960C]/70 text-right max-w-[180px] leading-tight">
-                Includes your reference number — keep private
-              </span>
-            </div>
-          )}
-          <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
-            <span className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors cursor-pointer">
-              <ArrowRightLeft size={12} />
-              Transfer
-            </span>
-          </Link>
-        </div>
-      </div>
-    </div>
   );
 }
