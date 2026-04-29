@@ -19,7 +19,7 @@ export const COMPANY = {
     country: "United Kingdom",
   },
   supportEmail: "hello@mintvaultuk.com",
-  website: "https://mintvault.fly.dev",
+  website: "https://mintvaultuk.com",
 } as const;
 
 export function isCompanyInfoComplete(): boolean {

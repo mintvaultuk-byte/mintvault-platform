@@ -366,7 +366,7 @@ export async function sendSubmissionDelivered(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
-  const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+  const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const vaultLink = data.certId ? `${appUrl}/vault/${data.certId}` : `${appUrl}/cert`;
   const body = `
 <p>Hi ${data.firstName},</p>
@@ -1213,7 +1213,7 @@ export async function sendVaultClubWelcomeEmail(data: {
   if (!resend) return;
   const name = data.displayName || "Collector";
   const tierLabel = data.tier.charAt(0).toUpperCase() + data.tier.slice(1);
-  const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+  const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const body = `
 <p>Hi ${name},</p>
 <p>Welcome to <strong style="color:#D4AF37;">Vault Club ${tierLabel}</strong> — your exclusive membership is now active.</p>
@@ -1243,7 +1243,7 @@ export async function sendVaultClubCancelledEmail(data: {
   const resend = getResend();
   if (!resend) return;
   const name = data.displayName || "Collector";
-  const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+  const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const body = `
 <p>Hi ${name},</p>
 <p>Your Vault Club membership has been cancelled. We're sorry to see you go.</p>
@@ -1268,7 +1268,7 @@ export async function sendVaultClubPaymentFailedEmail(data: {
   const resend = getResend();
   if (!resend) return;
   const name = data.displayName || "Collector";
-  const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+  const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const body = `
 <p>Hi ${name},</p>
 <p>We were unable to process your Vault Club subscription payment. This can happen if your card has expired or your bank declined the charge.</p>
@@ -1293,7 +1293,7 @@ export async function sendVaultClubGraceExpiredEmail(data: {
   const resend = getResend();
   if (!resend) return;
   const name = data.displayName || "Collector";
-  const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+  const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const body = `
 <p>Hi ${name},</p>
 <p>Your Vault Club membership has ended after repeated payment failures. Your Showroom has been set back to reserved.</p>

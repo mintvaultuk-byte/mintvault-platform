@@ -43,7 +43,7 @@ export function registerSellerRoutes(app: Express): void {
       }
 
       const stripe = await getUncachableStripeClient();
-      const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+      const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
       let accountId = user.stripe_connect_account_id as string | null;
 
       // Create Connect Express account if not yet created
@@ -194,7 +194,7 @@ export function registerSellerRoutes(app: Express): void {
       }
 
       const stripe = await getUncachableStripeClient();
-      const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+      const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
 
       const accountLink = await stripe.accountLinks.create({
         account: accountId,

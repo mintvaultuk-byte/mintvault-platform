@@ -107,7 +107,7 @@ export function registerVaultClubRoutes(app: Express): void {
       }
 
       const stripe = await getStripe();
-      const appUrl = process.env.APP_URL || "https://mintvault.fly.dev";
+      const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
       const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
         return_url: `${appUrl}/club`,

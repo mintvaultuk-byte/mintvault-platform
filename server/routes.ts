@@ -7173,7 +7173,7 @@ Defects (admin-confirmed): ${defectLines}`;
     for (const [k, v] of _uploadTokens.entries()) {
       if (Date.now() > v.expiresAt) _uploadTokens.delete(k);
     }
-    const uploadUrl = `${process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS}` : "https://mintvault.fly.dev"}/upload/${certId}/${imageType}?token=${token}`;
+    const uploadUrl = `${process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS}` : "https://mintvaultuk.com"}/upload/${certId}/${imageType}?token=${token}`;
     res.json({ token, expiresAt: new Date(expiresAt).toISOString(), uploadUrl });
   });
 
