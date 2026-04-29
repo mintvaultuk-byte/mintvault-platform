@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import AdminLoginPage from "./admin-login";
 import AdminDashboard from "./admin-dashboard";
 
 export default function AdminPage() {
@@ -39,7 +38,13 @@ export default function AdminPage() {
     return () => { cancelled = true; };
   }, []);
 
-  if (authenticated === null) {
+  useEffect(() => {
+    if (authenticated === false) {
+      navigate("/admin/login?next=/admin", { replace: true });
+    }
+  }, [authenticated, navigate]);
+
+  if (authenticated !== true) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="animate-pulse">
@@ -49,9 +54,5 @@ export default function AdminPage() {
     );
   }
 
-  if (!authenticated) {
-    return <AdminLoginPage onLogin={() => setAuthenticated(true)} />;
-  }
-
-  return <AdminDashboard onLogout={() => { setAuthenticated(false); navigate("/cert"); }} />;
+  return <AdminDashboard onLogout={() => navigate("/cert")} />;
 }

@@ -1,12 +1,16 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { Shield, LogIn, KeyRound, Eye, EyeOff } from "lucide-react";
 
 interface Props {
-  onLogin: () => void;
+  onLogin?: () => void;
 }
 
 export default function AdminLoginPage({ onLogin }: Props) {
+  const [, navigate] = useLocation();
+  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const nextPath = params.get("next") || "/admin";
   const [step, setStep] = useState<"password" | "pin">("password");
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
@@ -43,7 +47,8 @@ export default function AdminLoginPage({ onLogin }: Props) {
       const res = await apiRequest("POST", "/api/admin/pin", { pin });
       const data = await res.json();
       if (data.success) {
-        onLogin();
+        onLogin?.();
+        navigate(nextPath);
       }
     } catch (err: any) {
       const msg = err?.message || "";

@@ -148,6 +148,7 @@ import HowToReadVaultPage from "@/pages/vault-reports/how-to-read";
 import FAQPage from "@/pages/help/faq";
 import ContactPage from "@/pages/help/contact";
 import LoginPage from "@/pages/login";
+import AdminLoginPage from "@/pages/admin-login";
 import SignupPage from "@/pages/signup";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
@@ -180,6 +181,7 @@ function Router() {
       <ScrollToTop />
       <ScrollReveal />
       <Switch>
+        <Route path="/admin/login" component={AdminLoginPage} />
         <Route path="/admin">
           <AdminPage />
         </Route>
