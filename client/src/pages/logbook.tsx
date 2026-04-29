@@ -308,34 +308,38 @@ export default function LogbookPage() {
           </Section>
 
           {/* Ownership Chain */}
-          {data.ownership && data.ownership.chain.length > 0 && (
-            <Section title="Ownership History">
-              <p className="text-sm text-[#888888] mb-4">
-                {data.ownership.previousOwnersCount > 0
-                  ? `${data.ownership.previousOwnersCount} previous owner${data.ownership.previousOwnersCount !== 1 ? "s" : ""}`
-                  : "Original owner"}
-              </p>
-              <div className="space-y-3">
-                {data.ownership.chain.map(owner => (
-                  <div key={owner.ownerNumber} className="flex items-start gap-3">
-                    <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#E8E4DC]"}`} />
-                    <div>
-                      <p className="text-sm text-[#1A1A1A]">
-                        Owner {owner.ownerNumber}
-                        {owner.displayName && <span className="text-[#888888]"> — {owner.displayName}</span>}
-                      </p>
-                      <p className="text-xs text-[#888888]">
-                        {new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                        {owner.releasedAt
-                          ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
-                          : " (Current)"}
-                      </p>
+          <Section title="Ownership History">
+            {!data.ownership || data.ownership.chain.length === 0 ? (
+              <p className="text-sm text-[#888888]">Awaiting first owner — claim this card to begin its registry history</p>
+            ) : (
+              <>
+                {data.ownership.chain.length > 1 && (
+                  <p className="text-sm text-[#888888] mb-4">
+                    {data.ownership.chain.length - 1} previous owner{data.ownership.chain.length - 1 !== 1 ? "s" : ""}
+                  </p>
+                )}
+                <div className="space-y-3">
+                  {data.ownership.chain.map(owner => (
+                    <div key={owner.ownerNumber} className="flex items-start gap-3">
+                      <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#E8E4DC]"}`} />
+                      <div>
+                        <p className="text-sm text-[#1A1A1A]">
+                          Owner {owner.ownerNumber}
+                          {owner.displayName && <span className="text-[#888888]"> — {owner.displayName}</span>}
+                        </p>
+                        <p className="text-xs text-[#888888]">
+                          {new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                          {owner.releasedAt
+                            ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
+                            : " (Current)"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
+                  ))}
+                </div>
+              </>
+            )}
+          </Section>
 
           <GoldDivider />
 

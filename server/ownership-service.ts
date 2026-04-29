@@ -4,7 +4,7 @@
  */
 import { storage } from "./storage";
 
-const OWNER_EVENTS = ["initial_claim", "auto_submission", "transfer_completed", "admin_assign"];
+const OWNER_EVENTS = ["initial_claim", "transfer_completed", "admin_assign"];
 
 export interface OwnerEntry {
   ownerNumber: number;
@@ -24,10 +24,21 @@ export async function getOwnerChain(certId: string): Promise<OwnerEntry[]> {
 
     const ownerEvents = history
       .filter(h => OWNER_EVENTS.includes(h.eventType))
+      .filter(h => (h.toUserId && h.toUserId !== "") || (h.toEmail && h.toEmail !== ""))
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-    return ownerEvents.map((event, idx) => {
-      const nextEvent = ownerEvents[idx + 1];
+    const identityOf = (h: typeof ownerEvents[number]) =>
+      h.toUserId && h.toUserId !== "" ? `u:${h.toUserId}` : `e:${(h.toEmail || "").toLowerCase()}`;
+
+    const collapsed: typeof ownerEvents = [];
+    for (const event of ownerEvents) {
+      const prev = collapsed[collapsed.length - 1];
+      if (prev && identityOf(prev) === identityOf(event)) continue;
+      collapsed.push(event);
+    }
+
+    return collapsed.map((event, idx) => {
+      const nextEvent = collapsed[idx + 1];
       const claimedAt = event.createdAt ? new Date(event.createdAt).toISOString() : new Date().toISOString();
       const releasedAt = nextEvent?.createdAt ? new Date(nextEvent.createdAt).toISOString() : null;
       const durationDays = releasedAt
