@@ -181,7 +181,9 @@ function Router() {
       <ScrollToTop />
       <ScrollReveal />
       <Switch>
-        <Route path="/admin/login" component={AdminLoginPage} />
+        <Route path="/admin/login">
+          <AdminLoginPage />
+        </Route>
         <Route path="/admin">
           <AdminPage />
         </Route>
