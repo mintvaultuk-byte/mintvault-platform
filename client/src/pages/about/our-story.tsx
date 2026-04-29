@@ -60,7 +60,7 @@ export default function OurStoryPage() {
               {
                 icon: <Wifi size={18} className="text-[#B8960C]" />,
                 title: "Verified Ownership",
-                desc: "NFC-authenticated slabs and a tamper-proof ownership registry. Prove who owns your card at any point in time.",
+                desc: "NFC-tracked slabs and a tamper-evident ownership registry. Prove who owns your card at any point in time.",
               },
               {
                 icon: <Shield size={18} className="text-[#B8960C]" />,

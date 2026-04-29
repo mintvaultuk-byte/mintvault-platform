@@ -66,7 +66,7 @@ export default function BestCardGradingUk() {
         </h1>
 
         <p className="text-[#555555] text-base leading-relaxed mb-4">
-          MintVault UK is the leading professional card grading service in the United Kingdom. We grade Pokemon, Yu-Gi-Oh, Magic: The Gathering, One Piece, sports cards, and all other standard-size trading cards — providing tamper-evident precision slabs with NFC verification and a verified ownership registry that no other UK grader offers.
+          MintVault UK is the leading professional card grading service in the United Kingdom. We grade Pokemon, Yu-Gi-Oh, Magic: The Gathering, One Piece, sports cards, and all other standard-size trading cards — providing tamper-evident precision slabs with NFC tracking and a verified ownership registry that no other UK grader offers.
         </p>
 
         <p className="text-[#555555] text-sm leading-relaxed mb-8">

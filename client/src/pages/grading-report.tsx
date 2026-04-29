@@ -348,7 +348,7 @@ export default function GradingReportPage() {
                 </span>
                 {ownership.nfcEnabled && (
                   <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#D4AF37]/15 text-[#D4AF37] font-bold uppercase">
-                    NFC Verified ✓
+                    NFC-tracked
                   </span>
                 )}
               </div>

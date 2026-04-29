@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "Sports Card Grading UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "Professional sports card grading in the UK. Football, basketball, cricket and more. Tamper-evident slabs, NFC verification, and verified ownership.",
+    description: "Professional sports card grading in the UK. Football, basketball, cricket and more. Tamper-evident slabs, NFC tracking, and verified ownership.",
     areaServed: "United Kingdom",
     serviceType: "Sports Card Grading",
   },

@@ -102,7 +102,7 @@ export default function CardGradingNearMe() {
               { icon: <Shield size={16} />, title: "UK-based processing", desc: "Cards graded and returned entirely within the UK — no customs, no international risk." },
               { icon: <Package size={16} />, title: "Insured return shipping", desc: "Every return shipment is fully insured based on the declared value of your cards." },
               { icon: <CheckCircle size={16} />, title: "Online tracking", desc: "Track your submission status online at any time using your submission reference." },
-              { icon: <CheckCircle size={16} />, title: "NFC-verified slabs", desc: "Every slab has an NFC chip — buyers can verify your certificate with a phone scan." },
+              { icon: <CheckCircle size={16} />, title: "NFC-tracked slabs", desc: "Every slab has an NFC chip — buyers can verify your certificate with a phone scan." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>

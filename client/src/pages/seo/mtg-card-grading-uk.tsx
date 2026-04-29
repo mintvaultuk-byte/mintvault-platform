@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "MTG Card Grading UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "Professional Magic: The Gathering card grading in the UK. Expert grading, tamper-evident slabs, NFC verification, and verified ownership.",
+    description: "Professional Magic: The Gathering card grading in the UK. Expert grading, tamper-evident slabs, NFC tracking, and verified ownership.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },

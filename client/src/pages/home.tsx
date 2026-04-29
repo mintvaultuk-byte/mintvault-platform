@@ -278,7 +278,7 @@ export default function HomeV2() {
                 topBadge: cert?.cert_number ?? null,
                 mainLabel: hasCardName ? cert!.card_name : "MintVault",
                 rightLabel: cert?.grade ? `MV ${cert.grade}` : null,
-                footnote: "NFC \u00b7 Verified",
+                footnote: "NFC \u00b7 Tracked",
                 key: cert ? String(cert.id) : `slot-${i}`,
               };
             }) as [SlabContent, SlabContent, SlabContent];
@@ -297,10 +297,9 @@ export default function HomeV2() {
 
 
             {/* Promises row */}
-            <div className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8" style={{ borderColor: "var(--v2-line)" }}>
+            <div className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8" style={{ borderColor: "var(--v2-line)" }}>
               {[
-                { icon: Shield, title: "Insured in custody", desc: "Up to \u00a37,500 per card cover" },
-                { icon: Cpu, title: "NFC-verified", desc: "Every slab links to a live logbook" },
+                { icon: Cpu, title: "NFC-tracked", desc: "Every slab links to a live logbook" },
                 { icon: MapPin, title: "UK-based", desc: "Graded in Kent \u00b7 shipped across the UK" },
                 { icon: RefreshCw, title: "Reholder guarantee", desc: "Free regrade if we make a mistake" },
               ].map(({ icon: Icon, title, desc }) => (
@@ -649,7 +648,7 @@ export default function HomeV2() {
             Submit a card.<br />See yourself on the registry.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
-            From &pound;19. UK-based. Insured in transit and in custody.
+            From &pound;19. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <Link

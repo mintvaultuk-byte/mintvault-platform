@@ -517,10 +517,6 @@ export default function PricingV2() {
                 a: "Yes. All return shipping is Royal Mail Special Delivery with cover matched to your declared-value tier. Incoming shipping is your responsibility, but we recommend Royal Mail Special Delivery for anything above £100.",
               },
               {
-                q: "What happens if my card is lost or damaged in custody?",
-                a: "We reimburse up to your declared value. That&rsquo;s what the Value Protection tier does &mdash; sets the ceiling on our liability if something goes wrong. Full terms are in our T&Cs.",
-              },
-              {
                 q: "Do you grade cards other than Pokémon?",
                 a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you&rsquo;re unsure, submit anyway &mdash; we&rsquo;ll flag it before grading if we can&rsquo;t authenticate.",
               },
@@ -546,7 +542,7 @@ export default function PricingV2() {
             Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
-            From &pound;19. UK-based. Insured in transit and in custody.
+            From &pound;19. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <Link

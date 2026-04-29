@@ -424,7 +424,7 @@ export default function CertDetailPage() {
                 <div className="flex items-center gap-1.5 text-[#D4AF37]/40 text-xs" data-testid="text-nfc-scan-count">
                   <Wifi size={11} />
                   <span>
-                    NFC verified {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
+                    NFC scanned {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
                   </span>
                 </div>
               )}

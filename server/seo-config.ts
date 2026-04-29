@@ -132,13 +132,13 @@ const SEO_MAP: Record<string, SeoMeta> = {
   },
   "/tcg-grading-uk": {
     title: "TCG Grading UK | Trading Card Game Grading Service | MintVault",
-    description: "Professional TCG grading in the UK for all major trading card games. Tamper-evident slabs, NFC verification, and verified ownership registry from MintVault.",
+    description: "Professional TCG grading in the UK for all major trading card games. Tamper-evident slabs, NFC tracking, and verified ownership registry from MintVault.",
     canonical: `${BASE}/tcg-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
   "/yugioh-card-grading-uk": {
     title: "Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault",
-    description: "Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £19 per card.",
+    description: "Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking, from £19 per card.",
     canonical: `${BASE}/yugioh-card-grading-uk`,
     ogImage: DEFAULT_IMAGE,
   },
@@ -183,7 +183,7 @@ const SEO_MAP: Record<string, SeoMeta> = {
 /** Default meta for unknown routes (404, cert detail pages, etc.) */
 const DEFAULT_META: SeoMeta = {
   title: "MintVault UK — Professional Trading Card Grading",
-  description: "Professional UK trading card grading. Tamper-evident slabs, NFC verification, verified ownership registry, and insured return shipping. From £19 per card.",
+  description: "Professional UK trading card grading. Tamper-evident slabs, NFC tracking, verified ownership registry, and insured return shipping. From £19 per card.",
   canonical: BASE,
   ogImage: DEFAULT_IMAGE,
 };

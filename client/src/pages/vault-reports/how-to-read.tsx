@@ -26,7 +26,7 @@ const SECTIONS = [
   {
     num: "05",
     title: "Ownership History",
-    body: "Every transfer of ownership is logged here. The current owner is verified via email-confirmed handover. This creates a permanent, tamper-proof record of provenance.",
+    body: "Every transfer of ownership is logged here. The current owner is verified via email-confirmed handover. This creates a permanent, tamper-evident record of provenance.",
   },
   {
     num: "06",

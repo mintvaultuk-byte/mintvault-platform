@@ -40,7 +40,7 @@ const schema = [
     "@type": "Service",
     name: "Yu-Gi-Oh Card Grading UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "Professional Yu-Gi-Oh card grading service in the UK. Expert grading, tamper-evident slabs, NFC verification, and verified ownership.",
+    description: "Professional Yu-Gi-Oh card grading service in the UK. Expert grading, tamper-evident slabs, NFC tracking, and verified ownership.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },
@@ -52,7 +52,7 @@ export default function YugiohCardGradingUk() {
     <div className="px-4 py-10">
       <SeoHead
         title="Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault"
-        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC verification, from £19 per card."
+        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking, from £19 per card."
         canonical="https://mintvaultuk.com/yugioh-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
