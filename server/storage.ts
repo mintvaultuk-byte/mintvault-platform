@@ -1328,32 +1328,51 @@ export class DatabaseStorage implements IStorage {
 
     const ownershipToken = await this._generateOwnershipToken();
 
-    await db.execute(sql`
-      UPDATE certificates
-      SET current_owner_user_id = ${user.id},
-          ownership_status = 'claimed',
-          claim_code_used_at = NOW(),
-          ownership_token = ${ownershipToken},
-          ownership_token_generated_at = NOW(),
-          owner_name = ${verification.ownerName ?? null},
-          owner_email = ${verification.email},
-          declared_new = ${verification.declaredNew === true},
-          updated_at = NOW()
-      WHERE certificate_number = ${verification.certId}
-    `);
+    // Atomic claim — cert UPDATE, ownership_history INSERT, claim_verifications
+    // UPDATE, and the new users.email_verified flip all succeed together or
+    // none. Without the wrapping transaction a partial failure could leave
+    // the user table un-flipped while the cert is already claimed (or vice
+    // versa). The email_verified flip is conditional on email_verified=false
+    // so repeated claims by the same user don't churn the timestamp.
+    const userId = user.id;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        UPDATE certificates
+        SET current_owner_user_id = ${userId},
+            ownership_status = 'claimed',
+            claim_code_used_at = NOW(),
+            ownership_token = ${ownershipToken},
+            ownership_token_generated_at = NOW(),
+            owner_name = ${verification.ownerName ?? null},
+            owner_email = ${verification.email},
+            declared_new = ${verification.declaredNew === true},
+            updated_at = NOW()
+        WHERE certificate_number = ${verification.certId}
+      `);
 
-    await db.insert(ownershipHistory).values({
-      certId: verification.certId,
-      fromUserId: null,
-      toUserId: user.id,
-      toEmail: verification.email,
-      eventType: "initial_claim",
-      notes: "Claimed via email verification",
+      await tx.insert(ownershipHistory).values({
+        certId: verification.certId,
+        fromUserId: null,
+        toUserId: userId,
+        toEmail: verification.email,
+        eventType: "initial_claim",
+        notes: "Claimed via email verification",
+      });
+
+      await tx.update(claimVerifications)
+        .set({ usedAt: new Date() })
+        .where(eq(claimVerifications.id, verification.id));
+
+      // Clicking the unique-token verify link IS proof of email control;
+      // flip the user's email_verified flag now if it isn't already.
+      await tx.execute(sql`
+        UPDATE users
+        SET email_verified = true,
+            email_verified_at = NOW()
+        WHERE id = ${userId}
+          AND email_verified = false
+      `);
     });
-
-    await db.update(claimVerifications)
-      .set({ usedAt: new Date() })
-      .where(eq(claimVerifications.id, verification.id));
 
     return { success: true, certId: verification.certId, email: verification.email, ownerName: verification.ownerName ?? undefined };
   }
@@ -1573,7 +1592,7 @@ export class DatabaseStorage implements IStorage {
       JOIN submissions s ON si.submission_id = s.id
       WHERE LOWER(s.customer_email) = ${normalEmail}
         AND c.status != 'voided'
-      ORDER BY c.created_at DESC
+      ORDER BY c.issued_at DESC
     `);
     // Certs owned by this email (claimed via registry)
     const owned = await db.execute(sql`
@@ -1582,7 +1601,7 @@ export class DatabaseStorage implements IStorage {
       WHERE LOWER(c.owner_email) = ${normalEmail}
         AND c.ownership_status = 'claimed'
         AND c.status != 'voided'
-      ORDER BY c.created_at DESC
+      ORDER BY c.issued_at DESC
     `);
     // Merge, dedup by id
     const seen = new Set<number>();
