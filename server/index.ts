@@ -38,6 +38,21 @@ export function log(message: string, source = "express") {
 
 app.set("trust proxy", 1);
 
+// 301-redirect any *.fly.dev request to the canonical mintvaultuk.com.
+// First in the chain so it short-circuits before session, body-parsing, etc.
+// /health is excluded so Fly's HTTP-service health check (which may use
+// `Host: mintvault.fly.dev`) always reaches the 200 handler below regardless
+// of host. Path + query string preserved via req.originalUrl. Localhost,
+// IP literals, and *.mintvaultuk.com are unaffected.
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  const host = (req.headers.host || "").toLowerCase();
+  if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
+    return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
+  }
+  next();
+});
+
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
