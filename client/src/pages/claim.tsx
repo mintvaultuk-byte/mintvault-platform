@@ -56,13 +56,11 @@ export default function ClaimPage() {
       const data = await res.json();
       setResult({ type: "success", message: data.message });
     } catch (err: any) {
-      let msg = "An error occurred. Please try again.";
-      let code: string | undefined;
-      try {
-        const body = await err.json?.();
-        if (body?.error) msg = body.error;
-        if (body?.code) code = body.code;
-      } catch {}
+      // queryClient now throws an Error with .status + .body attached.
+      // body.error is the human-readable message; body.code is a machine
+      // tag used for redirect hints (e.g. ALREADY_CLAIMED).
+      const msg = err?.body?.error || err?.message || "An error occurred. Please try again.";
+      const code: string | undefined = err?.body?.code;
       // v435 — when the cert is already claimed, offer the buyer-init path
       // instead of leaving the user with a dead-end error.
       const showBuyerInit = code === "ALREADY_CLAIMED" && transferFlowLive;
