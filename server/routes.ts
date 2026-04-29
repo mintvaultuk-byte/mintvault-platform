@@ -1873,6 +1873,17 @@ export async function registerRoutes(
       }
 
       clearPinAttempts(req);
+
+      // Regenerate session on privilege escalation to admin.
+      // Prevents pre-existing customer/account-holder fields from
+      // surviving into the new admin session document (PR 3a).
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+
+      req.session.userId = undefined as unknown as string;
+      req.session.userEmail = undefined as unknown as string;
+      req.session.customerEmail = undefined as unknown as string;
       req.session.isAdmin = true;
       req.session.adminEmail = ADMIN_EMAIL;
       clearPendingAdmin(req);
@@ -5876,6 +5887,18 @@ export async function registerRoutes(
       if (!email) {
         return res.redirect("/dashboard?error=invalid_link");
       }
+
+      // Regenerate session on privilege grant to cert-owner.
+      // Prevents pre-existing admin/account-holder fields from
+      // surviving into the new customer session document (PR 3a).
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+
+      req.session.userId = undefined as unknown as string;
+      req.session.userEmail = undefined as unknown as string;
+      req.session.isAdmin = false;
+      req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = email;
       res.redirect("/dashboard?login=success");
     } catch (err) {
@@ -5891,8 +5914,14 @@ export async function registerRoutes(
 
   // POST /api/customer/logout — destroy customer session
   app.post("/api/customer/logout", (req, res) => {
-    req.session.customerEmail = undefined as unknown as string;
-    res.json({ message: "Logged out." });
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("[customer-logout] session destroy failed:", err);
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.clearCookie("mv.sid");
+      res.json({ message: "Logged out." });
+    });
   });
 
   // GET /api/customer/submissions — all submissions for the logged-in customer
