@@ -512,9 +512,9 @@ export default function HeroSlabFan({ slabs, scrollResponse = false }: HeroSlabF
       >
         {slabs.map((content, i) => {
           // Idle drift — sine waves with phase offset per slab.
-          const drift = Math.sin(time * 1.0 + i * 1.3) * 10 * driftScale;
-          const rotDriftY = Math.sin(time * 0.8 + i * 0.7) * 4 * driftScale;
-          const rotDriftZ = Math.sin(time * 0.6 + i) * 1.5 * driftScale;
+          const drift = Math.sin(time * 1.0 + i * 1.3) * 18 * driftScale;
+          const rotDriftY = Math.sin(time * 0.8 + i * 0.7) * 7 * driftScale;
+          const rotDriftZ = Math.sin(time * 0.6 + i) * 3 * driftScale;
 
           // Scroll-driven separation (zeroed when scrollResponse=false).
           const slabScrollRotY = scrollPush * (20 - i * 6);

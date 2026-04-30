@@ -38,7 +38,7 @@ export default function DarkSectionGlow() {
   const time = useIdleTime();
   // Slow breath: 0..1, full cycle ~42s at 0.005 increment * 0.15 frequency.
   const breathe = (Math.sin(time * 0.15) + 1) / 2;
-  const alpha = 0.06 + breathe * 0.04;
+  const alpha = 0.12 + breathe * 0.10;
 
   return (
     <div
@@ -59,7 +59,7 @@ export default function DarkSectionGlow() {
           height: "60%",
           transform: "translate(-50%, -50%)",
           background: `radial-gradient(ellipse, rgba(212, 175, 55, ${alpha}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`,
-          filter: "blur(80px)",
+          filter: "blur(60px)",
           willChange: "opacity",
         }}
       />

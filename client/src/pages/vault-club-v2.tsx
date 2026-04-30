@@ -100,14 +100,14 @@ function useHasBeenVisible(ref, threshold = 0.3) {
 
 function AmbientLayer() {
   const time = useIdleTime();
-  const x1 = 30 + Math.sin(time * 0.05) * 15;
+  const x1 = 30 + Math.sin(time * 0.10) * 22;
   const y1 = 25 + Math.cos(time * 0.04) * 10;
-  const x2 = 70 + Math.cos(time * 0.04) * 12;
+  const x2 = 70 + Math.cos(time * 0.08) * 18;
   const y2 = 75 + Math.sin(time * 0.03) * 8;
   return (
     <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: -1, overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: `${y1 - 35}%`, left: `${x1 - 35}%`, width: "70%", height: "70%", background: "radial-gradient(circle, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.03) 30%, transparent 60%)", filter: "blur(60px)" }} />
-      <div style={{ position: "absolute", top: `${y2 - 30}%`, left: `${x2 - 30}%`, width: "60%", height: "60%", background: "radial-gradient(circle, rgba(184, 150, 12, 0.06) 0%, rgba(184, 150, 12, 0.02) 30%, transparent 60%)", filter: "blur(50px)" }} />
+      <div style={{ position: "absolute", top: `${y1 - 35}%`, left: `${x1 - 35}%`, width: "70%", height: "70%", background: "radial-gradient(circle, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.06) 30%, transparent 60%)", filter: "blur(60px)" }} />
+      <div style={{ position: "absolute", top: `${y2 - 30}%`, left: `${x2 - 30}%`, width: "60%", height: "60%", background: "radial-gradient(circle, rgba(184, 150, 12, 0.13) 0%, rgba(184, 150, 12, 0.05) 30%, transparent 60%)", filter: "blur(50px)" }} />
     </div>
   );
 }
@@ -115,10 +115,10 @@ function AmbientLayer() {
 function DarkSectionGlow() {
   const time = useIdleTime();
   const breathe = (Math.sin(time * 0.15) + 1) / 2;
-  const alpha = 0.06 + breathe * 0.04;
+  const alpha = 0.12 + breathe * 0.10;
   return (
     <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: "30%", left: "50%", width: "70%", height: "60%", transform: "translate(-50%, -50%)", background: `radial-gradient(ellipse, rgba(212, 175, 55, ${alpha}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`, filter: "blur(80px)" }} />
+      <div style={{ position: "absolute", top: "30%", left: "50%", width: "70%", height: "60%", transform: "translate(-50%, -50%)", background: `radial-gradient(ellipse, rgba(212, 175, 55, ${alpha}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`, filter: "blur(60px)" }} />
     </div>
   );
 }
@@ -225,9 +225,9 @@ function HeroSlabFan({ slabs }) {
     <div ref={containerRef} className="relative h-[300px] md:h-[500px] flex items-center justify-center mx-auto" style={{ width: "min(95vw, 520px)", perspective: 1800 }}>
       <div style={{ position: "relative", width: "100%", height: "100%", transformStyle: "preserve-3d" }}>
         {slabs.map((content, i) => {
-          const drift = Math.sin(time * 1.0 + i * 1.3) * 10 * driftScale;
-          const rotDriftY = Math.sin(time * 0.8 + i * 0.7) * 4 * driftScale;
-          const rotDriftZ = Math.sin(time * 0.6 + i) * 1.5 * driftScale;
+          const drift = Math.sin(time * 1.0 + i * 1.3) * 18 * driftScale;
+          const rotDriftY = Math.sin(time * 0.8 + i * 0.7) * 7 * driftScale;
+          const rotDriftZ = Math.sin(time * 0.6 + i) * 3 * driftScale;
           return (
             <div key={content.key ?? `slot-${i}`} style={{ position: "absolute", left: "50%", top: "50%", marginLeft: -slabWidth / 2, marginTop: -slabWidth / 0.82 / 2, zIndex: slabs.length - i }}>
               <Slab3D width={slabWidth} translateX={offsets[i].x} translateY={offsets[i].y + drift} rotateZ={rotations[i] + rotDriftZ} rotateY={rotDriftY} topBadge={content.topBadge} mainLabel={content.mainLabel} rightLabel={content.rightLabel} footnote={content.footnote} />
@@ -333,9 +333,9 @@ function PerkRow({ number, title, body, value, isFirst }) {
           lineHeight: 1,
           fontSize: "clamp(2rem, 4vw, 3rem)",
           // Big numerals: faint gold by default, brighten when in view.
-          color: visible ? "rgba(212, 175, 55, 0.45)" : "rgba(212, 175, 55, 0.15)",
+          color: visible ? "rgba(212, 175, 55, 0.75)" : "rgba(212, 175, 55, 0.25)",
           transition: "color 1000ms ease-out 200ms",
-          textShadow: visible ? "0 0 20px rgba(212, 175, 55, 0.2)" : "none",
+          textShadow: visible ? "0 0 30px rgba(212, 175, 55, 0.4)" : "none",
         }}
       >
         {number}
@@ -519,7 +519,7 @@ function SectionIII() {
               padding: 32,
               backgroundColor: V.paper,
               border: `1px solid ${V.goldSoft}`,
-              boxShadow: `0 0 40px rgba(212, 175, 55, ${glow * 0.4}), inset 0 0 30px rgba(212, 175, 55, ${glow * 0.1})`,
+              boxShadow: `0 0 40px rgba(212, 175, 55, ${glow * 0.7}), inset 0 0 30px rgba(212, 175, 55, ${glow * 0.2})`,
               transition: "box-shadow 1s ease-in-out",
             }}
           >

@@ -39,11 +39,11 @@ function useIdleTime(): number {
 export default function AmbientLayer() {
   const time = useIdleTime();
 
-  // Two large radial gradients drifting in slow opposing arcs.
-  // ~60s cycle — barely perceptible, but the page never feels static.
-  const x1 = 30 + Math.sin(time * 0.05) * 15;
+  // Two large radial gradients drifting in opposing arcs.
+  // ~30s cycle — visible warmth, the page never feels static.
+  const x1 = 30 + Math.sin(time * 0.10) * 22;
   const y1 = 25 + Math.cos(time * 0.04) * 10;
-  const x2 = 70 + Math.cos(time * 0.04) * 12;
+  const x2 = 70 + Math.cos(time * 0.08) * 18;
   const y2 = 75 + Math.sin(time * 0.03) * 8;
 
   return (
@@ -66,7 +66,7 @@ export default function AmbientLayer() {
           width: "70%",
           height: "70%",
           background:
-            "radial-gradient(circle, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.03) 30%, transparent 60%)",
+            "radial-gradient(circle, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.06) 30%, transparent 60%)",
           filter: "blur(60px)",
           willChange: "transform",
         }}
@@ -80,7 +80,7 @@ export default function AmbientLayer() {
           width: "60%",
           height: "60%",
           background:
-            "radial-gradient(circle, rgba(184, 150, 12, 0.06) 0%, rgba(184, 150, 12, 0.02) 30%, transparent 60%)",
+            "radial-gradient(circle, rgba(184, 150, 12, 0.13) 0%, rgba(184, 150, 12, 0.05) 30%, transparent 60%)",
           filter: "blur(50px)",
           willChange: "transform",
         }}
