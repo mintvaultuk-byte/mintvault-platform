@@ -120,3 +120,23 @@ machine, email automation, and migration story for existing
 customers are each non-trivial. Better to ship grading first,
 get real usage data, then build the subscription model on
 evidence rather than guesses.
+
+---
+
+## Registry stats — return when volume justifies
+
+**Decision date:** 2026-04-30
+**Trigger:** When totalGraded > 100, restore the "At a Glance"
+section on /registry.
+
+Removed in 5668274 because at v1 launch volume (15/15/4/4) the
+small numbers undermine the page's positioning as the public
+ledger of every graded card. Better hidden than shown small.
+
+When restoring, consider:
+- Conditional render via `if stats.total_graded > 100`
+- Or keep removed permanently and replace with a more
+  qualitative section (e.g. "Recent additions" ticker)
+- Decide based on what the registry page is doing for users
+  at that point — credibility builder, search interface, or
+  social proof?
