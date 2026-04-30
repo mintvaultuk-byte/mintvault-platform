@@ -280,3 +280,80 @@ until Steps 3–8 complete + solicitor sign-off + live
 Stripe products created. Merging earlier ships a non-
 functional Vault Club (DB rows never get written; trial
 expirations never get acted on; success page 404s).
+
+## Session Close 2026-04-30 (Step 3)
+
+- **Branch:** `feat/vault-club-stripe-phase1-schema`
+- **HEAD:** `face2b5 feat(vault-club): phase 1 step 3 —
+  Stripe webhook handlers (code only, untested)`
+- **Status:** Webhook code written, `npm run check`
+  (TypeScript) clean. **NOT tested locally.** Stripe CLI
+  authentication blocked the local end-to-end smoke run
+  twice tonight (browser session timed out before the
+  Allow click landed). No webhook events have been
+  received against the new handlers; no rows have been
+  written to `vault_club_subscriptions`, `audit_log`, or
+  `vault_club_events` from this code path yet.
+- **What changed in this commit:**
+  - `server/stripeClient.ts` — NODE_ENV-switched webhook
+    secret resolution.
+  - `server/webhookHandlers.ts` — all six handlers
+    (incl. new `customer.subscription.created`)
+    dual-writing to `vault_club_subscriptions` +
+    `audit_log` via `writeVaultClubSubscriptionAudit()`,
+    while keeping legacy `users.vault_club_*` writes
+    intact. Idempotency via `insertVaultClubEvent`.
+  - `server/vault-club-checkout.ts` /
+    `server/vault-club.ts` — supporting wiring.
+
+### Resume tomorrow
+
+1. **Re-auth Stripe CLI** — `stripe login` in a fresh
+   terminal; click **Allow** in the browser within ~30
+   seconds (previous attempts timed out before the click
+   landed).
+2. **Start the listener on the right sandbox** —
+   `stripe listen --forward-to localhost:5000/api/stripe/webhook`
+   pointed at the **Mintvault sandbox**
+   (`acct_1T3vbuRN7H2pRqKE`), not live. Confirm the
+   header line shows the sandbox account name before
+   triggering anything.
+3. **Capture the test webhook secret** — `stripe listen`
+   prints a `whsec_…` on first connect. Add it to `.env`
+   as a NEW variable:
+   ```
+   STRIPE_WEBHOOK_SECRET_TEST=whsec_…
+   ```
+   Do **not** overwrite the existing live
+   `STRIPE_WEBHOOK_SECRET`. The NODE_ENV switch in
+   `server/stripeClient.ts` reads `_TEST` in dev.
+4. **Run the smoke script** —
+   `npx tsx scripts/test-vault-club-checkout.ts` to
+   issue a fresh checkout, then complete the Stripe-
+   hosted side with test card `4242 4242 4242 4242`.
+   Watch `stripe listen` for the event sequence:
+   `checkout.session.completed` →
+   `customer.subscription.created` →
+   `invoice.created` / `invoice.paid` (or
+   `invoice.payment_failed`).
+5. **Verify the dual-write landed** — query each table
+   and confirm matching rows for the new subscription:
+   - `vault_club_subscriptions` — one row, status
+     `trialing` (or whatever Stripe reports).
+   - `audit_log` — one row per handler invocation, tied
+     by `subscription_id`.
+   - `vault_club_events` — one row per Stripe event ID
+     (idempotency check: re-trigger the same event via
+     `stripe events resend <evt_…>` and confirm no
+     duplicate row appears).
+6. **Sanity-check the legacy path** — `users.vault_club_*`
+   columns on the test user should still update in
+   parallel (dual-write contract). If they don't, the
+   webhook short-circuited before the legacy write.
+
+### ⚠️ Do not merge yet
+
+Still applies — code is in place but unverified end-to-
+end. Step 4 (`/account/vault-club` success page +
+`requireActiveVaultClub` middleware) and Steps 5–8 are
+unchanged and remain blocking.
