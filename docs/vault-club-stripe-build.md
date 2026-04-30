@@ -185,3 +185,98 @@ NOT merged, NOT deployed.
   `/vault-club`. Out of scope for Step 2 — fix lives in
   the magic-link verify flow (server-side redirect or
   client-side post-auth navigation). Track separately.
+
+---
+
+## Session Close — 2026-04-30
+
+- **Branch:** `feat/vault-club-stripe-phase1-schema`
+- **HEAD:** `9b0ac54 fix(vault-club): smoke-test fixes —
+  login redirect, ESM require, publishable key fallback`
+- **State:** Phase 1 Step 2 functionally proven end-to-end.
+  Server-side smoke test
+  (`scripts/test-vault-club-checkout.ts`) drives the full
+  flow without a browser session: issues a magic-link
+  token in DB, hits `/api/auth/magic-link/verify` to
+  capture the `mv.sid` cookie, POSTs
+  `/api/vault-club/checkout`, prints the
+  `https://checkout.stripe.com/c/pay/cs_test_…` URL.
+  Cornelius pasted the URL into a browser and completed
+  the Stripe-hosted side with test card 4242 4242 4242 4242.
+- **Stripe sandbox state:** test customer
+  `oliveflopizzeria@gmail.com` now exists in
+  `acct_1T3vbuRN7H2pRqKE` (Mintvault sandbox) with a
+  trialing Silver subscription. Trial ends **14 May 2026**
+  (14 days from today). When trial ends Stripe will
+  attempt to charge the saved test card.
+- **`vault_club_subscriptions` DB table:** **EMPTY.** The
+  Drizzle table + migration helper from Step 1 ran cleanly
+  at boot (table exists, indexes exist), but no rows have
+  been written. Step 3 (webhook handlers) is what
+  populates this table. Right now the Stripe-side state
+  and our DB are out of sync — Stripe knows about the
+  trialing subscription, our app does not.
+
+### Resume points for tomorrow
+
+- **Step 3 — webhook handlers + state machine.** New
+  handlers for `checkout.session.completed`,
+  `customer.subscription.created`,
+  `customer.subscription.updated`,
+  `customer.subscription.deleted`, and
+  `invoice.payment_failed`. Each upserts a row in
+  `vault_club_subscriptions` keyed on
+  `stripe_subscription_id` (UNIQUE) and writes the
+  matching `VaultClubAuditAction` via
+  `writeVaultClubSubscriptionAudit()` (the wrapper from
+  Step 1). After Step 3 ships, the existing test
+  subscription should be backfilled by replaying the
+  Stripe events (or by running a one-off sync script).
+- **Step 4 — success page at `/account/vault-club`.**
+  Currently `success_url` points at
+  `/account/vault-club?checkout=success&session_id=…`
+  which doesn't exist as a route — pasting the URL
+  finishes on Stripe's side, but if Cornelius lets it
+  redirect, he lands on the SPA 404. Step 4 builds the
+  page (status panel reading from
+  `vault_club_subscriptions`, manage-billing button to
+  the existing `/api/vault-club/portal`). Also wires the
+  `requireActiveVaultClub` middleware that gates
+  member-only dashboard surfaces.
+
+### Bugs surfaced today (out of scope for Step 2)
+
+- **`account_magic_link_tokens.expires_at` is `TIMESTAMP`,
+  not `TIMESTAMPTZ`.** The verify handler does
+  `new Date(rec.expires_at) < new Date()`. Node parses
+  the TZ-less string in local time, so on a BST/UTC+1 Mac
+  a fresh 15-minute token reads as 45 minutes in the past
+  and the user is bounced to `/login?error=expired_link`
+  immediately. Production (Fly.io UTC) is unaffected. Two
+  fixes possible: migrate the column to `TIMESTAMPTZ`
+  (cleanest, also affects `consumed_at` and `created_at`),
+  or change the verify handler to compare in SQL via
+  `WHERE expires_at > NOW()` instead of JS-Date round-trip.
+  The smoke-test script side-steps this with a 24-hour
+  TTL — comment in
+  `scripts/test-vault-club-checkout.ts` explains why.
+- **`/login` ignores `?next=…`** (already noted above).
+- **Stray ESM-incompatible `require()` calls** in:
+  - `server/routes.ts` lines 881, 884, 889, 890, 913,
+    918, 919, 4904
+  - `server/labels.ts` line 69
+  Each will 500 with `ReferenceError: require is not
+  defined` the same way `routes.ts:746` did, the moment
+  any of those code paths runs. The 881–919 cluster is
+  the legal-page route — hits whenever a user navigates
+  to `/legal/*`. `4904` is in a gated route. `labels.ts`
+  is at module top-level and fires on label generation.
+  Worth a one-shot follow-up sweep.
+
+### ⚠️ Do not merge yet
+
+`feat/vault-club-stripe-phase1-schema` stays on the branch
+until Steps 3–8 complete + solicitor sign-off + live
+Stripe products created. Merging earlier ships a non-
+functional Vault Club (DB rows never get written; trial
+expirations never get acted on; success page 404s).
