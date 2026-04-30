@@ -5,6 +5,8 @@ import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
+import AmbientLayer from "@/components/v2/ambient-layer";
+import DarkSectionGlow from "@/components/v2/dark-section-glow";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -213,7 +215,8 @@ export default function HomeV2() {
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: "var(--v2-paper)" }}>
+      <AmbientLayer />
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
@@ -282,7 +285,7 @@ export default function HomeV2() {
                 key: cert ? String(cert.id) : `slot-${i}`,
               };
             }) as [SlabContent, SlabContent, SlabContent];
-            return <HeroSlabFan slabs={slabs} />;
+            return <HeroSlabFan slabs={slabs} scrollResponse />;
           })()}
         </div>
       </section>
@@ -316,8 +319,9 @@ export default function HomeV2() {
 
       {/* ── SECTION C: GRADING TIERS (dark) ──────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
-          <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+        <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+          <DarkSectionGlow />
+          <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
               I &middot; Grading Tiers
             </p>
@@ -639,8 +643,9 @@ export default function HomeV2() {
       </FadeIn>
 
       {/* ── SECTION F: FINAL CTA (dark) ──────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
-        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
+      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+        <DarkSectionGlow />
+        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
             IV &middot; Submit
           </p>
