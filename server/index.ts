@@ -13,6 +13,11 @@ import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
+import {
+  expectedStripeKeyName,
+  hasStripePublishableKey,
+  hasStripeSecretKey,
+} from "./stripeClient";
 import pg from "pg";
 import path from "path";
 
@@ -146,11 +151,15 @@ app.use("/api/auth/forgot-password", authRateLimit);
 app.use("/api/auth/magic-link", authRateLimit);
 app.use("/api/admin", adminIpAllowlist);
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.warn("[stripe] STRIPE_SECRET_KEY not set — payments disabled");
+if (!hasStripeSecretKey()) {
+  console.warn(
+    `[stripe] ${expectedStripeKeyName("secret")} not set — payments disabled`
+  );
 }
-if (!process.env.STRIPE_PUBLISHABLE_KEY) {
-  console.warn("[stripe] STRIPE_PUBLISHABLE_KEY not set — payments disabled");
+if (!hasStripePublishableKey()) {
+  console.warn(
+    `[stripe] ${expectedStripeKeyName("publishable")} not set — payments disabled`
+  );
 }
 
 app.post(

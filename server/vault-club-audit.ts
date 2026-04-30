@@ -27,6 +27,7 @@
 import { storage } from "./storage";
 
 export type VaultClubAuditAction =
+  | "checkout_session_created"
   | "created"
   | "trial_started"
   | "trial_ended_paid"

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { Link } from "wouter";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -122,6 +123,36 @@ const FAQS = [
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function VaultClubV2() {
+  const [isLoading, setIsLoading] = useState<"month" | "year" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleCheckout(interval: "month" | "year") {
+    setIsLoading(interval);
+    setError(null);
+    try {
+      const r = await fetch("/api/vault-club/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ interval }),
+      });
+      if (r.status === 401) {
+        window.location.href = `/account/login?next=${encodeURIComponent("/vault-club")}`;
+        return;
+      }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data?.url) {
+        setError(data?.message || "Could not start checkout. Please try again.");
+        setIsLoading(null);
+        return;
+      }
+      window.location.href = data.url as string;
+    } catch {
+      setError("Network error. Please try again.");
+      setIsLoading(null);
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
       <HeaderV2 />
@@ -335,7 +366,7 @@ export default function VaultClubV2() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Monthly card */}
-            <div className="rounded-xl p-8" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}>
+            <div className="rounded-xl p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-ink-mute)" }}>
                 Monthly
               </p>
@@ -348,13 +379,34 @@ export default function VaultClubV2() {
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
                 Cancel anytime. Bill renews monthly.
               </p>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-ink-mute)" }}>
                 Good for month-to-month flexibility.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleCheckout("month")}
+                disabled={isLoading !== null}
+                data-testid="vault-club-checkout-month"
+                className="mt-auto inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              >
+                {isLoading === "month" ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Starting checkout&hellip;
+                  </>
+                ) : (
+                  <>
+                    Start 14-day free trial <ArrowRight size={14} />
+                  </>
+                )}
+              </button>
+              <p className="font-mono-v2 text-[9px] uppercase tracking-widest text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
+                Card required &middot; Cancel anytime
               </p>
             </div>
 
             {/* Annual card */}
-            <div className="relative rounded-xl p-8" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}>
+            <div className="relative rounded-xl p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}>
               <span
                 className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded whitespace-nowrap"
                 style={{ top: "-14px", backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
@@ -373,18 +425,43 @@ export default function VaultClubV2() {
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
                 Equivalent to two months free. Bill renews yearly.
               </p>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-gold)" }}>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-gold)" }}>
                 Best value for regular submitters.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleCheckout("year")}
+                disabled={isLoading !== null}
+                data-testid="vault-club-checkout-year"
+                className="mt-auto inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              >
+                {isLoading === "year" ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Starting checkout&hellip;
+                  </>
+                ) : (
+                  <>
+                    Start 14-day free trial <ArrowRight size={14} />
+                  </>
+                )}
+              </button>
+              <p className="font-mono-v2 text-[9px] uppercase tracking-widest text-center mt-3" style={{ color: "var(--v2-gold)" }}>
+                Card required &middot; Cancel anytime
               </p>
             </div>
           </div>
 
-          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-10 text-center" style={{ color: "var(--v2-gold)" }}>
-            Subscriptions temporarily paused &mdash; relaunching with the full perks system.
-          </p>
-          <p className="font-body text-xs text-center mt-2" style={{ color: "var(--v2-ink-mute)" }}>
-            Contact support@mintvaultuk.com to join the waitlist.
-          </p>
+          {error && (
+            <p
+              role="alert"
+              data-testid="vault-club-checkout-error"
+              className="font-body text-sm text-center mt-8"
+              style={{ color: "#B00020" }}
+            >
+              {error}
+            </p>
+          )}
         </div>
       </section>
 
