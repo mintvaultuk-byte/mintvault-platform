@@ -256,7 +256,13 @@ export async function grantMemberCredits(userId: string, tier: VaultClubTier, so
   return;
 }
 
-/** Insert a vault_club_events audit row (idempotent via stripe_event_id UNIQUE) */
+/**
+ * Insert a vault_club_events audit row (idempotent via stripe_event_id UNIQUE).
+ *
+ * Returns `true` when a new row was inserted, `false` when the event was
+ * already processed (ON CONFLICT DO NOTHING fired) or an error swallowed it.
+ * Step 3 callers gate post-event writes on this signal.
+ */
 export async function insertVaultClubEvent(params: {
   userId: string;
   stripeEventId: string;
@@ -265,9 +271,9 @@ export async function insertVaultClubEvent(params: {
   status?: string | null;
   amountPence?: number | null;
   rawPayload?: unknown;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
-    await db.execute(sql`
+    const result = await db.execute(sql`
       INSERT INTO vault_club_events
         (user_id, stripe_event_id, event_type, tier, status, amount_pence, raw_payload)
       VALUES
@@ -276,6 +282,10 @@ export async function insertVaultClubEvent(params: {
          ${params.amountPence ?? null},
          ${params.rawPayload ? JSON.stringify(params.rawPayload) : null}::jsonb)
       ON CONFLICT (stripe_event_id) DO NOTHING
+      RETURNING id
     `);
-  } catch { /* non-critical */ }
+    return result.rows.length > 0;
+  } catch {
+    return false;
+  }
 }
