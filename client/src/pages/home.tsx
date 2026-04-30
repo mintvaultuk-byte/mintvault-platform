@@ -382,7 +382,7 @@ export default function HomeV2() {
                     {/* Price — Fraunces non-italic, floating pound sign */}
                     <div className="relative mb-1" style={{ lineHeight: 1 }}>
                       <span
-                        className="font-display font-semibold absolute"
+                        className="font-numeral font-semibold absolute"
                         style={{
                           color: "rgba(255,255,255,0.4)",
                           fontSize: "clamp(28px, 3vw, 36px)",
@@ -394,7 +394,7 @@ export default function HomeV2() {
                         &pound;
                       </span>
                       <span
-                        className="font-display font-semibold"
+                        className="font-numeral font-semibold"
                         style={{
                           color: "#FFFFFF",
                           fontSize: "clamp(72px, 6vw, 96px)",

@@ -507,7 +507,7 @@ export default function ToolsEstimateV2() {
                             {key}
                           </p>
                           <p
-                            className="font-display font-semibold leading-none text-right md:text-left"
+                            className="font-numeral font-semibold leading-none text-right md:text-left"
                             style={{
                               fontSize: "clamp(1.75rem, 3vw, 2rem)",
                               color: (score ?? 0) >= 9 ? "var(--v2-gold)" : "var(--v2-ink)",
@@ -642,7 +642,7 @@ export default function ToolsEstimateV2() {
                           {p.credits}
                         </p>
                         <p
-                          className="font-display font-semibold text-3xl mt-2 leading-none"
+                          className="font-numeral font-semibold text-3xl mt-2 leading-none"
                           style={{ color: p.featured ? "var(--v2-gold)" : "var(--v2-ink)" }}
                         >
                           {p.price}

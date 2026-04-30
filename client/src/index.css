@@ -235,11 +235,6 @@
     text-shadow: 0 0 6px rgba(212,175,55,0.35), 0 0 14px rgba(212,175,55,0.1);
   }
 
-  /* ── Display font — Space Grotesk for headings ───────────────────── */
-  .font-display {
-    font-family: var(--font-display);
-  }
-
   /* ── Card ───────────────────────────────────────────────────────── */
   .glass-card {
     position: relative;

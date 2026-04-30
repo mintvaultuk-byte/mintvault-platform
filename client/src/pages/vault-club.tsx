@@ -340,7 +340,7 @@ export default function VaultClubV2() {
                 Monthly
               </p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-display font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
+                <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
                   {poundsFromPence(SILVER.monthly_price_pence)}
                 </span>
                 <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ month</span>
@@ -365,7 +365,7 @@ export default function VaultClubV2() {
                 Annual
               </p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-display font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
+                <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
                   {poundsFromPence(SILVER.annual_price_pence)}
                 </span>
                 <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ year</span>

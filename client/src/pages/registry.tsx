@@ -153,7 +153,7 @@ export default function RegistryV2() {
                       />
                     ) : (
                       <p
-                        className="font-display font-semibold leading-none mt-3"
+                        className="font-numeral font-semibold leading-none mt-3"
                         style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "var(--v2-ink)" }}
                       >
                         {value}
