@@ -723,6 +723,10 @@ export async function registerRoutes(
   seedTierCapacityTable().catch(() => {});
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
+    .then(async () => {
+      const { migrateVaultClubSubscriptionsSchema } = await import("./vault-club-subscriptions-schema");
+      return migrateVaultClubSubscriptionsSchema();
+    })
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
 
   // Reference number backfill — async, fire-and-forget, never blocks boot
