@@ -152,6 +152,7 @@ import AdminLoginPage from "@/pages/admin-login";
 import HomeV2Integrated from "@/pages/home-v2-integrated";
 import HowItWorksV2 from "@/pages/how-it-works-v2";
 import HomeV3 from "@/pages/home-v3";
+import HomeV4 from "@/pages/home-v4";
 import SignupPage from "@/pages/signup";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
@@ -195,6 +196,9 @@ function Router() {
         </Route>
         <Route path="/home-v3">
           <HomeV3 />
+        </Route>
+        <Route path="/home-v4">
+          <HomeV4 />
         </Route>
         <Route path="/admin">
           <AdminPage />
