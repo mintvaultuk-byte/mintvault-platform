@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { getStripeSecretKey } from './stripeClient';
+import { getStripeSecretKey, getStripeWebhookSecrets } from './stripeClient';
 import { storage } from './storage';
 import { sendSubmissionConfirmation } from './email';
 import { db } from './db';
@@ -9,10 +9,93 @@ import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } 
 import { writeAuthAudit } from './account-auth';
 import { auditLog } from '@shared/schema';
 import {
+  writeVaultClubSubscriptionAudit,
+  type VaultClubAuditAction,
+} from './vault-club-audit';
+import {
   sendVaultClubWelcomeEmail,
   sendVaultClubCancelledEmail,
   sendVaultClubPaymentFailedEmail,
 } from './email';
+
+// ── Step 3 helpers ────────────────────────────────────────────────────────────
+// Shape of vault_club_subscriptions rows we care about for transition detection.
+interface VaultClubSubscriptionRow {
+  id: string;
+  user_id: string;
+  status: string;
+  cancel_at_period_end: boolean;
+  trial_end: string | null;
+}
+
+async function getSubscriptionRow(
+  stripeSubscriptionId: string,
+): Promise<VaultClubSubscriptionRow | null> {
+  const rows = await db.execute(sql`
+    SELECT id, user_id, status, cancel_at_period_end, trial_end
+    FROM vault_club_subscriptions
+    WHERE stripe_subscription_id = ${stripeSubscriptionId}
+    LIMIT 1
+  `);
+  return (rows.rows[0] as unknown as VaultClubSubscriptionRow | undefined) ?? null;
+}
+
+interface UpsertParams {
+  userId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  stripePriceId: string;
+  status: string;
+  trialEnd: number | null;
+  currentPeriodStart: number;
+  currentPeriodEnd: number;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: number | null;
+}
+
+/**
+ * Upsert a row in vault_club_subscriptions keyed on stripe_subscription_id.
+ * Returns the internal row id (subscription_row_id used as audit_log entity_id).
+ */
+async function upsertSubscriptionRow(p: UpsertParams): Promise<string> {
+  const trialEndIso = p.trialEnd ? new Date(p.trialEnd * 1000).toISOString() : null;
+  const periodStartIso = new Date(p.currentPeriodStart * 1000).toISOString();
+  const periodEndIso = new Date(p.currentPeriodEnd * 1000).toISOString();
+  const canceledAtIso = p.canceledAt ? new Date(p.canceledAt * 1000).toISOString() : null;
+
+  const result = await db.execute(sql`
+    INSERT INTO vault_club_subscriptions (
+      user_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
+      status, trial_end, current_period_start, current_period_end,
+      cancel_at_period_end, canceled_at, updated_at
+    ) VALUES (
+      ${p.userId}, ${p.stripeCustomerId}, ${p.stripeSubscriptionId}, ${p.stripePriceId},
+      ${p.status}, ${trialEndIso}, ${periodStartIso}, ${periodEndIso},
+      ${p.cancelAtPeriodEnd}, ${canceledAtIso}, NOW()
+    )
+    ON CONFLICT (stripe_subscription_id) DO UPDATE SET
+      stripe_customer_id     = EXCLUDED.stripe_customer_id,
+      stripe_price_id        = EXCLUDED.stripe_price_id,
+      status                 = EXCLUDED.status,
+      trial_end              = EXCLUDED.trial_end,
+      current_period_start   = EXCLUDED.current_period_start,
+      current_period_end     = EXCLUDED.current_period_end,
+      cancel_at_period_end   = EXCLUDED.cancel_at_period_end,
+      canceled_at            = EXCLUDED.canceled_at,
+      updated_at             = NOW()
+    RETURNING id
+  `);
+  return (result.rows[0] as { id: string }).id;
+}
+
+/**
+ * Pull a Stripe Subscription's price ID from its primary line item.
+ * Returns empty string if the subscription has no items (shouldn't happen
+ * in practice, but Stripe types make `items` optional).
+ */
+function priceIdFromSubscription(sub: Stripe.Subscription): string {
+  return sub.items?.data?.[0]?.price?.id ?? '';
+}
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
@@ -23,11 +106,7 @@ export class WebhookHandlers {
       );
     }
 
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    const webhookSecret2 = process.env.STRIPE_WEBHOOK_SECRET_2;
-    if (!webhookSecret) {
-      throw new Error('STRIPE_WEBHOOK_SECRET env var is not set');
-    }
+    const { primary: webhookSecret, secondary: webhookSecret2 } = getStripeWebhookSecrets();
 
     const secretKey = await getStripeSecretKey();
     const stripe = new Stripe(secretKey, { apiVersion: '2025-08-27.basil' as any });
@@ -140,6 +219,10 @@ export class WebhookHandlers {
 
     // ── Vault Club subscription events ────────────────────────────────────────
 
+    if (event.type === 'customer.subscription.created') {
+      await WebhookHandlers.handleSubscriptionCreated(event.id, event.data.object as Stripe.Subscription);
+    }
+
     if (event.type === 'customer.subscription.updated') {
       await WebhookHandlers.handleSubscriptionUpdated(event.id, event.data.object as Stripe.Subscription);
     }
@@ -230,7 +313,7 @@ export class WebhookHandlers {
       UPDATE users SET member_credits_last_granted_at = NOW() WHERE id = ${userId}
     `);
 
-    await insertVaultClubEvent({
+    const isNewEvent = await insertVaultClubEvent({
       userId, stripeEventId: eventId,
       eventType: 'subscription.created', tier, status,
     });
@@ -248,6 +331,104 @@ export class WebhookHandlers {
 
     await writeAuthAudit('vault_club.subscribed', userId, 'webhook', { tier, status });
     console.log(`[webhook] Vault Club subscribed: user=${userId} tier=${tier} status=${status}`);
+
+    // ── Step 3 dual-write: vault_club_subscriptions + audit_log ──────────────
+    // Gated on idempotency — if this event was already processed, skip.
+    if (!isNewEvent || !sub || !subscriptionId) return;
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: session.customer as string,
+      stripeSubscriptionId: subscriptionId,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status,
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? null,
+    });
+
+    await writeVaultClubSubscriptionAudit(
+      subRowId,
+      'checkout_session_created',
+      'stripe-webhook',
+      {
+        stripe_event_id: eventId,
+        stripe_subscription_id: subscriptionId,
+        stripe_customer_id: session.customer as string,
+        stripe_price_id: priceIdFromSubscription(sub),
+        new_status: sub.status,
+        tier,
+        interval,
+      },
+    );
+  }
+
+  // ── Subscription created ──────────────────────────────────────────────────
+  //
+  // Step 3: deterministic vault_club_subscriptions row creation. Stripe fires
+  // customer.subscription.created shortly after checkout.session.completed (or
+  // when an admin creates a sub via the dashboard / API). The legacy flow
+  // inferred creation from checkout.session.completed, which is racy when
+  // events arrive out of order. This handler is the canonical source for
+  // populating vault_club_subscriptions on first sight of a sub.
+  //
+  // No legacy users-column writes here — checkout.session.completed already
+  // does those. This handler is Step 3 only.
+
+  private static async handleSubscriptionCreated(
+    eventId: string,
+    sub: Stripe.Subscription,
+  ): Promise<void> {
+    const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+    const user = await findUserByStripeCustomerId(customerId);
+    if (!user) {
+      console.warn(`[webhook] subscription.created: no user for customer ${customerId}`);
+      return;
+    }
+    const userId = user.id as string;
+    const tier = (sub.metadata?.tier ?? sub.items?.data?.[0]?.price?.metadata?.mintvault_tier ?? null) as VaultClubTier | null;
+
+    const isNewEvent = await insertVaultClubEvent({
+      userId, stripeEventId: eventId,
+      eventType: 'subscription.created.event', tier, status: sub.status,
+    });
+    if (!isNewEvent) return;
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status,
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? null,
+    });
+
+    // Status=trialing on .created → "trial_started"
+    // Status=active on .created (no trial configured) → "created"
+    // Anything else (incomplete, etc.) → still write a "created" audit so the
+    // first-sighting is logged; subsequent .updated events will refine.
+    const action: VaultClubAuditAction = sub.status === 'trialing' ? 'trial_started' : 'created';
+
+    await writeVaultClubSubscriptionAudit(
+      subRowId,
+      action,
+      'stripe-webhook',
+      {
+        stripe_event_id: eventId,
+        stripe_subscription_id: sub.id,
+        stripe_customer_id: customerId,
+        new_status: sub.status,
+        trial_end: sub.trial_end,
+        tier,
+      },
+    );
+    console.log(`[webhook] Vault Club subscription.created: user=${userId} status=${sub.status} action=${action}`);
   }
 
   // ── Subscription updated ───────────────────────────────────────────────────
@@ -284,6 +465,10 @@ export class WebhookHandlers {
       ? VAULT_CLUB_TIERS[tier].ai_credits_monthly
       : null;
 
+    // ── Step 3 transition detection — read PREVIOUS state from
+    //    vault_club_subscriptions before any write so we can compare.
+    const prevRow = await getSubscriptionRow(sub.id);
+
     await db.execute(sql`
       UPDATE users SET
         vault_club_tier      = ${tier ?? null},
@@ -296,13 +481,67 @@ export class WebhookHandlers {
       WHERE id = ${userId}
     `);
 
-    await insertVaultClubEvent({
+    const isNewEvent = await insertVaultClubEvent({
       userId, stripeEventId: eventId,
       eventType: 'subscription.updated', tier, status: status,
     });
 
     await writeAuthAudit('vault_club.updated', userId, 'webhook', { tier, status });
     console.log(`[webhook] Vault Club updated: user=${userId} tier=${tier} status=${status}`);
+
+    // ── Step 3 dual-write: vault_club_subscriptions + audit_log ──────────────
+    if (!isNewEvent) return;
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status,
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? null,
+    });
+
+    // Detect the meaningful transition. Brief priorities:
+    //   1. trialing → active   ⇒ "trial_ended_paid"
+    //   2. cancel_at_period_end newly true ⇒ "canceled" (scheduled)
+    //   3. status → past_due   ⇒ "payment_failed"
+    // No transition match → upsert only, no audit row (the .updated event
+    // may be a benign change like a metadata edit).
+    const prevStatus = prevRow?.status ?? null;
+    const prevCancelAtPeriodEnd = prevRow?.cancel_at_period_end ?? false;
+    const newCancelAtPeriodEnd = sub.cancel_at_period_end ?? false;
+
+    let action: VaultClubAuditAction | null = null;
+    if (prevStatus === 'trialing' && sub.status === 'active') {
+      action = 'trial_ended_paid';
+    } else if (!prevCancelAtPeriodEnd && newCancelAtPeriodEnd) {
+      action = 'canceled';
+    } else if (sub.status === 'past_due') {
+      action = 'payment_failed';
+    }
+
+    if (action) {
+      await writeVaultClubSubscriptionAudit(
+        subRowId,
+        action,
+        'stripe-webhook',
+        {
+          stripe_event_id: eventId,
+          stripe_subscription_id: sub.id,
+          stripe_customer_id: customerId,
+          previous_status: prevStatus,
+          new_status: sub.status,
+          previous_cancel_at_period_end: prevCancelAtPeriodEnd,
+          new_cancel_at_period_end: newCancelAtPeriodEnd,
+          tier,
+        },
+      );
+      console.log(`[webhook] Vault Club transition: user=${userId} ${prevStatus}→${sub.status} action=${action}`);
+    }
   }
 
   // ── Subscription deleted ───────────────────────────────────────────────────
@@ -327,7 +566,7 @@ export class WebhookHandlers {
       WHERE id = ${userId}
     `);
 
-    await insertVaultClubEvent({
+    const isNewEvent = await insertVaultClubEvent({
       userId, stripeEventId: eventId,
       eventType: 'subscription.deleted', status: 'canceled',
     });
@@ -340,6 +579,36 @@ export class WebhookHandlers {
 
     await writeAuthAudit('vault_club.canceled', userId, 'webhook', {});
     console.log(`[webhook] Vault Club canceled: user=${userId}`);
+
+    // ── Step 3 dual-write ────────────────────────────────────────────────────
+    if (!isNewEvent) return;
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status, // typically 'canceled' on .deleted
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? Math.floor(Date.now() / 1000),
+    });
+
+    await writeVaultClubSubscriptionAudit(
+      subRowId,
+      'canceled',
+      'stripe-webhook',
+      {
+        stripe_event_id: eventId,
+        stripe_subscription_id: sub.id,
+        stripe_customer_id: customerId,
+        new_status: sub.status,
+        canceled_at: sub.canceled_at,
+        final: true,
+      },
+    );
   }
 
   // ── Invoice payment succeeded ──────────────────────────────────────────────
@@ -391,7 +660,7 @@ export class WebhookHandlers {
       `);
     }
 
-    await insertVaultClubEvent({
+    const isNewEvent = await insertVaultClubEvent({
       userId, stripeEventId: eventId,
       eventType: 'invoice.payment_succeeded', tier,
       status: 'active',
@@ -400,6 +669,47 @@ export class WebhookHandlers {
 
     await writeAuthAudit('vault_club.renewed', userId, 'webhook', { tier });
     console.log(`[webhook] Vault Club invoice paid: user=${userId} tier=${tier} renewal=${isRenewal}`);
+
+    // ── Step 3 dual-write: refresh vault_club_subscriptions from Stripe + audit
+    if (!isNewEvent) return;
+    const subscriptionId = (invoice as any).subscription as string | null;
+    if (!subscriptionId) return;
+
+    const stripe = new Stripe(await getStripeSecretKey(), { apiVersion: '2025-08-27.basil' as any });
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status,
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? null,
+    });
+
+    // Audit row only on recurring renewal — first invoice is covered by
+    // checkout.session.completed / customer.subscription.created.
+    if (isRenewal) {
+      await writeVaultClubSubscriptionAudit(
+        subRowId,
+        'renewed',
+        'stripe-webhook',
+        {
+          stripe_event_id: eventId,
+          stripe_invoice_id: invoice.id,
+          stripe_subscription_id: sub.id,
+          stripe_customer_id: customerId,
+          new_status: sub.status,
+          amount_pence: invoice.amount_paid,
+          billing_reason: (invoice as any).billing_reason,
+          tier,
+        },
+      );
+    }
   }
 
   // ── Invoice payment failed ─────────────────────────────────────────────────
@@ -433,7 +743,7 @@ export class WebhookHandlers {
       `);
     }
 
-    await insertVaultClubEvent({
+    const isNewEvent = await insertVaultClubEvent({
       userId, stripeEventId: eventId,
       eventType: 'invoice.payment_failed', status: isGrace ? 'grace' : 'past_due',
     });
@@ -445,6 +755,42 @@ export class WebhookHandlers {
     }
 
     console.log(`[webhook] Vault Club payment failed: user=${userId} attempt=${attemptCount} grace=${isGrace}`);
+
+    // ── Step 3 dual-write: refresh vault_club_subscriptions from Stripe + audit
+    if (!isNewEvent) return;
+    const subscriptionId = (invoice as any).subscription as string | null;
+    if (!subscriptionId) return;
+
+    const stripe = new Stripe(await getStripeSecretKey(), { apiVersion: '2025-08-27.basil' as any });
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+
+    const subRowId = await upsertSubscriptionRow({
+      userId,
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: sub.id,
+      stripePriceId: priceIdFromSubscription(sub),
+      status: sub.status,
+      trialEnd: sub.trial_end ?? null,
+      currentPeriodStart: (sub as any).current_period_start,
+      currentPeriodEnd: (sub as any).current_period_end,
+      cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
+      canceledAt: sub.canceled_at ?? null,
+    });
+
+    await writeVaultClubSubscriptionAudit(
+      subRowId,
+      'payment_failed',
+      'stripe-webhook',
+      {
+        stripe_event_id: eventId,
+        stripe_invoice_id: invoice.id,
+        stripe_subscription_id: sub.id,
+        stripe_customer_id: customerId,
+        new_status: sub.status,
+        attempt_count: attemptCount,
+        is_grace: isGrace,
+      },
+    );
   }
 
   // ── Stripe Connect: account.updated ──────────────────────────────────────

@@ -97,6 +97,12 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
 
     const customerId = await getOrCreateCustomer(stripe, user);
 
+    // Metadata keys (user_id / tier / interval) match what the existing
+    // WebhookHandlers dispatcher reads — see server/webhookHandlers.ts.
+    // Both Checkout Session metadata AND subscription_data.metadata are set;
+    // checkout.session.completed reads from session.metadata, but
+    // customer.subscription.* events only see subscription.metadata, so the
+    // tier+interval need to live on both.
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -104,9 +110,9 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       subscription_data: {
         trial_period_days: 14,
         metadata: {
-          mintvault_user_id: user.id,
-          mintvault_tier: "silver",
-          mintvault_interval: interval,
+          user_id: user.id,
+          tier: "silver",
+          interval,
         },
       },
       payment_method_collection: "always",
@@ -115,9 +121,9 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       success_url: `${APP_BASE_URL}/account/vault-club?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${APP_BASE_URL}/vault-club?checkout=cancel`,
       metadata: {
-        mintvault_user_id: user.id,
-        mintvault_tier: "silver",
-        mintvault_interval: interval,
+        user_id: user.id,
+        tier: "silver",
+        interval,
       },
     });
 
