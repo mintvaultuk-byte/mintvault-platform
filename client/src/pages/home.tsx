@@ -247,7 +247,7 @@ export default function HomeV2() {
               <Link
                 href="/submit"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Submit a card <ArrowRight size={14} />
               </Link>

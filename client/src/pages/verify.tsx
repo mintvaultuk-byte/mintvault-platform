@@ -276,7 +276,7 @@ export default function VerifyV2() {
                   type="submit"
                   disabled={isLoading}
                   className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-3 transition-all disabled:opacity-70"
-                  style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
+                  style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                 >
                   {isLoading ? "Verifying\u2026" : "Verify"}
                   {!isLoading && <ArrowRight size={14} />}
