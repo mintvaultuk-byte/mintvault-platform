@@ -46,14 +46,6 @@ function titleCase(s: string | null): string {
     .join(" ");
 }
 
-const COUNTER_TILES: { key: keyof PopulationCounters; label: string; format: (v: number) => string }[] = [
-  { key: "total_graded",  label: "Total graded",  format: (v) => v.toLocaleString() },
-  { key: "unique_cards",  label: "Unique cards",  format: (v) => v.toLocaleString() },
-  { key: "unique_sets",   label: "Unique sets",   format: (v) => v.toLocaleString() },
-  { key: "claimed_count", label: "Claimed",       format: (v) => v.toLocaleString() },
-  { key: "avg_grade",     label: "Avg grade",     format: (v) => v.toFixed(1) },
-];
-
 const REGISTRY_POINTS = [
   "Every graded cert is public and permanent",
   "Ownership claims are optional but encouraged",
@@ -64,7 +56,7 @@ const REGISTRY_POINTS = [
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function RegistryV2() {
-  const { data, isLoading, isError } = useQuery<PopulationResponse>({
+  const { data, isLoading } = useQuery<PopulationResponse>({
     queryKey: ["/api/population"],
     queryFn: async () => {
       const res = await fetch("/api/population");
@@ -82,7 +74,6 @@ export default function RegistryV2() {
     staleTime: 60_000,
   });
 
-  const counters = data?.counters;
   const recent = data?.recent ?? [];
 
   return (
@@ -121,56 +112,10 @@ export default function RegistryV2() {
         </div>
       </section>
 
-      {/* ── SECTION I: COUNTERS ─────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)", borderTop: "1px solid var(--v2-line)", borderBottom: "1px solid var(--v2-line)" }}>
-        <div className="mx-auto max-w-6xl px-6 py-16 md:py-20">
-          <SectionEyebrow numeral="I" label="At a glance" className="mb-8" />
-
-          {isError ? (
-            <p className="font-mono-v2 text-xs uppercase tracking-widest text-center py-8" style={{ color: "var(--v2-ink-mute)" }}>
-              Registry data temporarily unavailable.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              {COUNTER_TILES.map((tile) => {
-                const value = counters ? tile.format(counters[tile.key]) : null;
-                return (
-                  <div
-                    key={tile.key as string}
-                    className="p-6 rounded-xl text-center"
-                    style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}
-                  >
-                    <p
-                      className="font-mono-v2 text-[10px] uppercase tracking-widest"
-                      style={{ color: "var(--v2-ink-mute)" }}
-                    >
-                      {tile.label}
-                    </p>
-                    {isLoading || !value ? (
-                      <div
-                        className="mt-3 h-10 rounded animate-pulse"
-                        style={{ backgroundColor: "var(--v2-line-soft)" }}
-                      />
-                    ) : (
-                      <p
-                        className="font-numeral font-semibold leading-none mt-3"
-                        style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "var(--v2-ink)" }}
-                      >
-                        {value}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ── SECTION II: RECENT GALLERY ───────────────────────────── */}
+      {/* ── SECTION I: RECENT GALLERY ────────────────────────────── */}
       <section style={{ backgroundColor: "var(--v2-paper)" }}>
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
-          <SectionEyebrow numeral="II" label="Recently graded" className="mb-4" />
+          <SectionEyebrow numeral="I" label="Recently graded" className="mb-4" />
           <h2
             className="font-display italic font-medium leading-tight"
             style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "var(--v2-ink)" }}
@@ -290,10 +235,10 @@ export default function RegistryV2() {
         </div>
       </section>
 
-      {/* ── SECTION III: HOW THE REGISTRY WORKS ─────────────────── */}
+      {/* ── SECTION II: HOW THE REGISTRY WORKS ──────────────────── */}
       <section style={{ backgroundColor: "var(--v2-paper)" }}>
         <div className="mx-auto max-w-5xl px-6 py-16 md:py-24">
-          <SectionEyebrow numeral="III" label="How it works" className="mb-4" />
+          <SectionEyebrow numeral="II" label="How it works" className="mb-4" />
           <h2
             className="font-display italic font-medium leading-tight mb-10"
             style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "var(--v2-ink)" }}
@@ -327,10 +272,10 @@ export default function RegistryV2() {
         </div>
       </section>
 
-      {/* ── SECTION IV: SEARCH LINK ─────────────────────────────── */}
+      {/* ── SECTION III: SEARCH LINK ────────────────────────────── */}
       <section style={{ backgroundColor: "var(--v2-paper-raised)", borderTop: "1px solid var(--v2-line)" }}>
         <div className="mx-auto max-w-4xl px-6 py-16 md:py-20 text-center">
-          <SectionEyebrow numeral="IV" label="Browse" className="mb-4" />
+          <SectionEyebrow numeral="III" label="Browse" className="mb-4" />
           <h2
             className="font-display italic font-medium leading-tight mb-4"
             style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "var(--v2-ink)" }}
@@ -354,10 +299,10 @@ export default function RegistryV2() {
         </div>
       </section>
 
-      {/* ── SECTION V: FINAL CTA ─────────────────────────────────── */}
+      {/* ── SECTION IV: FINAL CTA ────────────────────────────────── */}
       <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
         <div className="mx-auto max-w-3xl px-6 py-20 md:py-28 text-center">
-          <SectionEyebrow numeral="V" label="Submit" className="mb-4" />
+          <SectionEyebrow numeral="IV" label="Submit" className="mb-4" />
           <h2
             className="font-display italic font-medium leading-tight mb-6"
             style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "#FFFFFF" }}
