@@ -164,3 +164,24 @@ Buy buttons on `/vault-club` (replace the current
 `mailto:waitlist` CTA with month/year Stripe Checkout
 buttons) + `/api/billing/vault-club/checkout` endpoint that
 creates a Stripe Checkout Session and redirects.
+
+---
+
+## Step 2 — Buy buttons + checkout endpoint
+
+**Status:** Branch `feat/vault-club-stripe-phase1-schema`
+— shipped commit `6c45339`, smoke-test fixes follow-up,
+NOT merged, NOT deployed.
+
+### TODO carried forward
+
+- **`/login` does not honor `?next=...` query param.** When
+  an unauthenticated user clicks the Vault Club trial
+  button, they're redirected to `/login?next=/vault-club`
+  but `client/src/pages/login.tsx` is a magic-link form
+  that ignores the `next` param entirely. After clicking
+  the email link, the user lands on the default landing
+  page (likely `/`) instead of bouncing back to
+  `/vault-club`. Out of scope for Step 2 — fix lives in
+  the magic-link verify flow (server-side redirect or
+  client-side post-auth navigation). Track separately.

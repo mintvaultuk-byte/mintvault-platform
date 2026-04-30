@@ -137,7 +137,7 @@ export default function VaultClubV2() {
         body: JSON.stringify({ interval }),
       });
       if (r.status === 401) {
-        window.location.href = `/account/login?next=${encodeURIComponent("/vault-club")}`;
+        window.location.href = `/login?next=${encodeURIComponent("/vault-club")}`;
         return;
       }
       const data = await r.json().catch(() => ({}));

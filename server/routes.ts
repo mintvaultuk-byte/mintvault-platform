@@ -42,6 +42,7 @@ import { requireScannerOrAdmin } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { handleVaultClubCheckout } from "./vault-club-checkout";
+import { FEATURE_FLAGS } from "./config/feature-flags";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
 
@@ -743,7 +744,6 @@ export async function registerRoutes(
 
   // ── Public flags endpoint ──────────────────────────────────────────────────
   app.get("/api/config/public-flags", (_req, res) => {
-    const { FEATURE_FLAGS } = require("./config/feature-flags");
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
