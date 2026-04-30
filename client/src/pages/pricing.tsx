@@ -1,9 +1,12 @@
+import { useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Check } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
+import AmbientLayer from "@/components/v2/ambient-layer";
+import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import {
   pricingTiers,
   insuranceTiers,
@@ -49,8 +52,29 @@ const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured:
 const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
 const gbp = (n: number) => `£${n.toLocaleString("en-GB")}`;
 export default function PricingV2() {
+  // FAQ left-edge gold accent fade-in (Section VII).
+  // Single IntersectionObserver shared by all FAQ items; each fades once
+  // on first intersection then unobserves, no re-trigger on scroll back.
+  const faqRefs = useRef<(HTMLDivElement | null)[]>([]);
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.3 }
+    );
+    faqRefs.current.forEach((el) => el && observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: "var(--v2-paper)" }}>
+      <AmbientLayer />
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
@@ -134,8 +158,9 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION I: GRADING TIERS (dark) ──────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
-        <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
+      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+        <DarkSectionGlow />
+        <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="I" label="Grading Tiers" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
             <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
@@ -158,7 +183,7 @@ export default function PricingV2() {
                 return (
                   <div
                     key={tier.id}
-                    className="relative rounded-xl flex flex-col"
+                    className="tier-card-v2 relative rounded-xl flex flex-col"
                     style={{
                       padding: "48px 40px",
                       backgroundColor: "transparent",
@@ -332,7 +357,7 @@ export default function PricingV2() {
             {ADDON_ORDER.map((id) => {
               const addon = ADDON_PRICES[id];
               return (
-                <div key={id}>
+                <div key={id} className="addon-item-v2">
                   <div className="flex items-baseline justify-between mb-3" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "10px" }}>
                     <h3 className="font-display italic font-medium text-xl md:text-2xl" style={{ color: "var(--v2-ink)" }}>
                       {addon.name}
@@ -405,7 +430,7 @@ export default function PricingV2() {
             </p>
           </div>
 
-          <div className="rounded-xl p-8 md:p-10" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-gold-soft)" }}>
+          <div className="silver-vault-card rounded-xl p-8 md:p-10" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-gold-soft)" }}>
             <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4 mb-8" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "20px" }}>
               <div>
                 <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--v2-gold)" }}>
@@ -520,8 +545,12 @@ export default function PricingV2() {
                 q: "Do you grade cards other than Pokémon?",
                 a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you&rsquo;re unsure, submit anyway &mdash; we&rsquo;ll flag it before grading if we can&rsquo;t authenticate.",
               },
-            ].map((item) => (
-              <div key={item.q}>
+            ].map((item, i) => (
+              <div
+                key={item.q}
+                ref={(el) => { faqRefs.current[i] = el; }}
+                className="faq-item-accent"
+              >
                 <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
                   {item.q}
                 </h3>
@@ -535,8 +564,9 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION VIII: FINAL CTA (dark) ───────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
-        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
+      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+        <DarkSectionGlow />
+        <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="VIII" label="Submit" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             Ready when you are.

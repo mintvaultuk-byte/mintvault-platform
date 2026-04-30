@@ -60,3 +60,69 @@
 .animate-marquee {
   animation: v2-marquee 30s linear infinite;
 }
+
+/* ── Pricing v2 — tier card hover lift (Section I) ─────────────── */
+.tier-card-v2 {
+  transition: transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 250ms ease-out;
+  will-change: transform;
+}
+.tier-card-v2:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(15, 14, 11, 0.25),
+              0 0 60px rgba(212, 175, 55, 0.15);
+}
+
+/* ── Pricing v2 — addon item hover lift, calmer (Section III) ──── */
+.addon-item-v2 {
+  transition: transform 200ms ease-out;
+  will-change: transform;
+}
+.addon-item-v2:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Pricing v2 — Silver Vault Club card breathing glow (Section V) */
+@keyframes silverBreathe {
+  0%, 100% {
+    box-shadow: 0 0 40px rgba(212, 175, 55, 0.10),
+                inset 0 0 30px rgba(212, 175, 55, 0.025);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(212, 175, 55, 0.40),
+                inset 0 0 30px rgba(212, 175, 55, 0.10);
+  }
+}
+.silver-vault-card {
+  animation: silverBreathe 30s ease-in-out infinite;
+}
+
+/* ── Pricing v2 — FAQ left-edge gold accent fade-in (Section VII) ─
+   Pseudo-element sits 16px to the left of the item so the natural
+   item content does not shift on appear. The .visible class is
+   added once via IntersectionObserver in pricing.tsx. */
+.faq-item-accent {
+  position: relative;
+}
+.faq-item-accent::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--v2-gold);
+  opacity: 0;
+  transition: opacity 600ms ease-out;
+}
+.faq-item-accent.visible::before {
+  opacity: 0.6;
+}
+
+/* prefers-reduced-motion — freeze the pricing v2 motion */
+@media (prefers-reduced-motion: reduce) {
+  .silver-vault-card { animation: none; }
+  .tier-card-v2:hover,
+  .addon-item-v2:hover { transform: none; }
+  .faq-item-accent::before { transition: none; }
+}
