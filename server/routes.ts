@@ -1,6 +1,6 @@
 import type { Express, Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction } from "express";
 import { createServer, type Server } from "http";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage, deductAiCredits } from "./storage";
@@ -41,6 +41,7 @@ import { requireAuth } from "./middleware/auth";
 import { requireScannerOrAdmin } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
+import { handleVaultClubCheckout } from "./vault-club-checkout";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
 
@@ -975,6 +976,22 @@ export async function registerRoutes(
     windowMs: 15 * 60 * 1000, max: 10,
     standardHeaders: true, legacyHeaders: false,
     message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
+  });
+
+  // Vault Club Checkout — keyed per-user (not per-IP) so legitimate retries
+  // don't get blocked by a noisy NAT neighbour. 5 attempts per 5 minutes is
+  // generous for a real signup but kills any token-replay loop. Uses
+  // ipKeyGenerator() for the unauthenticated fallback so IPv6 ranges aren't
+  // silently bypassable (express-rate-limit ERR_ERL_KEY_GEN_IPV6).
+  const vaultClubCheckoutRateLimit = rateLimit({
+    windowMs: 5 * 60 * 1000, max: 5,
+    standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => {
+      const userId = (req.session as any)?.userId;
+      if (userId) return `user:${userId}`;
+      return ipKeyGenerator(req.ip || req.socket.remoteAddress || "unknown");
+    },
+    message: { error: "Too many checkout attempts. Please wait a few minutes." },
   });
 
   // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
@@ -9370,6 +9387,15 @@ Defects (admin-confirmed): ${defectLines}`;
   registerShowroomRoutes(app);
 
   // ── Vault Club routes ────────────────────────────────────────────────────────
+  // Checkout endpoint is wired here (not inside registerVaultClubRoutes) so the
+  // per-user rate limit defined above applies. Must be registered BEFORE
+  // registerVaultClubRoutes(app) — Express uses first-match.
+  app.post(
+    "/api/vault-club/checkout",
+    vaultClubCheckoutRateLimit,
+    requireAuth,
+    handleVaultClubCheckout
+  );
   registerVaultClubRoutes(app);
 
   // ── Marketplace seller routes ──────────────────────────────────────────────

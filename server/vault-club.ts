@@ -13,7 +13,6 @@ import { requireAuth, requireAdmin } from "./middleware/auth";
 import { getStripeSecretKey } from "./stripeClient";
 import { writeAuthAudit } from "./account-auth";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, endOfCurrentQuarter, quarterKey } from "./vault-club-tiers";
-import { VAULT_CLUB_PRICE_IDS, getPriceId } from "./vault-club-config";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -83,16 +82,9 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── POST /api/vault-club/checkout ──────────────────────────────────────────
-  // Re-enable in Phase 1B (perk evaluator). Disabled because config no longer
-  // maps to checkout behaviour — Silver's perks (free return shipping, free
-  // monthly Authentication, queue-jump) need server-side exemption logic that
-  // doesn't exist yet. Shipping users to Stripe now would take their money for
-  // perks we aren't actually applying.
-  app.post("/api/vault-club/checkout", requireAuth, async (_req: Request, res: Response) => {
-    return res.status(503).json({
-      error: "Vault Club temporarily unavailable — re-enables with the full perks system. Contact support@mintvaultuk.com to be notified.",
-    });
-  });
+  // Wired in server/routes.ts with vaultClubCheckoutRateLimit + requireAuth
+  // before registerVaultClubRoutes() runs. Implementation lives in
+  // server/vault-club-checkout.ts (Phase 1 Step 2).
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
   app.post("/api/vault-club/portal", requireAuth, async (req: Request, res: Response) => {
@@ -156,10 +148,9 @@ export function registerVaultClubRoutes(app: Express): void {
       const stripe = await getStripe();
       const results: Record<string, { product_id: string; month_price_id: string; year_price_id: string }> = {};
 
+      // Bronze + Gold deprecated 2026-04-19 — silver-only setup.
       const tierEntries: Array<[VaultClubTier, typeof VAULT_CLUB_TIERS[VaultClubTier]]> = [
-        ["bronze", VAULT_CLUB_TIERS.bronze],
         ["silver", VAULT_CLUB_TIERS.silver],
-        ["gold", VAULT_CLUB_TIERS.gold],
       ];
 
       for (const [tierKey, tierDef] of tierEntries) {
