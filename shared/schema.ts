@@ -1180,3 +1180,46 @@ export const marketplaceDac7Quarterly = pgTable("marketplace_dac7_quarterly", {
 });
 
 export type MarketplaceDac7Quarterly = typeof marketplaceDac7Quarterly.$inferSelect;
+
+// ============================================================================
+// VAULT CLUB SUBSCRIPTIONS (Stripe Subscriptions Phase 1 Step 1)
+// ----------------------------------------------------------------------------
+// One row per Stripe subscription. Webhook handlers (Phase 1 Step 3) upsert
+// this table on customer.subscription.created/updated/deleted. Dashboard
+// gating (Phase 1 Step 4) reads status + current_period_end to decide
+// read-only vs full access.
+//
+// Timestamps are timestamptz because Stripe sends Unix UTC timestamps —
+// storing them naively would lose timezone meaning. Other tables in this
+// schema use plain timestamp; that's a long-running quirk we don't fix here.
+//
+// Migration applied via raw CREATE TABLE IF NOT EXISTS at server startup
+// (server/vault-club-subscriptions-schema.ts) — additive, idempotent,
+// neon-postgres safe.
+// ============================================================================
+
+export const vaultClubSubscriptions = pgTable("vault_club_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  stripeSubscriptionId: text("stripe_subscription_id").notNull().unique(),
+  stripePriceId: text("stripe_price_id").notNull(),
+  status: text("status").notNull(),
+  trialEnd: timestamp("trial_end", { withTimezone: true }),
+  currentPeriodStart: timestamp("current_period_start", { withTimezone: true }).notNull(),
+  currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }).notNull(),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  canceledAt: timestamp("canceled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  // Single-user lookup (dashboard gating, account page).
+  userIdIdx: index("idx_vault_club_subs_user_id").on(t.userId),
+  // Composite index for dunning queries: "active subs ending in next N days".
+  // .unique() on stripeSubscriptionId already creates a unique index for the
+  // webhook-handler lookup path; no separate index needed.
+  statusPeriodIdx: index("idx_vault_club_subs_status_period").on(t.status, t.currentPeriodEnd),
+}));
+
+export type VaultClubSubscription = typeof vaultClubSubscriptions.$inferSelect;
+export type InsertVaultClubSubscription = typeof vaultClubSubscriptions.$inferInsert;
