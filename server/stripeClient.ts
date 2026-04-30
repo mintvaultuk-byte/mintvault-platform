@@ -28,18 +28,52 @@ function readSecretKey(): string {
   return key;
 }
 
+/**
+ * Publishable key reader.
+ *
+ * Production is strict: STRIPE_PUBLISHABLE_KEY only, no fallback.
+ *
+ * Dev (NODE_ENV !== "production") tries STRIPE_PUBLISHABLE_KEY_TEST first,
+ * then falls back to STRIPE_PUBLISHABLE_KEY with a one-time warning. This
+ * fallback is safe because publishable keys are designed to be exposed —
+ * the worst case is Stripe.js initialises against the live account, which
+ * fails harmlessly when the server-side flow uses the test secret key
+ * (account IDs don't match).
+ *
+ * NOTE: same fallback is INTENTIONALLY NOT applied to the secret key.
+ * Falling back from STRIPE_SECRET_KEY_TEST → STRIPE_SECRET_KEY in dev is
+ * how you accidentally take real money during local testing — exactly the
+ * scenario the dev/prod split is supposed to prevent. Secret stays strict.
+ */
+let publishableFallbackWarned = false;
 function readPublishableKey(): string {
-  const prod = isProduction();
-  const key = prod
-    ? process.env.STRIPE_PUBLISHABLE_KEY
-    : process.env.STRIPE_PUBLISHABLE_KEY_TEST;
-  if (!key) {
-    const expected = prod ? "STRIPE_PUBLISHABLE_KEY" : "STRIPE_PUBLISHABLE_KEY_TEST";
-    throw new Error(
-      `${expected} is not set (NODE_ENV=${process.env.NODE_ENV || "development"})`
-    );
+  if (isProduction()) {
+    const key = process.env.STRIPE_PUBLISHABLE_KEY;
+    if (!key) {
+      throw new Error(
+        `STRIPE_PUBLISHABLE_KEY is not set (NODE_ENV=${process.env.NODE_ENV || "development"})`
+      );
+    }
+    return key;
   }
-  return key;
+
+  const testKey = process.env.STRIPE_PUBLISHABLE_KEY_TEST;
+  if (testKey) return testKey;
+
+  const liveKey = process.env.STRIPE_PUBLISHABLE_KEY;
+  if (liveKey) {
+    if (!publishableFallbackWarned) {
+      console.warn(
+        "[stripe] STRIPE_PUBLISHABLE_KEY_TEST not set, falling back to STRIPE_PUBLISHABLE_KEY for dev. Set STRIPE_PUBLISHABLE_KEY_TEST in .env to silence this."
+      );
+      publishableFallbackWarned = true;
+    }
+    return liveKey;
+  }
+
+  throw new Error(
+    `STRIPE_PUBLISHABLE_KEY_TEST is not set (NODE_ENV=${process.env.NODE_ENV || "development"})`
+  );
 }
 
 export function hasStripeSecretKey(): boolean {
@@ -48,9 +82,10 @@ export function hasStripeSecretKey(): boolean {
 }
 
 export function hasStripePublishableKey(): boolean {
-  const prod = isProduction();
+  if (isProduction()) return Boolean(process.env.STRIPE_PUBLISHABLE_KEY);
+  // Dev: TEST preferred, but live publishable is an acceptable fallback.
   return Boolean(
-    prod ? process.env.STRIPE_PUBLISHABLE_KEY : process.env.STRIPE_PUBLISHABLE_KEY_TEST
+    process.env.STRIPE_PUBLISHABLE_KEY_TEST || process.env.STRIPE_PUBLISHABLE_KEY
   );
 }
 
