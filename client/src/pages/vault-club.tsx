@@ -99,6 +99,14 @@ export default function VaultClubV2() {
         return;
       }
       const data = await r.json().catch(() => ({}));
+      // Already-subscribed guard (server-side three-layer): redirect to the
+      // account page rather than surfacing an error toast — the user is
+      // either confused or accidentally re-clicked, and the account page is
+      // where they manage what they already have.
+      if (r.status === 409) {
+        window.location.href = (data?.account_url as string) || "/account/vault-club";
+        return;
+      }
       if (!r.ok || !data?.url) {
         setError(data?.message || "Could not start checkout. Please try again.");
         setIsLoading(null);

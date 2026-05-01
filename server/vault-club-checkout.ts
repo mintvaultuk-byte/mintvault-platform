@@ -91,11 +91,88 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       return res.status(404).json({ error: "user_not_found" });
     }
 
+    // ── Layer 1 — DB-side duplicate-subscription guard ─────────────────────
+    // Reading from vault_club_subscriptions (the canonical Step 3 store).
+    // Statuses considered "live" mirror the set the Step 3 webhook handlers
+    // upsert as. cancel_at_period_end=true is treated as "winding down" —
+    // we let the user re-checkout to start a new sub before the old lapses.
+    const existing = await db.execute(sql`
+      SELECT status, cancel_at_period_end, stripe_subscription_id
+      FROM vault_club_subscriptions
+      WHERE user_id = ${user.id}
+        AND status IN ('trialing', 'active', 'past_due', 'incomplete')
+      LIMIT 1
+    `);
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0] as {
+        status: string;
+        cancel_at_period_end: boolean;
+        stripe_subscription_id: string;
+      };
+      if (!row.cancel_at_period_end) {
+        await writeVaultClubSubscriptionAudit(
+          user.id,
+          "checkout_blocked_already_active",
+          "system",
+          {
+            layer: 1,
+            existing_subscription_id: row.stripe_subscription_id,
+            existing_status: row.status,
+            attempted_interval: interval,
+          },
+        );
+        return res.status(409).json({
+          error: "already_subscribed",
+          message: "You already have an active Vault Club membership.",
+          account_url: "/account/vault-club",
+        });
+      }
+    }
+
     const priceId = getPriceId("silver", interval);
     const secretKey = await getStripeSecretKey();
     const stripe = new Stripe(secretKey, { apiVersion: "2025-08-27.basil" as any });
 
     const customerId = await getOrCreateCustomer(stripe, user);
+
+    // ── Layer 2 — Stripe-side belt-and-braces guard ────────────────────────
+    // Catches the case where Stripe has a live sub our DB missed (most
+    // commonly: a customer.subscription.created webhook the dual-write
+    // handler never successfully processed). Layer 1 → Layer 2 catch is
+    // logged at warn level — that's a real signal worth noticing in prod.
+    const stripeSubs = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 10,
+    });
+    const activeStripeSubs = stripeSubs.data.filter((s) =>
+      ["trialing", "active", "past_due", "incomplete"].includes(s.status) &&
+      !s.cancel_at_period_end
+    );
+    if (activeStripeSubs.length > 0) {
+      const blockingSub = activeStripeSubs[0];
+      console.warn(
+        `[vault-club-checkout] Layer 2 caught a sub Layer 1 missed — webhook drop? user=${user.id} stripe_sub=${blockingSub.id} status=${blockingSub.status}`
+      );
+      await writeVaultClubSubscriptionAudit(
+        user.id,
+        "checkout_blocked_already_active",
+        "system",
+        {
+          layer: 2,
+          existing_subscription_id: blockingSub.id,
+          existing_status: blockingSub.status,
+          attempted_interval: interval,
+          stripe_customer_id: customerId,
+          note: "Stripe-side guard caught a sub our DB did not have — likely a missed customer.subscription.created webhook delivery",
+        },
+      );
+      return res.status(409).json({
+        error: "already_subscribed",
+        message: "You already have an active Vault Club membership.",
+        account_url: "/account/vault-club",
+      });
+    }
 
     // Metadata keys (user_id / tier / interval) match what the existing
     // WebhookHandlers dispatcher reads — see server/webhookHandlers.ts.
