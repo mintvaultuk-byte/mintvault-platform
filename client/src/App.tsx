@@ -160,6 +160,7 @@ import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
 import AccountSettingsPage from "@/pages/account-settings";
+import AccountVaultClubPage from "@/pages/account-vault-club";
 import ShowroomPage from "@/pages/showroom";
 import ShowroomsListPage from "@/pages/showrooms";
 import Home from "@/pages/home";
@@ -219,6 +220,7 @@ function Router() {
         <Route path="/" component={Home} />
         <Route path="/pricing" component={Pricing} />
         <Route path="/vault-club" component={VaultClub} />
+        <Route path="/account/vault-club" component={AccountVaultClubPage} />
         <Route path="/verify" component={Verify} />
         <Route path="/ai-pre-grade" component={AiPreGrade} />
         <Route path="/tools/estimate" component={ToolsEstimate} />
