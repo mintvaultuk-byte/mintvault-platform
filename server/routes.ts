@@ -42,6 +42,7 @@ import { requireScannerOrAdmin } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { handleVaultClubCheckout } from "./vault-club-checkout";
+import { handleVaultClubPortal } from "./vault-club-portal";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
@@ -992,6 +993,20 @@ export async function registerRoutes(
       return ipKeyGenerator(req.ip || req.socket.remoteAddress || "unknown");
     },
     message: { error: "Too many checkout attempts. Please wait a few minutes." },
+  });
+
+  // Vault Club Portal — same shape as the checkout limiter (per-user 5/5min).
+  // Separate instance from checkout so the buckets don't share counters —
+  // a user mid-signup shouldn't be blocked from opening the portal.
+  const vaultClubPortalRateLimit = rateLimit({
+    windowMs: 5 * 60 * 1000, max: 5,
+    standardHeaders: true, legacyHeaders: false,
+    keyGenerator: (req) => {
+      const userId = (req.session as any)?.userId;
+      if (userId) return `user:${userId}`;
+      return ipKeyGenerator(req.ip || req.socket.remoteAddress || "unknown");
+    },
+    message: { error: "Too many portal requests. Please wait a few minutes." },
   });
 
   // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
@@ -9392,14 +9407,21 @@ Defects (admin-confirmed): ${defectLines}`;
   registerShowroomRoutes(app);
 
   // ── Vault Club routes ────────────────────────────────────────────────────────
-  // Checkout endpoint is wired here (not inside registerVaultClubRoutes) so the
-  // per-user rate limit defined above applies. Must be registered BEFORE
-  // registerVaultClubRoutes(app) — Express uses first-match.
+  // Checkout + Portal endpoints are wired here (not inside
+  // registerVaultClubRoutes) so the per-user rate limits defined above
+  // apply. Must be registered BEFORE registerVaultClubRoutes(app) —
+  // Express uses first-match.
   app.post(
     "/api/vault-club/checkout",
     vaultClubCheckoutRateLimit,
     requireAuth,
     handleVaultClubCheckout
+  );
+  app.post(
+    "/api/vault-club/portal",
+    vaultClubPortalRateLimit,
+    requireAuth,
+    handleVaultClubPortal
   );
   registerVaultClubRoutes(app);
 

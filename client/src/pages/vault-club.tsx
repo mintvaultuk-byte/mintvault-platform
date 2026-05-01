@@ -7,27 +7,17 @@ import SectionEyebrow from "@/components/v2/section-eyebrow";
 import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 import { insuranceTiers } from "@shared/schema";
 import { ADDON_PRICES } from "@shared/addons";
-
-// Silver Vault Club perk values — mirrors server/vault-club-tiers.ts Silver
-// config (verified 2026-04-19 after merge a8e5f8d). Hardcoded here because
-// VAULT_CLUB_TIERS lives under server/ and has no shared import path.
-const SILVER = {
-  monthly_price_pence: 999,
-  annual_price_pence: 9900,
-  ai_credits_monthly: 100,
-  free_authentication_monthly: 2,
-} as const;
-
-// Format helpers
-const poundsFromPence = (p: number) =>
-  `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
+import {
+  VAULT_CLUB_PERKS as PERKS,
+  VAULT_CLUB_SILVER as SILVER,
+  VAULT_CLUB_PENCE_TO_POUNDS as poundsFromPence,
+} from "@/config/vault-club-perks";
 
 // Derived display values (all numbers traceable to shared/ config or SILVER above)
 const AUTH_PRICE_PENCE = ADDON_PRICES.authentication.price; // 1500
 const MONTHLY_AUTH_VALUE_PENCE = AUTH_PRICE_PENCE * SILVER.free_authentication_monthly; // 3000
 const SHIPPING_STANDARD = insuranceTiers[0].shippingPence; // 499
 const SHIPPING_ENHANCED = insuranceTiers[1].shippingPence; // 999
-const SHIPPING_MAX = insuranceTiers[3].shippingPence; // 2499
 const ANNUAL_SAVINGS_PENCE = SILVER.monthly_price_pence * 12 - SILVER.annual_price_pence; // 2088
 
 // Math-table scenarios — narrative card counts are hand-picked; all monetary
@@ -56,40 +46,8 @@ const SCENARIOS = [
   },
 ];
 
-// ── Perks list data (Section I) ────────────────────────────────────────────
-
-const PERKS = [
-  {
-    number: "01",
-    title: "Priority queue within your grading tier",
-    body: "Members jump ahead within their chosen tier. No turnaround SLA change, but first in, first out — every time.",
-    value: null,
-  },
-  {
-    number: "02",
-    title: "Two free Authentication add-ons every month",
-    body: "Worth £15 each. If you submit cards that need authentication, this alone covers the membership.",
-    value: `${poundsFromPence(MONTHLY_AUTH_VALUE_PENCE)}/mo value`,
-  },
-  {
-    number: "03",
-    title: "Free return shipping on every declared-value tier",
-    body: "High-value submitters save most. Standard tier saves £4.99 per submission; Max tier saves £24.99.",
-    value: `${poundsFromPence(SHIPPING_STANDARD)}\u2013${poundsFromPence(SHIPPING_MAX)} / submission`,
-  },
-  {
-    number: "04",
-    title: `${SILVER.ai_credits_monthly} AI Pre-Grade credits every month`,
-    body: "Test cards before submitting. Credits reset monthly — no rollover — so use them or lose them.",
-    value: "Unlimited practical use",
-  },
-  {
-    number: "05",
-    title: "Early access to Population Report features",
-    body: "See new filters, exports, and analytics before they ship publicly. Shape the tool as it grows.",
-    value: "Priority access",
-  },
-];
+// PERKS list lives in client/src/config/vault-club-perks.ts (extracted Step 4
+// so /account/vault-club can render the same list).
 
 // ── FAQ (Section V) ────────────────────────────────────────────────────────
 

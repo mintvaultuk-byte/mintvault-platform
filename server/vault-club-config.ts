@@ -30,3 +30,20 @@ export type VaultClubInterval = "month" | "year";
 export function getPriceId(tier: VaultClubTier, interval: VaultClubInterval): string {
   return VAULT_CLUB_PRICE_IDS[tier][interval];
 }
+
+/**
+ * Reverse-lookup: given a Stripe Price ID, return its billing interval, or
+ * null if the ID isn't one we recognise (e.g. a legacy/archived price).
+ *
+ * Used by GET /api/vault-club/me to derive the human-readable interval for
+ * the account dashboard. Iterating over the small fixed PRICE_IDS map is
+ * fine; if this grows, switch to a reverse map built once at module load.
+ */
+export function intervalForPriceId(priceId: string): VaultClubInterval | null {
+  for (const tier of Object.keys(VAULT_CLUB_PRICE_IDS) as VaultClubTier[]) {
+    for (const interval of ["month", "year"] as const) {
+      if (VAULT_CLUB_PRICE_IDS[tier][interval] === priceId) return interval;
+    }
+  }
+  return null;
+}

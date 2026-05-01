@@ -13,6 +13,7 @@ import { requireAuth, requireAdmin } from "./middleware/auth";
 import { getStripeSecretKey } from "./stripeClient";
 import { writeAuthAudit } from "./account-auth";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, endOfCurrentQuarter, quarterKey } from "./vault-club-tiers";
+import { intervalForPriceId } from "./vault-club-config";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,9 @@ async function countMemberCreditsRemaining(userId: string): Promise<number> {
 export function registerVaultClubRoutes(app: Express): void {
 
   // ── GET /api/vault-club/me ─────────────────────────────────────────────────
+  // Returns BOTH the legacy users.vault_club_* shape (consumed by
+  // /dashboard) AND the Step 4 vault_club_subscriptions shape (consumed by
+  // /account/vault-club). Backwards-compatible by addition only.
   app.get("/api/vault-club/me", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -59,7 +63,39 @@ export function registerVaultClubRoutes(app: Express): void {
       const perks = tier ? VAULT_CLUB_TIERS[tier] : null;
       const memberCredits = tier ? await countMemberCreditsRemaining(userId) : 0;
 
+      // Step 4: read latest subscription row from vault_club_subscriptions.
+      // ORDER BY updated_at DESC LIMIT 1 — a user shouldn't have multiple
+      // active rows, but if they ever do (legacy comp + new sub) we surface
+      // the most recently touched.
+      const subRows = await db.execute(sql`
+        SELECT stripe_price_id, status, trial_end, current_period_end,
+               cancel_at_period_end, canceled_at
+        FROM vault_club_subscriptions
+        WHERE user_id = ${userId}
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `);
+      const sub = subRows.rows[0] as
+        | {
+            stripe_price_id: string;
+            status: string;
+            trial_end: string | null;
+            current_period_end: string;
+            cancel_at_period_end: boolean;
+            canceled_at: string | null;
+          }
+        | undefined;
+
+      const hasSubscription = Boolean(sub);
+      const subStatus = sub?.status ?? null;
+      const subInterval = sub ? intervalForPriceId(sub.stripe_price_id) : null;
+      const trialEnd = sub?.trial_end ?? null;
+      const currentPeriodEnd = sub?.current_period_end ?? null;
+      const cancelAtPeriodEnd = sub?.cancel_at_period_end ?? false;
+      const canceledAt = sub?.canceled_at ?? null;
+
       return res.json({
+        // Legacy shape (consumed by /dashboard) — unchanged.
         tier,
         label: tier ? VAULT_CLUB_TIERS[tier].label : null,
         status,
@@ -74,6 +110,16 @@ export function registerVaultClubRoutes(app: Express): void {
         member_credits_remaining: memberCredits,
         stripe_customer_id: user.stripe_customer_id || null,
         username: user.username || null,
+
+        // Step 4 shape (consumed by /account/vault-club). When no row exists,
+        // every field except hasSubscription is null/false.
+        hasSubscription,
+        subscriptionStatus: subStatus,
+        interval: subInterval,
+        trialEnd,
+        currentPeriodEnd,
+        cancelAtPeriodEnd,
+        canceledAt,
       });
     } catch (err: any) {
       console.error("[vault-club] me error:", err.message);
@@ -87,29 +133,9 @@ export function registerVaultClubRoutes(app: Express): void {
   // server/vault-club-checkout.ts (Phase 1 Step 2).
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
-  app.post("/api/vault-club/portal", requireAuth, async (req: Request, res: Response) => {
-    try {
-      const userId = (req.session as any).userId as string;
-      const user = await getUserVaultClub(userId);
-      if (!user) return res.status(404).json({ error: "User not found" });
-
-      const customerId = user.stripe_customer_id as string | null;
-      if (!customerId) {
-        return res.status(400).json({ error: "No Stripe subscription found. Join Vault Club first." });
-      }
-
-      const stripe = await getStripe();
-      const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
-      const session = await stripe.billingPortal.sessions.create({
-        customer: customerId,
-        return_url: `${appUrl}/club`,
-      });
-      return res.json({ url: session.url });
-    } catch (err: any) {
-      console.error("[vault-club] portal error:", err.message);
-      return res.status(500).json({ error: "Failed to open billing portal." });
-    }
-  });
+  // Wired in server/routes.ts with vaultClubCheckoutRateLimit + requireAuth
+  // before registerVaultClubRoutes() runs. Implementation lives in
+  // server/vault-club-portal.ts (Phase 1 Step 4).
 
   // ── GET /api/vault-club/check-discount ────────────────────────────────────
   // Legacy endpoint — percentage grading discount removed 2026-04-19 when the
