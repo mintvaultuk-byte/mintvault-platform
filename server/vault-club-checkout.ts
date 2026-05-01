@@ -31,7 +31,7 @@ import { sql } from "drizzle-orm";
 import { getStripeSecretKey } from "./stripeClient";
 import { getPriceId, type VaultClubInterval } from "./vault-club-config";
 import { writeVaultClubSubscriptionAudit } from "./vault-club-audit";
-import { APP_BASE_URL } from "./app-url";
+import { getRedirectBaseUrl } from "./app-url";
 
 interface UserRow {
   id: string;
@@ -195,8 +195,8 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       payment_method_collection: "always",
       billing_address_collection: "required",
       allow_promotion_codes: true,
-      success_url: `${APP_BASE_URL}/account/vault-club?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${APP_BASE_URL}/vault-club?checkout=cancel`,
+      success_url: `${getRedirectBaseUrl()}/account/vault-club?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${getRedirectBaseUrl()}/vault-club?checkout=cancel`,
       metadata: {
         user_id: user.id,
         tier: "silver",

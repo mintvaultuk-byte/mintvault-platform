@@ -25,7 +25,7 @@ import Stripe from "stripe";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { getStripeSecretKey } from "./stripeClient";
-import { APP_BASE_URL } from "./app-url";
+import { getRedirectBaseUrl } from "./app-url";
 
 interface UserRow {
   id: string;
@@ -68,7 +68,7 @@ export async function handleVaultClubPortal(req: Request, res: Response): Promis
 
     const session = await stripe.billingPortal.sessions.create({
       customer: user.stripe_customer_id,
-      return_url: `${APP_BASE_URL}/account/vault-club`,
+      return_url: `${getRedirectBaseUrl()}/account/vault-club`,
     });
 
     if (!session.url) {
