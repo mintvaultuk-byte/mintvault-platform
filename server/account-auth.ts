@@ -416,7 +416,12 @@ export async function migrateAccountSchema(): Promise<void> {
     )
   `);
 
-  // Magic link tokens for account logins
+  // Magic link tokens for account logins.
+  // Note: expires_at started life as TIMESTAMP (no TZ). The CREATE below is
+  // kept at TIMESTAMP for parity with the historical column type for new
+  // installs, but the migration block immediately after promotes it to
+  // TIMESTAMPTZ. Both new and existing deployments end up with TIMESTAMPTZ
+  // before any query runs.
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS account_magic_link_tokens (
       id          SERIAL PRIMARY KEY,
@@ -426,6 +431,30 @@ export async function migrateAccountSchema(): Promise<void> {
       consumed_at TIMESTAMP,
       created_at  TIMESTAMP NOT NULL DEFAULT NOW()
     )
+  `);
+
+  // Promote expires_at from TIMESTAMP → TIMESTAMPTZ. Idempotent: only runs
+  // when the column is still naive. AT TIME ZONE 'UTC' tells Postgres to
+  // interpret existing naive values as UTC — which matches what production
+  // (Fly.io UTC) has been writing via Date.toISOString(). On a BST/local-TZ
+  // dev machine the verify handler's `new Date(naive_string) < new Date()`
+  // applied a -1h offset and judged fresh tokens as expired; this column
+  // promotion + the SQL-side comparison in routes.ts kills both halves of
+  // that bug.
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'account_magic_link_tokens'
+          AND column_name = 'expires_at'
+          AND data_type = 'timestamp without time zone'
+      ) THEN
+        ALTER TABLE account_magic_link_tokens
+          ALTER COLUMN expires_at TYPE TIMESTAMPTZ
+          USING expires_at AT TIME ZONE 'UTC';
+      END IF;
+    END $$;
   `);
 
   // Magic link tokens for customer dashboard logins
