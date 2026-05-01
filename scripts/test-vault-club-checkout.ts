@@ -23,26 +23,6 @@
  *
  * Safe to re-run — issues a fresh token each invocation. Old tokens are
  * marked consumed by the verify handler.
- *
- * ─── 24-hour TTL is intentional ──────────────────────────────────────────
- * The token is issued with `NOW() + INTERVAL '24 hours'` rather than the
- * 15-minute TTL that real `/api/auth/magic-link` uses. This is a workaround
- * for a pre-existing TZ bug in the verify handler:
- *
- *   account_magic_link_tokens.expires_at is TIMESTAMP (no timezone). The
- *   verify handler reads it back as a TZ-less string and does
- *   `new Date(rec.expires_at) < new Date()`. Node parses the naive string
- *   as LOCAL time, so on a BST (UTC+1) Mac dev machine a fresh token reads
- *   as 1 hour earlier than intended and fires the "expired_link" branch
- *   immediately. Production runs UTC on Fly.io and is unaffected.
- *
- * 24 hours is far enough ahead that the offset doesn't matter — the row
- * still tests as future even after the BST→UTC shift. Real fix lives in
- * the schema (TIMESTAMP → TIMESTAMPTZ) or the verify handler (compare via
- * SQL `WHERE expires_at > NOW()` instead of round-tripping JS Dates),
- * tracked in /docs/vault-club-stripe-build.md as a Step 2 close-out bug.
- *
- * If/when that bug is fixed, drop the TTL here back to 5 minutes.
  */
 
 import crypto from "crypto";
@@ -75,17 +55,8 @@ async function main(): Promise<void> {
   }
   console.log(`[test] user.id:       ${user.id}`);
 
-  // 2. Issue a magic-link token directly (bypass email send).
-  //
-  //    ⚠️  TZ workaround: account_magic_link_tokens.expires_at is TIMESTAMP
-  //    (no timezone). Postgres stores the wall-clock value naively. The
-  //    verify handler does `new Date(rec.expires_at) < new Date()` —
-  //    Node interprets the naive string in LOCAL time, so on a BST (UTC+1)
-  //    dev machine the row reads as 1 hour earlier than intended and a
-  //    legitimately-fresh token reads as already expired. We dodge that
-  //    here by issuing a 24-hour TTL so the value survives the shift.
-  //    (This is a pre-existing bug in the magic-link verify path; tracked
-  //    separately, out of scope for the Vault Club smoke test.)
+  // 2. Issue a magic-link token directly (bypass email send). 24-hour TTL
+  //    is generous for re-running the script over a long debug session.
   const token = crypto.randomBytes(32).toString("hex");
   await db.execute(sql`
     INSERT INTO account_magic_link_tokens (user_id, token, expires_at)

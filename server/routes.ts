@@ -8985,14 +8985,19 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const { token } = req.query;
       if (!token || typeof token !== "string") return res.redirect("/login?error=expired_link");
+      // Validate expiry + unconsumed in SQL so we never reparse a stored
+      // timestamp through JS Date math (the prior `new Date(rec.expires_at)`
+      // path applied a local-TZ offset on naive TIMESTAMP values, judging
+      // fresh tokens as expired on BST dev machines).
       const rows = await db.execute(sql`
-        SELECT * FROM account_magic_link_tokens WHERE token = ${token} LIMIT 1
+        SELECT * FROM account_magic_link_tokens
+        WHERE token = ${token}
+          AND consumed_at IS NULL
+          AND expires_at > NOW()
+        LIMIT 1
       `);
       if (!rows.rows.length) return res.redirect("/login?error=expired_link");
       const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
-        return res.redirect("/login?error=expired_link");
-      }
       await db.execute(sql`UPDATE account_magic_link_tokens SET consumed_at = NOW() WHERE token = ${token}`);
       const user = await findUserById(rec.user_id);
       if (!user || user.deleted_at) return res.redirect("/login?error=expired_link");
