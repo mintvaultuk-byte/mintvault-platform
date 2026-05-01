@@ -56,12 +56,25 @@ interface UpsertParams {
 /**
  * Upsert a row in vault_club_subscriptions keyed on stripe_subscription_id.
  * Returns the internal row id (subscription_row_id used as audit_log entity_id).
+ *
+ * Date-conversion guards: only build a Date when the source is a positive
+ * Unix-seconds number. `null * 1000` is `0` (epoch 1970-01-01), which would
+ * silently leak into the DB; `undefined * 1000` is NaN, which throws
+ * "Invalid time value" from toISOString. The typeof+>0 check handles both.
+ * Caller is responsible for passing real numbers for currentPeriodStart/End
+ * — see periodFromSubscription() above.
  */
 async function upsertSubscriptionRow(p: UpsertParams): Promise<string> {
-  const trialEndIso = p.trialEnd ? new Date(p.trialEnd * 1000).toISOString() : null;
+  const trialEndIso =
+    typeof p.trialEnd === 'number' && p.trialEnd > 0
+      ? new Date(p.trialEnd * 1000).toISOString()
+      : null;
   const periodStartIso = new Date(p.currentPeriodStart * 1000).toISOString();
   const periodEndIso = new Date(p.currentPeriodEnd * 1000).toISOString();
-  const canceledAtIso = p.canceledAt ? new Date(p.canceledAt * 1000).toISOString() : null;
+  const canceledAtIso =
+    typeof p.canceledAt === 'number' && p.canceledAt > 0
+      ? new Date(p.canceledAt * 1000).toISOString()
+      : null;
 
   const result = await db.execute(sql`
     INSERT INTO vault_club_subscriptions (
@@ -95,6 +108,33 @@ async function upsertSubscriptionRow(p: UpsertParams): Promise<string> {
  */
 function priceIdFromSubscription(sub: Stripe.Subscription): string {
   return sub.items?.data?.[0]?.price?.id ?? '';
+}
+
+/**
+ * Pull current period bounds from the primary subscription item.
+ *
+ * As of Stripe API version 2025-08-27.basil, `current_period_start` and
+ * `current_period_end` were moved off `Subscription` and onto each
+ * `SubscriptionItem` to support multi-item subs with mixed billing cycles.
+ * Reading them from the Subscription returns undefined → NaN math →
+ * `Invalid time value` thrown by Date.prototype.toISOString().
+ *
+ * Returns null if the item is missing or the period bounds aren't present
+ * as positive numbers. Callers should treat null as "skip the upsert and
+ * wait for a later event with complete data" — never fabricate a value.
+ */
+function periodFromSubscription(
+  sub: Stripe.Subscription,
+): { start: number; end: number } | null {
+  const item = sub.items?.data?.[0] as any;
+  const start = item?.current_period_start;
+  const end = item?.current_period_end;
+  // Number.isFinite rejects undefined / null / NaN / Infinity in one check
+  // (typeof NaN === 'number', so a typeof guard alone wouldn't catch it).
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) {
+    return null;
+  }
+  return { start, end };
 }
 
 export class WebhookHandlers {
@@ -336,6 +376,12 @@ export class WebhookHandlers {
     // Gated on idempotency — if this event was already processed, skip.
     if (!isNewEvent || !sub || !subscriptionId) return;
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${subscriptionId}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: session.customer as string,
@@ -343,8 +389,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status,
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? null,
     });
@@ -396,6 +442,12 @@ export class WebhookHandlers {
     });
     if (!isNewEvent) return;
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${sub.id}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: customerId,
@@ -403,8 +455,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status,
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? null,
     });
@@ -492,6 +544,12 @@ export class WebhookHandlers {
     // ── Step 3 dual-write: vault_club_subscriptions + audit_log ──────────────
     if (!isNewEvent) return;
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${sub.id}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: customerId,
@@ -499,8 +557,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status,
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? null,
     });
@@ -583,6 +641,12 @@ export class WebhookHandlers {
     // ── Step 3 dual-write ────────────────────────────────────────────────────
     if (!isNewEvent) return;
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${sub.id}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: customerId,
@@ -590,8 +654,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status, // typically 'canceled' on .deleted
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? Math.floor(Date.now() / 1000),
     });
@@ -678,6 +742,12 @@ export class WebhookHandlers {
     const stripe = new Stripe(await getStripeSecretKey(), { apiVersion: '2025-08-27.basil' as any });
     const sub = await stripe.subscriptions.retrieve(subscriptionId);
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${sub.id}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: customerId,
@@ -685,8 +755,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status,
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? null,
     });
@@ -764,6 +834,12 @@ export class WebhookHandlers {
     const stripe = new Stripe(await getStripeSecretKey(), { apiVersion: '2025-08-27.basil' as any });
     const sub = await stripe.subscriptions.retrieve(subscriptionId);
 
+    const period = periodFromSubscription(sub);
+    if (!period) {
+      console.warn(`[webhook] period bounds missing for sub ${sub.id}, skipping vault_club_subscriptions upsert; will populate on next event`);
+      return;
+    }
+
     const subRowId = await upsertSubscriptionRow({
       userId,
       stripeCustomerId: customerId,
@@ -771,8 +847,8 @@ export class WebhookHandlers {
       stripePriceId: priceIdFromSubscription(sub),
       status: sub.status,
       trialEnd: sub.trial_end ?? null,
-      currentPeriodStart: (sub as any).current_period_start,
-      currentPeriodEnd: (sub as any).current_period_end,
+      currentPeriodStart: period.start,
+      currentPeriodEnd: period.end,
       cancelAtPeriodEnd: sub.cancel_at_period_end ?? false,
       canceledAt: sub.canceled_at ?? null,
     });
