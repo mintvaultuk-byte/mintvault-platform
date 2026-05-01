@@ -28,6 +28,7 @@ import { storage } from "./storage";
 
 export type VaultClubAuditAction =
   | "checkout_session_created"
+  | "checkout_blocked_already_active"
   | "created"
   | "trial_started"
   | "trial_ended_paid"
