@@ -730,6 +730,10 @@ export async function registerRoutes(
       const { migrateVaultClubSubscriptionsSchema } = await import("./vault-club-subscriptions-schema");
       return migrateVaultClubSubscriptionsSchema();
     })
+    .then(async () => {
+      const { migrateSubscriptionRemindersSchema } = await import("./vault-club-reminders-schema");
+      return migrateSubscriptionRemindersSchema();
+    })
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
 
   // Reference number backfill — async, fire-and-forget, never blocks boot

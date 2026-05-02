@@ -1223,3 +1223,62 @@ export const vaultClubSubscriptions = pgTable("vault_club_subscriptions", {
 
 export type VaultClubSubscription = typeof vaultClubSubscriptions.$inferSelect;
 export type InsertVaultClubSubscription = typeof vaultClubSubscriptions.$inferInsert;
+
+// ============================================================================
+// SUBSCRIPTION REMINDERS — DMCC Step 5a
+// ============================================================================
+// Scheduled reminder notices we owe a Vault Club subscriber. Required by the
+// DMCC 2024 subscription contracts chapter — missing a reminder is a breach
+// (see uk-subscription-compliance skill, lines 52-78).
+//
+// One row per reminder we INTEND to send. Dispatcher (next step) picks rows
+// where sent_at IS NULL AND scheduled_for <= NOW(), sends, marks sent.
+//
+// subscription_id holds the Stripe sub id (e.g. "sub_..."). Intentionally NO
+// FK to vault_club_subscriptions: reminder rows may be scheduled in webhook
+// handlers before the dual-write completes, and a FK would create write-
+// order dependencies for no real protection. Same reasoning audit_log and
+// vault_club_events use.
+//
+// Migration applied via raw CREATE TABLE IF NOT EXISTS at server startup
+// (server/vault-club-reminders-schema.ts) — additive, idempotent,
+// neon-postgres safe.
+// ============================================================================
+
+export const subscriptionReminderTypeEnum = [
+  "trial_ending",
+  "annual_renewal",
+  "monthly_6mo",
+  "monthly_12mo",
+  "price_change",
+] as const;
+
+export type SubscriptionReminderType = (typeof subscriptionReminderTypeEnum)[number];
+
+export const subscriptionReminders = pgTable("subscription_reminders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subscriptionId: text("subscription_id").notNull(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reminderType: text("reminder_type").$type<SubscriptionReminderType>().notNull(),
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  sendError: text("send_error"),
+  emailMessageId: text("email_message_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  // Idempotent scheduling — re-scheduling the same reminder for the same
+  // renewal (sub + type + scheduled time) is a no-op. The runtime CHECK
+  // constraint on reminder_type lives in the migration SQL; Drizzle
+  // doesn't model CHECK constraints natively, but $type<> above gives
+  // us TypeScript-side narrowing.
+  uniqueIdx: uniqueIndex("subscription_reminders_subscription_idx")
+    .on(t.subscriptionId, t.reminderType, t.scheduledFor),
+  // Dispatcher hot path. The partial-WHERE clause (sent_at IS NULL)
+  // lives in the migration SQL — Drizzle's index() helper doesn't
+  // expose partial indexes, so this Drizzle-side index() is informational
+  // only. The real index is created by migrateSubscriptionRemindersSchema.
+  dueIdx: index("subscription_reminders_due_idx").on(t.sentAt, t.scheduledFor),
+}));
+
+export type SubscriptionReminder = typeof subscriptionReminders.$inferSelect;
+export type InsertSubscriptionReminder = typeof subscriptionReminders.$inferInsert;
