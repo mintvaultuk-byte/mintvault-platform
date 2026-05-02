@@ -58,11 +58,15 @@ const FAQS = [
   },
   {
     q: "Can I cancel anytime?",
-    a: "Yes. Monthly plans cancel from the next billing cycle. Annual plans run to the end of the paid term — no partial refunds, but you keep every perk until it ends.",
+    a: "Yes. Monthly plans cancel from the next billing cycle. Annual plans run to the end of the paid term — no partial refunds, but you keep every perk until it ends. Your unused credits remain valid until the end of your current paid period.",
   },
   {
-    q: "Do unused credits roll over?",
+    q: "Do unused credits roll over from one month to the next?",
     a: "No. Free Authentication add-ons and AI Pre-Grade credits reset every month. Use them within the month or lose them.",
+  },
+  {
+    q: "What happens to my credits if I cancel?",
+    a: "On cancellation, you keep your unused credits until your current paid period ends. After that, they expire.",
   },
   {
     q: "Can I combine Silver with the bulk discount?",
@@ -78,11 +82,34 @@ const FAQS = [
   },
 ];
 
+// First-charge date displayed under the buy buttons. Today + 14 days,
+// matching server/vault-club-checkout.ts trial_period_days: 14. Computed
+// on render (client-side) so the date is always today-relative for visitors.
+// Returns null on any failure so the caller can fall back to a non-dated label.
+function trialEndLabel(): string | null {
+  try {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function VaultClubV2() {
   const [isLoading, setIsLoading] = useState<"month" | "year" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const trialEndDate = trialEndLabel();
+  const buttonMicrocopy = trialEndDate
+    ? `Card required · 14-day free trial · First charge ${trialEndDate}`
+    : "Card required · 14-day free trial";
 
   async function handleCheckout(interval: "month" | "year") {
     setIsLoading(interval);
@@ -132,7 +159,7 @@ export default function VaultClubV2() {
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
               style={{ color: "var(--v2-gold)" }}
             >
-              Est. Kent &middot; Vault Club
+              Est. Kent &middot; Vault Club &middot; Membership active
             </p>
             <h1
               className="font-display italic font-medium leading-[0.95] mb-6"
@@ -145,16 +172,17 @@ export default function VaultClubV2() {
               style={{ color: "var(--v2-ink-soft)" }}
             >
               Silver is a perks-and-credits membership for collectors who submit regularly.
-              Subscriptions are paused while we finish the perk system &mdash; join the
-              waitlist and you&rsquo;ll be first when it reopens.
+              Two free Authentications a month, free return shipping, AI Pre-Grade credits,
+              and priority queueing &mdash; for less than the cost of one card&rsquo;s
+              shipping insurance.
             </p>
             <div className="flex flex-wrap items-center gap-3 mb-5">
               <a
-                href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist"
+                href="#pricing"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
-                Notify me when it reopens <ArrowRight size={14} />
+                See pricing <ArrowRight size={14} />
               </a>
               <Link
                 href="/tools/estimate"
@@ -168,7 +196,7 @@ export default function VaultClubV2() {
               className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
-              &pound;9.99 / month &middot; 5 perks &middot; Membership paused
+              &pound;9.99 / month &middot; 14-day free trial &middot; Cancel anytime
             </p>
           </div>
 
@@ -323,7 +351,7 @@ export default function VaultClubV2() {
       </section>
 
       {/* ── SECTION III: MONTHLY VS ANNUAL ───────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      <section id="pricing" style={{ backgroundColor: "var(--v2-paper-raised)" }}>
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="Pricing" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
@@ -343,7 +371,7 @@ export default function VaultClubV2() {
                 <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ month</span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
-                Cancel anytime. Bill renews monthly.
+                &pound;9.99/month &mdash; renews automatically each month. Cancel anytime from your account.
               </p>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-ink-mute)" }}>
                 Good for month-to-month flexibility.
@@ -367,7 +395,7 @@ export default function VaultClubV2() {
                 )}
               </button>
               <p className="font-mono-v2 text-[9px] uppercase tracking-widest text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-                Card required &middot; Cancel anytime
+                {buttonMicrocopy}
               </p>
             </div>
 
@@ -389,7 +417,7 @@ export default function VaultClubV2() {
                 <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ year</span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
-                Equivalent to two months free. Bill renews yearly.
+                &pound;99/year &mdash; renews automatically each year. Cancel anytime from your account. Equivalent to two months free.
               </p>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-gold)" }}>
                 Best value for regular submitters.
@@ -413,7 +441,7 @@ export default function VaultClubV2() {
                 )}
               </button>
               <p className="font-mono-v2 text-[9px] uppercase tracking-widest text-center mt-3" style={{ color: "var(--v2-gold)" }}>
-                Card required &middot; Cancel anytime
+                {buttonMicrocopy}
               </p>
             </div>
           </div>
@@ -431,10 +459,128 @@ export default function VaultClubV2() {
         </div>
       </section>
 
-      {/* ── SECTION IV: WHAT SILVER ISN'T ────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      {/* ── SECTION IV: BEFORE YOU JOIN — pre-contract info (DMCC) ───── */}
+      {/*
+        Pre-contract disclosure block. Required by DMCC 2024 + CCR 2013 +
+        consumer-protection norms — every claim here is backed by a code
+        path:
+          - auto-renewal: vault_club_subscriptions.cancel_at_period_end
+            defaults false; Stripe sub auto-renews
+          - cancellation: /account/vault-club + Stripe Customer Portal
+          - 14-day trial: trial_period_days: 14 in vault-club-checkout.ts
+          - reminder commitment: subscription_reminders dispatcher (Step 5b)
+          - credits-on-cancellation: enforced server-side at period_end
+            (Phase 1B perk evaluator) — disclosed verbatim
+          - 30-day price-change notice: sendVaultClubPriceChangeEmail
+          - cooling-off: standard CCR 2013 14-day right
+        See docs/dmcc-step5-audit.md for the audit context.
+      */}
+      <section id="before-you-join" style={{ backgroundColor: "var(--v2-paper)" }}>
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
-          <SectionEyebrow numeral="IV" label="Honesty" className="mb-4" />
+          <SectionEyebrow numeral="IV" label="Pre-contract info" className="mb-4" />
+          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+            Before you join &mdash; what to know.
+          </h2>
+
+          <div className="space-y-8">
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Auto-renewal.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                Your membership renews automatically at the end of each billing period
+                &mdash; every month for monthly, every year for annual &mdash; until you cancel.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                How to cancel.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                You can cancel anytime from your account at{" "}
+                <Link href="/account/vault-club" className="underline" style={{ color: "var(--v2-gold)" }}>
+                  /account/vault-club
+                </Link>
+                . Cancellation is one click and takes effect at the end of your
+                current paid period.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Your 14-day free trial.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                Your 14-day free trial starts the moment you subscribe. You won&rsquo;t
+                be charged until the trial ends &mdash; we&rsquo;ll email you 3 days before
+                the first charge so you can cancel beforehand if you change your mind.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Reminder emails.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                We&rsquo;ll email you before key billing moments &mdash; before your trial
+                ends, before annual renewals (14 days ahead), and at 6-month and
+                12-month milestones for monthly memberships.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Credits on cancellation.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                On cancellation, you keep your unused credits until your current paid
+                period ends. After that, they expire.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Price changes.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                If we change the price, we&rsquo;ll give you at least 30 days&rsquo;
+                notice before the change takes effect, with a single-click option
+                to cancel before the new price applies.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                Cooling-off right.
+              </h3>
+              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                You have a 14-day legal right to cancel under UK Consumer Contracts
+                Regulations. By starting your trial, you&rsquo;re asking us to begin
+                services immediately &mdash; if you cancel during the cooling-off
+                period after using member benefits, we may be entitled to a
+                proportionate charge for benefits used.
+              </p>
+            </div>
+          </div>
+
+          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-12" style={{ color: "var(--v2-ink-mute)" }}>
+            Full terms:{" "}
+            <Link href="/legal/vault-club-terms" className="underline" style={{ color: "var(--v2-gold)" }}>
+              Vault Club Terms
+            </Link>
+            {" "}&middot;{" "}
+            <Link href="/legal/privacy" className="underline" style={{ color: "var(--v2-gold)" }}>
+              Privacy Notice
+            </Link>
+          </p>
+        </div>
+      </section>
+
+      {/* ── SECTION V: WHAT SILVER ISN'T ─────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+        <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
+          <SectionEyebrow numeral="V" label="Honesty" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
             What Silver isn&rsquo;t.
           </h2>
@@ -464,10 +610,10 @@ export default function VaultClubV2() {
         </div>
       </section>
 
-      {/* ── SECTION V: FAQ ───────────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      {/* ── SECTION VI: FAQ ──────────────────────────────────────────── */}
+      <section style={{ backgroundColor: "var(--v2-paper)" }}>
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
-          <SectionEyebrow numeral="V" label="FAQ" className="mb-4" />
+          <SectionEyebrow numeral="VI" label="FAQ" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
             Silver questions.
           </h2>
@@ -487,24 +633,26 @@ export default function VaultClubV2() {
         </div>
       </section>
 
-      {/* ── SECTION VI: FINAL CTA (dark) ─────────────────────────────── */}
+      {/* ── SECTION VII: FINAL CTA (dark) ────────────────────────────── */}
       <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
-          <SectionEyebrow numeral="VI" label="Waitlist" className="mb-4" />
+          <SectionEyebrow numeral="VII" label="Join now" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
-            Ready when we are.
+            Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
-            Subscriptions are paused while we finish the perks system. Join the waitlist &mdash;
-            you&rsquo;ll be first when we reopen.
+            Two cards a month? Silver pays for itself. Start your 14-day free trial &mdash;
+            {trialEndDate
+              ? <> no charge until {trialEndDate}, cancel anytime from your account.</>
+              : <> no charge for 14 days, cancel anytime from your account.</>}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <a
-              href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist"
+              href="#pricing"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
               style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
-              Email the waitlist <ArrowRight size={14} />
+              Start 14-day free trial <ArrowRight size={14} />
             </a>
             <Link
               href="/tools/estimate"
