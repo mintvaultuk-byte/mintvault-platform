@@ -1890,11 +1890,14 @@ export async function registerRoutes(
   //
   // ─── INVARIANT: at most one audience identity per session at any time. ───
   // Three login handlers mutate session identity and MUST be kept symmetric:
-  //   - POST /api/admin/pin (this handler)
-  //   - GET  /api/customer/verify/:token (routes.ts ~5927)
-  //   - GET  /api/auth/magic-link/verify (routes.ts ~9050)
-  // Each must regenerate() the session AND explicitly clear cross-audience
-  // fields. See docs/login-flow-bug-report.md.
+  //   - POST /api/admin/pin (this handler) — admin only, clears userId + customerEmail
+  //   - GET  /api/customer/verify/:token (routes.ts ~5946) — sets BOTH userId AND customerEmail
+  //   - GET  /api/auth/magic-link/verify (routes.ts ~9115) — sets BOTH userId AND customerEmail
+  // The customer + account-holder flows produce EQUIVALENT sessions
+  // (one magic-link click satisfies both audiences) — see
+  // docs/login-unification-plan.md. Admin-pin remains the only flow that
+  // sets isAdmin/adminEmail and explicitly clears the other two audiences.
+  // See docs/login-flow-bug-report.md for the session-bleed history.
   // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/admin/pin", async (req, res) => {
     try {
@@ -5937,11 +5940,15 @@ export async function registerRoutes(
   //
   // ─── INVARIANT: at most one audience identity per session at any time. ───
   // Three login handlers mutate session identity and MUST be kept symmetric:
-  //   - POST /api/admin/pin (routes.ts ~1889)
-  //   - GET  /api/customer/verify/:token (this handler)
-  //   - GET  /api/auth/magic-link/verify (routes.ts ~9050)
-  // Each must regenerate() the session AND explicitly clear cross-audience
-  // fields. See docs/login-flow-bug-report.md.
+  //   - POST /api/admin/pin (routes.ts ~1889) — admin only
+  //   - GET  /api/customer/verify/:token (this handler) — sets BOTH userId AND customerEmail
+  //   - GET  /api/auth/magic-link/verify (routes.ts ~9050) — sets BOTH userId AND customerEmail
+  // Each must regenerate() AND explicitly clear cross-audience fields.
+  // Post-verify, the cert-owner and account-holder flows produce
+  // EQUIVALENT sessions (one magic-link click satisfies both audiences) —
+  // see docs/login-unification-plan.md. Admin-pin is the only flow that
+  // sets isAdmin/adminEmail and explicitly clears the other two audiences.
+  // See docs/login-flow-bug-report.md for the session-bleed history.
   // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/customer/verify/:token", async (req, res) => {
     try {
@@ -5949,6 +5956,30 @@ export async function registerRoutes(
       const email = await verifyMagicToken(token);
       if (!email) {
         return res.redirect("/dashboard?error=invalid_link");
+      }
+      const normalEmail = email.toLowerCase().trim();
+
+      // Find-or-create the users row for this email. The cert-owner flow
+      // historically only set customerEmail, leaving anyone who entered via
+      // /dashboard's form unable to access /vault-club, /account/settings,
+      // and other userId-gated surfaces. The verify endpoint is the right
+      // place to provision the row — the user has just proved control of
+      // the inbox, so creating a row here is safe (creating on send-side
+      // would let attackers spam-create from random emails).
+      let user = await storage.getUserByEmail(normalEmail);
+      const userIsNew = !user;
+      if (!user) {
+        user = await storage.createUser({ email: normalEmail });
+        await storage.writeAuditLog(
+          "users",
+          user.id,
+          "cert_owner_verify_create",
+          "system",
+          {
+            source: "customer_magic_link_verify",
+            email: normalEmail,
+          },
+        );
       }
 
       // Regenerate session on privilege grant to cert-owner.
@@ -5958,11 +5989,15 @@ export async function registerRoutes(
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
 
-      req.session.userId = undefined as unknown as string;
-      req.session.userEmail = undefined as unknown as string;
+      // Set BOTH audiences. One magic-link click → both userId and
+      // customerEmail satisfied → user can hit /api/customer/* AND
+      // /api/auth/* / /api/vault-club/* without a second login.
+      req.session.userId = user.id;
+      req.session.userEmail = user.email as string;
+      req.session.customerEmail = normalEmail;
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
-      req.session.customerEmail = email;
+      void userIsNew; // referenced only for the audit-log conditional above
       res.redirect("/dashboard?login=success");
     } catch (err) {
       console.error("[customer] verify error:", err);
@@ -9006,12 +9041,12 @@ Defects (admin-confirmed): ${defectLines}`;
   //
   // ─── INVARIANT: at most one audience identity per session at any time. ───
   // Three login handlers mutate session identity and MUST be kept symmetric:
-  //   - POST /api/admin/pin (routes.ts:1925)
-  //   - GET  /api/customer/verify/:token (routes.ts:5927)
-  //   - GET  /api/auth/magic-link/verify (this file, below)
-  // Each must regenerate() the session AND explicitly clear cross-audience
-  // fields. See docs/login-flow-bug-report.md for the bug that motivated
-  // this discipline.
+  //   - POST /api/admin/pin (routes.ts ~1889) — admin only
+  //   - GET  /api/customer/verify/:token (routes.ts ~5946) — sets BOTH userId AND customerEmail
+  //   - GET  /api/auth/magic-link/verify (this file, below) — sets BOTH userId AND customerEmail
+  // Customer + account-holder flows produce EQUIVALENT sessions — one
+  // magic-link click satisfies both audiences. See
+  // docs/login-unification-plan.md and docs/login-flow-bug-report.md.
   // ──────────────────────────────────────────────────────────────────────────
   //
   // Defense layer for the issuer side: an authenticated caller cannot
@@ -9076,9 +9111,11 @@ Defects (admin-confirmed): ${defectLines}`;
   //
   // ─── INVARIANT: at most one audience identity per session at any time. ───
   // See the comment block above POST /api/auth/magic-link. This handler
-  // promotes the session to "account-holder"; admin and customer flows
-  // (POST /api/admin/pin, GET /api/customer/verify/:token) do the same
-  // for their audiences and must stay symmetric.
+  // and customer-verify (routes.ts ~5946) BOTH set userId AND customerEmail
+  // to produce equivalent sessions — one magic-link click satisfies both
+  // audiences, see docs/login-unification-plan.md. admin-pin
+  // (routes.ts ~1889) is the only flow that sets isAdmin/adminEmail and
+  // explicitly clears userId/userEmail/customerEmail.
   // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/auth/magic-link/verify", async (req, res) => {
     try {
@@ -9112,9 +9149,12 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      // customerEmail mirrored to user.email so this verify produces the
+      // SAME session shape as the customer-flow verify (one magic-link
+      // click satisfies both audiences). See docs/login-unification-plan.md.
+      (req.session as any).customerEmail = String(user.email).toLowerCase();
       (req.session as any).isAdmin = false;
       (req.session as any).adminEmail = undefined as unknown as string;
-      (req.session as any).customerEmail = undefined as unknown as string;
       await db.execute(sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`);
       await writeAuthAudit("auth.magic_link.used", user.id as string, getClientIpForAuth(req), {});
       return res.redirect("/dashboard");
