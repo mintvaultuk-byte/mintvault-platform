@@ -394,6 +394,23 @@ async function runTransferV2Sweep() {
   runVaultClubGraceSweep();
   setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
+  // DMCC reminder dispatcher — picks up rows from subscription_reminders
+  // whose scheduled_for is past and sends them. Runs every 5 minutes; also
+  // invoked once 60s after boot (lets the migration chain finish first)
+  // so a deploy doesn't delay reminders by up to 5 minutes.
+  setTimeout(() => {
+    import("./vault-club-reminders-dispatcher").then(({ runReminderDispatcher }) => {
+      runReminderDispatcher().catch((e: any) =>
+        console.error("[reminders] startup dispatch error:", e.message)
+      );
+      setInterval(() => {
+        runReminderDispatcher().catch((e: any) =>
+          console.error("[reminders] interval dispatch error:", e.message)
+        );
+      }, 5 * 60 * 1000);
+    });
+  }, 60_000);
+
   // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
   setTimeout(runTransferV2Sweep, 30_000);
   setInterval(runTransferV2Sweep, 60 * 60 * 1000);

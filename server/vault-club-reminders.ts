@@ -43,6 +43,7 @@ import type { SubscriptionReminderType } from "@shared/schema";
 type ReminderAuditAction =
   | "reminder_scheduled"
   | "reminder_sent"
+  | "reminder_skipped"
   | "reminder_failed";
 
 async function writeReminderAudit(
@@ -157,6 +158,31 @@ export async function markReminderSent(
   await writeReminderAudit(reminderId, "reminder_sent", {
     email_message_id: emailMessageId,
   });
+}
+
+/**
+ * Mark a reminder as deliberately skipped — used by the dispatcher when
+ * the subscription is no longer active by the time the reminder is due
+ * (cancelled, expired, status moved to past_due, etc.). Sends nothing,
+ * but flips sent_at so the dispatcher won't keep selecting the row, and
+ * stores a sentinel in email_message_id so the row is recognisable as
+ * skipped in the audit trail.
+ */
+export async function markReminderSkipped(
+  reminderId: string,
+  reason: string,
+): Promise<void> {
+  const sentinel = `skipped:${reason}`.slice(0, 200);
+  const result = await db.execute(sql`
+    UPDATE subscription_reminders
+    SET sent_at = NOW(),
+        email_message_id = ${sentinel},
+        send_error = NULL
+    WHERE id = ${reminderId} AND sent_at IS NULL
+    RETURNING id
+  `);
+  if (result.rows.length === 0) return;
+  await writeReminderAudit(reminderId, "reminder_skipped", { reason });
 }
 
 /**
