@@ -112,10 +112,12 @@ export default function VaultClubV2() {
   const [isLoading, setIsLoading] = useState<"month" | "year" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState<boolean>(false);
-  // DMCC: explicit consent at sign-up, never pre-ticked. Single state shared
-  // across both pricing cards — ticking the box on either card enables both
-  // buy buttons (same agreement applies to either interval).
-  const [consentChecked, setConsentChecked] = useState<boolean>(false);
+  // DMCC: explicit consent at sign-up, never pre-ticked. Independent state
+  // per pricing card so a tick on one card does not silently propagate to
+  // the other — the user must affirmatively tick the box on the card whose
+  // "Start 14-day free trial" button they intend to click.
+  const [monthlyConsent, setMonthlyConsent] = useState<boolean>(false);
+  const [annualConsent, setAnnualConsent] = useState<boolean>(false);
   const [consentMeta, setConsentMeta] = useState<ConsentMeta | null>(null);
 
   // Fetch the canonical consent text + hash from the server on mount. The
@@ -143,14 +145,16 @@ export default function VaultClubV2() {
     ? `Card required · 14-day free trial · First charge ${trialEndDate}`
     : "Card required · 14-day free trial";
 
-  // Buttons are disabled until both: consent ticked, AND hash loaded from
-  // server (so we have something to send back on click). Loading-in-progress
-  // also disables to prevent double-submit.
-  const checkoutDisabled =
-    !consentChecked || !consentMeta || isLoading !== null;
+  // Each button is disabled until both: this card's consent ticked, AND hash
+  // loaded from server (so we have something to send back on click). Loading-
+  // in-progress also disables both to prevent double-submit.
+  function isCheckoutDisabled(interval: "month" | "year"): boolean {
+    const consent = interval === "month" ? monthlyConsent : annualConsent;
+    return !consent || !consentMeta || isLoading !== null;
+  }
 
   async function handleCheckout(interval: "month" | "year") {
-    if (checkoutDisabled || !consentMeta) return;
+    if (isCheckoutDisabled(interval) || !consentMeta) return;
     setIsLoading(interval);
     setError(null);
     setStale(false);
@@ -434,8 +438,8 @@ export default function VaultClubV2() {
               >
                 <input
                   type="checkbox"
-                  checked={consentChecked}
-                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  checked={monthlyConsent}
+                  onChange={(e) => setMonthlyConsent(e.target.checked)}
                   data-testid="vault-club-consent-month"
                   className="mt-1 w-4 h-4 flex-shrink-0 cursor-pointer"
                   style={{ accentColor: "var(--v2-gold)" }}
@@ -455,7 +459,7 @@ export default function VaultClubV2() {
               <button
                 type="button"
                 onClick={() => handleCheckout("month")}
-                disabled={checkoutDisabled}
+                disabled={isCheckoutDisabled("month")}
                 data-testid="vault-club-checkout-month"
                 className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
@@ -504,8 +508,8 @@ export default function VaultClubV2() {
               >
                 <input
                   type="checkbox"
-                  checked={consentChecked}
-                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  checked={annualConsent}
+                  onChange={(e) => setAnnualConsent(e.target.checked)}
                   data-testid="vault-club-consent-year"
                   className="mt-1 w-4 h-4 flex-shrink-0 cursor-pointer"
                   style={{ accentColor: "var(--v2-gold)" }}
@@ -525,7 +529,7 @@ export default function VaultClubV2() {
               <button
                 type="button"
                 onClick={() => handleCheckout("year")}
-                disabled={checkoutDisabled}
+                disabled={isCheckoutDisabled("year")}
                 data-testid="vault-club-checkout-year"
                 className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
