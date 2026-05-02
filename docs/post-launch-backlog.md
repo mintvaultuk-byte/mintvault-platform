@@ -155,6 +155,8 @@ When restoring, consider:
 
 **Effort.** ~30 minutes including verification.
 
+**Superseded by.** "Restore 10% grading discount for Silver Vault Club members" (below). The dead branch is being repurposed, not deleted — this item now applies only if the restoration item is itself shelved.
+
 ### Welcome email tier-label hardcoded from sub record (email.ts)
 
 **Context.** [server/email.ts:1213-1215](../server/email.ts#L1213-L1215) — `sendVaultClubWelcomeEmail` interpolates `tierLabel` (derived from `data.tier`) into both the subject line (`Welcome to Vault Club ${tierLabel}`) and the email header. After commit 17c2487 (2026-05-02), the body shows Silver-only perks regardless of the subscription's `tier` value. If a re-welcome ever fires on a legacy bronze or gold subscription record, the subject reads "Welcome to Vault Club Bronze" while the body lists Silver perks.
@@ -165,9 +167,32 @@ When restoring, consider:
 
 **Effort.** ~5 minutes.
 
+### Restore 10% grading discount for Silver Vault Club members
+
+**Context.** Silver Vault Club currently offers a perks-and-credits bundle (2 free Authentication add-ons per month, free return shipping, 100 AI Pre-Grade credits, priority queue, activated Showroom). The percentage-discount model was removed 2026-04-19 ([server/vault-club.ts:140-163](../server/vault-club.ts#L140-L163), [server/vault-club-tiers.ts:12](../server/vault-club-tiers.ts#L12) — both have inline comments documenting the removal). The founder has since decided to reinstate a 10% grading discount for active Silver members, layered on top of the existing perks bundle. This is a deliberate reversal of the April 2026 architectural decision, not a regression.
+
+**Risk.** Cross-cutting change. Pricing engine, customer-facing copy across six or more files, T&Cs, and the marketing page must all move together — partial implementation reintroduces the same DMCC/CPR exposure that motivated the 2026-05-02 cleanup (claim without code path). Solicitor review of revised T&Cs is required before any deploy. Margin impact on the £9.99/mo plan must be modelled — Silver perks already cost roughly £30/mo per active member at full utilisation, and a 10% grading discount on top tightens unit economics further. The stacking rule with the existing bulk discount needs an explicit decision; the working assumption is "higher of the two, mutually exclusive" (per the existing memory rule), but that should be confirmed before code lands.
+
+**Scope.**
+
+1. Add `discount_percent: 10` to the Silver tier in [server/vault-club-tiers.ts](../server/vault-club-tiers.ts).
+2. Restore `/api/vault-club/check-discount` to return `10` for active Silver subs (currently hard-returns `0` in [server/vault-club.ts:140-163](../server/vault-club.ts#L140-L163)).
+3. Re-wire checkout pricing in [server/routes.ts](../server/routes.ts) (around the bulk-discount calc, ~line 1484) to apply the percentage when the user has an active Silver sub, respecting the higher-of stacking rule.
+4. Restore `vcPercent` / `vcWins` / `discountLabel` rendering in [client/src/pages/submit.tsx](../client/src/pages/submit.tsx) — repurpose the existing dead branch flagged in the item above; do not delete.
+5. Restore the "Discount" stat on the dashboard widget — revert the relevant portion of [client/src/pages/dashboard.tsx](../client/src/pages/dashboard.tsx) from commit 17c2487 (2026-05-02), showing "10%" for Silver.
+6. Update the /vault-club marketing page ([client/src/pages/vault-club.tsx](../client/src/pages/vault-club.tsx)) — current copy explicitly states "Not a percentage discount on grading. Perks are flag-based" — that becomes false and must change.
+7. Update the home-page Vault Club teasers across all four variants ([home.tsx](../client/src/pages/home.tsx), [home-v2-integrated.tsx](../client/src/pages/home-v2-integrated.tsx), [home-v3.tsx](../client/src/pages/home-v3.tsx), [home-v4.tsx](../client/src/pages/home-v4.tsx)) — restore percentage language alongside the perks list.
+8. Update the welcome email — `sendVaultClubWelcomeEmail` in [server/email.ts](../server/email.ts) — to add a "10% off grading" line to the perks list.
+9. Revise [content/legal/vault-club-terms.md](../content/legal/vault-club-terms.md) to disclose the 10% discount, refund implications, and edge cases (cancellation mid-submission, downgrade, lapse during in-flight grading, etc.).
+10. Solicitor review of the revised T&Cs — Adam J — before deploy.
+11. Update memory rule #20 (perks-and-credits model → hybrid: perks + 10% Silver discount, no other tier percentages).
+12. Margin model: confirm the £9.99/mo plan remains profitable at expected Silver utilisation including the 10% grading discount on top of 2 free Authentication add-ons, free returns, and 100 AI credits.
+
+**Effort.** 1–2 engineering days plus solicitor turnaround. Cannot ship within the v1 timeframe. Targeted v1.1 release with its own deploy and announcement.
+
 ---
 
-Both items reference feature branch `feat/vault-club-stripe-phase1-schema` as of commit 17c2487 (2026-05-02). No urgency — post-v1.
+These items reference feature branch `feat/vault-club-stripe-phase1-schema` as of commit 17c2487 (2026-05-02). No urgency — post-v1.
 
 ---
 
