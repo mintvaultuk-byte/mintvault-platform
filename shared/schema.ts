@@ -1282,3 +1282,51 @@ export const subscriptionReminders = pgTable("subscription_reminders", {
 
 export type SubscriptionReminder = typeof subscriptionReminders.$inferSelect;
 export type InsertSubscriptionReminder = typeof subscriptionReminders.$inferInsert;
+
+// ============================================================================
+// VAULT CLUB CONSENTS — DMCC Step 5d
+// ============================================================================
+// Append-only ledger of explicit, un-pre-ticked subscription consent
+// captured at the moment of sign-up. Required by DMCC 2024 — the consumer
+// must take a "specific action" to accept the subscription, not infer
+// consent from a pre-ticked box or bundled flow (skill lines 48-51).
+//
+// Pin to TERMS_VERSION + sha256 of the consent text the user actually saw
+// so a regulator dispute lands on a stable artefact even if the live text
+// changes later.
+//
+// One row per checkout attempt. Subsequent attempts (after a 409 dup-sub
+// guard etc.) record their own row — we never collapse history.
+//
+// Stripe back-reference written into Stripe Customer metadata as
+// vault_club_consent_id, giving the Stripe dashboard a one-click bridge
+// to the consent record for any audit / chargeback dispute.
+//
+// Migration applied via raw CREATE TABLE IF NOT EXISTS at server startup
+// (server/vault-club-consents-schema.ts) — additive, idempotent,
+// neon-postgres safe.
+// ============================================================================
+
+export const vaultClubConsents = pgTable("vault_club_consents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  termsVersion: text("terms_version").notNull(),
+  consentTextHash: text("consent_text_hash").notNull(),
+  interval: text("interval").$type<"month" | "year">().notNull(),
+  // Stripe refs are null at INSERT time; populated by attachConsentToStripeRefs
+  // immediately after stripe.checkout.sessions.create succeeds. Once set, never
+  // overwritten (UPDATE … COALESCE …).
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSessionId: text("stripe_session_id"),
+  // INET column type lives in the migration SQL; Drizzle doesn't model
+  // INET natively so we store/read as text. Postgres will reject malformed
+  // addresses on INSERT regardless.
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userIdx: index("vault_club_consents_user_idx").on(t.userId, t.capturedAt),
+}));
+
+export type VaultClubConsent = typeof vaultClubConsents.$inferSelect;
+export type InsertVaultClubConsent = typeof vaultClubConsents.$inferInsert;

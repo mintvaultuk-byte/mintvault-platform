@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Loader2 } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
@@ -103,23 +103,67 @@ function trialEndLabel(): string | null {
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
+interface ConsentMeta {
+  termsVersion: string;
+  consentTextHash: string;
+}
+
 export default function VaultClubV2() {
   const [isLoading, setIsLoading] = useState<"month" | "year" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState<boolean>(false);
+  // DMCC: explicit consent at sign-up, never pre-ticked. Single state shared
+  // across both pricing cards — ticking the box on either card enables both
+  // buy buttons (same agreement applies to either interval).
+  const [consentChecked, setConsentChecked] = useState<boolean>(false);
+  const [consentMeta, setConsentMeta] = useState<ConsentMeta | null>(null);
+
+  // Fetch the canonical consent text + hash from the server on mount. The
+  // hash anchors the user's agreement to a specific version of the
+  // contractual text — if TERMS_VERSION (or the consent text itself) changes
+  // between page render and click, the server rejects with consent_text_stale
+  // and we ask the user to refresh + re-read.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/vault-club/consent-text", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setConsentMeta({
+          termsVersion: String(data.termsVersion || ""),
+          consentTextHash: String(data.consentTextHash || ""),
+        });
+      })
+      .catch(() => { /* page still loads; buttons stay disabled until tick */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const trialEndDate = trialEndLabel();
   const buttonMicrocopy = trialEndDate
     ? `Card required · 14-day free trial · First charge ${trialEndDate}`
     : "Card required · 14-day free trial";
 
+  // Buttons are disabled until both: consent ticked, AND hash loaded from
+  // server (so we have something to send back on click). Loading-in-progress
+  // also disables to prevent double-submit.
+  const checkoutDisabled =
+    !consentChecked || !consentMeta || isLoading !== null;
+
   async function handleCheckout(interval: "month" | "year") {
+    if (checkoutDisabled || !consentMeta) return;
     setIsLoading(interval);
     setError(null);
+    setStale(false);
     try {
       const r = await fetch("/api/vault-club/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ interval }),
+        body: JSON.stringify({
+          interval,
+          consent_accepted: true,
+          consent_text_hash: consentMeta.consentTextHash,
+        }),
       });
       if (r.status === 401) {
         window.location.href = `/login?next=${encodeURIComponent("/vault-club")}`;
@@ -132,6 +176,14 @@ export default function VaultClubV2() {
       // where they manage what they already have.
       if (r.status === 409) {
         window.location.href = (data?.account_url as string) || "/account/vault-club";
+        return;
+      }
+      // Stale consent text — render-time hash diverged from server hash.
+      // Ask the user to refresh; don't auto-refresh because they need to
+      // actually re-read the changed terms.
+      if (r.status === 400 && data?.error === "consent_text_stale") {
+        setStale(true);
+        setIsLoading(null);
         return;
       }
       if (!r.ok || !data?.url) {
@@ -376,12 +428,36 @@ export default function VaultClubV2() {
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-ink-mute)" }}>
                 Good for month-to-month flexibility.
               </p>
+              <label
+                className="flex items-start gap-3 mb-4 cursor-pointer mt-auto"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  data-testid="vault-club-consent-month"
+                  className="mt-1 w-4 h-4 flex-shrink-0 cursor-pointer"
+                  style={{ accentColor: "var(--v2-gold)" }}
+                />
+                <span className="font-body text-xs leading-relaxed">
+                  I have read and agree to the{" "}
+                  <Link href="/legal/vault-club-terms" className="underline" style={{ color: "var(--v2-gold)" }}>
+                    Vault Club Terms
+                  </Link>{" "}
+                  and{" "}
+                  <Link href="/privacy" className="underline" style={{ color: "var(--v2-gold)" }}>
+                    Privacy Notice
+                  </Link>
+                  . I understand my membership renews automatically until I cancel.
+                </span>
+              </label>
               <button
                 type="button"
                 onClick={() => handleCheckout("month")}
-                disabled={isLoading !== null}
+                disabled={checkoutDisabled}
                 data-testid="vault-club-checkout-month"
-                className="mt-auto inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 {isLoading === "month" ? (
@@ -422,12 +498,36 @@ export default function VaultClubV2() {
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-6" style={{ color: "var(--v2-gold)" }}>
                 Best value for regular submitters.
               </p>
+              <label
+                className="flex items-start gap-3 mb-4 cursor-pointer mt-auto"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  data-testid="vault-club-consent-year"
+                  className="mt-1 w-4 h-4 flex-shrink-0 cursor-pointer"
+                  style={{ accentColor: "var(--v2-gold)" }}
+                />
+                <span className="font-body text-xs leading-relaxed">
+                  I have read and agree to the{" "}
+                  <Link href="/legal/vault-club-terms" className="underline" style={{ color: "var(--v2-gold)" }}>
+                    Vault Club Terms
+                  </Link>{" "}
+                  and{" "}
+                  <Link href="/privacy" className="underline" style={{ color: "var(--v2-gold)" }}>
+                    Privacy Notice
+                  </Link>
+                  . I understand my membership renews automatically until I cancel.
+                </span>
+              </label>
               <button
                 type="button"
                 onClick={() => handleCheckout("year")}
-                disabled={isLoading !== null}
+                disabled={checkoutDisabled}
                 data-testid="vault-club-checkout-year"
-                className="mt-auto inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
                 style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 {isLoading === "year" ? (
@@ -455,6 +555,27 @@ export default function VaultClubV2() {
             >
               {error}
             </p>
+          )}
+
+          {stale && (
+            <div
+              role="alert"
+              data-testid="vault-club-consent-stale"
+              className="mt-8 mx-auto max-w-md text-center rounded-lg p-4"
+              style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}
+            >
+              <p className="font-body text-sm" style={{ color: "var(--v2-ink)" }}>
+                Our terms have been updated. Please refresh and review before subscribing.
+              </p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-5 py-2 rounded-full mt-3 transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              >
+                Refresh page <ArrowRight size={14} />
+              </button>
+            </div>
           )}
         </div>
       </section>

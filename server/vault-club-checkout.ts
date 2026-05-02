@@ -32,6 +32,12 @@ import { getStripeSecretKey } from "./stripeClient";
 import { getPriceId, type VaultClubInterval } from "./vault-club-config";
 import { writeVaultClubSubscriptionAudit } from "./vault-club-audit";
 import { getRedirectBaseUrl } from "./app-url";
+import { TERMS_VERSION } from "./config/legal";
+import { VAULT_CLUB_CONSENT_TEXT_HASH } from "./config/consents";
+import {
+  attachConsentToStripeRefs,
+  recordConsent,
+} from "./vault-club-consents";
 
 interface UserRow {
   id: string;
@@ -83,6 +89,29 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       return res.status(400).json({
         error: "invalid_interval",
         message: "interval must be 'month' or 'year'",
+      });
+    }
+
+    // ── DMCC explicit-consent gate (Step 5d) ──────────────────────────────
+    // The frontend must send consent_accepted: true AND the hash of the
+    // consent text it actually rendered. The hash check catches the deploy
+    // race where /vault-club was rendered just before a TERMS_VERSION bump:
+    // the user is shown stale text, ticks the box, server has new text,
+    // request rejects. User has to refresh and re-read.
+    const consentAccepted = req.body?.consent_accepted;
+    const consentTextHash = req.body?.consent_text_hash;
+    if (consentAccepted !== true) {
+      return res.status(400).json({
+        error: "consent_required",
+        message:
+          "You must agree to the Vault Club Terms and Privacy Notice before subscribing.",
+      });
+    }
+    if (typeof consentTextHash !== "string" || consentTextHash !== VAULT_CLUB_CONSENT_TEXT_HASH) {
+      return res.status(400).json({
+        error: "consent_text_stale",
+        message:
+          "Our terms have been updated. Please refresh the page and review before subscribing.",
       });
     }
 
@@ -174,12 +203,39 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
       });
     }
 
+    // ── DMCC consent recorded BEFORE the Checkout Session is created ──────
+    // Order matters: by the time we hit Stripe's API, the consent record
+    // exists with a captured_at timestamp. If Stripe fails after this
+    // INSERT, we have a consent row with no Stripe refs — that's fine,
+    // attachConsentToStripeRefs is a separate UPDATE call that runs only
+    // on the success path. A consent without Stripe refs is a "user agreed
+    // but Stripe error" record, which is actually the regulator-friendly
+    // shape (we can show the user agreed even though the charge never
+    // started).
+    const ipAddress =
+      (req.ip ?? req.socket.remoteAddress ?? null) || null;
+    const userAgentHeader = req.get("user-agent");
+    const userAgent =
+      typeof userAgentHeader === "string" ? userAgentHeader.slice(0, 500) : null;
+    const consent = await recordConsent({
+      userId: user.id,
+      termsVersion: TERMS_VERSION,
+      consentTextHash: VAULT_CLUB_CONSENT_TEXT_HASH,
+      interval,
+      ipAddress,
+      userAgent,
+    });
+
     // Metadata keys (user_id / tier / interval) match what the existing
     // WebhookHandlers dispatcher reads — see server/webhookHandlers.ts.
     // Both Checkout Session metadata AND subscription_data.metadata are set;
     // checkout.session.completed reads from session.metadata, but
     // customer.subscription.* events only see subscription.metadata, so the
     // tier+interval need to live on both.
+    //
+    // Stripe Customer metadata also gets vault_club_consent_id +
+    // vault_club_terms_version — these give the Stripe dashboard a
+    // back-reference to the consent ledger row for any audit / dispute.
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -190,6 +246,8 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
           user_id: user.id,
           tier: "silver",
           interval,
+          vault_club_consent_id: consent.id,
+          vault_club_terms_version: TERMS_VERSION,
         },
       },
       payment_method_collection: "always",
@@ -201,8 +259,23 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
         user_id: user.id,
         tier: "silver",
         interval,
+        vault_club_consent_id: consent.id,
+        vault_club_terms_version: TERMS_VERSION,
       },
     });
+
+    // Attach the Stripe ids to the consent ledger row. Idempotent via
+    // COALESCE — if this fails for any reason, the consent row stays
+    // intact and the bridge is best-effort.
+    await attachConsentToStripeRefs(consent.id, {
+      stripeCustomerId: customerId,
+      stripeSessionId: session.id,
+    }).catch((e: any) =>
+      console.error(
+        `[vault-club-checkout] failed to attach Stripe refs to consent ${consent.id}:`,
+        e?.message,
+      ),
+    );
 
     await writeVaultClubSubscriptionAudit(
       user.id,
@@ -214,6 +287,8 @@ export async function handleVaultClubCheckout(req: Request, res: Response): Prom
         stripe_price_id: priceId,
         interval,
         mode: process.env.NODE_ENV === "production" ? "live" : "test",
+        vault_club_consent_id: consent.id,
+        vault_club_terms_version: TERMS_VERSION,
       }
     );
 
