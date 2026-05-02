@@ -38,6 +38,7 @@ import {
   sendEmailChangedNotification, sendAccountDeletedEmail,
 } from "./email";
 import { requireAuth } from "./middleware/auth";
+import { authRateLimit } from "./index";
 import { requireScannerOrAdmin } from "./lib/scanner-auth";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
@@ -9054,7 +9055,7 @@ Defects (admin-confirmed): ${defectLines}`;
   // "session swap via second tab + email click" path the bug report
   // identified — without this guard, Neil-while-logged-in could trigger
   // a mid-session swap to anyone whose inbox he has access to.
-  app.post("/api/auth/magic-link", async (req, res) => {
+  app.post("/api/auth/magic-link", authRateLimit, async (req, res) => {
     try {
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Email is required" });

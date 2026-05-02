@@ -496,8 +496,12 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
   });
 
   const portalMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/vault-club/portal", {}),
-    onSuccess: (data: any) => { if (data?.url) window.location.href = data.url; },
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/vault-club/portal", {});
+      const data = await res.json().catch(() => ({}));
+      return data as { url?: string; message?: string };
+    },
+    onSuccess: (data) => { if (data.url) window.location.href = data.url; },
   });
 
   if (isLoading) {

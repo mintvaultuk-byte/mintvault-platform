@@ -132,7 +132,7 @@ app.use("/api/admin/login", loginRateLimit);
 app.use("/api/admin/session", loginRateLimit);
 app.use("/api/admin/pin", loginRateLimit);
 
-const authRateLimit = rateLimit({
+export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 5,
   standardHeaders: true,
@@ -148,7 +148,12 @@ const authRateLimit = rateLimit({
 app.use("/api/auth/login", authRateLimit);
 app.use("/api/auth/signup", authRateLimit);
 app.use("/api/auth/forgot-password", authRateLimit);
-app.use("/api/auth/magic-link", authRateLimit);
+// /api/auth/magic-link is rate-limited at the POST handler in
+// server/routes.ts (search: `app.post("/api/auth/magic-link", authRateLimit, …)`).
+// app.use(prefix, …) here would also catch GET /api/auth/magic-link/verify,
+// which must NOT be rate-limited — locking out consumption of an already-
+// issued one-time token via shared-IP/NAT noise is a real lockout risk
+// for legitimate users.
 app.use("/api/admin", adminIpAllowlist);
 
 if (!hasStripeSecretKey()) {
