@@ -1886,6 +1886,16 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/admin/pin — promotes the session to admin audience.
+  //
+  // ─── INVARIANT: at most one audience identity per session at any time. ───
+  // Three login handlers mutate session identity and MUST be kept symmetric:
+  //   - POST /api/admin/pin (this handler)
+  //   - GET  /api/customer/verify/:token (routes.ts ~5927)
+  //   - GET  /api/auth/magic-link/verify (routes.ts ~9050)
+  // Each must regenerate() the session AND explicitly clear cross-audience
+  // fields. See docs/login-flow-bug-report.md.
+  // ──────────────────────────────────────────────────────────────────────────
   app.post("/api/admin/pin", async (req, res) => {
     try {
       if (isPinRateLimited(req)) {
@@ -5924,6 +5934,15 @@ export async function registerRoutes(
   });
 
   // GET /api/customer/verify/:token — verify magic link, set session, redirect
+  //
+  // ─── INVARIANT: at most one audience identity per session at any time. ───
+  // Three login handlers mutate session identity and MUST be kept symmetric:
+  //   - POST /api/admin/pin (routes.ts ~1889)
+  //   - GET  /api/customer/verify/:token (this handler)
+  //   - GET  /api/auth/magic-link/verify (routes.ts ~9050)
+  // Each must regenerate() the session AND explicitly clear cross-audience
+  // fields. See docs/login-flow-bug-report.md.
+  // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/customer/verify/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
@@ -8984,17 +9003,67 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // POST /api/auth/magic-link
+  //
+  // ─── INVARIANT: at most one audience identity per session at any time. ───
+  // Three login handlers mutate session identity and MUST be kept symmetric:
+  //   - POST /api/admin/pin (routes.ts:1925)
+  //   - GET  /api/customer/verify/:token (routes.ts:5927)
+  //   - GET  /api/auth/magic-link/verify (this file, below)
+  // Each must regenerate() the session AND explicitly clear cross-audience
+  // fields. See docs/login-flow-bug-report.md for the bug that motivated
+  // this discipline.
+  // ──────────────────────────────────────────────────────────────────────────
+  //
+  // Defense layer for the issuer side: an authenticated caller cannot
+  // request a magic link for a different user's email. This closes the
+  // "session swap via second tab + email click" path the bug report
+  // identified — without this guard, Neil-while-logged-in could trigger
+  // a mid-session swap to anyone whose inbox he has access to.
   app.post("/api/auth/magic-link", async (req, res) => {
     try {
       const { email } = req.body;
       if (!email) return res.status(400).json({ error: "Email is required" });
+      const requestedEmail = String(email).trim().toLowerCase();
+
+      // Caller-auth check — if a session is already live, the caller can
+      // only request a magic link FOR themselves. Cross-user requests are
+      // 403'd and audit-logged. We re-fetch the user from DB rather than
+      // trusting req.session.userEmail (which can drift if the user changes
+      // email while their session is live).
+      const sessionUserId = (req.session as any)?.userId as string | undefined;
+      if (sessionUserId) {
+        const sessionUser = await findUserById(sessionUserId);
+        const sessionEmail =
+          sessionUser && !sessionUser.deleted_at ? String(sessionUser.email || "").toLowerCase() : null;
+        if (sessionEmail && sessionEmail !== requestedEmail) {
+          await storage.writeAuditLog(
+            "auth",
+            sessionUserId,
+            "magic_link_swap_rejected",
+            "system",
+            {
+              session_user_id: sessionUserId,
+              session_user_email: sessionEmail,
+              requested_email: requestedEmail,
+              ip: getClientIpForAuth(req),
+            },
+          );
+          return res.status(403).json({
+            error: "already_authenticated_as_other",
+            message: `You are signed in as ${sessionEmail}. Log out first to switch users.`,
+          });
+        }
+        // Same-user re-issue is allowed (forgot device, refresh of the
+        // expired link, etc.). Fall through to the normal issue path.
+      }
+
       // Generic success regardless of whether account exists (prevents enumeration)
-      const user = await findUserByEmail(email);
+      const user = await findUserByEmail(requestedEmail);
       if (user && !user.deleted_at) {
         const token = await createAccountMagicLinkToken(user.id as string);
         const loginUrl = `${getAppBaseUrl(req)}/api/auth/magic-link/verify?token=${token}`;
         await sendAccountMagicLinkEmail(user.email as string, loginUrl);
-        await writeAuthAudit("auth.magic_link.requested", user.id as string, getClientIpForAuth(req), { email });
+        await writeAuthAudit("auth.magic_link.requested", user.id as string, getClientIpForAuth(req), { email: requestedEmail });
       }
       return res.json({ ok: true, message: "If an account exists, a login link has been sent." });
     } catch (err: any) {
@@ -9004,6 +9073,13 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // GET /api/auth/magic-link/verify?token=...
+  //
+  // ─── INVARIANT: at most one audience identity per session at any time. ───
+  // See the comment block above POST /api/auth/magic-link. This handler
+  // promotes the session to "account-holder"; admin and customer flows
+  // (POST /api/admin/pin, GET /api/customer/verify/:token) do the same
+  // for their audiences and must stay symmetric.
+  // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/auth/magic-link/verify", async (req, res) => {
     try {
       const { token } = req.query;
@@ -9025,11 +9101,20 @@ Defects (admin-confirmed): ${defectLines}`;
       const user = await findUserById(rec.user_id);
       if (!user || user.deleted_at) return res.redirect("/login?error=expired_link");
 
+      // Regenerate session on privilege grant — destroys the previous
+      // session document and starts a clean one. Then explicitly clear
+      // cross-audience fields. The regenerate alone empties the session,
+      // so these clears are belt-and-braces — but they document the
+      // invariant and mirror customer-verify (routes.ts:5942-5946) and
+      // admin-pin (routes.ts:1928-1933).
       await new Promise<void>((resolve, reject) => {
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      (req.session as any).isAdmin = false;
+      (req.session as any).adminEmail = undefined as unknown as string;
+      (req.session as any).customerEmail = undefined as unknown as string;
       await db.execute(sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`);
       await writeAuthAudit("auth.magic_link.used", user.id as string, getClientIpForAuth(req), {});
       return res.redirect("/dashboard");
