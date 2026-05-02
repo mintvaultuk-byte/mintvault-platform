@@ -143,6 +143,34 @@ When restoring, consider:
 
 ---
 
+## v1.1 — cleanup & latent risk
+
+### Strip dead Vault Club discount branch from checkout review (submit.tsx)
+
+**Context.** [client/src/pages/submit.tsx:705-1050](../client/src/pages/submit.tsx#L705-L1050) still contains a Vault Club percentage-discount path: a `vcPercent` prop, `vcWins` logic, and a "Vault Club discount (X%)" label rendered in the review step. This is currently inert because `/api/vault-club/check-discount` hard-returns `discount_percent: 0` ([server/vault-club.ts:140-163](../server/vault-club.ts#L140-L163), removed 2026-04-19 when the club moved to a perks-and-credits model). The `vcWins` branch never evaluates true, so the bulk-discount label is the only path that ever renders.
+
+**Risk.** Footgun. If anyone re-enables the discount endpoint without also removing the client-side fork, fake "Silver Vault Club discount (X%)" labels would silently appear at checkout review. Same DMCC/CPR exposure class as the dashboard fix shipped 2026-05-02 (commit 17c2487) — a marketing/pricing claim with no traceable code path.
+
+**Scope.** Remove `vcPercent`, `vcTier`, `vcWins`, the `discountLabel` ternary, and the `useQuery` hook fetching `/api/vault-club/check-discount`. Keep the bulk-discount path (legitimate). Run `npm run check` to confirm clean. Should ship as a targeted PR — payment flow, deserves a focused audit, not a tacked-on edit on top of an unrelated change.
+
+**Effort.** ~30 minutes including verification.
+
+### Welcome email tier-label hardcoded from sub record (email.ts)
+
+**Context.** [server/email.ts:1213-1215](../server/email.ts#L1213-L1215) — `sendVaultClubWelcomeEmail` interpolates `tierLabel` (derived from `data.tier`) into both the subject line (`Welcome to Vault Club ${tierLabel}`) and the email header. After commit 17c2487 (2026-05-02), the body shows Silver-only perks regardless of the subscription's `tier` value. If a re-welcome ever fires on a legacy bronze or gold subscription record, the subject reads "Welcome to Vault Club Bronze" while the body lists Silver perks.
+
+**Risk.** Cosmetic. Realistic likelihood: zero. The welcome email only fires on subscription activation, and no new bronze or gold sign-ups have been possible since 2026-04-19. The only path that could trigger this is a deliberate re-welcome on a legacy sub record, which is not a documented flow.
+
+**Scope.** Two options: (a) drop `tierLabel` from the subject and header and hardcode "Vault Club" or "Vault Club Silver", since Silver is the only live tier; or (b) restore tier-specific welcome bodies if bronze or gold are ever reinstated. Option (a) is the right call unless multi-tier returns.
+
+**Effort.** ~5 minutes.
+
+---
+
+Both items reference feature branch `feat/vault-club-stripe-phase1-schema` as of commit 17c2487 (2026-05-02). No urgency — post-v1.
+
+---
+
 ## v1.1 — Admin tooling polish (assignOwnerManual follow-ups)
 
 Surfaced by the 2026-05-03 owner_email sync hotfix. Manual Assign
