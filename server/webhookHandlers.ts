@@ -16,7 +16,10 @@ import {
   sendVaultClubWelcomeEmail,
   sendVaultClubCancelledEmail,
   sendVaultClubPaymentFailedEmail,
+  sendVaultClubCancellationConfirmationEmail,
 } from './email';
+import { scheduleReminder } from './vault-club-reminders';
+import { intervalForPriceId } from './vault-club-config';
 
 // ── Step 3 helpers ────────────────────────────────────────────────────────────
 // Shape of vault_club_subscriptions rows we care about for transition detection.
@@ -481,6 +484,31 @@ export class WebhookHandlers {
       },
     );
     console.log(`[webhook] Vault Club subscription.created: user=${userId} status=${sub.status} action=${action}`);
+
+    // ── DMCC: schedule trial-ending reminder (Phase 1 Step 5b) ─────────────
+    // If the subscription started on a trial, queue a "trial ends in 3 days"
+    // notice. Skill lines 60, 135, 238 — DMCC requires this before the
+    // first charge converts a free trial to paid. scheduleReminder is
+    // idempotent on (sub_id, type, scheduled_for) so retried deliveries
+    // of customer.subscription.created don't double-schedule.
+    if (sub.status === 'trialing' && typeof sub.trial_end === 'number' && sub.trial_end > 0) {
+      const trialEndMs = sub.trial_end * 1000;
+      const reminderAt = new Date(trialEndMs - 3 * 24 * 60 * 60 * 1000);
+      // Only schedule if the reminder window is still in the future —
+      // otherwise the dispatcher would fire it immediately, defeating
+      // the "3 days notice" intent. Trials shorter than 3 days are
+      // edge cases (e.g. test fixtures) and don't need a reminder.
+      if (reminderAt.getTime() > Date.now()) {
+        await scheduleReminder({
+          subscriptionId: sub.id,
+          userId,
+          reminderType: 'trial_ending',
+          scheduledFor: reminderAt,
+        }).catch((e: any) =>
+          console.error(`[reminders] failed to schedule trial_ending for ${sub.id}:`, e.message)
+        );
+      }
+    }
   }
 
   // ── Subscription updated ───────────────────────────────────────────────────
@@ -600,6 +628,36 @@ export class WebhookHandlers {
       );
       console.log(`[webhook] Vault Club transition: user=${userId} ${prevStatus}→${sub.status} action=${action}`);
     }
+
+    // ── DMCC: cancellation confirmation email (Phase 1 Step 5b) ────────────
+    // Skill line 121 — "On confirm → immediate in-app confirmation + email
+    // in durable medium". The canonical "user clicked cancel" event in
+    // Stripe's default Portal flow is customer.subscription.updated with
+    // cancel_at_period_end transitioning false → true. Send the
+    // regulator-grade confirmation here, NOT on .deleted (which fires
+    // weeks later when the period actually ends — too late for the user).
+    //
+    // For true-immediate cancellations (no wind-down), .deleted fires
+    // without a prior .updated flip — handled in handleSubscriptionDeleted
+    // below.
+    if (!prevCancelAtPeriodEnd && newCancelAtPeriodEnd) {
+      const userRows = await db.execute(sql`
+        SELECT email, display_name, ai_credits_user_balance
+        FROM users WHERE id = ${userId} LIMIT 1
+      `);
+      const userRow = userRows.rows[0] as any;
+      if (userRow?.email) {
+        sendVaultClubCancellationConfirmationEmail({
+          email: userRow.email,
+          displayName: userRow.display_name || null,
+          cancellationDate: new Date(),
+          accessEndsDate: new Date(period.end * 1000),
+          creditsRemaining: Number(userRow.ai_credits_user_balance ?? 0),
+        }).catch((e: any) =>
+          console.error(`[email] cancellation confirmation send failed for ${userRow.email}:`, e.message)
+        );
+      }
+    }
   }
 
   // ── Subscription deleted ───────────────────────────────────────────────────
@@ -612,6 +670,15 @@ export class WebhookHandlers {
     const user = await findUserByStripeCustomerId(customerId);
     if (!user) return;
     const userId = user.id as string;
+
+    // Read the prior DB row BEFORE we overwrite users + upsert
+    // vault_club_subscriptions, so we can tell whether this .deleted
+    // is the natural completion of an earlier cancel_at_period_end
+    // wind-down (user already received the cancellation confirmation
+    // when they clicked cancel) or a truly-immediate cancel (where this
+    // .deleted IS the cancellation moment and the email goes here).
+    const priorRow = await getSubscriptionRow(sub.id);
+    const isWindDownCompletion = priorRow?.cancel_at_period_end === true;
 
     await db.execute(sql`
       UPDATE users SET
@@ -629,14 +696,46 @@ export class WebhookHandlers {
       eventType: 'subscription.deleted', status: 'canceled',
     });
 
-    const userRows = await db.execute(sql`SELECT email, display_name FROM users WHERE id = ${userId} LIMIT 1`);
+    const userRows = await db.execute(sql`
+      SELECT email, display_name, ai_credits_user_balance
+      FROM users WHERE id = ${userId} LIMIT 1
+    `);
     const userRow = userRows.rows[0] as any;
     if (userRow?.email) {
-      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(() => {});
+      if (isWindDownCompletion) {
+        // The user already got the regulator-grade confirmation when
+        // they clicked cancel (in handleSubscriptionUpdated). Don't
+        // double-email — the period ending is what they expected.
+        // We do still trigger the legacy "we miss you" template as a
+        // courtesy re-engagement nudge; it's marketing-shaped but
+        // harmless because the user's subscription is genuinely over
+        // and we have a transactional reason to write.
+        sendVaultClubCancelledEmail({
+          email: userRow.email,
+          displayName: userRow.display_name || null,
+        }).catch(() => {});
+      } else {
+        // True-immediate cancel (admin revoke, Stripe API direct cancel,
+        // payment failure terminal, etc.) — send the regulator-grade
+        // confirmation here because no prior .updated flip fired.
+        const canceledMs = (sub.canceled_at ?? Math.floor(Date.now() / 1000)) * 1000;
+        const periodEndMs = sub.items?.data?.[0]
+          ? ((sub.items.data[0] as any).current_period_end ?? sub.canceled_at ?? Math.floor(Date.now() / 1000)) * 1000
+          : canceledMs;
+        sendVaultClubCancellationConfirmationEmail({
+          email: userRow.email,
+          displayName: userRow.display_name || null,
+          cancellationDate: new Date(canceledMs),
+          accessEndsDate: new Date(periodEndMs),
+          creditsRemaining: Number(userRow.ai_credits_user_balance ?? 0),
+        }).catch((e: any) =>
+          console.error(`[email] immediate-cancel confirmation send failed for ${userRow.email}:`, e.message)
+        );
+      }
     }
 
     await writeAuthAudit('vault_club.canceled', userId, 'webhook', {});
-    console.log(`[webhook] Vault Club canceled: user=${userId}`);
+    console.log(`[webhook] Vault Club canceled: user=${userId} windDown=${isWindDownCompletion}`);
 
     // ── Step 3 dual-write ────────────────────────────────────────────────────
     if (!isNewEvent) return;
@@ -779,6 +878,57 @@ export class WebhookHandlers {
           tier,
         },
       );
+    }
+
+    // ── DMCC: schedule next-cycle reminder (Phase 1 Step 5b) ────────────────
+    // Annual: schedule annual_renewal at next_period_end - 14 days
+    //         (skill: 10–35 days before each annual renewal — line 59).
+    // Monthly: DMCC does NOT require a reminder before every monthly
+    //          renewal — only at 6-month and 12-month milestones from
+    //          subscription start (skill lines 56-58). On every monthly
+    //          invoice we (re-)schedule both 6mo and 12mo reminders for
+    //          ~3 days before each anniversary; scheduleReminder is
+    //          idempotent on (sub, type, scheduled_for) so we don't
+    //          double-up across renewal cycles.
+    const billingInterval = intervalForPriceId(sub.items?.data?.[0]?.price?.id ?? '');
+    if (billingInterval === 'year') {
+      const renewalAt = new Date(period.end * 1000);
+      const reminderAt = new Date(renewalAt.getTime() - 14 * 24 * 60 * 60 * 1000);
+      if (reminderAt.getTime() > Date.now()) {
+        await scheduleReminder({
+          subscriptionId: sub.id,
+          userId,
+          reminderType: 'annual_renewal',
+          scheduledFor: reminderAt,
+        }).catch((e: any) =>
+          console.error(`[reminders] failed to schedule annual_renewal for ${sub.id}:`, e.message)
+        );
+      }
+    } else if (billingInterval === 'month') {
+      // Subscription anniversary (= sub.start_date if present, else created).
+      const startMs = (sub.start_date ?? sub.created) * 1000;
+      const sixMonthMs = 6 * 30 * 24 * 60 * 60 * 1000;   // approx — see skill caveat
+      const twelveMonthMs = 12 * 30 * 24 * 60 * 60 * 1000;
+      // 3 days before each anniversary mirrors the trial_ending lead time.
+      const sixMoReminder = new Date(startMs + sixMonthMs - 3 * 24 * 60 * 60 * 1000);
+      const twelveMoReminder = new Date(startMs + twelveMonthMs - 3 * 24 * 60 * 60 * 1000);
+      const todoMonth: Array<{ at: Date; type: 'monthly_6mo' | 'monthly_12mo' }> = [];
+      if (sixMoReminder.getTime() > Date.now()) {
+        todoMonth.push({ at: sixMoReminder, type: 'monthly_6mo' });
+      }
+      if (twelveMoReminder.getTime() > Date.now()) {
+        todoMonth.push({ at: twelveMoReminder, type: 'monthly_12mo' });
+      }
+      for (const t of todoMonth) {
+        await scheduleReminder({
+          subscriptionId: sub.id,
+          userId,
+          reminderType: t.type,
+          scheduledFor: t.at,
+        }).catch((e: any) =>
+          console.error(`[reminders] failed to schedule ${t.type} for ${sub.id}:`, e.message)
+        );
+      }
     }
   }
 

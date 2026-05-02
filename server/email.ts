@@ -1309,3 +1309,232 @@ export async function sendVaultClubGraceExpiredEmail(data: {
     });
   } catch (err: any) { console.error(`[email] Vault Club grace expired notice for ${data.email}:`, err.message); }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// DMCC reminder + cancellation templates (Phase 1 Step 5b)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// All templates below are TRANSACTIONAL (not marketing). DMCC + PECR
+// position them as required notices that don't need marketing consent —
+// but the corollary is they must NOT carry upsells or marketing content
+// (skill lines 175-181). Keep them factual and minimal.
+//
+// Each function returns the Resend message id on success, throws on
+// failure. The dispatcher captures the id via markReminderSent and the
+// throw via markReminderFailed.
+//
+// Date formatting: en-GB long style ("15 May 2026") — clear for UK
+// consumers, regulator-friendly.
+//
+// Credits-on-cancellation policy line — locked verbatim:
+//   "You keep your unused credits until your current paid period ends;
+//    after that, they expire. No partial refunds for unused credits."
+// ════════════════════════════════════════════════════════════════════════════
+
+const CREDITS_POLICY_LINE =
+  "You keep your unused credits until your current paid period ends; after that, they expire. No partial refunds for unused credits.";
+
+function fmtPounds(pence: number): string {
+  return `£${(pence / 100).toFixed(pence % 100 === 0 ? 0 : 2)}`;
+}
+
+function fmtDate(d: Date): string {
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function tncLink(): string {
+  // Vault Club T&Cs sit under /legal/vault-club-terms once published;
+  // until then, link to the umbrella terms page so the email isn't a
+  // dead link. Solicitor sign-off (skill line 263) replaces this.
+  return `${APP_BASE_URL}/legal/website-terms`;
+}
+
+/**
+ * Trial-ending reminder — DMCC requires this before the first charge
+ * converts a free trial to paid (skill lines 60, 135, 238).
+ *
+ * Send 3 days before trial_end (scheduling lives in the dispatcher
+ * + webhookHandlers; this function only renders + sends).
+ */
+export async function sendVaultClubTrialEndingEmail(data: {
+  email: string;
+  displayName: string | null;
+  trialEndDate: Date;
+  firstChargeDate: Date;
+  firstChargeAmountPence: number;
+  interval: "month" | "year";
+  manageUrl: string;
+}): Promise<string> {
+  const resend = getResend();
+  if (!resend) throw new Error("Resend client unavailable");
+  const name = data.displayName || "Collector";
+  const intervalLabel = data.interval === "year" ? "year" : "month";
+  const body = `
+<p>Hi ${name},</p>
+<p>Your Vault Club free trial ends on <strong>${fmtDate(data.trialEndDate)}</strong>.</p>
+<p>Unless you cancel before then, your card will be charged <strong>${fmtPounds(data.firstChargeAmountPence)}</strong> on <strong>${fmtDate(data.firstChargeDate)}</strong> and your membership will continue billing every ${intervalLabel}.</p>
+<p style="margin-top:24px;">
+  <a href="${data.manageUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">MANAGE OR CANCEL MEMBERSHIP</a>
+</p>
+<p style="color:#888;font-size:12px;margin-top:24px;">${CREDITS_POLICY_LINE}</p>
+<p style="color:#888;font-size:12px;">Full terms: <a href="${tncLink()}" style="color:#D4AF37;">${tncLink()}</a></p>`;
+  const result = await sendViaResend(resend, {
+    from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+    subject: "Your Vault Club trial ends in 3 days",
+    html: baseHtml("Trial ending", body),
+  });
+  return result.id;
+}
+
+/**
+ * Annual renewal reminder — DMCC: 10–35 days before each annual renewal
+ * (skill line 59). Scheduled at current_period_end - 14 days.
+ */
+export async function sendVaultClubAnnualRenewalEmail(data: {
+  email: string;
+  displayName: string | null;
+  renewalDate: Date;
+  renewalAmountPence: number;
+  manageUrl: string;
+}): Promise<string> {
+  const resend = getResend();
+  if (!resend) throw new Error("Resend client unavailable");
+  const name = data.displayName || "Collector";
+  const body = `
+<p>Hi ${name},</p>
+<p>Your Vault Club annual membership will renew on <strong>${fmtDate(data.renewalDate)}</strong>. Your card will be charged <strong>${fmtPounds(data.renewalAmountPence)}</strong> for the next 12 months.</p>
+<p>If you'd rather not renew, cancel any time before that date — you won't be charged.</p>
+<p style="margin-top:24px;">
+  <a href="${data.manageUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">MANAGE OR CANCEL MEMBERSHIP</a>
+</p>
+<p style="color:#888;font-size:12px;margin-top:24px;">${CREDITS_POLICY_LINE}</p>
+<p style="color:#888;font-size:12px;">Full terms: <a href="${tncLink()}" style="color:#D4AF37;">${tncLink()}</a></p>`;
+  const result = await sendViaResend(resend, {
+    from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+    subject: "Your Vault Club annual membership renews in 14 days",
+    html: baseHtml("Annual renewal in 14 days", body),
+  });
+  return result.id;
+}
+
+/**
+ * Monthly check-in reminder — DMCC: required at 6-month and 12-month
+ * milestones from subscription start (skill lines 56-58). DMCC does NOT
+ * require a reminder before every monthly renewal — only at the long
+ * intervals.
+ */
+export async function sendVaultClubMonthlyReminderEmail(data: {
+  email: string;
+  displayName: string | null;
+  monthsActive: number;
+  nextRenewalDate: Date;
+  renewalAmountPence: number;
+  manageUrl: string;
+}): Promise<string> {
+  const resend = getResend();
+  if (!resend) throw new Error("Resend client unavailable");
+  const name = data.displayName || "Collector";
+  const body = `
+<p>Hi ${name},</p>
+<p>You've been a Vault Club member for ${data.monthsActive} months. This is a periodic reminder that your membership is still active and renewing every month at <strong>${fmtPounds(data.renewalAmountPence)}</strong>.</p>
+<p>Your next renewal is on <strong>${fmtDate(data.nextRenewalDate)}</strong>. You can cancel any time — there's no minimum term.</p>
+<p style="margin-top:24px;">
+  <a href="${data.manageUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">MANAGE OR CANCEL MEMBERSHIP</a>
+</p>
+<p style="color:#888;font-size:12px;margin-top:24px;">${CREDITS_POLICY_LINE}</p>
+<p style="color:#888;font-size:12px;">Full terms: <a href="${tncLink()}" style="color:#D4AF37;">${tncLink()}</a></p>`;
+  const result = await sendViaResend(resend, {
+    from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+    subject: `Your Vault Club membership — ${data.monthsActive}-month check-in`,
+    html: baseHtml(`${data.monthsActive}-month check-in`, body),
+  });
+  return result.id;
+}
+
+/**
+ * Price-change notice — DMCC + general consumer law: 30+ days notice,
+ * old + new price, effective date, cancellation route that avoids the
+ * new price (skill lines 156-165).
+ */
+export async function sendVaultClubPriceChangeEmail(data: {
+  email: string;
+  displayName: string | null;
+  oldPricePence: number;
+  newPricePence: number;
+  effectiveDate: Date;
+  manageUrl: string;
+}): Promise<string> {
+  const resend = getResend();
+  if (!resend) throw new Error("Resend client unavailable");
+  const name = data.displayName || "Collector";
+  const effectiveDateLabel = fmtDate(data.effectiveDate);
+  const body = `
+<p>Hi ${name},</p>
+<p>We're writing to let you know that the price of your Vault Club membership is changing.</p>
+<p style="margin:16px 0;">
+  Current price: <strong>${fmtPounds(data.oldPricePence)}</strong><br>
+  New price: <strong>${fmtPounds(data.newPricePence)}</strong><br>
+  Effective from: <strong>${effectiveDateLabel}</strong>
+</p>
+<p>You can cancel before <strong>${effectiveDateLabel}</strong> and you will never pay the new price — no further charges will be taken.</p>
+<p style="margin-top:24px;">
+  <a href="${data.manageUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">MANAGE OR CANCEL MEMBERSHIP</a>
+</p>
+<p style="color:#888;font-size:12px;margin-top:24px;">${CREDITS_POLICY_LINE}</p>
+<p style="color:#888;font-size:12px;">Full terms: <a href="${tncLink()}" style="color:#D4AF37;">${tncLink()}</a></p>`;
+  const result = await sendViaResend(resend, {
+    from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+    subject: `Important: Vault Club price change effective ${effectiveDateLabel}`,
+    html: baseHtml("Price change notice", body),
+  });
+  return result.id;
+}
+
+/**
+ * Cancellation confirmation — regulator-grade durable-medium confirmation
+ * (skill line 121). Triggered IMMEDIATELY by the webhook handler when the
+ * user clicks cancel (cancel_at_period_end flips false→true), or on
+ * customer.subscription.deleted for true-immediate cancels with no
+ * prior wind-down.
+ *
+ * NOTE: This replaces the body content of the legacy
+ * sendVaultClubCancelledEmail for the regulator-grade path. The legacy
+ * function (email.ts:1239) stays in place but is now only fired from
+ * the .deleted handler when there was no prior cancel_at_period_end
+ * flip — i.e. for non-user-initiated cancellations (admin revoke, etc.)
+ * where the user-friendly "we miss you" framing is fine. Documented in
+ * webhookHandlers.ts at the call sites.
+ */
+export async function sendVaultClubCancellationConfirmationEmail(data: {
+  email: string;
+  displayName: string | null;
+  cancellationDate: Date;
+  accessEndsDate: Date;
+  creditsRemaining: number;
+}): Promise<string> {
+  const resend = getResend();
+  if (!resend) throw new Error("Resend client unavailable");
+  const name = data.displayName || "Collector";
+  const reactivateUrl = `${APP_BASE_URL}/account/vault-club`;
+  const accessLabel = fmtDate(data.accessEndsDate);
+  const credits = data.creditsRemaining;
+  const body = `
+<p>Hi ${name},</p>
+<p>Your Vault Club cancellation is confirmed.</p>
+<p style="margin:16px 0;">
+  Cancelled on: <strong>${fmtDate(data.cancellationDate)}</strong><br>
+  Membership ends: <strong>${accessLabel}</strong>
+</p>
+<p>Your perks remain active until ${accessLabel}. ${CREDITS_POLICY_LINE}${credits > 0 ? ` You currently have <strong>${credits}</strong> AI Pre-Grade credits available to use until then.` : ""}</p>
+<p>If you cancelled by mistake, you can reactivate before ${accessLabel} and your membership will continue without interruption:</p>
+<p style="margin-top:16px;">
+  <a href="${reactivateUrl}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REACTIVATE MEMBERSHIP</a>
+</p>
+<p style="color:#888;font-size:12px;margin-top:24px;">Full terms: <a href="${tncLink()}" style="color:#D4AF37;">${tncLink()}</a></p>`;
+  const result = await sendViaResend(resend, {
+    from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+    subject: "Your Vault Club cancellation is confirmed",
+    html: baseHtml("Cancellation confirmed", body),
+  });
+  return result.id;
+}
