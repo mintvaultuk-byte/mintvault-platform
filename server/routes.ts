@@ -734,6 +734,10 @@ export async function registerRoutes(
       const { migrateSubscriptionRemindersSchema } = await import("./vault-club-reminders-schema");
       return migrateSubscriptionRemindersSchema();
     })
+    .then(async () => {
+      const { migrateVaultClubConsentsSchema } = await import("./vault-club-consents-schema");
+      return migrateVaultClubConsentsSchema();
+    })
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
 
   // Reference number backfill — async, fire-and-forget, never blocks boot
@@ -9427,6 +9431,24 @@ Defects (admin-confirmed): ${defectLines}`;
     requireAuth,
     handleVaultClubPortal
   );
+  // Public — frontend fetches this on /vault-club mount to get the
+  // canonical consent text + hash. Hash is sent back on checkout to
+  // detect deploy-race staleness (Step 5d).
+  app.get("/api/vault-club/consent-text", async (_req, res) => {
+    const { TERMS_VERSION } = await import("./config/legal");
+    const { VAULT_CLUB_CONSENT_TEXT, VAULT_CLUB_CONSENT_TEXT_HASH } = await import(
+      "./config/consents"
+    );
+    res.json({
+      termsVersion: TERMS_VERSION,
+      consentText: VAULT_CLUB_CONSENT_TEXT,
+      consentTextHash: VAULT_CLUB_CONSENT_TEXT_HASH,
+      links: {
+        vaultClubTerms: "/legal/vault-club-terms",
+        privacy: "/privacy",
+      },
+    });
+  });
   registerVaultClubRoutes(app);
 
   // ── Marketplace seller routes ──────────────────────────────────────────────
