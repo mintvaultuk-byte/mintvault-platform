@@ -5,7 +5,7 @@ Implementation tracking for the solicitor-approved legal pack. Update as items c
 ## Stage A — Infrastructure (engineering only, no flag flip)
 - [ ] 1. This checklist file created
 - [ ] 2. `shared/company.ts` centralised company info (placeholders for pending values)
-- [ ] 3. Four missing slugs added: cookies, grading-standards, cancel, adr (placeholder MD files)
+- [ ] 3. Five missing slugs added: cookies, grading-standards, cancel, adr, vault-club-terms (placeholder MD files)
 - [ ] 4. Slug renamed: guarantee → guarantee-and-correction-policy (+ redirect for old slug)
 - [ ] 5. Top-level route redirects added for all 9 legal paths → /legal/<slug>
 - [ ] 6. V2 footer legal column flag-gated, correct URLs, company info from shared/company.ts
@@ -15,13 +15,13 @@ Implementation tracking for the solicitor-approved legal pack. Update as items c
 Requires all of:
 - [ ] Companies House number received
 - [ ] ICO registration number received
-- [ ] Solicitor-approved content for all 9 MD files
+- [ ] Solicitor-approved content for all 10 MD files (the original 9 plus vault-club-terms, added Step 5e)
 - [ ] Final lastUpdated / effectiveFrom dates from solicitor
 - [ ] TERMS_VERSION bumped from `v1.0-draft-pre-solicitor` to final value
 - [ ] shared/company.ts placeholders replaced with real values
 - [ ] LEGAL_PAGES_LIVE feature flag flipped to true
 - [ ] Privacy policy final review
-- [ ] Full QA pass on all 9 pages (mobile, desktop, no tracked changes, no inline comments)
+- [ ] Full QA pass on all 10 pages (mobile, desktop, no tracked changes, no inline comments)
 
 ## Stage B — Release-ready sign-off (post-flag-flip)
 - [ ] Footer links all resolve to live pages

@@ -570,7 +570,7 @@ export default function VaultClubV2() {
               Vault Club Terms
             </Link>
             {" "}&middot;{" "}
-            <Link href="/legal/privacy" className="underline" style={{ color: "var(--v2-gold)" }}>
+            <Link href="/privacy" className="underline" style={{ color: "var(--v2-gold)" }}>
               Privacy Notice
             </Link>
           </p>

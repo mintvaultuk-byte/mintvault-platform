@@ -15,6 +15,7 @@ export const LEGAL_SLUGS = [
   "grading-standards",
   "cancel",
   "adr",
+  "vault-club-terms",                   // 10th doc, placeholder until Adam J drafts (Step 5e)
 ] as const;
 
 export type LegalSlug = typeof LEGAL_SLUGS[number];
