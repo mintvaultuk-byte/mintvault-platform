@@ -1219,9 +1219,12 @@ export async function sendVaultClubWelcomeEmail(data: {
 <p>Welcome to <strong style="color:#D4AF37;">Vault Club ${tierLabel}</strong> — your exclusive membership is now active.</p>
 <p>Here's what's unlocked for you:</p>
 <ul style="color:#ccc;line-height:1.8;">
-  ${data.tier === "bronze" ? "<li>10% discount on all grading submissions</li><li>30 AI Pre-Grade credits per month</li><li>Bronze Vault badge on your Showroom and certificates</li>" : ""}
-  ${data.tier === "silver" ? "<li>20% discount on all grading submissions</li><li>100 AI Pre-Grade credits per month</li><li>Silver Vault badge + 8 Showroom themes + custom banner</li><li>1 free reholder credit per quarter</li><li>Members-only Vault report design</li>" : ""}
-  ${data.tier === "gold" ? "<li>30% discount on all grading submissions</li><li>400 AI Pre-Grade credits per month</li><li>Gold Vault badge + all premium features</li><li>4 free reholder credits per quarter</li><li>Featured Collector rotation + free Express upgrade per submission</li>" : ""}
+  <li>2 free Authentication add-ons per month</li>
+  <li>Free return shipping on every submission</li>
+  <li>100 AI Pre-Grade credits per month</li>
+  <li>Priority queue on every grading submission</li>
+  <li>Reserved username on the public registry</li>
+  <li>Activated Showroom with Silver Vault badge</li>
 </ul>
 <p style="margin-top:24px;">
 <a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW YOUR MEMBERSHIP</a>

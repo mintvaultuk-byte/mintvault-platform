@@ -538,7 +538,7 @@ export default function HomeV2() {
                   Membership for the serious.
                 </h3>
                 <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "var(--v2-ink-soft)" }}>
-                  Grading discounts, higher AI Pre-Grade allowance, priority queue,
+                  Free Authentication add-ons, free return shipping, 100 AI Pre-Grade credits, priority queue,
                   and a reserved username on the public registry.
                 </p>
                 <div className="space-y-2 mb-5">

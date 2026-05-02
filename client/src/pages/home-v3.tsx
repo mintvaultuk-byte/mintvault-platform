@@ -1079,7 +1079,7 @@ function SectionD() {
               fontSize: 12, lineHeight: 1.65, color: V.inkSoft,
               margin: 0, marginBottom: 24, flex: 1,
             }}>
-              Grading discounts, higher AI Pre-Grade allowance, priority queue,
+              Free Authentication add-ons, free return shipping, 100 AI Pre-Grade credits, priority queue,
               and a reserved username on the public registry.
             </p>
             <div style={{ marginBottom: 20 }}>
