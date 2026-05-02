@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Mail, Loader2, CheckCircle, AlertCircle,
   Package, Award, ArrowRightLeft, LogOut, ExternalLink, Download, Lock,
   ChevronRight, Clock, Truck, Box, Settings, RefreshCw,
-  Globe, Copy, Check, Sparkles, Shield, Zap, TrendingDown,
+  Globe, Copy, Check, Sparkles, Shield, Zap,
   Camera, MapPin, X,
 } from "lucide-react";
 import VaultClubBadge from "@/components/vault-club-badge";
@@ -524,7 +524,7 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
           <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Join Vault Club</h2>
         </div>
         <p className="text-xs text-[#888888] mb-4">
-          Get up to 30% off grading, monthly AI Pre-Grade credits, and your own activated Showroom.
+          Free Authentication add-ons, free return shipping, 100 AI Pre-Grade credits, priority queue, and your own activated Showroom.
         </p>
         <Link href="/vault-club">
           <button
@@ -541,7 +541,6 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
   const tierColour: Record<string, string> = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#D4AF37" };
   const colour = vcMe!.tier ? tierColour[vcMe!.tier] : "#D4AF37";
   const statusLabel: Record<string, string> = { active: "Active", trialing: "Free Trial", past_due: "Payment Due", grace: "Grace Period" };
-  const discountLabel: Record<string, string> = { bronze: "10%", silver: "20%", gold: "30%" };
 
   return (
     <div
@@ -587,9 +586,9 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
           </div>
         </div>
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
-          <TrendingDown size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
-          <p className="text-sm font-black text-[#1A1A1A]">{vcMe!.tier ? discountLabel[vcMe!.tier] : "—"}</p>
-          <p className="text-[10px] text-[#AAAAAA]">Discount</p>
+          <Truck size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
+          <p className="text-sm font-black text-[#1A1A1A]">Yes</p>
+          <p className="text-[10px] text-[#AAAAAA]">Free Returns</p>
         </div>
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
           <Award size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
