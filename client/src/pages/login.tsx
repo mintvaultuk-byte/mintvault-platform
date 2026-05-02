@@ -1,14 +1,37 @@
-import { useState } from "react";
-import { Link } from "wouter";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Loader2, Mail } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import { useAuthSession } from "@/hooks/use-auth-session";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const [, setLocation] = useLocation();
+
+  // If a session is already live, redirect to /dashboard with a banner.
+  // Without this, an authenticated user submitting a different email
+  // could trigger a session-swap mid-tab and produce mixed-state UI
+  // (see docs/login-flow-bug-report.md). The banner uses
+  // sessionStorage so the dashboard reads it once and clears it.
+  const session = useAuthSession();
+  useEffect(() => {
+    if (session.isLoading) return;
+    if (!session.isAuthenticated) return;
+    const signedInEmail =
+      session.authMe?.email || session.customerMe?.email || "";
+    if (signedInEmail) {
+      try {
+        sessionStorage.setItem("mv.login_redirect_banner", signedInEmail);
+      } catch {
+        // sessionStorage unavailable — banner is best-effort, redirect anyway.
+      }
+    }
+    setLocation("/dashboard");
+  }, [session.isLoading, session.isAuthenticated, session.authMe, session.customerMe, setLocation]);
 
   const magicMutation = useMutation({
     mutationFn: async (addr: string) => {
@@ -16,7 +39,16 @@ export default function LoginPage() {
       return res.json();
     },
     onSuccess: () => setSent(true),
-    onError: () => setError("Failed to send link. Please try again."),
+    onError: (err: any) => {
+      // The server returns 403 'already_authenticated_as_other' when an
+      // authenticated user submits a different email. apiRequest throws
+      // an Error with err.body populated for non-2xx responses.
+      if (err?.body?.error === "already_authenticated_as_other") {
+        setError(err.body.message || "Log out first to switch users.");
+        return;
+      }
+      setError("Failed to send link. Please try again.");
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {

@@ -12,6 +12,7 @@ import VaultClubBadge from "@/components/vault-club-badge";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
 import SeoHead from "@/components/seo-head";
+import { useAuthSession } from "@/hooks/use-auth-session";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface CustomerSubmission {
@@ -878,6 +879,11 @@ export default function DashboardPage() {
   const [, setLocation] = useLocation();
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [loginError, setLoginError] = useState("");
+  // Set by /login when an authenticated user lands on the login page —
+  // we redirect them here and surface a banner explaining why they
+  // weren't shown a fresh login form. See client/src/pages/login.tsx
+  // and docs/login-flow-bug-report.md.
+  const [redirectedFromLoginEmail, setRedirectedFromLoginEmail] = useState<string | null>(null);
 
   // Handle redirect params from magic link verification
   useEffect(() => {
@@ -887,27 +893,26 @@ export default function DashboardPage() {
     if (params.get("login") || params.get("error")) {
       window.history.replaceState({}, "", "/dashboard");
     }
+    try {
+      const banner = sessionStorage.getItem("mv.login_redirect_banner");
+      if (banner) {
+        setRedirectedFromLoginEmail(banner);
+        sessionStorage.removeItem("mv.login_redirect_banner");
+      }
+    } catch {
+      // sessionStorage unavailable — silently skip.
+    }
   }, []);
 
-  const { data: me, isLoading: meLoading } = useQuery<{ email: string } | null>({
-    queryKey: ["/api/customer/me"],
-    queryFn: async () => {
-      const res = await fetch("/api/customer/me");
-      if (res.status === 401) return null;
-      return res.json();
-    },
-    retry: false,
-  });
-
-  const { data: authMe } = useQuery<AuthMe | null>({
-    queryKey: ["/api/auth/me"],
-    queryFn: async () => {
-      const res = await fetch("/api/auth/me");
-      if (res.status === 401) return null;
-      return res.json();
-    },
-    retry: false,
-  });
+  // Auth identity sourced through useAuthSession — single hook owns
+  // /api/auth/me + /api/customer/me and clears the QueryClient cache
+  // on identity transitions so cross-tab session swaps don't surface
+  // as mixed-state UI. See client/src/hooks/use-auth-session.ts and
+  // docs/login-flow-bug-report.md.
+  const session = useAuthSession();
+  const me = session.customerMe;
+  const meLoading = session.isLoading;
+  const authMe = session.authMe;
 
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/customer/logout", {}),
@@ -1002,6 +1007,15 @@ export default function DashboardPage() {
           <div className="mb-6 flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-300 rounded-lg px-4 py-3">
             <CheckCircle size={15} className="shrink-0" />
             Logged in successfully.
+          </div>
+        )}
+
+        {redirectedFromLoginEmail && (
+          <div className="mb-6 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3">
+            <AlertCircle size={15} className="shrink-0 mt-0.5" />
+            <span>
+              You're already logged in as <strong>{redirectedFromLoginEmail}</strong>. Log out first to switch users.
+            </span>
           </div>
         )}
 
