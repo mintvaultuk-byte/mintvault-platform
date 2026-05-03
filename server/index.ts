@@ -44,10 +44,18 @@ app.set("trust proxy", 1);
 // `Host: mintvault.fly.dev`) always reaches the 200 handler below regardless
 // of host. Path + query string preserved via req.originalUrl. Localhost,
 // IP literals, and *.mintvaultuk.com are unaffected.
+//
+// API endpoints must NOT 301 — non-browser clients (scanner-watcher, future
+// webhooks) lose the POST body when node-fetch follows a 301 (RFC 7231
+// legacy: 301 follow downgrades POST→GET). Bypassing /api/* here keeps
+// canonical-domain redirect for browser traffic while letting machine
+// clients reach the real route handler.
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
+  if (req.path.startsWith("/api/")) return next();
   const host = (req.headers.host || "").toLowerCase();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
+    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
     return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
   }
   next();

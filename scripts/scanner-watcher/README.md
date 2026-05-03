@@ -34,7 +34,7 @@ For auto-start on login via launchd, see the **Install as launchd service** sect
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `SCANNER_API_TOKEN` | **Yes** | — | Must match the `SCANNER_API_TOKEN` Fly secret on the target app. Watcher refuses to start if missing. |
-| `MINTVAULT_INGEST_URL` | No | `https://mintvault.fly.dev/api/admin/scan-ingest` | Override to hit staging during testing. |
+| `MINTVAULT_INGEST_URL` | No | `https://mintvaultuk.com/api/admin/scan-ingest` | Override to hit staging during testing. |
 
 The old cookie-based env var `MINTVAULT_ADMIN_COOKIE` is no longer used.
 

@@ -34,7 +34,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 
 // ── Config ────────────────────────────────────────────────────────────────
-const INGEST_URL = process.env.MINTVAULT_INGEST_URL || "https://mintvault.fly.dev/api/admin/scan-ingest";
+const INGEST_URL = process.env.MINTVAULT_INGEST_URL || "https://mintvaultuk.com/api/admin/scan-ingest";
 const TOKEN = process.env.SCANNER_API_TOKEN || "";
 
 const BASE = path.join(os.homedir(), "mintvault-scans");
