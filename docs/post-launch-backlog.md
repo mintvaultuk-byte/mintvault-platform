@@ -140,3 +140,20 @@ When restoring, consider:
 - Decide based on what the registry page is doing for users
   at that point — credibility builder, search interface, or
   social proof?
+
+---
+
+## v1.1 — Admin tooling polish (assignOwnerManual follow-ups)
+
+Surfaced by the 2026-05-03 owner_email sync hotfix. Manual Assign
+now writes correct data but the surrounding UX is still rough.
+
+- Rename `Manual Assign` button to `Reassign Owner` (current label
+  ambiguous — implies first-time assignment)
+- Add reason-code dropdown to assign-owner endpoint (customer email
+  change / account recovery / support ticket / test cleanup) —
+  persisted in audit_log details
+- Send notification email to previous owner on reassign (DMCC
+  consideration — confirm whether triggers required notice)
+- Add two-step confirmation modal in admin UI (re-type cert ID to
+  confirm)
