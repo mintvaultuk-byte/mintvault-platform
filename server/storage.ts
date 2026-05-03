@@ -1399,6 +1399,8 @@ export class DatabaseStorage implements IStorage {
     await db.execute(sql`
       UPDATE certificates
       SET current_owner_user_id = ${user.id},
+          owner_email = ${normalEmail},
+          owner_name = ${user.displayName ?? null},
           ownership_status = 'claimed',
           claim_code_used_at = NOW(),
           ownership_token = ${ownershipToken},
