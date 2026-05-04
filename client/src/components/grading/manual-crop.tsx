@@ -249,7 +249,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   return (
     <div className="fixed inset-0 z-[100] bg-[#F7F7F5] flex flex-col select-none">
       {/* Top bar */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#D4D0C8]">
+      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[#D4D0C8]">
         <div>
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Perspective Crop \u2014 {side}
@@ -260,13 +260,13 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       </div>
 
       {/* Image area */}
-      <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">
-        <div className="relative" style={{ maxHeight: "85vh", maxWidth: "100vw" }}>
+      <div className="flex-1 flex items-center justify-center p-0 sm:p-4 min-h-0 overflow-auto">
+        <div className="relative max-h-[90vh] sm:max-h-[85vh] max-w-[100vw]">
           <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
             {/* Image + overlay container — NO overflow-hidden so handles aren't clipped */}
             <div ref={containerRef} className="relative rounded-lg bg-[#F7F7F5]"
               onMouseDown={startBodyDrag} onTouchStart={startBodyTouch}>
-              <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[80vh] max-w-[100vw] w-auto" draggable={false} />
+              <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[88vh] sm:max-h-[80vh] max-w-[100vw] w-auto" draggable={false} />
 
               {/* Layer 1: SVG overlay — dark mask + edge lines — NO pointer events */}
               <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
@@ -322,16 +322,16 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       </div>
 
       {/* Controls below image — always visible, no scrolling */}
-      <div className="flex-shrink-0 px-4 py-3 border-t border-[#D4D0C8] space-y-3">
+      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[#D4D0C8] space-y-1.5 sm:space-y-3">
         {/* Row 1: Quick actions */}
         <div className="flex items-center gap-2">
           <button type="button" onClick={handleAutoDetect} disabled={detecting}
-            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-3 py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
+            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
             {detecting ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
             {detecting ? "Detecting..." : "Auto-Detect"} <span className="text-[#555555] text-[9px]">A</span>
           </button>
           <button type="button" onClick={() => { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }}
-            className="flex items-center gap-1 text-[#555555] text-xs border border-[#D4D0C8] px-3 py-1.5 rounded-lg hover:bg-[#E8E4DC] transition-colors">
+            className="flex items-center gap-1 text-[#555555] text-xs border border-[#D4D0C8] px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#E8E4DC] transition-colors">
             <RotateCcw size={12} /> Reset <span className="text-[#555555] text-[9px]">R</span>
           </button>
           <div className="flex-1" />
@@ -353,7 +353,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
 
         {/* Row 3: Cancel + Apply */}
         <div className="flex items-center justify-between">
-          <button type="button" onClick={onCancel} className="border border-[#D4D0C8] text-[#555555] text-xs px-4 py-2 rounded-lg hover:bg-[#E8E4DC]">
+          <button type="button" onClick={onCancel} className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]">
             Cancel <span className="text-[#555555] text-[9px]">Esc</span>
           </button>
           <button type="button" onClick={handleApply} disabled={saving}
