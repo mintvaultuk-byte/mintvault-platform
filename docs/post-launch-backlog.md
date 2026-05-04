@@ -160,6 +160,18 @@ now writes correct data but the surrounding UX is still rough.
 
 ---
 
+## v1.1 — Transfer flow polish (TRANSFER_FLOW_LIVE follow-ups)
+
+Surfaced when TRANSFER_FLOW_LIVE was flipped to true on 2026-05-04. Flow
+is functional but four edges remain rough; none are launch-blocking.
+
+- **Wire `sendTransferV2IncomingReminder` into `runTransferV2Sweep`** ([server/email.ts:945](../server/email.ts#L945) is defined but never called). Fire at day 7 and day 12 of the incoming keeper's 14-day acceptance window so they don't miss the deadline by accident. Without this, an incoming keeper who delays gets only the initial confirmation email and then an `Expired` email — no nudge in between.
+- **Admin "freeze auto-finalise" toggle for the first wave of real transfers.** `runTransferV2Sweep` at [server/index.ts:328](../server/index.ts#L328) auto-finalises any `pending_dispute` transfer past its `dispute_deadline` with no human review. For early prod traffic, an admin-controlled freeze flag (or per-cert hold) would let support manually inspect each transfer before the sweep finalises it. DRN rotation + logbook version bump are durable changes — irreversible without a manual repair script.
+- **Audit transfer email templates for legal-pack URL integrity.** `LEGAL_PAGES_LIVE=false` in prod, so any `/legal/<slug>` link in the V2 transfer email bodies will currently 404 when the recipient clicks it. Either (a) audit the templates and remove/rewrite legal links until LEGAL_PAGES_LIVE flips, or (b) gate the V2 transfer templates on `LEGAL_PAGES_LIVE` so they don't go out until the legal pack is live.
+- **`/transfer` UI launch announcement.** The flag flip is silent — `/transfer`, `/transfer/accept`, `/transfer/claim-by-code` pages already rendered before the flip (submissions just 503'd). A user who tried it last week and saw an error has no way to know it works now. Consider a launch banner on `/transfer` or a one-shot email to existing cert-owners announcing the feature is live.
+
+---
+
 ## Retired infra — do not re-add
 
 - **`ADMIN_PIN` env var** — deleted 2026-05-04 after PIN auth migration
