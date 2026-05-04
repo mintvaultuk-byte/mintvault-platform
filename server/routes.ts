@@ -6594,7 +6594,7 @@ export async function registerRoutes(
         for (const file of files) {
           const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
           await uploadToR2(key, file.buffer, file.mimetype);
-          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 365); // 1-year URL
+          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 7);   // 7-day URL (AWS SigV4 hard cap)
           photoUrls.push(url);
         }
         // Also accept pre-uploaded URLs from body (for admin typing in URLs)
