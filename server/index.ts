@@ -271,7 +271,7 @@ app.use((req, res, next) => {
 });
 
 log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
-log(`ADMIN_PIN env var: ${process.env.ADMIN_PIN ? "SET" : "NOT SET"}`, "auth");
+// ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
 log(`SESSION_SECRET env var: ${process.env.SESSION_SECRET ? "SET" : "NOT SET (using fallback)"}`, "auth");
 
 // Daily safety-net: purge any pre-grade-checker images older than 1 hour from R2.

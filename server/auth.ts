@@ -106,11 +106,9 @@ export async function verifyAdminPassword(password: string): Promise<boolean> {
   return timingSafeEqual(password.trim(), raw.trim());
 }
 
-export async function verifyAdminPin(pin: string): Promise<boolean> {
-  const raw = process.env.ADMIN_PIN;
-  if (!raw) return false;
-  return timingSafeEqual(pin.trim(), raw.trim());
-}
+// verifyAdminPin removed 2026-05-04 — admin PIN is now bcrypt-hashed on
+// users.pin_hash and verified via storage.getUserByEmail(ADMIN_EMAIL) +
+// verifyPin from server/pin.ts. ADMIN_PIN env var is obsolete.
 
 export function isPendingAdminValid(req: Request): boolean {
   if (!req.session?.pendingAdmin) return false;
