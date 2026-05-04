@@ -143,6 +143,21 @@ When restoring, consider:
 
 ---
 
+## v1.1 — Mobile admin layout overhaul
+
+The entire `/admin` area was built desktop-first. On mobile (~390px width) every page squashes the desktop layout into the leftmost ~33% with empty whitespace on the right. Affects: cert browser, cert edit form, grading workstation (forms not crop UI — that was fixed separately in v1.0), submissions list, transfers, scans, intake, pricing, capacity, printing, learning, AI workstation panel.
+
+Scope: 8+ hours. Should be done as a single dedicated sprint, not piecemeal. Strategy:
+1. Audit every admin page for missing responsive classes
+2. Convert `grid-cols-N` to `grid-cols-1 sm:grid-cols-N`
+3. Add mobile-friendly form layouts (full-width inputs, stacked labels)
+4. Test every page at 390px width
+5. Regression-test every page at desktop width before merge
+
+Affects only the operator (admin user). Customers see the customer-facing pages which are already responsive. Not a launch blocker. Workaround: use desktop for `/admin` work.
+
+---
+
 ## v1.1 — Admin tooling polish (assignOwnerManual follow-ups)
 
 Surfaced by the 2026-05-03 owner_email sync hotfix. Manual Assign
