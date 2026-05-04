@@ -165,7 +165,7 @@ Admin email: `admin@mintvaultuk.co.uk`
 |---|---|
 | `MINTVAULT_DATABASE_URL` | PostgreSQL connection string (Neon EU) |
 | `RESEND_API_KEY` | Resend email service |
-| Stripe keys | Managed via Replit Stripe integration |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe credentials (Fly secrets, read via `process.env`) |
 | R2 credentials | Cloudflare R2 bucket access |
 
 ---

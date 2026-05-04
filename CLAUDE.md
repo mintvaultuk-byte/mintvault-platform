@@ -133,7 +133,7 @@ Cloudflare R2 (S3-compatible) via `server/r2.ts`. Images uploaded to keys like `
 
 ### Stripe
 
-Uses Replit's managed connector (credentials fetched from Connectors API, not env vars). Webhook route at `/api/stripe/webhook` must be registered **before** `express.json()` middleware (raw body requirement).
+Credentials live in Fly secrets (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`) and are read by `server/stripeClient.ts` via `process.env`. The earlier Replit Connectors integration is gone — `getUncachableStripeClient()` is now a thin `new Stripe(...)` wrapper, no API exchange. Webhook route at `/api/stripe/webhook` must be registered **before** `express.json()` middleware (raw body requirement).
 
 ### Certificate ID normalisation
 
