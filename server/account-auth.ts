@@ -466,6 +466,44 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[customer-magic-link-migrate] audit_log skipped:", e.message);
   }
 
+  // Pending account-switch nonces — used by /account/switch confirm flow.
+  // When a magic-link verify produces a different email than the active
+  // session, we issue a 5-min HMAC-signed cookie tied to a row here. Atomic
+  // consume on POST /account/switch/confirm. Idempotent CREATE — safe to
+  // re-run on every boot.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pending_switch_nonces (
+      nonce        TEXT PRIMARY KEY,
+      email_target TEXT NOT NULL,
+      issued_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      consumed_at  TIMESTAMPTZ
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS pending_switch_nonces_issued_at_idx
+      ON pending_switch_nonces (issued_at)
+  `);
+  try {
+    const existingSwitch = await db.execute(sql`
+      SELECT 1 FROM audit_log
+      WHERE entity_type = 'schema'
+        AND entity_id = 'pending_switch_nonces'
+        AND action = 'table_created'
+      LIMIT 1
+    `);
+    if (existingSwitch.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('schema', 'pending_switch_nonces', 'table_created',
+                '{"reason":"v1 launch UX/privacy: confirm page when magic-link would switch active session","ttl_minutes":5,"single_use":true,"cleanup_window_hours":1}'::jsonb,
+                NOW())
+      `);
+      console.log("[pending-switch-nonces-migrate] table created + audit logged");
+    }
+  } catch (e: any) {
+    console.log("[pending-switch-nonces-migrate] audit_log skipped:", e.message);
+  }
+
   // Login attempts (rate limiting + audit)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS login_attempts (

@@ -877,12 +877,14 @@ export default function DashboardPage() {
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
   const [loginSuccess, setLoginSuccess] = useState(false);
+  const [switchedAccounts, setSwitchedAccounts] = useState(false);
   const [loginError, setLoginError] = useState("");
 
   // Handle redirect params from magic link verification
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("login") === "success") setLoginSuccess(true);
+    if (params.get("switched") === "1") setSwitchedAccounts(true);
     if (params.get("error")) setLoginError("Invalid or expired login link. Please request a new one.");
     if (params.get("login") || params.get("error")) {
       window.history.replaceState({}, "", "/dashboard");
@@ -1001,7 +1003,9 @@ export default function DashboardPage() {
         {loginSuccess && (
           <div className="mb-6 flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-300 rounded-lg px-4 py-3">
             <CheckCircle size={15} className="shrink-0" />
-            Logged in successfully.
+            {switchedAccounts && me?.email
+              ? `You're now signed in as ${me.email}. The previous account has been signed out on this device.`
+              : "Logged in successfully."}
           </div>
         )}
 

@@ -5892,6 +5892,18 @@ export async function registerRoutes(
         });
       }
 
+      // If an active session is already signed in as a DIFFERENT customer,
+      // don't switch silently. Stash a 5-min HMAC-signed cookie + DB nonce
+      // and route the user to /account/switch for explicit confirmation.
+      // Same-email and no-session cases fall through to the existing flow.
+      const existingCustomerEmail = (req.session as any)?.customerEmail as string | undefined;
+      if (existingCustomerEmail && existingCustomerEmail.toLowerCase() !== email.toLowerCase()) {
+        const { createPendingSwitchCookie, setPendingSwitchCookie } = await import("./account-switch");
+        const cookie = await createPendingSwitchCookie(email);
+        setPendingSwitchCookie(res, cookie.value, cookie.attrs);
+        return res.redirect("/account/switch");
+      }
+
       // Regenerate session on privilege grant to cert-owner.
       // Prevents pre-existing admin/account-holder fields from
       // surviving into the new customer session document (PR 3a).
@@ -5911,6 +5923,142 @@ export async function registerRoutes(
         res.redirect("/dashboard?error=server_error");
       });
     }
+  });
+
+  // ── Account-switch confirm flow ─────────────────────────────────────────────
+  // Triggered by /api/customer/verify/:token when an active session is signed
+  // in as a different customer. /account/switch renders an HTML confirm page;
+  // the user explicitly confirms or cancels. See server/account-switch.ts.
+
+  const accountSwitchRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many switch attempts. Please wait 15 minutes." },
+  });
+
+  app.get("/account/switch", async (req, res) => {
+    const { readSwitchCookie, verifyPendingSwitchCookie, clearPendingSwitchCookie } = await import("./account-switch");
+    const raw = readSwitchCookie(req);
+    const verified = verifyPendingSwitchCookie(raw);
+    if (!verified.valid) {
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard?error=switch_expired");
+    }
+    const currentEmail = ((req.session as any)?.customerEmail as string | undefined) ?? "";
+    if (!currentEmail) {
+      // No active session to switch from — just clear the pending cookie and
+      // route to /dashboard. The success path on /verify handles a fresh login.
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard");
+    }
+    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const currentEsc = escape(currentEmail);
+    const pendingEsc = escape(verified.email);
+    const nonceEsc = escape(verified.nonce);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switch account — MintVault</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 16px; }
+  h1 { color: #FAF7F1; font-size: 24px; font-weight: 600; margin: 0 0 16px; }
+  p { color: rgba(250,247,241,0.78); font-size: 15px; line-height: 1.55; margin: 0 0 16px; }
+  strong.email { color: #D4AF37; font-weight: 600; word-break: break-all; }
+  .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
+  button { font: inherit; font-size: 15px; padding: 12px 18px; border-radius: 10px; border: 0; cursor: pointer; width: 100%; }
+  button.primary { background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; }
+  button.secondary { background: transparent; color: #FAF7F1; border: 1px solid rgba(250,247,241,0.25); }
+  button:hover { filter: brightness(1.08); }
+  form { margin: 0; }
+  .meta { color: rgba(250,247,241,0.45); font-size: 12px; margin-top: 18px; }
+</style></head>
+<body>
+  <div class="card">
+    <p class="eyebrow">MintVault &middot; Account switch</p>
+    <h1>Switch account?</h1>
+    <p>You're currently signed in as <strong class="email">${currentEsc}</strong> on this device.</p>
+    <p>Continuing will sign that account out and sign in as <strong class="email">${pendingEsc}</strong>.</p>
+    <div class="actions">
+      <form method="POST" action="/account/switch/confirm">
+        <input type="hidden" name="nonce" value="${nonceEsc}">
+        <button type="submit" class="primary">Switch to ${pendingEsc}</button>
+      </form>
+      <form method="POST" action="/account/switch/cancel">
+        <button type="submit" class="secondary">Stay signed in as ${currentEsc}</button>
+      </form>
+    </div>
+    <p class="meta">If you don't recognise either address, close this page. Doing nothing leaves your current session intact.</p>
+  </div>
+</body></html>`);
+  });
+
+  app.post("/account/switch/confirm", accountSwitchRateLimit, async (req, res) => {
+    const { readSwitchCookie, verifyPendingSwitchCookie, consumePendingSwitch, clearPendingSwitchCookie, cleanupStaleNonces, maskEmail, ipHash } = await import("./account-switch");
+    cleanupStaleNonces();
+    const raw = readSwitchCookie(req);
+    const verified = verifyPendingSwitchCookie(raw);
+    if (!verified.valid) {
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard?error=switch_failed");
+    }
+    const formNonce = String((req.body?.nonce ?? "")).trim();
+    if (!formNonce || formNonce !== verified.nonce) {
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard?error=switch_failed");
+    }
+    const consumed = await consumePendingSwitch(verified.nonce);
+    if (!consumed) {
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard?error=switch_failed");
+    }
+    const fromEmail = ((req.session as any)?.customerEmail as string | undefined) ?? "";
+    const toEmail = verified.email;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+    } catch (err: any) {
+      console.error("[account-switch] regenerate failed:", err?.message ?? err);
+      clearPendingSwitchCookie(res);
+      return res.redirect("/dashboard?error=switch_failed");
+    }
+    req.session.userId = undefined as unknown as string;
+    req.session.userEmail = undefined as unknown as string;
+    req.session.isAdmin = false;
+    req.session.adminEmail = undefined as unknown as string;
+    req.session.customerEmail = toEmail;
+    clearPendingSwitchCookie(res);
+    try {
+      const ip = (req.ip as string) || "unknown";
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('session', ${verified.nonce}, 'customer_session_switch', 'system',
+                ${JSON.stringify({
+                  from_email_masked: maskEmail(fromEmail),
+                  to_email_masked: maskEmail(toEmail),
+                  ip_hash: ipHash(ip),
+                  nonce: verified.nonce,
+                })}::jsonb,
+                NOW())
+      `);
+    } catch (auditErr: any) {
+      console.warn("[account-switch] audit_log insert failed:", auditErr?.message ?? auditErr);
+    }
+    return res.redirect("/dashboard?login=success&switched=1");
+  });
+
+  app.post("/account/switch/cancel", async (_req, res) => {
+    const { clearPendingSwitchCookie, cleanupStaleNonces } = await import("./account-switch");
+    cleanupStaleNonces();
+    clearPendingSwitchCookie(res);
+    return res.redirect("/dashboard");
   });
 
   // GET /api/customer/me — return current customer session info
