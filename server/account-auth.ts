@@ -466,6 +466,112 @@ export async function migrateAccountSchema(): Promise<void> {
     console.log("[customer-magic-link-migrate] audit_log skipped:", e.message);
   }
 
+  // ── PIN-based authentication (v1 launch) ──────────────────────────────────
+  // Replaces magic-link as primary login for cert-owners + admin. Magic-link
+  // demoted to first-time enrollment + forgot-PIN reset.
+  // Schema sequence (LOCK-1 from PIN auth checkpoint):
+  //   1. ALTER users +pin_hash +pin_set_at +pin_failed_count +pin_locked_until
+  //   2. CREATE pin_attempts, pin_reset_tokens
+  //   3. UPDATE users SET role='admin' WHERE email = ADMIN canonical (idempotent)
+  //   4. audit_log entries for first-time table creation / role assignment
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMPTZ`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_failed_count INTEGER NOT NULL DEFAULT 0`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pin_attempts (
+      id           SERIAL PRIMARY KEY,
+      email        TEXT NOT NULL,
+      success      BOOLEAN NOT NULL,
+      reason       TEXT,
+      ip_hash      TEXT,
+      attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS pin_attempts_email_attempted_idx
+      ON pin_attempts (email, attempted_at DESC)
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pin_reset_tokens (
+      id          SERIAL PRIMARY KEY,
+      email       TEXT NOT NULL,
+      token       TEXT UNIQUE NOT NULL,
+      expires_at  TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS pin_reset_tokens_email_created_idx
+      ON pin_reset_tokens (email, created_at DESC)
+  `);
+
+  // Idempotent admin role assignment. The admin login flow (LOCK-3) reads
+  // the admin user's pin_hash via ADMIN_EMAIL, so the row must exist with
+  // role='admin'. No-op if the email isn't in the users table yet (admin
+  // account-holder signup happens via /api/auth/signup separately).
+  try {
+    await db.execute(sql`
+      UPDATE users SET role = 'admin', updated_at = NOW()
+      WHERE LOWER(email) = LOWER('mintvaultuk@gmail.com')
+        AND COALESCE(role, '') <> 'admin'
+        AND deleted_at IS NULL
+    `);
+  } catch (e: any) {
+    console.log("[pin-migrate] admin role assignment skipped:", e.message);
+  }
+
+  // Audit_log entries — only on first-time creation
+  try {
+    const existingPinAttempts = await db.execute(sql`
+      SELECT 1 FROM audit_log
+      WHERE entity_type = 'schema' AND entity_id = 'pin_attempts' AND action = 'table_created'
+      LIMIT 1
+    `);
+    if (existingPinAttempts.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('schema', 'pin_attempts', 'table_created',
+                '{"reason":"v1 launch: PIN-based auth replaces magic-link as primary login","cost_factor":12,"lockout_threshold":3,"lockout_duration_minutes":15}'::jsonb,
+                NOW())
+      `);
+      console.log("[pin-migrate] pin_attempts table created + audit logged");
+    }
+    const existingPinResets = await db.execute(sql`
+      SELECT 1 FROM audit_log
+      WHERE entity_type = 'schema' AND entity_id = 'pin_reset_tokens' AND action = 'table_created'
+      LIMIT 1
+    `);
+    if (existingPinResets.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('schema', 'pin_reset_tokens', 'table_created',
+                '{"reason":"v1 launch: PIN reset flow via magic-link","ttl_minutes":15,"single_use":true}'::jsonb,
+                NOW())
+      `);
+      console.log("[pin-migrate] pin_reset_tokens table created + audit logged");
+    }
+    const existingPinCols = await db.execute(sql`
+      SELECT 1 FROM audit_log
+      WHERE entity_type = 'schema' AND entity_id = 'users.pin_columns' AND action = 'columns_added'
+      LIMIT 1
+    `);
+    if (existingPinCols.rows.length === 0) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
+        VALUES ('schema', 'users.pin_columns', 'columns_added',
+                '{"columns":["pin_hash","pin_set_at","pin_failed_count","pin_locked_until"],"reason":"v1 launch PIN auth"}'::jsonb,
+                NOW())
+      `);
+      console.log("[pin-migrate] users PIN columns added + audit logged");
+    }
+  } catch (e: any) {
+    console.log("[pin-migrate] audit_log skipped:", e.message);
+  }
+
   // Pending account-switch nonces — used by /account/switch confirm flow.
   // When a magic-link verify produces a different email than the active
   // session, we issue a 5-min HMAC-signed cookie tied to a row here. Atomic

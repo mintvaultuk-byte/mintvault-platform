@@ -110,6 +110,9 @@ import TrackPage from "@/pages/track";
 import TermsPage from "@/pages/terms";
 import LiabilityPage from "@/pages/liability";
 import AdminPage from "@/pages/admin";
+import CustomerLoginPage from "@/pages/customer-login";
+import PinSetupPage from "@/pages/auth/pin-setup";
+import PinForgotPage from "@/pages/auth/pin-forgot";
 import NotFound from "@/pages/not-found";
 import PokemonCardGradingUkPage from "@/pages/seo/pokemon-card-grading-uk";
 import TradingCardGradingUkPage from "@/pages/seo/trading-card-grading-uk";
@@ -276,6 +279,9 @@ function Router() {
               <Route path="/help/faq" component={FAQPage} />
               <Route path="/help/contact" component={ContactPage} />
               <Route path="/login" component={LoginPage} />
+              <Route path="/customer-login" component={CustomerLoginPage} />
+              <Route path="/auth/pin/setup" component={PinSetupPage} />
+              <Route path="/auth/pin/forgot" component={PinForgotPage} />
               <Route path="/signup" component={SignupPage} />
               <Route path="/forgot-password" component={ForgotPasswordPage} />
               <Route path="/reset-password" component={ResetPasswordPage} />

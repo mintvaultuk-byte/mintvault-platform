@@ -41,6 +41,12 @@ export const users = pgTable("users", {
   lastLoginIp: text("last_login_ip"),
   failedLoginCount: integer("failed_login_count").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
+  // PIN auth (v1 launch) — separate lockout state from password above so
+  // cert-owner PIN failures don't share counters with account-holder password.
+  pinHash: text("pin_hash"),
+  pinSetAt: timestamp("pin_set_at"),
+  pinFailedCount: integer("pin_failed_count").notNull().default(0),
+  pinLockedUntil: timestamp("pin_locked_until"),
 });
 
 export type User = typeof users.$inferSelect;

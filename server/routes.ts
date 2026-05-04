@@ -16,7 +16,7 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyF
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendTransferV2OwnerInvitedByBuyer, sendTransferV2BuyerInitOwnerConfirmed, sendTransferV2BuyerInitOwnerRejected, sendCertificatePdf, sendMagicLink, sendStolenVerificationEmail } from "./email";
+import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendTransferV2OwnerInvitedByBuyer, sendTransferV2BuyerInitOwnerConfirmed, sendTransferV2BuyerInitOwnerRejected, sendCertificatePdf, sendMagicLink, sendPinResetLink, sendStolenVerificationEmail } from "./email";
 import { getOwnerChain } from "./ownership-service";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
@@ -1858,21 +1858,49 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid credentials" });
       }
 
-      const valid = await verifyAdminPin(pin);
+      // LOCK-3: verify against the admin user's per-user bcrypt pin_hash,
+      // not the legacy env-var ADMIN_PIN. If the admin has no pin_hash yet
+      // (first time after PIN-auth deploy), surface PIN_SETUP_REQUIRED so
+      // the frontend routes to /auth/pin/setup with admin context.
+      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp } = await import("./pin");
+      const ipH = hashIp(req.ip || "unknown");
+
+      const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+      if (!adminUser) {
+        await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      if (!(adminUser as any).pinHash) {
+        // PIN not yet set — keep pendingAdmin flag in session, frontend
+        // routes the admin to /auth/pin/setup which uses pendingAdmin
+        // as the admin-context authorisation flag.
+        return res.json({ step: "PIN_SETUP_REQUIRED" });
+      }
+
+      const lockState = await checkLockout(ADMIN_EMAIL);
+      if (lockState.locked) {
+        await logPinEvent(ADMIN_EMAIL, false, "locked", ipH);
+        clearPendingAdmin(req);
+        return res.status(423).json({ error: "Account locked. Try again later." });
+      }
+
+      const valid = await verifyPin(pin, (adminUser as any).pinHash);
       if (!valid) {
-        const failures = recordFailedPin(req);
+        const post = await registerFailure(ADMIN_EMAIL);
+        await logPinEvent(ADMIN_EMAIL, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
+        recordFailedPin(req); // session-level counter retained for back-compat
         req.session.pinFailures = (req.session.pinFailures || 0) + 1;
         await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
 
-        if (req.session.pinFailures >= 5) {
+        if (post.locked || req.session.pinFailures >= 5) {
           clearPendingAdmin(req);
           return res.status(401).json({ error: "Too many failed attempts, please start again" });
         }
-
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       clearPinAttempts(req);
+      await resetFailures(ADMIN_EMAIL);
 
       // Regenerate session on privilege escalation to admin.
       // Prevents pre-existing customer/account-holder fields from
@@ -5861,7 +5889,10 @@ export async function registerRoutes(
 
       const token = await createMagicToken(normalEmail);
       const baseUrl = APP_BASE_URL;
-      const loginUrl = `${baseUrl}/api/customer/verify/${token}`;
+      // Wrap through /m/login/:token so the User-Agent sniff can intercept
+      // mobile-webview clicks and show the "open in browser" intermediate
+      // page. Real browsers 302 straight to /api/customer/verify/:token.
+      const loginUrl = `${baseUrl}/m/login/${token}`;
 
       try {
         await sendMagicLink({ email: normalEmail, loginUrl });
@@ -5904,6 +5935,14 @@ export async function registerRoutes(
         return res.redirect("/account/switch");
       }
 
+      // Find-or-create the users row for this email. PIN auth requires a
+      // users row to live on (pin_hash column). Cert-owners who came in
+      // pre-PIN may not have one yet — create idempotently here.
+      let user = await storage.getUserByEmail(email);
+      if (!user) {
+        user = await storage.createUser({ email });
+      }
+
       // Regenerate session on privilege grant to cert-owner.
       // Prevents pre-existing admin/account-holder fields from
       // surviving into the new customer session document (PR 3a).
@@ -5916,6 +5955,16 @@ export async function registerRoutes(
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = email;
+
+      // Branch on whether the user has a PIN set. First-time enrollers go
+      // to /auth/pin/setup; returning users with a PIN already set carry
+      // on to /dashboard. Setup-required is also a session flag the setup
+      // endpoint reads to authorise the write.
+      const hasPin = !!(user as any).pinHash;
+      if (!hasPin) {
+        (req.session as any).pinSetupRequired = true;
+        return res.redirect("/auth/pin/setup");
+      }
       res.redirect("/dashboard?login=success");
     } catch (err) {
       console.error("[customer] verify error:", err);
@@ -6054,11 +6103,390 @@ export async function registerRoutes(
     return res.redirect("/dashboard?login=success&switched=1");
   });
 
+  // ── Mobile-webview intermediate pages (PIN auth launch) ─────────────────────
+  // Magic-link emails clicked from in-app webviews (Gmail, Outlook, FB, etc.)
+  // land in a webview that doesn't share session cookies with the user's real
+  // browser. /m/login and /m/reset sniff the User-Agent: real browsers 302
+  // straight through; webviews get an HTML page with an "open in browser"
+  // CTA that re-targets the real verify URL via target="_blank" + window.open.
+
+  function isInAppWebview(ua: string): boolean {
+    if (!ua) return false;
+    // Common in-app browser signatures. Conservative — false positives just
+    // show one extra confirmation tap, false negatives mean a broken login.
+    return /\bwv\)|; wv;|FBAN\/|FBAV\/|Instagram |Twitter for|LinkedInApp|GoogleMail|Outlook(?:Mobile|-iOS|-Android)|YJApp|Snapchat\b|Line\/|MicroMessenger\b/i.test(ua);
+  }
+
+  function renderIntermediateHtml(realUrl: string, kind: "login" | "reset"): string {
+    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const urlEsc = escape(realUrl);
+    const heading = kind === "login" ? "Open in your browser" : "Open in your browser";
+    const subhead = kind === "login"
+      ? "For security, your sign-in link needs to open in your phone's real browser, not inside this email app."
+      : "For security, your PIN reset link needs to open in your phone's real browser, not inside this email app.";
+    const ctaLabel = kind === "login" ? "Open Sign-In Link" : "Open Reset Link";
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${heading} — MintVault</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 14px; }
+  h1 { color: #FAF7F1; font-size: 22px; font-weight: 600; margin: 0 0 14px; line-height: 1.25; }
+  p { color: rgba(250,247,241,0.78); font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
+  .cta { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; font-size: 15px; text-align: center; text-decoration: none; margin: 18px 0 12px; }
+  .copy-block { background: #15110D; border: 1px solid rgba(250,247,241,0.08); border-radius: 8px; padding: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; color: rgba(250,247,241,0.55); }
+  .meta { color: rgba(250,247,241,0.45); font-size: 12px; margin-top: 16px; }
+  .steps { color: rgba(250,247,241,0.55); font-size: 12px; line-height: 1.6; margin: 14px 0 0; padding-left: 18px; }
+  .steps li { margin-bottom: 4px; }
+</style></head>
+<body>
+  <div class="card">
+    <p class="eyebrow">MintVault &middot; Continue in browser</p>
+    <h1>${heading}</h1>
+    <p>${subhead}</p>
+    <a href="${urlEsc}" target="_blank" rel="noopener" class="cta" id="cta">${ctaLabel}</a>
+    <p class="meta">If the button doesn't open your browser, long-press it and choose <em>Open in Browser</em>, or copy the link below into Safari / Chrome:</p>
+    <div class="copy-block">${urlEsc}</div>
+    <ol class="steps">
+      <li>Tap the share / menu icon in this email view</li>
+      <li>Choose <em>Open in Browser</em> (iOS) or <em>Open in Chrome</em> (Android)</li>
+    </ol>
+  </div>
+  <script>
+    // Defence in depth: try window.open as a JS fallback when the user taps
+    // the CTA. In some webviews target=_blank is intercepted; window.open
+    // can succeed where the anchor fails.
+    document.getElementById("cta").addEventListener("click", function(e) {
+      try { window.open(${JSON.stringify(realUrl)}, "_blank", "noopener"); } catch (_) {}
+    });
+  </script>
+</body></html>`;
+  }
+
+  app.get("/m/login/:token", (req, res) => {
+    const token = String(req.params.token);
+    const realUrl = `${APP_BASE_URL}/api/customer/verify/${token}`;
+    const ua = String(req.headers["user-agent"] || "");
+    if (!isInAppWebview(ua)) {
+      return res.redirect(302, realUrl);
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.send(renderIntermediateHtml(realUrl, "login"));
+  });
+
+  app.get("/m/reset/:token", (req, res) => {
+    const token = String(req.params.token);
+    const realUrl = `${APP_BASE_URL}/auth/pin/reset/${token}`;
+    const ua = String(req.headers["user-agent"] || "");
+    if (!isInAppWebview(ua)) {
+      return res.redirect(302, realUrl);
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.send(renderIntermediateHtml(realUrl, "reset"));
+  });
+
   app.post("/account/switch/cancel", async (_req, res) => {
     const { clearPendingSwitchCookie, cleanupStaleNonces } = await import("./account-switch");
     cleanupStaleNonces();
     clearPendingSwitchCookie(res);
     return res.redirect("/dashboard");
+  });
+
+  // ── PIN auth (v1 launch) ────────────────────────────────────────────────────
+  // Replaces magic-link as primary login for cert-owners + admin step 2.
+  // Magic-link demoted to first-time enrollment (/api/customer/verify routes
+  // to /auth/pin/setup if no pin_hash) and forgot-PIN reset.
+
+  const pinLoginRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many login attempts. Please wait 15 minutes." },
+  });
+
+  // POST /api/auth/pin/setup — set the PIN on the user's row.
+  // Authorisation: must have one of these session contexts (in priority order):
+  //   1. pinResetEmail (set by /auth/pin/reset/:token after consuming a reset token)
+  //   2. pendingAdmin (admin in step 2 of two-step login, no PIN yet — LOCK-3)
+  //   3. customerEmail (cert-owner just verified magic-link, pinSetupRequired flag set)
+  app.post("/api/auth/pin/setup", async (req, res) => {
+    try {
+      const { hashPin, validatePinStrength, WeakPinError, logPinEvent, hashIp, resetFailures } = await import("./pin");
+      const pin = String(req.body?.pin || "").trim();
+      const ipH = hashIp(req.ip || "unknown");
+
+      // Determine target email + completion behaviour from session context
+      let targetEmail: string | undefined;
+      let completionMode: "customer" | "admin" | "reset_customer" | "reset_admin" | null = null;
+      const resetEmail = (req.session as any)?.pinResetEmail as string | undefined;
+      const resetIsAdmin = (req.session as any)?.pinResetIsAdmin === true;
+      if (resetEmail) {
+        targetEmail = resetEmail;
+        completionMode = resetIsAdmin ? "reset_admin" : "reset_customer";
+      } else if ((req.session as any)?.pendingAdmin) {
+        targetEmail = ADMIN_EMAIL;
+        completionMode = "admin";
+      } else if ((req.session as any)?.customerEmail) {
+        targetEmail = (req.session as any).customerEmail;
+        completionMode = "customer";
+      }
+      if (!targetEmail || !completionMode) {
+        return res.status(401).json({ error: "Not authorised to set a PIN. Please log in via your email link first." });
+      }
+
+      try {
+        validatePinStrength(pin);
+      } catch (e: any) {
+        if (e instanceof WeakPinError) {
+          await logPinEvent(targetEmail, false, "weak_pin", ipH);
+          return res.status(422).json({ error: e.message, reason: e.reason });
+        }
+        throw e;
+      }
+
+      const hash = await hashPin(pin);
+      await db.execute(sql`
+        UPDATE users
+        SET pin_hash = ${hash},
+            pin_set_at = NOW(),
+            pin_failed_count = 0,
+            pin_locked_until = NULL,
+            updated_at = NOW()
+        WHERE LOWER(email) = LOWER(${targetEmail}) AND deleted_at IS NULL
+      `);
+      await resetFailures(targetEmail);
+
+      const isReset = completionMode.startsWith("reset_");
+      await logPinEvent(targetEmail, true, isReset ? "pin_reset" : "pin_set", ipH);
+
+      // Clear setup-context flags
+      (req.session as any).pinResetEmail = undefined;
+      (req.session as any).pinResetIsAdmin = undefined;
+      (req.session as any).pinSetupRequired = undefined;
+
+      // Complete the login appropriate to context. Reset paths come in
+      // logged-out, so we regenerate + set the appropriate session field.
+      if (completionMode === "admin" || completionMode === "reset_admin") {
+        await new Promise<void>((resolve, reject) => {
+          req.session.regenerate((err) => (err ? reject(err) : resolve()));
+        });
+        req.session.userId = undefined as unknown as string;
+        req.session.userEmail = undefined as unknown as string;
+        req.session.customerEmail = undefined as unknown as string;
+        req.session.isAdmin = true;
+        req.session.adminEmail = ADMIN_EMAIL;
+        clearPendingAdmin(req);
+        return res.json({ ok: true, redirect: "/admin" });
+      }
+      // customer or reset_customer
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+      req.session.userId = undefined as unknown as string;
+      req.session.userEmail = undefined as unknown as string;
+      req.session.isAdmin = false;
+      req.session.adminEmail = undefined as unknown as string;
+      req.session.customerEmail = targetEmail;
+      return res.json({ ok: true, redirect: "/dashboard?login=success" });
+    } catch (err: any) {
+      console.error("[pin/setup] error:", err.message);
+      res.status(500).json({ error: "Could not set PIN. Please try again." });
+    }
+  });
+
+  // POST /api/auth/pin/login — primary cert-owner login. Email + PIN.
+  // Admin login uses /api/admin/login (password) → /api/admin/pin (PIN) instead.
+  app.post("/api/auth/pin/login", pinLoginRateLimit, async (req, res) => {
+    try {
+      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp, PIN_LOCKOUT_DURATION_MS } = await import("./pin");
+      const rawEmail = String(req.body?.email || "").toLowerCase().trim();
+      const pin = String(req.body?.pin || "").trim();
+      const ipH = hashIp(req.ip || "unknown");
+
+      if (!rawEmail || !pin) {
+        return res.status(400).json({ error: "Email and PIN are both required." });
+      }
+
+      // Lockout check first — even before user existence check, so a locked
+      // account can't be probed via "is this email in our system" timing.
+      const lockState = await checkLockout(rawEmail);
+      if (lockState.locked) {
+        await logPinEvent(rawEmail, false, "locked", ipH);
+        const retryAfterSeconds = lockState.retryAfter
+          ? Math.ceil((lockState.retryAfter.getTime() - Date.now()) / 1000)
+          : Math.ceil(PIN_LOCKOUT_DURATION_MS / 1000);
+        return res.status(423).json({
+          error: `Too many incorrect attempts. Try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+          retryAfterSeconds,
+        });
+      }
+
+      const user = await storage.getUserByEmail(rawEmail);
+      if (!user || !(user as any).pinHash) {
+        await logPinEvent(rawEmail, false, user ? "no_pin_set" : "no_user", ipH);
+        return res.status(401).json({ error: "Email or PIN incorrect." });
+      }
+
+      const ok = await verifyPin(pin, (user as any).pinHash);
+      if (!ok) {
+        const post = await registerFailure(rawEmail);
+        await logPinEvent(rawEmail, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
+        if (post.locked && post.retryAfter) {
+          const retryAfterSeconds = Math.ceil((post.retryAfter.getTime() - Date.now()) / 1000);
+          return res.status(423).json({
+            error: `Too many incorrect attempts. Try again in ${Math.ceil(retryAfterSeconds / 60)} minutes.`,
+            retryAfterSeconds,
+          });
+        }
+        return res.status(401).json({ error: "Email or PIN incorrect." });
+      }
+
+      // PIN correct. Reset failure counters.
+      await resetFailures(rawEmail);
+
+      // LOCK-2: account-switch mismatch detection. If the existing session
+      // is signed in as a DIFFERENT cert-owner, route through the confirm
+      // page instead of switching silently. Same logic shape as the
+      // magic-link verify branch above.
+      const existingCustomerEmail = (req.session as any)?.customerEmail as string | undefined;
+      if (existingCustomerEmail && existingCustomerEmail.toLowerCase() !== rawEmail) {
+        const { createPendingSwitchCookie, setPendingSwitchCookie } = await import("./account-switch");
+        const cookie = await createPendingSwitchCookie(rawEmail);
+        setPendingSwitchCookie(res, cookie.value, cookie.attrs);
+        return res.json({ ok: true, redirect: "/account/switch" });
+      }
+
+      // Regenerate session on privilege grant. Cross-clear admin/account-holder
+      // fields per the existing PR 3a discipline.
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((err) => (err ? reject(err) : resolve()));
+      });
+      req.session.userId = undefined as unknown as string;
+      req.session.userEmail = undefined as unknown as string;
+      req.session.isAdmin = false;
+      req.session.adminEmail = undefined as unknown as string;
+      req.session.customerEmail = rawEmail;
+      return res.json({ ok: true, redirect: "/dashboard?login=success" });
+    } catch (err: any) {
+      console.error("[pin/login] error:", err.message);
+      res.status(500).json({ error: "Could not sign in. Please try again." });
+    }
+  });
+
+  // POST /api/auth/pin/forgot — request a PIN-reset magic link by email.
+  // Always returns 200 with a generic message to avoid email enumeration.
+  app.post("/api/auth/pin/forgot", magicLinkRateLimit, async (req, res) => {
+    try {
+      const { logPinEvent, hashIp } = await import("./pin");
+      const rawEmail = String(req.body?.email || "").toLowerCase().trim();
+      const ipH = hashIp(req.ip || "unknown");
+
+      if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+        return res.status(400).json({ error: "Please enter a valid email address." });
+      }
+
+      const user = await storage.getUserByEmail(rawEmail);
+      // Generic response either way
+      const genericMsg = { ok: true, message: "If an account exists, a reset link has been sent." };
+
+      if (!user) {
+        await logPinEvent(rawEmail, false, "no_user", ipH);
+        return res.json(genericMsg);
+      }
+
+      // Mint reset token + send email
+      const token = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      await db.execute(sql`
+        INSERT INTO pin_reset_tokens (email, token, expires_at)
+        VALUES (${rawEmail}, ${token}, ${expiresAt.toISOString()})
+      `);
+      const baseUrl = APP_BASE_URL;
+      // Wrap through /m/reset/:token for the same in-app-webview protection
+      // as the login flow. The token itself is consumed at /auth/pin/reset/:token,
+      // not at the /m/ wrapper.
+      const resetUrl = `${baseUrl}/m/reset/${token}`;
+      try {
+        await sendPinResetLink({ email: rawEmail, resetUrl });
+      } catch (sendErr: any) {
+        console.error("[pin/forgot] sendPinResetLink failed:", sendErr.message);
+      }
+      await logPinEvent(rawEmail, true, "reset_link_sent", ipH);
+      return res.json(genericMsg);
+    } catch (err: any) {
+      console.error("[pin/forgot] error:", err.message);
+      // Still return generic success so timing doesn't leak existence
+      return res.json({ ok: true, message: "If an account exists, a reset link has been sent." });
+    }
+  });
+
+  // GET /auth/pin/reset/:token — consume the reset token, set a session
+  // flag authorising a PIN write, redirect to /auth/pin/setup?reset=1.
+  app.get("/auth/pin/reset/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token);
+      // Atomic single-use consume — same pattern as customer_magic_link_tokens
+      const r = await db.execute(sql`
+        UPDATE pin_reset_tokens
+        SET consumed_at = NOW()
+        WHERE token = ${token}
+          AND consumed_at IS NULL
+          AND expires_at > NOW()
+        RETURNING email
+      `);
+      const row = r.rows[0] as { email: string } | undefined;
+      if (!row) {
+        return req.session.destroy(() => {
+          res.redirect("/customer-login?error=reset_link_invalid");
+        });
+      }
+      // Establish reset-authorised session. Destroy any pre-existing session
+      // first to prevent leaking another account's data into the setup flow.
+      await new Promise<void>((resolve) => req.session.regenerate(() => resolve()));
+      const user = await storage.getUserByEmail(row.email);
+      const isAdmin = !!user && (user as any).role === "admin";
+      (req.session as any).pinResetEmail = row.email.toLowerCase();
+      (req.session as any).pinResetIsAdmin = isAdmin;
+      return res.redirect("/auth/pin/setup?reset=1");
+    } catch (err: any) {
+      console.error("[pin/reset] error:", err.message);
+      return req.session.destroy(() => {
+        res.redirect("/customer-login?error=reset_link_invalid");
+      });
+    }
+  });
+
+  // POST /api/auth/logout-everywhere — admin-only. Truncates the session
+  // table; every active cookie is invalidated. Used as a one-shot kick
+  // after the PIN-auth deploy lands so all 30-day cookies must re-auth.
+  // Wraps in try/catch so a failed truncate surfaces clearly.
+  app.post("/api/auth/logout-everywhere", requireAdmin, async (req, res) => {
+    try {
+      const before = await db.execute(sql`SELECT COUNT(*)::int AS n FROM session`);
+      const beforeCount = (before.rows[0] as any).n;
+      await db.execute(sql`TRUNCATE session`);
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('session', 'all', 'logout_everywhere', ${adminEmail},
+                ${JSON.stringify({ destroyed: beforeCount, reason: "PIN auth deploy: forced re-auth" })}::jsonb,
+                NOW())
+      `);
+      // Note: this destroys the admin's own session too. Their next request
+      // will hit 401. They'll need to re-authenticate via /api/admin/login.
+      return res.json({ ok: true, destroyed: beforeCount });
+    } catch (err: any) {
+      console.error("[logout-everywhere] error:", err.message);
+      return res.status(500).json({ error: "Failed to truncate sessions: " + err.message });
+    }
   });
 
   // GET /api/customer/me — return current customer session info

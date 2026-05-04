@@ -995,6 +995,37 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
   }
 }
 
+// ── PIN reset link email ──────────────────────────────────────────────────────
+// Distinct from sendMagicLink so the subject + body unambiguously signal
+// "reset your PIN" rather than "log in". 15-min single-use link.
+export async function sendPinResetLink(data: { email: string; resetUrl: string }): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.log(`[email] SKIPPED PIN reset email to ${data.email} (no Resend client)`);
+    return;
+  }
+
+  const body = `
+<p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 16px;">You asked to reset your 6-digit MintVault PIN. Click the button below to choose a new one. This link is valid for <strong style="color:#fff;">15 minutes</strong> and can only be used once.</p>
+${ctaButton(data.resetUrl, "Reset Your PIN")}
+<p style="color:rgba(255,255,255,0.28);font-size:11px;line-height:1.6;margin:16px 0 6px;">If you did not request a PIN reset, you can ignore this email — your existing PIN remains unchanged.</p>
+<p style="color:rgba(255,255,255,0.18);font-size:10px;line-height:1.5;margin:0;word-break:break-all;font-family:'Courier New',Courier,monospace;">LINK: ${data.resetUrl}</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: "MintVault — Reset Your PIN",
+      html: ownershipBaseHtml("Reset Your PIN", body),
+    });
+    console.log(`[email] PIN reset link sent to ${data.email}`);
+  } catch (err: any) {
+    console.error(`[email] Failed to send PIN reset link to ${data.email}:`, err.message);
+    throw err;
+  }
+}
+
 // ── Certificate PDF email ──────────────────────────────────────────────────
 export async function sendCertificatePdf(data: {
   email: string;
