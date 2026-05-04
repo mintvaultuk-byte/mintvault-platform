@@ -157,3 +157,13 @@ now writes correct data but the surrounding UX is still rough.
   consideration — confirm whether triggers required notice)
 - Add two-step confirmation modal in admin UI (re-type cert ID to
   confirm)
+
+---
+
+## Retired infra — do not re-add
+
+- **`ADMIN_PIN` env var** — deleted 2026-05-04 after PIN auth migration
+  (commits `9cc6fca`, `66aab7b`). Per-user bcrypt PIN on
+  `users.pin_hash` is the only admin PIN source. Do not re-add the env
+  var; if a regression ever requires it, the design has reverted, not
+  the env-var-as-source-of-truth.
