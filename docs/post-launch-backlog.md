@@ -172,6 +172,34 @@ is functional but four edges remain rough; none are launch-blocking.
 
 ---
 
+## v1.1 — Submit-flow follow-ups (Phase 1 E2E test, MV-SUB-000317)
+
+Surfaced 2026-05-04 by physical E2E test on submission MV-SUB-000317. Display fixes (PDF row-numbering, address-box overflow, success-page totalPrice) shipped same day in commit `ec99bd9`. The four items below are intentionally deferred — none are launch-blocking but all need to land before high-volume payment traffic.
+
+- **`payment_amount` and `payment_timestamp` are not written by `markSubmissionAsPaid`** ([server/storage.ts:283-294](../server/storage.ts#L283-L294)). The UPDATE clause sets only `status`, `payment_status`, `updated_at`. As a result, all paid submissions in prod (315, 316, 317) have NULL in those two columns. Breaks any future reconciliation against Stripe (e.g. "did the amount we charged match the amount stored?"). Fix: extend the method signature to accept `amountPence` + `paidAt`, plumb from both call sites (webhook handler at [server/webhookHandlers.ts:67](../server/webhookHandlers.ts#L67) and `/api/confirm-payment` at [server/routes.ts:601](../server/routes.ts#L601)). Backfill of existing rows from Stripe API optional but recommended.
+
+- **Zero `audit_log` rows for the /submit lifecycle.** Locked-rule violation. The infrastructure (`storage.writeAuditLog`) is fine and used heavily elsewhere, but no submission-flow code path calls it. Three call sites need adding: [server/routes.ts:1480](../server/routes.ts#L1480) (`submission.created` at create-payment-intent), [server/routes.ts:601](../server/routes.ts#L601) (`submission.payment_received` at confirm-payment), [server/webhookHandlers.ts:51](../server/webhookHandlers.ts#L51) (mirror at webhook for back-up coverage). Decide canonical action names + use `tracking_number` as `entity_id` for consistency with admin pattern. Note: the `terms_accepted` audit at [server/routes.ts:1523-1539](../server/routes.ts#L1523-L1539) is gated on `FEATURE_FLAGS.LEGAL_PAGES_LIVE` (currently `false`) so it's a no-op in prod — that one will start firing automatically when the legal pack ships.
+
+- **Tier dictionary collision between PDF and confirmation page.** [server/packingSlip.ts:92-95](../server/packingSlip.ts#L92-L95) has a private `tierNames` map with 5 keys (`basic`/`standard`/`premier`/`ultra`/`elite`) while [shared/schema.ts:905](../shared/schema.ts#L905) has the canonical `pricingTiers` with different ids and names (`standard`→"VAULT QUEUE", `priority`→"STANDARD", `express`→"EXPRESS"). Result: PDF says "Standard" while confirmation page says "VAULT QUEUE" for the same submission. Worse, the PDF dictionary has 4 ghost keys that don't exist in pricingTiers and is missing `priority` + `express`. Fix: delete `tierNames` from packingSlip.ts, import `pricingTiers` from `@shared/schema`, look up by id. Single source of truth. Note: this will mean the PDF starts showing "VAULT QUEUE" for the £19 tier — separate product question whether that's the right name.
+
+- **Card-detail entry section is collapsed by default.** [client/src/pages/submit.tsx:457](../client/src/pages/submit.tsx#L457): `useState(state.cardItems.length > 0)` → defaults to `false` for a fresh wizard. Customer has to click "Add Card Details (Optional)" to open it. Phase 1 test customer (Cornelius) didn't open the section, so all 5 `submission_items` rows have NULL game/card_set/card_name/card_number/year. PDF correctly renders "—" for NULL — no code bug, but **UX call needed**: required, default-expanded, or keep optional? Recommend default-expanded as low-friction nudge.
+
+### Stripe webhook misconfiguration (operational, not code)
+
+Discovered during Phase A3 diagnostic. Stripe TEST-mode webhook endpoint is registered at the stale `https://mint-vault.replit.app/api/stripe/webhook` URL (Replit hosting from the pre-Fly era) and only subscribes to `checkout.session.completed` — `payment_intent.succeeded` is not subscribed. Fly app is therefore unreachable from Stripe; `payment_intent.succeeded` events fire but never deliver. Status='paid' is currently set entirely by the client-driven `/api/confirm-payment` path (which does verify with Stripe via `paymentIntents.retrieve`, so payments are real — just no webhook safety net).
+
+Action items (Stripe Dashboard, no code):
+- Update webhook URL to `https://mintvaultuk.com/api/stripe/webhook` (and/or `https://mintvault.fly.dev/api/stripe/webhook`)
+- Subscribe to `payment_intent.succeeded` and `payment_intent.payment_failed`
+- Verify/rotate `STRIPE_WEBHOOK_SECRET` in Fly env to match new endpoint signing secret
+- Repeat for LIVE-mode webhook endpoint before the launch flip
+
+### Latent security check in /confirm-payment
+
+[server/routes.ts:601](../server/routes.ts#L601) `/api/confirm-payment` retrieves the PI server-side (so the client cannot fake a successful PI status), but does **not** verify the PI belongs to the submission. Add cross-checks: `submission.paymentIntentId === paymentIntentId` (we already store this at create-time at [server/routes.ts:1579-1581](../server/routes.ts#L1579-L1581)) and ideally `paymentIntent.metadata.submissionId === submissionId`. PI IDs are 36-char random strings so guessing is hard, but defending against ID-substitution is a 2-line hardening worth bundling with the audit-log additions above.
+
+---
+
 ## Retired infra — do not re-add
 
 - **`ADMIN_PIN` env var** — deleted 2026-05-04 after PIN auth migration
