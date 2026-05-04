@@ -197,7 +197,7 @@ export async function generatePackingSlipPDF(data: PackingSlipData): Promise<Buf
             doc.addPage();
             y = 50;
           }
-          doc.text(String(item.cardIndex + 1), colLeft, y, { width: 20 });
+          doc.text(String(item.cardIndex), colLeft, y, { width: 20 });
           doc.text(item.game || "—", colLeft + 22, y, { width: 55 });
           doc.text(item.cardSet || "—", colLeft + 80, y, { width: 120 });
           doc.text(item.cardName || "—", colLeft + 205, y, { width: 140 });
@@ -212,7 +212,7 @@ export async function generatePackingSlipPDF(data: PackingSlipData): Promise<Buf
 
       const boxX = marginL - 5;
       const boxW = contentW + 10;
-      const boxH = 185;
+      const boxH = 205;
       doc.roundedRect(boxX, y, boxW, boxH, 3).lineWidth(1).strokeColor(GOLD).stroke();
 
       const bx = marginL + 5;

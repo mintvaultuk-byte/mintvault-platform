@@ -1739,6 +1739,7 @@ export async function registerRoutes(
         serviceTier: submission.serviceTier || null,
         serviceType: submission.serviceType || null,
         cardCount: submission.cardCount,
+        totalPrice: submission.totalPrice || null,
         createdAt: submission.createdAt,
       });
     } catch (error: any) {
