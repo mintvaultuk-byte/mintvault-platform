@@ -295,7 +295,7 @@ export default function HeaderV2() {
               </Link>
             ) : (
               <Link
-                href="/login"
+                href="/customer-login"
                 className="hidden md:inline-flex font-body text-sm font-medium no-underline transition-colors"
                 style={{ color: "var(--v2-ink-soft)" }}
               >
@@ -398,7 +398,7 @@ export default function HeaderV2() {
             </Link>
             {!isAuthed && (
               <Link
-                href="/login"
+                href="/customer-login"
                 onClick={() => setMobileOpen(false)}
                 className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full border"
                 style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
