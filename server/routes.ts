@@ -5885,7 +5885,11 @@ export async function registerRoutes(
       const token = String(req.params.token);
       const email = await verifyMagicToken(token);
       if (!email) {
-        return res.redirect("/dashboard?error=invalid_link");
+        // Destroy any pre-existing session — prevents a failed verify from
+        // leaving a stale customer/admin session visible to the recipient.
+        return req.session.destroy(() => {
+          res.redirect("/dashboard?error=invalid_link");
+        });
       }
 
       // Regenerate session on privilege grant to cert-owner.
@@ -5903,7 +5907,9 @@ export async function registerRoutes(
       res.redirect("/dashboard?login=success");
     } catch (err) {
       console.error("[customer] verify error:", err);
-      res.redirect("/dashboard?error=server_error");
+      return req.session.destroy(() => {
+        res.redirect("/dashboard?error=server_error");
+      });
     }
   });
 
