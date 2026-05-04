@@ -510,9 +510,12 @@ export async function migrateAccountSchema(): Promise<void> {
   `);
 
   // Idempotent admin role assignment. The admin login flow (LOCK-3) reads
-  // the admin user's pin_hash via ADMIN_EMAIL, so the row must exist with
-  // role='admin'. No-op if the email isn't in the users table yet (admin
-  // account-holder signup happens via /api/auth/signup separately).
+  // the admin user's pin_hash via ADMIN_EMAIL ('mintvaultuk@gmail.com',
+  // see server/auth.ts:4), so the row must exist with role='admin' on
+  // exactly that email. The hard-coded address below MUST stay in sync
+  // with the ADMIN_EMAIL constant. No-op if the email isn't in the users
+  // table yet (admin account-holder signup happens via /api/auth/signup
+  // separately).
   try {
     await db.execute(sql`
       UPDATE users SET role = 'admin', updated_at = NOW()

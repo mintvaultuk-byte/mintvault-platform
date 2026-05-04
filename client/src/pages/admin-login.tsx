@@ -46,6 +46,14 @@ export default function AdminLoginPage({ onLogin }: Props) {
     try {
       const res = await apiRequest("POST", "/api/admin/pin", { pin });
       const data = await res.json();
+      if (data.step === "PIN_SETUP_REQUIRED") {
+        // First admin login post-PIN-deploy: pin_hash not yet set. Server keeps
+        // pendingAdmin flag in session; /auth/pin/setup uses that as the admin-
+        // context authorisation flag. Use window.location.href (not navigate)
+        // so the setup page does a fresh fetch and reads the session correctly.
+        window.location.href = "/auth/pin/setup";
+        return;
+      }
       if (data.success) {
         onLogin?.();
         navigate(nextPath);

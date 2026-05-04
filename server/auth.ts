@@ -1,7 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 
-const ADMIN_EMAIL = "admin@mintvaultuk.co.uk";
+// Aligned 2026-05-04 with the user row migrated to role='admin' by
+// migrateAccountSchema(). PIN auth flow uses storage.getUserByEmail(ADMIN_EMAIL)
+// to locate the admin's pin_hash; the constant must match the actual row's email.
+const ADMIN_EMAIL = "mintvaultuk@gmail.com";
 
 const loginAttempts = new Map<string, { count: number; firstAttempt: number }>();
 const pinAttempts = new Map<string, { count: number; firstAttempt: number }>();
