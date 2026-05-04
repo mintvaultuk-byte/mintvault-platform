@@ -69,6 +69,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   const [detecting, setDetecting] = useState(false);
   const [drag, setDrag] = useState<null | { type: "corner" | "body"; corner?: keyof CropQuad; startMouse: Point; startQuad: CropQuad }>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
@@ -82,12 +83,23 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   }
 
   function startCornerDrag(corner: keyof CropQuad, e: React.MouseEvent) {
+    // Ignore synthetic mouse events fired ~300-500ms after touchstart on iOS Safari
+    if (Date.now() - lastTouchAtRef.current < 500) return;
     e.stopPropagation();
     e.preventDefault();
     setDrag({ type: "corner", corner, startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
   }
 
+  function startCornerTouch(corner: keyof CropQuad, e: React.TouchEvent) {
+    e.stopPropagation();
+    lastTouchAtRef.current = Date.now();
+    const t = e.touches[0];
+    if (!t) return;
+    setDrag({ type: "corner", corner, startMouse: { x: t.clientX, y: t.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+  }
+
   function startBodyDrag(e: React.MouseEvent) {
+    if (Date.now() - lastTouchAtRef.current < 500) return;
     e.stopPropagation();
     e.preventDefault();
     // Only start body drag if click is inside the quad
@@ -96,13 +108,26 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     setDrag({ type: "body", startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
   }
 
+  function startBodyTouch(e: React.TouchEvent) {
+    lastTouchAtRef.current = Date.now();
+    const t = e.touches[0];
+    if (!t) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const px = clamp(((t.clientX - r.left) / r.width) * 100);
+    const py = clamp(((t.clientY - r.top) / r.height) * 100);
+    if (!pointInQuad(px, py, quad)) return;
+    setDrag({ type: "body", startMouse: { x: t.clientX, y: t.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+  }
+
   useEffect(() => {
     if (!drag) return;
-    function onMove(e: MouseEvent) {
+    function applyDelta(clientX: number, clientY: number) {
       const cw = containerRef.current?.clientWidth || 1;
       const ch = containerRef.current?.clientHeight || 1;
-      const dx = ((e.clientX - drag!.startMouse.x) / cw) * 100;
-      const dy = ((e.clientY - drag!.startMouse.y) / ch) * 100;
+      const dx = ((clientX - drag!.startMouse.x) / cw) * 100;
+      const dy = ((clientY - drag!.startMouse.y) / ch) * 100;
       const sq = drag!.startQuad;
 
       if (drag!.type === "corner" && drag!.corner) {
@@ -120,10 +145,27 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         setQuad(newQuad);
       }
     }
+    function onMove(e: MouseEvent) { applyDelta(e.clientX, e.clientY); }
+    function onTouchMove(e: TouchEvent) {
+      if (e.touches.length === 0) return;
+      // Suppress page scroll / pinch-zoom while we own a drag
+      e.preventDefault();
+      const t = e.touches[0];
+      applyDelta(t.clientX, t.clientY);
+    }
     function onUp() { setDrag(null); }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+    window.addEventListener("touchcancel", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onUp);
+      window.removeEventListener("touchcancel", onUp);
+    };
   }, [drag]);
 
   useEffect(() => {
@@ -219,12 +261,12 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
 
       {/* Image area */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0 overflow-auto">
-        <div className="relative" style={{ maxHeight: "80vh", maxWidth: "90vw" }}>
+        <div className="relative" style={{ maxHeight: "85vh", maxWidth: "100vw" }}>
           <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
             {/* Image + overlay container — NO overflow-hidden so handles aren't clipped */}
             <div ref={containerRef} className="relative rounded-lg bg-[#F7F7F5]"
-              onMouseDown={startBodyDrag}>
-              <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[75vh] w-auto" draggable={false} />
+              onMouseDown={startBodyDrag} onTouchStart={startBodyTouch}>
+              <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[80vh] max-w-[100vw] w-auto" draggable={false} />
 
               {/* Layer 1: SVG overlay — dark mask + edge lines — NO pointer events */}
               <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
@@ -257,15 +299,16 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                     pointerEvents: "auto",
                   }}
                 >
-                  {/* Invisible 32px hit area for easy grabbing */}
+                  {/* Invisible 44px hit area (Apple HIG / Google MD min touch target) */}
                   <div
-                    className="cursor-grab active:cursor-grabbing"
-                    style={{ width: 32, height: 32, transform: "translate(-50%, -50%)", position: "relative" }}
+                    className="cursor-grab active:cursor-grabbing touch-none"
+                    style={{ width: 44, height: 44, transform: "translate(-50%, -50%)", position: "relative" }}
                     onMouseDown={(e) => startCornerDrag(k, e)}
+                    onTouchStart={(e) => startCornerTouch(k, e)}
                   >
-                    {/* Visible 16px handle centered inside */}
+                    {/* Visible 20px handle centered inside */}
                     <div className="absolute bg-[#D4AF37] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
-                      style={{ inset: 8, pointerEvents: "none" }} />
+                      style={{ inset: 12, pointerEvents: "none" }} />
                     {/* Label */}
                     <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none select-none">
                       {CORNER_LABELS[k]}
