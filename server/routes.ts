@@ -1,7 +1,7 @@
 import type { Express, Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
-import { BUILD_STAMP, pricingTiers, calculateOrderTotals, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
+import { BUILD_STAMP, pricingTiers, calculateOrderTotals, getVaultClubDiscountPercent, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -1436,17 +1436,34 @@ export async function registerRoutes(
 
       const totals = calculateOrderTotals(tierData.pricePerCard, quantity, totalDeclaredValue);
 
-      // Vault Club perks — Bronze/Gold deprecated 2026-04-19, Silver paused
-      // pending the Phase 1B perk evaluator (free return shipping / free
-      // authentication credits / queue jump). No percentage discount applies.
-      // Bulk discount still works via totals.discountPercent. The locked
-      // max(vault_club, bulk) rule still holds — vault_club side is 0 in
-      // Phase 1A, so bulk always wins when present. Tier tracking will be
-      // re-introduced when the perk evaluator ships and starts exempting
-      // specific fees per-member.
-      const effectiveDiscountPercent = totals.discountPercent;
-      const effectiveDiscountAmount = totals.discountAmount;
-      const discountType: string | null = totals.discountPercent > 0 ? "bulk" : null;
+      // Vault Club Silver discount (10%) vs bulk discount — apply max(vc, bulk).
+      // Tie goes to VC (>= on the vc side) since it's a paid member perk.
+      // Discount applies ONLY to the per-card grading fee, not shipping/insurance.
+      let vcTier: string | null = null;
+      let vcStatus: string | null = null;
+      let vcPercent = 0;
+      if (req.session?.userId) {
+        const vcRows = await db.execute(sql`
+          SELECT vault_club_tier, vault_club_status FROM users
+          WHERE id = ${(req.session as any).userId} AND deleted_at IS NULL LIMIT 1
+        `);
+        if (vcRows.rows.length > 0) {
+          const u = vcRows.rows[0] as any;
+          vcTier = u.vault_club_tier ?? null;
+          vcStatus = u.vault_club_status ?? null;
+          vcPercent = getVaultClubDiscountPercent(vcTier, vcStatus);
+        }
+      }
+
+      const bulkPercent = totals.discountPercent;
+      const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent);
+      const effectiveDiscountAmount = Math.round(
+        tierData.pricePerCard * quantity * effectiveDiscountPercent / 100
+      );
+      const discountType: string | null =
+        vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" :
+        bulkPercent > 0 ? "bulk" :
+        null;
       const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
@@ -1538,6 +1555,33 @@ export async function registerRoutes(
         } catch {}
       }
 
+      // Audit log for applied discount (vault_club_silver or bulk). Records
+      // both the applied side and the alternative so the max(vc, bulk)
+      // decision is reconstructable later.
+      if (discountType !== null) {
+        try {
+          await db.insert(auditLog).values({
+            entityType: "submission",
+            entityId: String(submission.id),
+            action: discountType === "vault_club_silver"
+              ? "vault_club_discount_applied"
+              : "bulk_discount_applied",
+            adminUser: null,
+            details: {
+              user_id: (req.session as any)?.userId ?? null,
+              vault_club_tier: vcTier,
+              vault_club_status: vcStatus,
+              applied_type: discountType,
+              applied_percent: effectiveDiscountPercent,
+              amount_pence: effectiveDiscountAmount,
+              card_count: quantity,
+              vc_alternative_percent: vcPercent,
+              bulk_alternative_percent: bulkPercent,
+            },
+          });
+        } catch {}
+      }
+
       const stripe = await getUncachableStripeClient();
 
       const paymentIntent = await stripe.paymentIntents.create({
@@ -1552,6 +1596,8 @@ export async function registerRoutes(
           discountPercent: String(effectiveDiscountPercent),
           discountAmount: String(effectiveDiscountAmount),
           discountType: discountType || "none",
+          vcAlternativePercent: String(vcPercent),
+          bulkAlternativePercent: String(bulkPercent),
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
           shippingInsurance: totals.shippingLabel,

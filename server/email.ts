@@ -1250,7 +1250,7 @@ export async function sendVaultClubWelcomeEmail(data: {
 <p>Welcome to <strong style="color:#D4AF37;">Vault Club ${tierLabel}</strong> — your exclusive membership is now active.</p>
 <p>Here's what's unlocked for you:</p>
 <ul style="color:#ccc;line-height:1.8;">
-  ${data.tier === "silver" ? "<li>50 AI Pre-Grade credits every month</li><li>Your own public Showroom at mintvaultuk.com/showroom/[your-name]</li><li>Silver Vault badge on every cert</li>" : ""}
+  ${data.tier === "silver" ? "<li>10% off all grading submissions</li><li>50 AI Pre-Grade credits every month</li><li>Your own public Showroom at mintvaultuk.com/showroom/[your-name]</li><li>Silver Vault badge on every cert</li>" : ""}
 </ul>
 <p style="margin-top:24px;">
 <a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW YOUR MEMBERSHIP</a>

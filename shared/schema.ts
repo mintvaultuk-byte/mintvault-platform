@@ -837,6 +837,20 @@ export function getBulkDiscountPercent(quantity: number): number {
   return 0;
 }
 
+// Vault Club grading discount — Silver tier only. Mutually exclusive with
+// bulk discount; server applies max(vc, bulk) and ties go to vc.
+export const VAULT_CLUB_SILVER_DISCOUNT_PERCENT = 10;
+
+export function getVaultClubDiscountPercent(
+  tier: string | null | undefined,
+  status: string | null | undefined,
+): number {
+  if (tier === "silver" && (status === "active" || status === "trialing")) {
+    return VAULT_CLUB_SILVER_DISCOUNT_PERCENT;
+  }
+  return 0;
+}
+
 export interface InsuranceTier {
   maxValue: number;
   shippingPence: number;

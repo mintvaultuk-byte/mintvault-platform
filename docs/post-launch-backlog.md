@@ -156,16 +156,16 @@ Decide which (if any) of these to actually build based on:
 - Funnel data: where do non-members drop off?
 - Direct asks: what do customers say is missing?
 
-Candidate perks (any combination, build properly):
-1. **10% grading discount** — needs full discount code path on /submit checkout,
-   Stripe metadata, mutually-exclusive-with-bulk logic per locked rule
-2. **Free return shipping over £50** — needs return shipping unbundled from
+Candidate perks (any combination, build properly). 10% grading discount
+shipped in v1 (2026-05-05) — see commit history.
+
+1. **Free return shipping over £50** — needs return shipping unbundled from
    grading fee as separate line, threshold logic, stacking rules with bulk
-3. **Free authentication credits monthly** — needs member_credits table writes
+2. **Free authentication credits monthly** — needs member_credits table writes
    + checkout consumption logic
-4. **Queue jump** — would need grading queue priority field consumed by admin
+3. **Queue jump** — would need grading queue priority field consumed by admin
    queue ordering
-5. **Free reholder credits quarterly** — same plumbing as auth credits
+4. **Free reholder credits quarterly** — same plumbing as auth credits
 
 Each has 2-4 hours of plumbing work + Stripe testing. Do NOT promise any of
 these in welcome email or marketing until code is live in prod.

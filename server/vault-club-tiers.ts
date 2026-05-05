@@ -7,12 +7,14 @@
  * retained in vault-club-config.ts but archive those prices manually via the
  * Stripe dashboard.
  *
- * The active perk model for Silver is perks-and-credits (free shipping, free
- * monthly authentication credits, queue-jump, AI credits) — NOT a percentage
- * grading discount. Percentage discounts removed 2026-04-19. Per-perk
- * evaluation (applying free shipping / free auth at checkout) is deferred to
- * Phase 1B. For now the config carries the flags; consumers are no-ops.
+ * v1 active Silver perks (all enforced in code): 10% grading discount, 50 AI
+ * Pre-Grade credits/month, public Showroom, Silver Vault badge. Other flags
+ * (free_authentication_monthly, free_return_shipping, early_pop_report_access,
+ * members_only_vault_design, queue_jump_within_tier) carry intent only —
+ * deferred to v1.1, see docs/post-launch-backlog.md.
  */
+
+import { VAULT_CLUB_SILVER_DISCOUNT_PERCENT } from "@shared/schema";
 
 export interface VaultClubTierConfig {
   label: string;
@@ -20,6 +22,7 @@ export interface VaultClubTierConfig {
   annual_price_pence: number;
   is_active: boolean;
   deprecated_at: string | null;
+  grading_discount_percent: number;
   ai_credits_monthly: number;
   queue_jump_within_tier: boolean;
   free_authentication_monthly: number;
@@ -39,6 +42,7 @@ export const VAULT_CLUB_TIERS: Record<string, VaultClubTierConfig> = {
     annual_price_pence: 4900,
     is_active: false,
     deprecated_at: "2026-04-19",
+    grading_discount_percent: 0,
     ai_credits_monthly: 0,
     queue_jump_within_tier: false,
     free_authentication_monthly: 0,
@@ -50,7 +54,7 @@ export const VAULT_CLUB_TIERS: Record<string, VaultClubTierConfig> = {
     featured_collector_rotation: false,
     badge: "bronze",
   },
-  // v1 active perks (enforced in code): AI credits, Showroom, badge.
+  // v1 active perks (enforced in code): 10% grading discount, AI credits, Showroom, badge.
   // All other flags deferred to v1.1 — see docs/post-launch-backlog.md.
   silver: {
     label: "Silver Vault",
@@ -58,6 +62,7 @@ export const VAULT_CLUB_TIERS: Record<string, VaultClubTierConfig> = {
     annual_price_pence: 9900,
     is_active: true,
     deprecated_at: null,
+    grading_discount_percent: VAULT_CLUB_SILVER_DISCOUNT_PERCENT,
     ai_credits_monthly: 50,
     queue_jump_within_tier: true,
     free_authentication_monthly: 0,
@@ -75,6 +80,7 @@ export const VAULT_CLUB_TIERS: Record<string, VaultClubTierConfig> = {
     annual_price_pence: 19900,
     is_active: false,
     deprecated_at: "2026-04-19",
+    grading_discount_percent: 0,
     ai_credits_monthly: 0,
     queue_jump_within_tier: false,
     free_authentication_monthly: 0,

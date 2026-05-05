@@ -875,11 +875,10 @@ function SectionV() {
   const glow = 0.15 + breathe * 0.1;
 
   const perks = [
-    "Priority queue within your grading tier",
-    "2 free Authentication add-ons every month",
-    "Free return shipping on every declared-value tier",
-    "100 AI Pre-Grade credits per month",
-    "Early access to Population Report insights",
+    "10% off all grading submissions",
+    "50 AI Pre-Grade credits per month",
+    "Your own public Showroom at mintvaultuk.com/showroom/[your-name]",
+    "Silver Vault badge on every cert",
   ];
 
   return (

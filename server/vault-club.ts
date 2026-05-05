@@ -14,6 +14,7 @@ import { getStripeSecretKey } from "./stripeClient";
 import { writeAuthAudit } from "./account-auth";
 import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, endOfCurrentQuarter, quarterKey } from "./vault-club-tiers";
 import { VAULT_CLUB_PRICE_IDS, getPriceId } from "./vault-club-config";
+import { getVaultClubDiscountPercent } from "@shared/schema";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ export function registerVaultClubRoutes(app: Express): void {
         cancels_at: user.vault_club_cancels_at || null,
         started_at: user.vault_club_started_at || null,
         perks,
+        grading_discount_percent: getVaultClubDiscountPercent(tier, status),
         ai_credits_balance: user.ai_credits_user_balance ?? 0,
         ai_credits_monthly: tier ? VAULT_CLUB_TIERS[tier].ai_credits_monthly : 0,
         next_refill_at: user.vault_club_renews_at || null,
@@ -83,15 +85,75 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── POST /api/vault-club/checkout ──────────────────────────────────────────
-  // Re-enable in Phase 1B (perk evaluator). Disabled because config no longer
-  // maps to checkout behaviour — Silver's perks (free return shipping, free
-  // monthly Authentication, queue-jump) need server-side exemption logic that
-  // doesn't exist yet. Shipping users to Stripe now would take their money for
-  // perks we aren't actually applying.
-  app.post("/api/vault-club/checkout", requireAuth, async (_req: Request, res: Response) => {
-    return res.status(503).json({
-      error: "Vault Club temporarily unavailable — re-enables with the full perks system. Contact support@mintvaultuk.com to be notified.",
-    });
+  // Re-enabled 2026-05-05 — lean perk model is now fully enforced (10% grading
+  // discount, 50 AI Pre-Grade credits/mo, Showroom, badge). Silver-only since
+  // Bronze and Gold deprecated 2026-04-19. Annual plans get a 14-day trial
+  // (DMCC-compatible reminder copy lives in welcome email).
+  app.post("/api/vault-club/checkout", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req.session as any).userId as string;
+      const { tier, interval } = req.body;
+
+      if (tier !== "silver") {
+        return res.status(400).json({ error: "Only Silver Vault is available." });
+      }
+      if (!interval || !["month", "year"].includes(interval)) {
+        return res.status(400).json({ error: "Invalid interval. Must be month or year." });
+      }
+
+      const priceId = getPriceId(tier, interval);
+      if (!priceId) {
+        return res.status(503).json({ error: "Stripe products not yet configured. Run POST /api/admin/vault-club/setup-stripe-products first." });
+      }
+
+      const user = await getUserVaultClub(userId);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const stripe = await getStripe();
+      const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
+
+      // Get or create Stripe customer
+      let customerId = user.stripe_customer_id as string | null;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: user.email as string,
+          name: (user.display_name as string) || undefined,
+          metadata: { user_id: userId },
+        });
+        customerId = customer.id;
+        await db.execute(sql`
+          UPDATE users SET stripe_customer_id = ${customerId} WHERE id = ${userId}
+        `);
+      }
+
+      const sessionParams: Stripe.Checkout.SessionCreateParams = {
+        mode: "subscription",
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${appUrl}/club?welcome=1`,
+        cancel_url: `${appUrl}/club`,
+        allow_promotion_codes: true,
+        metadata: { user_id: userId, tier, interval },
+      };
+
+      // Annual plans get a 14-day trial; monthly plans do not.
+      if (interval === "year") {
+        sessionParams.subscription_data = {
+          trial_period_days: 14,
+          metadata: { user_id: userId, tier, interval },
+        };
+      } else {
+        sessionParams.subscription_data = {
+          metadata: { user_id: userId, tier, interval },
+        };
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionParams);
+      return res.json({ url: session.url });
+    } catch (err: any) {
+      console.error("[vault-club] checkout error:", err.message);
+      return res.status(500).json({ error: "Failed to create checkout session." });
+    }
   });
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
@@ -120,12 +182,9 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── GET /api/vault-club/check-discount ────────────────────────────────────
-  // Legacy endpoint — percentage grading discount removed 2026-04-19 when the
-  // club moved to a perks-and-credits model. Returns 0 always so any
-  // still-subscribed clients degrade gracefully. Returns the user's tier
-  // when known (active+trialing) so receipts can show "Silver member" etc.
-  // When the Phase 1B perk evaluator ships, this endpoint can either be
-  // removed or repurposed to surface per-perk availability.
+  // Returns the active grading-fee discount percentage for the current user.
+  // 0 if no tier or status is not active/trialing. Silver = 10% per
+  // VAULT_CLUB_SILVER_DISCOUNT_PERCENT in shared/schema.ts.
   app.get("/api/vault-club/check-discount", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -142,7 +201,7 @@ export function registerVaultClubRoutes(app: Express): void {
       if (!tier || !isActiveStatus(status)) {
         return res.json({ discount_percent: 0, tier: null });
       }
-      return res.json({ discount_percent: 0, tier });
+      return res.json({ discount_percent: getVaultClubDiscountPercent(tier, status), tier });
     } catch (err: any) {
       console.error("[vault-club] check-discount error:", err.message);
       return res.status(500).json({ error: "Failed to check discount." });

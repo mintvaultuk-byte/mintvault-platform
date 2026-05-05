@@ -451,6 +451,7 @@ export default function PricingV2() {
 
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 mb-8">
               {[
+                "10% off all grading submissions",
                 `${SILVER.ai_credits_monthly} AI Pre-Grade credits per month`,
                 "Your own public Showroom at mintvaultuk.com/showroom/[your-name]",
                 "Silver Vault badge on every cert",
