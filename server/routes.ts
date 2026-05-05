@@ -6370,8 +6370,13 @@ export async function registerRoutes(
       await new Promise<void>((resolve, reject) => {
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
-      req.session.userId = undefined as unknown as string;
-      req.session.userEmail = undefined as unknown as string;
+      // Set both audiences from the verified user (login-unification design,
+      // see commit bca27f4 + docs/login-unification-plan.md). regenerate()
+      // above already wiped any prior session contents. We preserve the
+      // admin cross-clear (PR 3a discipline) since admin is the only
+      // audience that must remain isolated from cert-owner / account-holder.
+      req.session.userId = user.id as string;
+      req.session.userEmail = (user.email as string | null) ?? rawEmail;
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = rawEmail;
@@ -9500,6 +9505,12 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      // Mirror to customer-audience field per login-unification design.
+      // The verified user's email is the same identity for both audiences.
+      // Admin cross-clear is defensive belt-and-braces (regenerate() already wiped).
+      (req.session as any).customerEmail = user.email;
+      (req.session as any).isAdmin = false;
+      (req.session as any).adminEmail = undefined;
 
       await db.execute(sql`
         UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip}, failed_login_count = 0 WHERE id = ${user.id as string}
