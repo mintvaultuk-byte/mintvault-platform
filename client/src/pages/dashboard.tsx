@@ -9,6 +9,7 @@ import {
   Camera, MapPin, X,
 } from "lucide-react";
 import VaultClubBadge from "@/components/vault-club-badge";
+import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
 import SeoHead from "@/components/seo-head";
@@ -480,9 +481,11 @@ interface VaultClubMe {
   ai_credits_monthly: number;
 }
 
-function VaultClubSection({ authMe }: { authMe: { id: string; email: string; display_name: string | null; email_verified: boolean } }) {
+function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; email: string; display_name: string | null; email_verified: boolean }; vcMe?: VaultClubMe | null }) {
   const queryClient = useQueryClient();
-  const { data: vcMe, isLoading } = useQuery<VaultClubMe | null>({
+  // Falls back to its own fetch if the parent didn't provide vcMe.
+  // Both queries share the same TanStack key so they read from the same cache.
+  const { data: vcMeFetched, isLoading: vcMeLoading } = useQuery<VaultClubMe | null>({
     queryKey: ["/api/vault-club/me"],
     queryFn: async () => {
       const res = await fetch("/api/vault-club/me");
@@ -492,7 +495,10 @@ function VaultClubSection({ authMe }: { authMe: { id: string; email: string; dis
     },
     retry: false,
     staleTime: 30_000,
+    enabled: vcMeProp === undefined,
   });
+  const vcMe = vcMeProp !== undefined ? vcMeProp : vcMeFetched;
+  const isLoading = vcMeProp !== undefined ? false : vcMeLoading;
 
   const portalMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vault-club/portal", {}),
@@ -911,6 +917,24 @@ export default function DashboardPage() {
     retry: false,
   });
 
+  // Vault Club membership state — pulled up to page level so MemberHeader
+  // can switch between premium and standard styling without re-fetching.
+  // VaultClubSection still receives this as a prop and falls back to its
+  // own (cache-shared) fetch if undefined.
+  const { data: vcMe } = useQuery<VaultClubMe | null>({
+    queryKey: ["/api/vault-club/me"],
+    queryFn: async () => {
+      const res = await fetch("/api/vault-club/me");
+      if (res.status === 401) return null;
+      if (!res.ok) return null;
+      return res.json();
+    },
+    retry: false,
+    staleTime: 30_000,
+    enabled: !!authMe,
+  });
+  const isMember = !!(vcMe?.tier === "silver" && vcMe?.status && (vcMe.status === "active" || vcMe.status === "trialing"));
+
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/customer/logout", {}),
     onSuccess: () => {
@@ -973,32 +997,23 @@ export default function DashboardPage() {
       />
       <div className="max-w-3xl mx-auto px-4 py-8">
 
+        {/* Premium / standard header — switches on Vault Club Silver membership */}
+        <MemberHeader
+          me={me}
+          authMe={authMe ?? null}
+          vcMe={vcMe ?? null}
+          isMember={isMember}
+          onLogout={() => logoutMutation.mutate()}
+        />
+
         {/* Account welcome + verification banner */}
         {authMe && <AccountBanner authMe={authMe} />}
 
         {/* Vault Club section — shown for email+password account users */}
-        {authMe && <VaultClubSection authMe={authMe} />}
+        {authMe && <VaultClubSection authMe={authMe} vcMe={vcMe ?? null} />}
 
         {/* Showroom section — only shown for email+password account users */}
         {authMe && <ShowroomSection authMe={authMe} />}
-
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <LayoutDashboard className="text-[#D4AF37]" size={22} />
-            <div>
-              <h1 className="text-lg font-sans font-bold text-[#1A1A1A] leading-tight tracking-tight">My Dashboard</h1>
-              <p className="text-xs text-[#999999]">{me.email}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => logoutMutation.mutate()}
-            className="flex items-center gap-1.5 text-xs text-[#999999] hover:text-[#666666] transition-colors"
-          >
-            <LogOut size={13} />
-            Log out
-          </button>
-        </div>
 
         {loginSuccess && (
           <div className="mb-6 flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-300 rounded-lg px-4 py-3">
