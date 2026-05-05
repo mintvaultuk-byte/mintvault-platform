@@ -156,7 +156,7 @@ export default function VaultClubV2() {
               className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
-              {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; 4 perks &middot; Available now
+              {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year (14-day free trial) &middot; Available now
             </p>
           </div>
 

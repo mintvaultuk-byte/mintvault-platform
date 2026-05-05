@@ -317,7 +317,7 @@ function SectionAHero() {
             </a>
           </div>
           <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-            £9.99 / month · 4 perks · Available now
+            £9.99 / month · £99 / year (14-day free trial) · Available now
           </p>
         </div>
         <HeroSlabFan slabs={slabs} />
