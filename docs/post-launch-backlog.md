@@ -143,6 +143,26 @@ When restoring, consider:
 
 ---
 
+## v1.1 — Draft grade exposure on public cert page
+
+The `certificates.grade` column is written by both `draft_save` (debounced auto-save during admin editing) AND `approve` (final publish). The public `/cert/:id` page reads `grade` directly without checking `grade_approved_at`. Result: any draft-state edit immediately leaks to the public QR-scan view.
+
+**Risk:** low for v1 (Cornelius is sole admin, won't open the workstation if not committed to grading). High for v1.1+ when (a) other admin graders are added, or (b) any auto-save triggers fire during partial edits.
+
+**Fix options (pick one in v1.1):**
+1. Gate public `grade` on `grade_approved_at IS NOT NULL` — return `ai_draft_grade` or NULL otherwise
+2. Stop writing draft state to `grade`. Use `ai_draft_grade` as the working state, only write `grade` on `/approve`
+3. Add `grade_visibility` flag to certificates and gate public read
+
+Option 2 is cleanest and matches the existing schema split (`ai_draft_grade` already exists for this purpose).
+
+**Affected files:**
+- [server/routes.ts:7501](../server/routes.ts#L7501) (`/approve` handler)
+- The `/grade` auto-save handler (find via grep)
+- `server/routes.ts` public cert lookup (`certToPublic`)
+
+---
+
 ## v1.1 — Mobile admin layout overhaul
 
 The entire `/admin` area was built desktop-first. On mobile (~390px width) every page squashes the desktop layout into the leftmost ~33% with empty whitespace on the right. Affects: cert browser, cert edit form, grading workstation (forms not crop UI — that was fixed separately in v1.0), submissions list, transfers, scans, intake, pricing, capacity, printing, learning, AI workstation panel.
