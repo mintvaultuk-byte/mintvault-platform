@@ -1,33 +1,24 @@
 // @ts-nocheck — visual mockup; full port pending
 /* =========================================================================
    MINTVAULT — VAULT CLUB V2 (visual mockup, /vault-club-v2 preview route)
-   STRICT CONSTRAINT: zero copy/layout/structure changes from live vault-club.tsx.
+   Mirrors the lean perk model now live on /vault-club. v1 active perks
+   (all enforced in code): 10% grading discount, 50 AI Pre-Grade credits/mo,
+   public Showroom, Silver badge. See bf16063 + 1e95c9d + the v492 truth-up.
 
-   Visual treatments:
-     1. Hero slab fan inherits 3D + idle drift from shipped HeroSlabFan.
+   Visual treatments preserved from earlier mockup:
+     1. Hero slab fan with 3D + idle drift (custom HeroSlabFan).
      2. AmbientLayer — page-level warm gold drift behind everything.
-     3. DarkSectionGlow — breathing gold ambience inside Section I (Why Silver)
-        and Section VI (Final CTA).
+     3. DarkSectionGlow — breathing gold ambience inside Section I and VI.
      4. Numbered perk rows (Section I) — IntersectionObserver fade-in on the
-        big "01 / 02 / 03 / 04 / 05" numerals; numerals brighten from
-        rgba(212,175,55,0.15) → rgba(212,175,55,0.35) when in view.
+        big "01 / 02 / 03 / 04" numerals; numerals brighten when in view.
      5. Annual pricing card (Section III) — breathing gold glow on the box
         shadow (reuses the .silver-vault-card pattern from pricing).
-     6. Math-table rows (Section II) — calmer treatment. Subtle row hover
-        with a 1px gold left-edge accent. Restrained — table is dense,
-        readability comes first.
-     7. FAQ items (Section V) — same gold left-edge fade-in as pricing.
+     6. FAQ items (Section V) — gold left-edge fade-in.
 
-   Paused-state copy preserved at all THREE sites:
-     - Hero "Subscriptions are paused while we finish the perk system"
-     - Section III "Subscriptions temporarily paused — relaunching..."
-     - Section VI "Subscriptions are paused while we finish..."
-   Hero CTA stays mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist.
-   No fake "Subscribe Now" buttons. No claim that membership is currently sold.
-
-   FONT: Geist for everything (matches v465 typography deploy).
-   COPY: identical to live vault-club.tsx — every word, every CTA, every
-         ordinal, every microcopy line preserved verbatim.
+   The Section II math table (5-perk multiplied "saves £30+/mo" calculation)
+   is removed — its inputs (free Authentication, free shipping) were stripped
+   pre-launch. Section II is now a simple "when it pays off" paragraph based
+   only on enforced perks.
    ========================================================================= */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -53,6 +44,34 @@ const V = {
 
 const SLAB_NOISE_SVG =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")";
+
+// ── CHECKOUT HELPER ────────────────────────────────────────────────────────
+// Posts to /api/vault-club/checkout (re-enabled 2026-05-05 in v491). On 401
+// redirects to login with return path. Bare fetch — no @tanstack/react-query
+// dependency in this mockup file.
+
+async function startCheckout(interval) {
+  try {
+    const res = await fetch("/api/vault-club/checkout", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier: "silver", interval }),
+    });
+    if (res.status === 401) {
+      window.location.href = "/customer-login?return=/vault-club-v2";
+      return;
+    }
+    const data = await res.json();
+    if (data?.url) {
+      window.location.href = data.url;
+      return;
+    }
+    alert(data?.error || "Checkout failed. Please try again.");
+  } catch (err) {
+    alert("Checkout failed. Please try again.");
+  }
+}
 
 // ── HOOKS ──────────────────────────────────────────────────────────────────
 
@@ -271,9 +290,9 @@ function Header() {
 
 function SectionAHero() {
   const slabs = [
-    { topBadge: "AUTHENTICATION", mainLabel: "×2 free", rightLabel: "/mo", footnote: "£30.00 VALUE · MONTHLY", key: "auth" },
-    { topBadge: "RETURN SHIPPING", mainLabel: "Free", rightLabel: "Always", footnote: "ALL TIERS INSURED", key: "shipping" },
-    { topBadge: "AI CREDITS", mainLabel: "×100", rightLabel: "/mo", footnote: "PRE-GRADE UNLIMITED", key: "credits" },
+    { topBadge: "GRADING DISCOUNT", mainLabel: "10% off", rightLabel: "Per card", footnote: "EVERY SUBMISSION", key: "discount" },
+    { topBadge: "AI CREDITS", mainLabel: "×50", rightLabel: "/mo", footnote: "PRE-GRADE TESTING", key: "credits" },
+    { topBadge: "SHOWROOM", mainLabel: "Public", rightLabel: "page", footnote: "PERSONAL URL", key: "showroom" },
   ];
 
   return (
@@ -287,18 +306,18 @@ function SectionAHero() {
             For the<br />regular submitter.
           </h1>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 17, lineHeight: 1.6, maxWidth: 540, marginBottom: 32, color: V.inkSoft }}>
-            Silver is a perks-and-credits membership for collectors who submit regularly. Subscriptions are paused while we finish the perk system — join the waitlist and you'll be first when it reopens.
+            Silver is a paid membership for collectors who submit regularly. 10% off every grading fee, 50 AI Pre-Grade credits every month, your own public Showroom, and a member badge across the registry.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 20 }}>
-            <a href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, backgroundColor: V.ink, color: V.paper, textDecoration: "none" }}>
-              Notify me when it reopens →
-            </a>
-            <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, border: `1px solid ${V.line}`, color: V.inkSoft, textDecoration: "none" }}>
+            <button type="button" onClick={() => startCheckout("month")} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, backgroundColor: V.ink, color: V.paper, border: "none", cursor: "pointer" }}>
+              Subscribe — £9.99/mo →
+            </button>
+            <a href="/tools/estimate" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, border: `1px solid ${V.line}`, color: V.inkSoft, textDecoration: "none" }}>
               Try AI Pre-Grade (free) →
             </a>
           </div>
           <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-            £9.99 / month · 5 perks · Membership paused
+            £9.99 / month · 4 perks · Available now
           </p>
         </div>
         <HeroSlabFan slabs={slabs} />
@@ -332,7 +351,6 @@ function PerkRow({ number, title, body, value, isFirst }) {
           fontWeight: 500,
           lineHeight: 1,
           fontSize: "clamp(2rem, 4vw, 3rem)",
-          // Big numerals: faint gold by default, brighten when in view.
           color: visible ? "rgba(212, 175, 55, 0.75)" : "rgba(212, 175, 55, 0.25)",
           transition: "color 1000ms ease-out 200ms",
           textShadow: visible ? "0 0 30px rgba(212, 175, 55, 0.4)" : "none",
@@ -364,11 +382,10 @@ function PerkRow({ number, title, body, value, isFirst }) {
 
 function SectionI() {
   const PERKS = [
-    { number: "01", title: "Priority queue within your grading tier", body: "Members jump ahead within their chosen tier. No turnaround SLA change, but first in, first out — every time.", value: null },
-    { number: "02", title: "Two free Authentication add-ons every month", body: "Worth £15 each. If you submit cards that need authentication, this alone covers the membership.", value: "£30.00/mo value" },
-    { number: "03", title: "Free return shipping on every declared-value tier", body: "High-value submitters save most. Standard tier saves £4.99 per submission; Max tier saves £24.99.", value: "£4.99–£24.99 / submission" },
-    { number: "04", title: "100 AI Pre-Grade credits every month", body: "Test cards before submitting. Credits reset monthly — no rollover — so use them or lose them.", value: "Unlimited practical use" },
-    { number: "05", title: "Early access to Population Report features", body: "See new filters, exports, and analytics before they ship publicly. Shape the tool as it grows.", value: "Priority access" },
+    { number: "01", title: "10% off every grading submission", body: "Applied automatically at checkout on the per-card grading fee. Stacks with bulk discounts via max-of-the-two — Silver wins up to 49 cards, bulk wins at 50+.", value: "10% per card" },
+    { number: "02", title: "50 AI Pre-Grade credits every month", body: "Test cards before submitting — single-photo subgrade estimate with confidence labels. Credits reset monthly, no rollover.", value: "50/mo" },
+    { number: "03", title: "Public Showroom for your collection", body: "Personal page at mintvaultuk.com/showroom/[your-name]. Your verified slabs displayed publicly; activates on your first Silver billing cycle.", value: "Personal URL" },
+    { number: "04", title: "Silver Vault badge on every cert", body: "Member badge surfaces on your dashboard, your Showroom, and the public cert pages of slabs you own. Visible across the registry.", value: "Across the registry" },
   ];
 
   return (
@@ -380,11 +397,11 @@ function SectionI() {
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
           <h2 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.875rem, 4vw, 3rem)", lineHeight: 1.1, color: "#FFFFFF" }}>
-            Perks, not<br />
-            <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 400, color: V.goldSoft }}>percentages.</span>
+            Four perks.<br />
+            <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 400, color: V.goldSoft }}>All enforced.</span>
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: "rgba(255,255,255,0.6)" }}>
-            A percentage discount scales with the cheapest cards and hurts our margin on Express. Perks do the opposite — they give members tangible, predictable value that stays honest on both sides of the transaction.
+            Every Silver perk is wired into code — the discount applies at checkout, the credits land in your account, the Showroom activates on first billing, the badge renders on your certs. Nothing promised that we don't deliver.
           </p>
         </div>
 
@@ -398,78 +415,27 @@ function SectionI() {
   );
 }
 
-// ── SECTION II: THE MATH ──────────────────────────────────────────────────
-
-function MathRow({ cards, authCount, authValue, shipping, shippingLabel, total, net, isLast }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <tr
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        borderBottom: isLast ? undefined : `1px solid ${V.lineSoft}`,
-        backgroundColor: V.paperRaised,
-        position: "relative",
-        boxShadow: hovered ? `inset 3px 0 0 ${V.gold}` : "inset 0 0 0 transparent",
-        transition: "box-shadow 200ms ease-out",
-      }}
-    >
-      <td style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "16px", color: V.ink }}>{cards}</td>
-      <td style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, padding: "16px", color: V.ink }}>{authCount} · {authValue}</td>
-      <td style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, padding: "16px", color: V.ink }}>
-        {shipping}
-        <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, marginLeft: 6, color: V.inkMute }}>({shippingLabel})</span>
-      </td>
-      <td style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, padding: "16px", color: V.ink }}>{total}</td>
-      <td style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, padding: "16px", color: V.gold }}>+{net} saved</td>
-    </tr>
-  );
-}
+// ── SECTION II: WHEN IT PAYS OFF ──────────────────────────────────────────
+// Replaces the earlier "saves £30+/mo" math table — that table multiplied
+// free-Authentication and free-shipping perks that were never enforced. With
+// the lean perk set the math is straightforward: 10% of grading fees pays
+// off at roughly 4 cards/month at Standard.
 
 function SectionII() {
-  const SCENARIOS = [
-    { cards: "1 card", authCount: "1", authValue: "£15.00", shipping: "£4.99", shippingLabel: "Standard", total: "£19.99", net: "£10.00" },
-    { cards: "3 cards", authCount: "2 (max)", authValue: "£30.00", shipping: "£4.99", shippingLabel: "Standard", total: "£34.99", net: "£25.00" },
-    { cards: "5 cards", authCount: "2 (max)", authValue: "£30.00", shipping: "£9.99", shippingLabel: "Enhanced", total: "£39.99", net: "£30.00" },
-  ];
-
   return (
     <section style={{ backgroundColor: V.paper }}>
-      <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
+      <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
         <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.25em", marginBottom: 16, color: V.gold }}>
-          II · The Math
+          II · When it pays off
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16">
           <h2 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.875rem, 4vw, 3rem)", lineHeight: 1.1, color: V.ink }}>
-            When Silver<br />pays off.
+            Roughly four cards a month.
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: V.inkSoft }}>
-            Membership is £9.99/month. Here's what you'd save at different submission cadences, assuming Standard grading tier with one Authentication add-on per submission.
+            Membership is £9.99/month. At Standard grading (£25/card), the 10% discount alone returns £2.50 per card — four cards covers the membership. AI Pre-Grade credits, Showroom, and the badge are bonus on top. Submit fewer than that and you're better off paying per-card.
           </p>
         </div>
-
-        <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${V.line}` }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
-            <thead>
-              <tr style={{ backgroundColor: V.paperRaised, borderBottom: `1px solid ${V.line}` }}>
-                {["Submissions / month", "Authentication", "Shipping saved", "Total value", "Net vs £9.99"].map((h) => (
-                  <th key={h} style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", padding: "12px 16px", textAlign: "left", color: V.inkMute }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SCENARIOS.map((s, i) => (
-                <MathRow key={s.cards} {...s} isLast={i === SCENARIOS.length - 1} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, marginTop: 24, color: V.inkMute }}>
-          Based on Standard grading tier. Higher declared values save more on shipping. AI Pre-Grade credits excluded — bonus on top.
-        </p>
       </div>
     </section>
   );
@@ -479,7 +445,6 @@ function SectionII() {
 
 function SectionIII() {
   const time = useIdleTime();
-  // Slow breathing on the annual card's outer glow
   const breathe = (Math.sin(time * 0.2) + 1) / 2;
   const glow = 0.15 + breathe * 0.25;
 
@@ -495,7 +460,7 @@ function SectionIII() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Monthly card — calm, no glow */}
-          <div style={{ borderRadius: 12, padding: 32, backgroundColor: V.paper, border: `1px solid ${V.line}` }}>
+          <div style={{ borderRadius: 12, padding: 32, backgroundColor: V.paper, border: `1px solid ${V.line}`, display: "flex", flexDirection: "column" }}>
             <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 16, color: V.inkMute }}>
               Monthly
             </p>
@@ -506,7 +471,10 @@ function SectionIII() {
             <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, marginBottom: 24, color: V.inkSoft }}>
               Cancel anytime. Bill renews monthly.
             </p>
-            <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", color: V.inkMute }}>
+            <button type="button" onClick={() => startCheckout("month")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 20px", borderRadius: 999, backgroundColor: V.ink, color: V.paper, border: "none", cursor: "pointer", marginBottom: 16 }}>
+              Subscribe monthly →
+            </button>
+            <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginTop: "auto", color: V.inkMute }}>
               Good for month-to-month flexibility.
             </p>
           </div>
@@ -521,33 +489,31 @@ function SectionIII() {
               border: `1px solid ${V.goldSoft}`,
               boxShadow: `0 0 40px rgba(212, 175, 55, ${glow * 0.7}), inset 0 0 30px rgba(212, 175, 55, ${glow * 0.2})`,
               transition: "box-shadow 1s ease-in-out",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
             <span style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.15em", padding: "6px 16px", borderRadius: 4, whiteSpace: "nowrap", backgroundColor: V.gold, color: V.panelDark }}>
               Save £20.88
             </span>
             <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 16, color: V.gold }}>
-              Annual
+              Annual · 14-day free trial
             </p>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
               <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontWeight: 600, color: V.ink, fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>£99</span>
               <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, color: V.inkMute }}>/ year</span>
             </div>
             <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, marginBottom: 24, color: V.inkSoft }}>
-              Equivalent to two months free. Bill renews yearly.
+              Equivalent to two months free. 14-day free trial. Bill renews yearly.
             </p>
-            <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", color: V.gold }}>
+            <button type="button" onClick={() => startCheckout("year")} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 20px", borderRadius: 999, backgroundColor: V.gold, color: V.panelDark, border: "none", cursor: "pointer", marginBottom: 16 }}>
+              Start free trial →
+            </button>
+            <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginTop: "auto", color: V.gold }}>
               Best value for regular submitters.
             </p>
           </div>
         </div>
-
-        <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginTop: 40, textAlign: "center", color: V.gold }}>
-          Subscriptions temporarily paused — relaunching with the full perks system.
-        </p>
-        <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, textAlign: "center", marginTop: 8, color: V.inkMute }}>
-          Contact support@mintvaultuk.com to join the waitlist.
-        </p>
       </div>
     </section>
   );
@@ -568,10 +534,18 @@ function SectionIV() {
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
           <div>
             <h3 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.25rem, 1.8vw, 1.5rem)", lineHeight: 1.3, marginBottom: 12, color: V.ink }}>
-              Not a percentage discount on grading.
+              Not stacked with bulk discounts.
             </h3>
             <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, color: V.inkSoft }}>
-              Perks are flag-based — specific fees waived (Authentication, return shipping), not a blanket percentage off the price per card. Your grading fee is the same as a non-member's.
+              The basket applies whichever saves you more, never both. Silver's 10% wins up to 49 cards per submission. The bulk discount overtakes Silver at 50+ cards (15% bracket). Either way, you get the better number.
+            </p>
+          </div>
+          <div>
+            <h3 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.25rem, 1.8vw, 1.5rem)", lineHeight: 1.3, marginBottom: 12, color: V.ink }}>
+              Not free shipping or free authentication.
+            </h3>
+            <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, color: V.inkSoft }}>
+              Earlier drafts of Silver promised free return shipping and free Authentication add-ons. We didn't ship those for v1, so we stripped them rather than overclaim. They may return as paid perks later if there's demand.
             </p>
           </div>
         </div>
@@ -602,9 +576,9 @@ function SectionV() {
   const FAQS = [
     { q: "Why no Gold or Bronze tier?", a: "We launched Silver-only to learn what collectors actually use. Bronze and Gold return once the data supports them." },
     { q: "Can I cancel anytime?", a: "Yes. Monthly plans cancel from the next billing cycle. Annual plans run to the end of the paid term — no partial refunds, but you keep every perk until it ends." },
-    { q: "Do unused credits roll over?", a: "No. Free Authentication add-ons and AI Pre-Grade credits reset every month. Use them within the month or lose them." },
-    { q: "Why is checkout paused right now?", a: "We're finishing the perk-evaluator so every waived fee (shipping, Authentication) applies correctly at checkout. Relaunching soon." },
-    { q: "What if I don't submit often?", a: "Silver pays for itself at roughly one Authentication per month. If you submit less than that, skip membership and pay per-card — honestly, it's the better deal." },
+    { q: "Do unused AI credits roll over?", a: "No. AI Pre-Grade credits reset every month. Use them within the month or lose them." },
+    { q: "How does Silver stack with bulk discounts?", a: "We apply whichever saves you more, never both. Silver's 10% wins on smaller orders; the bulk discount (5/10/15% at 10/25/50+ cards) overtakes Silver at 50+ cards. Tied at 25 cards, Silver wins." },
+    { q: "What if I don't submit often?", a: "Silver pays off at roughly 4 cards per month at Standard (£25). The 10% discount alone returns £2.50 per card; AI credits and Showroom are bonus on top. If you submit less than that, skip membership and pay per-card — honestly, it's the better deal." },
   ];
   return (
     <section style={{ backgroundColor: V.paperRaised }}>
@@ -631,21 +605,21 @@ function SectionVI() {
       <DarkSectionGlow />
       <div className="mx-auto max-w-3xl px-6 py-24 md:py-32" style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
         <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.25em", marginBottom: 16, color: V.gold }}>
-          VI · Waitlist
+          VI · Subscribe
         </p>
         <h2 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.875rem, 4vw, 3rem)", lineHeight: 1.1, marginBottom: 24, color: "#FFFFFF" }}>
-          Ready when we are.
+          Ready when you are.
         </h2>
         <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, marginBottom: 40, color: "rgba(255,255,255,0.5)" }}>
-          Subscriptions are paused while we finish the perks system. Join the waitlist — you'll be first when we reopen.
+          £9.99/month or £99/year (14-day free trial). Cancel anytime.
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 24 }}>
-          <a href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 28px", borderRadius: 999, backgroundColor: V.gold, color: V.panelDark, textDecoration: "none" }}>
-            Email the waitlist →
-          </a>
-          <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 28px", borderRadius: 999, border: "1px solid rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)", textDecoration: "none" }}>
-            Try AI Pre-Grade →
-          </a>
+          <button type="button" onClick={() => startCheckout("month")} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 28px", borderRadius: 999, backgroundColor: V.gold, color: V.panelDark, border: "none", cursor: "pointer" }}>
+            Subscribe monthly →
+          </button>
+          <button type="button" onClick={() => startCheckout("year")} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 28px", borderRadius: 999, border: `1px solid ${V.gold}`, color: V.gold, backgroundColor: "transparent", cursor: "pointer" }}>
+            Annual + free trial →
+          </button>
         </div>
       </div>
     </section>

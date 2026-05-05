@@ -703,7 +703,7 @@ function SectionB() {
           {[
             { icon: "⚙", title: "NFC-tracked", desc: "Every slab links to a live logbook" },
             { icon: "📍", title: "UK-based", desc: "Graded in Kent · shipped across the UK" },
-            { icon: "↻", title: "Reholder guarantee", desc: "Free regrade if we make a mistake" },
+            { icon: "↻", title: "Ownership tracked", desc: "Each transfer recorded with a new reference number" },
           ].map((p) => (
             <div key={p.title}>
               <div style={{ fontSize: 18, color: V.gold, marginBottom: 8 }}>{p.icon}</div>
@@ -967,9 +967,9 @@ function SectionD() {
               margin: 0, marginBottom: 24, flex: 1,
             }}>
               A sub-millimetre NFC chip inside each slab links to an ownership
-              registry. Tap with any phone — instantly see provenance, transfer
-              history, and authenticity. Stolen, faked, or altered slabs
-              invalidate on scan.
+              registry. Tap with any phone — instantly see provenance and
+              transfer history. Slabs reported stolen flag publicly on the cert
+              page.
             </p>
             <div style={{ display: "flex", justifyContent: "center", height: 96, alignItems: "center" }}>
               <div style={{ position: "relative", width: 64, height: 64 }}>

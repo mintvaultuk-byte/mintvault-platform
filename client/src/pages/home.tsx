@@ -304,7 +304,7 @@ export default function HomeV2() {
               {[
                 { icon: Cpu, title: "NFC-tracked", desc: "Every slab links to a live logbook" },
                 { icon: MapPin, title: "UK-based", desc: "Graded in Kent \u00b7 shipped across the UK" },
-                { icon: RefreshCw, title: "Reholder guarantee", desc: "Free regrade if we make a mistake" },
+                { icon: RefreshCw, title: "Ownership tracked", desc: "Each transfer recorded with a new reference number" },
               ].map(({ icon: Icon, title, desc }) => (
                 <div key={title}>
                   <Icon size={18} style={{ color: "var(--v2-gold)" }} className="mb-2" />
@@ -479,9 +479,9 @@ export default function HomeV2() {
                 </h3>
                 <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "rgba(255,255,255,0.6)" }}>
                   A sub-millimetre NFC chip inside each slab links to an ownership
-                  registry. Tap with any phone &mdash; instantly see provenance, transfer
-                  history, and authenticity. Stolen, faked, or altered slabs
-                  invalidate on scan.
+                  registry. Tap with any phone &mdash; instantly see provenance and
+                  transfer history. Slabs reported stolen flag publicly on the cert
+                  page.
                 </p>
                 {/* Radar ring visual */}
                 <div className="flex items-center justify-center h-24">
