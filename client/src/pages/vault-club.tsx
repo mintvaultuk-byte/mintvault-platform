@@ -106,10 +106,6 @@ const FAQS = [
     a: "No. Free Authentication add-ons and AI Pre-Grade credits reset every month. Use them within the month or lose them.",
   },
   {
-    q: "Can I combine Silver with the bulk discount?",
-    a: "No. Your basket applies whichever saves more — Silver perks or the bulk discount — never both stacked.",
-  },
-  {
     q: "Why is checkout paused right now?",
     a: "We\u2019re finishing the perk-evaluator so every waived fee (shipping, Authentication) applies correctly at checkout. Relaunching soon.",
   },
@@ -405,16 +401,6 @@ export default function VaultClubV2() {
                 Perks are flag-based &mdash; specific fees waived (Authentication, return
                 shipping), not a blanket percentage off the price per card. Your grading fee
                 is the same as a non-member&rsquo;s.
-              </p>
-            </div>
-            <div>
-              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
-                Not stackable with the bulk discount.
-              </h3>
-              <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                Your basket applies whichever saves more &mdash; Silver perks or the bulk
-                discount &mdash; never both combined. Submitting 10 or more cards? The
-                basket may use bulk instead. It&rsquo;s always the better of the two.
               </p>
             </div>
           </div>

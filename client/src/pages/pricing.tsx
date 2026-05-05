@@ -22,8 +22,7 @@ const SILVER = {
   label: "Silver Vault",
   monthly_price_pence: 999,
   annual_price_pence: 9900,
-  ai_credits_monthly: 100,
-  free_authentication_monthly: 2,
+  ai_credits_monthly: 50,
 } as const;
 
 // Display descriptors derived from config — keep all copy/marketing text in
@@ -452,11 +451,9 @@ export default function PricingV2() {
 
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 mb-8">
               {[
-                "Priority queue within your grading tier",
-                `${SILVER.free_authentication_monthly} free Authentication add-ons every month`,
-                "Free return shipping on every declared-value tier",
                 `${SILVER.ai_credits_monthly} AI Pre-Grade credits per month`,
-                "Early access to Population Report insights",
+                "Your own public Showroom at mintvaultuk.com/showroom/[your-name]",
+                "Silver Vault badge on every cert",
               ].map((perk) => (
                 <li key={perk} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
                   <Check size={14} style={{ color: "var(--v2-gold)" }} className="mt-1 shrink-0" />
@@ -481,34 +478,40 @@ export default function PricingV2() {
         </div>
       </section>
 
-      {/* ── SECTION VI: DISCOUNT STACKING ────────────────────────────── */}
+      {/* ── SECTION VI: BULK DISCOUNTS ────────────────────────────── */}
       <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
-          <SectionEyebrow numeral="VI" label="Discount Stacking" className="mb-4" />
+          <SectionEyebrow numeral="VI" label="Bulk Discounts" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-8" style={{ color: "var(--v2-ink)" }}>
-            One discount at a time.
+            Save more when you submit more.
           </h2>
           <p className="font-body text-base md:text-lg leading-relaxed mb-6" style={{ color: "var(--v2-ink-soft)" }}>
-            Your basket uses whichever saves you more &mdash; bulk discount, or Vault Club perks.
-            Never both. It keeps the maths honest and the pricing legible.
+            Bulk discounts apply automatically at checkout based on your card count.
+            The more cards you submit, the more you save per card.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-10">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
             <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
-                Example A
+                10–24 cards
               </p>
               <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                Submit 10 or more cards? <strong style={{ color: "var(--v2-ink)" }}>Bulk discount applies</strong> &mdash; graduated from
-                5% at 10 cards to 15% at 50+.
+                <strong style={{ color: "var(--v2-ink)" }}>5% off</strong> the per-card grading fee.
               </p>
             </div>
             <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
-                Example B
+                25–49 cards
               </p>
               <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                Silver member? <strong style={{ color: "var(--v2-ink)" }}>Vault Club perks apply</strong> &mdash; free return shipping,
-                free Authentication credits, priority queue.
+                <strong style={{ color: "var(--v2-ink)" }}>10% off</strong> the per-card grading fee.
+              </p>
+            </div>
+            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
+              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+                50+ cards
+              </p>
+              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                <strong style={{ color: "var(--v2-ink)" }}>15% off</strong> the per-card grading fee.
               </p>
             </div>
           </div>
@@ -532,10 +535,6 @@ export default function PricingV2() {
               {
                 q: "Is Black Label a paid upgrade?",
                 a: "No. Black Label is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There&rsquo;s no extra charge, no form to tick. If your card earns it, you get it.",
-              },
-              {
-                q: "Can I combine Vault Club perks with the bulk discount?",
-                a: "No. Your basket applies whichever saves you more &mdash; bulk discount or Vault Club perks &mdash; never both stacked. This keeps pricing predictable and fair.",
               },
               {
                 q: "Are cards insured in transit?",

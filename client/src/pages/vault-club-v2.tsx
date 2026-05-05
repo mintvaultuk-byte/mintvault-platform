@@ -574,14 +574,6 @@ function SectionIV() {
               Perks are flag-based — specific fees waived (Authentication, return shipping), not a blanket percentage off the price per card. Your grading fee is the same as a non-member's.
             </p>
           </div>
-          <div>
-            <h3 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.25rem, 1.8vw, 1.5rem)", lineHeight: 1.3, marginBottom: 12, color: V.ink }}>
-              Not stackable with the bulk discount.
-            </h3>
-            <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, color: V.inkSoft }}>
-              Your basket applies whichever saves more — Silver perks or the bulk discount — never both combined. Submitting 10 or more cards? The basket may use bulk instead. It's always the better of the two.
-            </p>
-          </div>
         </div>
       </div>
     </section>
@@ -611,7 +603,6 @@ function SectionV() {
     { q: "Why no Gold or Bronze tier?", a: "We launched Silver-only to learn what collectors actually use. Bronze and Gold return once the data supports them." },
     { q: "Can I cancel anytime?", a: "Yes. Monthly plans cancel from the next billing cycle. Annual plans run to the end of the paid term — no partial refunds, but you keep every perk until it ends." },
     { q: "Do unused credits roll over?", a: "No. Free Authentication add-ons and AI Pre-Grade credits reset every month. Use them within the month or lose them." },
-    { q: "Can I combine Silver with the bulk discount?", a: "No. Your basket applies whichever saves more — Silver perks or the bulk discount — never both stacked." },
     { q: "Why is checkout paused right now?", a: "We're finishing the perk-evaluator so every waived fee (shipping, Authentication) applies correctly at checkout. Relaunching soon." },
     { q: "What if I don't submit often?", a: "Silver pays for itself at roughly one Authentication per month. If you submit less than that, skip membership and pay per-card — honestly, it's the better deal." },
   ];

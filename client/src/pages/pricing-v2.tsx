@@ -953,18 +953,19 @@ function SectionVI() {
     <section style={{ backgroundColor: V.paperRaised }}>
       <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
         <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.25em", marginBottom: 16, color: V.gold }}>
-          VI · Discount Stacking
+          VI · Bulk Discounts
         </p>
         <h2 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.875rem, 4vw, 3rem)", lineHeight: 1.1, marginBottom: 32, color: V.ink }}>
-          One discount at a time.
+          Save more when you submit more.
         </h2>
         <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 17, lineHeight: 1.6, marginBottom: 24, color: V.inkSoft }}>
-          Your basket uses whichever saves you more — bulk discount, or Vault Club perks. Never both. It keeps the maths honest and the pricing legible.
+          Bulk discounts apply automatically at checkout based on your card count. The more cards you submit, the more you save per card.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
           {[
-            { label: "Example A", body: <>Submit 10 or more cards? <strong style={{ color: V.ink }}>Bulk discount applies</strong> — graduated from 5% at 10 cards to 15% at 50+.</> },
-            { label: "Example B", body: <>Silver member? <strong style={{ color: V.ink }}>Vault Club perks apply</strong> — free return shipping, free Authentication credits, priority queue.</> },
+            { label: "10–24 cards", body: <><strong style={{ color: V.ink }}>5% off</strong> the per-card grading fee.</> },
+            { label: "25–49 cards", body: <><strong style={{ color: V.ink }}>10% off</strong> the per-card grading fee.</> },
+            { label: "50+ cards",   body: <><strong style={{ color: V.ink }}>15% off</strong> the per-card grading fee.</> },
           ].map((ex) => (
             <div key={ex.label} style={{ borderRadius: 8, padding: 24, backgroundColor: V.paperSunk, border: `1px solid ${V.line}` }}>
               <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 12, color: V.gold }}>
@@ -1018,7 +1019,6 @@ function SectionVII() {
   const items = [
     { q: "Why only three tiers? What happened to Gold?", a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork." },
     { q: "Is Black Label a paid upgrade?", a: "No. Black Label is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There's no extra charge, no form to tick. If your card earns it, you get it." },
-    { q: "Can I combine Vault Club perks with the bulk discount?", a: "No. Your basket applies whichever saves you more — bulk discount or Vault Club perks — never both stacked. This keeps pricing predictable and fair." },
     { q: "Are cards insured in transit?", a: "Yes. All return shipping is Royal Mail Special Delivery with cover matched to your declared-value tier. Incoming shipping is your responsibility, but we recommend Royal Mail Special Delivery for anything above £100." },
     { q: "Do you grade cards other than Pokémon?", a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you're unsure, submit anyway — we'll flag it before grading if we can't authenticate." },
   ];

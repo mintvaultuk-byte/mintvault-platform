@@ -182,7 +182,7 @@ export const guides: Guide[] = [
 <p>MintVault UK offers three grading tiers. Vault Queue tier (40 working days) starts at £19 per card. Standard is £25 (15 working days) and Express is £45 (5 working days). Choose based on how quickly you need your cards back and the value of the cards being graded.</p>
 
 <h2>Bulk Discounts</h2>
-<p>Submitting more cards reduces the per-card cost significantly. Discounts apply at 10 cards (3% off), 25 cards (5% off), 50 cards (7% off), and 100+ cards (10% off the service fee).</p>
+<p>Submitting more cards reduces the per-card cost significantly. Discounts apply automatically at checkout: 5% off for 10+ cards, 10% off for 25+ cards, and 15% off for 50+ cards.</p>
 
 <h2>Shipping to MintVault</h2>
 <p>You pay for postage to send your cards to MintVault. We recommend Royal Mail Special Delivery for domestic submissions — typically £7–£10 depending on weight. Always use tracked and insured shipping.</p>

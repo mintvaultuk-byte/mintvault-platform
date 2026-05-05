@@ -143,6 +143,55 @@ When restoring, consider:
 
 ---
 
+## v1.1 — Vault Club Silver: additional perks (post-launch decision)
+
+v1 launched with a lean perk set: AI credits + Showroom + badge.
+The original perk list (10% discount, free return shipping, free
+authentication credits, members-only Vault design, 1 free reholder credit/qtr,
+queue jump) was stripped from welcome email + config because none of these
+were enforced in code.
+
+Decide which (if any) of these to actually build based on:
+- Week-1 customer signup volume on Silver
+- Funnel data: where do non-members drop off?
+- Direct asks: what do customers say is missing?
+
+Candidate perks (any combination, build properly):
+1. **10% grading discount** — needs full discount code path on /submit checkout,
+   Stripe metadata, mutually-exclusive-with-bulk logic per locked rule
+2. **Free return shipping over £50** — needs return shipping unbundled from
+   grading fee as separate line, threshold logic, stacking rules with bulk
+3. **Free authentication credits monthly** — needs member_credits table writes
+   + checkout consumption logic
+4. **Queue jump** — would need grading queue priority field consumed by admin
+   queue ordering
+5. **Free reholder credits quarterly** — same plumbing as auth credits
+
+Each has 2-4 hours of plumbing work + Stripe testing. Do NOT promise any of
+these in welcome email or marketing until code is live in prod.
+
+---
+
+## v1.1 — vault-club.tsx + vault-club-v2.tsx rewrite around lean Silver model
+
+Both pages currently advertise unenforced perks (free Authentication ×2/mo,
+free return shipping, early pop reports) and use a SCENARIOS math table that
+multiplies these into "saves £30+/mo". Pages already say "Subscriptions
+temporarily paused — relaunching with full perks system" so no immediate
+customer harm. After v1 launch, decide:
+1. Keep `/vault-club` or `/vault-club-v2` as canonical (one or the other, not both)
+2. Rewrite around real Silver perks: 50 AI credits + Showroom + badge
+3. Replace SCENARIOS math table with realistic value framing OR delete section
+4. Update PERKS array to 3 entries
+5. Update hero subhead "5 perks" → "3 perks"
+6. Update FAQs (remove unused-credit-rollover claim about free Authentication)
+7. Section IV "What Silver isn't" — remove "Not a percentage discount" subblock if no longer needed; the bulk-stacking subblock has already been stripped pre-launch
+
+Either keep "Subscriptions temporarily paused" copy and delay further, OR
+fully rewrite when subscription opens.
+
+---
+
 ## v1.1 — Draft grade exposure on public cert page
 
 The `certificates.grade` column is written by both `draft_save` (debounced auto-save during admin editing) AND `approve` (final publish). The public `/cert/:id` page reads `grade` directly without checking `grade_approved_at`. Result: any draft-state edit immediately leaks to the public QR-scan view.
