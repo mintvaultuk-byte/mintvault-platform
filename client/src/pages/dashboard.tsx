@@ -13,6 +13,7 @@ import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
 import SeoHead from "@/components/seo-head";
+import Starfield from "@/components/starfield";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface CustomerSubmission {
@@ -995,7 +996,17 @@ export default function DashboardPage() {
         description="Track your MintVault submissions, view your graded cards, and manage ownership."
         canonical="https://mintvaultuk.com/dashboard"
       />
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div
+        className="dashboard-page"
+        style={{
+          backgroundColor: "#0a0e1a",
+          minHeight: "100vh",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <Starfield />
+      <div className="max-w-3xl mx-auto px-4 py-8" style={{ position: "relative", zIndex: 1 }}>
 
         {/* Premium / standard header — switches on Vault Club Silver membership */}
         <MemberHeader
@@ -1034,9 +1045,9 @@ export default function DashboardPage() {
           {subsLoading ? (
             <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
           ) : !submissions?.length ? (
-            <div className="border border-[#E8E4DC] rounded-xl p-8 text-center">
+            <div className="border border-white/10 rounded-xl p-8 text-center">
               <Package size={32} className="text-[#D4AF37]/20 mx-auto mb-3" />
-              <p className="text-[#999999] text-sm mb-1">You haven't submitted any cards yet.</p>
+              <p className="text-white/60 text-sm mb-1">You haven't submitted any cards yet.</p>
               <Link href="/submit">
                 <button className="btn-gold mt-4 px-5 py-2 rounded-lg text-[#1A1400] text-xs font-bold tracking-wide">
                   Submit Your First Card →
@@ -1062,8 +1073,8 @@ export default function DashboardPage() {
           {certsLoading ? (
             <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
           ) : !linkedCerts.length ? (
-            <div className="border border-[#E8E4DC] rounded-xl p-6 text-center">
-              <p className="text-[#999999] text-sm">No graded cards found for this email yet.</p>
+            <div className="border border-white/10 rounded-xl p-6 text-center">
+              <p className="text-white/60 text-sm">No graded cards found for this email yet.</p>
             </div>
           ) : (
             <div>
@@ -1193,6 +1204,7 @@ export default function DashboardPage() {
               "Your Cards" above. The standalone OwnedCertRow component +
               the duplicated cert metadata it displayed were collapsed in
               favour of one card per cert. ──────────────────────────── */}
+      </div>
       </div>
     </>
   );
