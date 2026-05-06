@@ -242,10 +242,11 @@ export default function HomeV2() {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(180deg,
-            rgba(248, 244, 232, 0) 0%,
-            rgba(248, 244, 232, 0.4) 60%,
-            rgba(248, 244, 232, 0.95) 100%);
+          background: linear-gradient(105deg,
+            rgba(248, 244, 232, 0.85) 0%,
+            rgba(248, 244, 232, 0.65) 35%,
+            rgba(248, 244, 232, 0.25) 60%,
+            rgba(248, 244, 232, 0) 80%);
           pointer-events: none;
           z-index: 0;
         }
