@@ -215,12 +215,50 @@ export default function HomeV2() {
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="homepage-vault-bg min-h-screen flex flex-col relative">
+      <style>{`
+        .homepage-vault-bg {
+          background-image: url('/images/hero-vault.webp');
+          background-size: cover;
+          background-position: center center;
+          background-attachment: fixed;
+          background-repeat: no-repeat;
+        }
+        /* iOS Safari and most mobile browsers ignore background-attachment: fixed,
+           and on those that don't, it tanks scroll performance. Drop to scroll
+           below the breakpoint. */
+        @media (max-width: 768px) {
+          .homepage-vault-bg {
+            background-attachment: scroll;
+          }
+        }
+        /* Hero section sits transparent so the vault image shows through, with
+           a bottom-fade overlay so the page transitions smoothly into the
+           cream-coloured Section B below. */
+        .vault-hero-section {
+          position: relative;
+        }
+        .vault-hero-section::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg,
+            rgba(248, 244, 232, 0) 0%,
+            rgba(248, 244, 232, 0.4) 60%,
+            rgba(248, 244, 232, 0.95) 100%);
+          pointer-events: none;
+          z-index: 0;
+        }
+        .vault-hero-section > * {
+          position: relative;
+          z-index: 1;
+        }
+      `}</style>
       <AmbientLayer />
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
-      <section className="relative">
+      <section className="relative vault-hero-section">
         <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
           {/* Left — copy */}
           <div>
