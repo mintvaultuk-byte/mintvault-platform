@@ -215,26 +215,11 @@ export default function HomeV2() {
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
-    <div className="homepage-vault-bg min-h-screen flex flex-col relative">
+    <div className="min-h-screen flex flex-col relative">
       <style>{`
-        .homepage-vault-bg {
-          background-image: url('/images/hero-vault.webp');
-          background-size: cover;
-          background-position: center center;
-          background-attachment: fixed;
-          background-repeat: no-repeat;
-        }
-        /* iOS Safari and most mobile browsers ignore background-attachment: fixed,
-           and on those that don't, it tanks scroll performance. Drop to scroll
-           below the breakpoint. */
-        @media (max-width: 768px) {
-          .homepage-vault-bg {
-            background-attachment: scroll;
-          }
-        }
-        /* Hero section sits transparent so the vault image shows through, with
-           a bottom-fade overlay so the page transitions smoothly into the
-           cream-coloured Section B below. */
+        /* Hero section sits transparent so the site-wide vault video shows
+           through, with a diagonal cream overlay so the headline area on the
+           left reads cleanly while the SlabFan side stays unobstructed. */
         .vault-hero-section {
           position: relative;
         }

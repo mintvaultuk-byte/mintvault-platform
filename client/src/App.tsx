@@ -175,6 +175,7 @@ import Journal from "@/pages/journal";
 import JournalDetail from "@/pages/journal-detail";
 import Technology from "@/pages/technology";
 import Registry from "@/pages/registry";
+import VaultVideoBg from "@/components/v2/vault-video-bg";
 
 // Redirect helper — wouter has no built-in redirect, so we replace the URL
 // on mount and render nothing. Used for legacy URLs that moved during cutover.
@@ -187,6 +188,7 @@ function Redirect({ to }: { to: string }) {
 function Router() {
   return (
     <>
+      <VaultVideoBg />
       <ScrollToTop />
       <ScrollReveal />
       <Switch>
