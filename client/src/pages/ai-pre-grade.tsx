@@ -222,9 +222,9 @@ export default function AiPreGradeV2() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
             <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
               One photo.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>Four subgrades.</span>
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>Four subgrades.</span>
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
               Take a photo or upload one. Our AI analyses centering, corners, edges, and
               surface separately and returns a subgrade breakdown plus a grade range.
               It&rsquo;s a sense-check, not a definitive grade.
@@ -243,7 +243,7 @@ export default function AiPreGradeV2() {
               >
                 <p
                   className="font-display italic font-medium leading-none"
-                  style={{ color: "rgba(212, 175, 55, 0.35)", fontSize: "clamp(2rem, 4vw, 3rem)" }}
+                  style={{ color: "var(--v2-gold)", fontSize: "clamp(2rem, 4vw, 3rem)" }}
                 >
                   {s.number}
                 </p>
@@ -251,7 +251,7 @@ export default function AiPreGradeV2() {
                   <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
                     {s.title}
                   </h3>
-                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
                     {s.body}
                   </p>
                 </div>
@@ -428,7 +428,7 @@ export default function AiPreGradeV2() {
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             One photo.<br />One grade range.<br />Zero friction.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             First estimate is free. Credit packs start at &pound;2. Full grading starts at
             &pound;19 when you&rsquo;re ready.
           </p>
@@ -443,7 +443,7 @@ export default function AiPreGradeV2() {
             <Link
               href="/pricing"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               See full grading pricing <ArrowRight size={14} />
             </Link>

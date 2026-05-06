@@ -129,7 +129,7 @@ export default function JournalV2() {
                         fontStyle: "italic",
                         fontWeight: 500,
                         fontSize: "clamp(5rem, 14vw, 9rem)",
-                        color: "rgba(212, 175, 55, 0.45)",
+                        color: "var(--v2-gold)",
                         lineHeight: 1,
                         userSelect: "none",
                         pointerEvents: "none",
@@ -146,7 +146,7 @@ export default function JournalV2() {
                       fontSize: "10px",
                       letterSpacing: "0.2em",
                       textTransform: "uppercase",
-                      color: "rgba(255,255,255,0.55)",
+                      color: "#ffffff",
                       pointerEvents: "none",
                     }}
                   >
@@ -160,7 +160,7 @@ export default function JournalV2() {
                       fontSize: "9px",
                       letterSpacing: "0.3em",
                       textTransform: "uppercase",
-                      color: "rgba(255,255,255,0.3)",
+                      color: "#ffffff",
                       pointerEvents: "none",
                     }}
                   >

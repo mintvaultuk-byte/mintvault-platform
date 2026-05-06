@@ -176,8 +176,8 @@
      reset since they have their own solid backgrounds. */
   .vault-page {
     --v2-ink: #ffffff;
-    --v2-ink-soft: rgba(255, 255, 255, 0.9);
-    --v2-ink-mute: rgba(255, 255, 255, 0.8);
+    --v2-ink-soft: #ffffff;
+    --v2-ink-mute: #ffffff;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   }
   .vault-page header,
@@ -193,8 +193,8 @@
   .frost-panel-dark,
   .vault-hero-section {
     --v2-ink: #ffffff;
-    --v2-ink-soft: rgba(255, 255, 255, 0.9);
-    --v2-ink-mute: rgba(255, 255, 255, 0.8);
+    --v2-ink-soft: #ffffff;
+    --v2-ink-mute: #ffffff;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   }
   .vault-page [style*="--v2-paper"],
@@ -216,7 +216,7 @@
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   }
   .text-on-vault-muted {
-    color: rgba(255, 255, 255, 0.9);
+    color: #ffffff;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   }
 

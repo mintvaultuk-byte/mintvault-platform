@@ -164,9 +164,9 @@ export default function PricingV2() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
             <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
               Three tiers.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One standard.</span>
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One standard.</span>
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
               Every card passes the same four-point inspection: centering, corners, edges,
               surface. Tier only changes how quickly the work comes back.
             </p>
@@ -273,14 +273,14 @@ export default function PricingV2() {
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
               className="font-mono-v2 text-[9px] uppercase tracking-[0.3em] mb-3"
-              style={{ color: "var(--v2-gold-soft)" }}
+              style={{ color: "var(--v2-gold)" }}
             >
               Black Label &middot; Earned, not sold
             </p>
             <p className="font-display italic font-medium text-2xl md:text-3xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
               When every subgrade scores a 10, the slab upgrades automatically.
             </p>
-            <p className="font-body text-sm md:text-base" style={{ color: "rgba(255,255,255,0.6)" }}>
+            <p className="font-body text-sm md:text-base" style={{ color: "#ffffff" }}>
               Black Label is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit
               perfect across centering, corners, edges, and surface. There&rsquo;s no separate fee,
               no form to tick. If it earns it, you get it.
@@ -571,7 +571,7 @@ export default function PricingV2() {
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             Ready when you are.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             From &pound;19. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
@@ -585,7 +585,7 @@ export default function PricingV2() {
             <Link
               href="/tools/estimate"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>

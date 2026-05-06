@@ -309,7 +309,7 @@ export default function RegistryV2() {
           >
             Add your card<br />to the registry.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             Every cert joins the same public ledger. Submit once, stays forever.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -323,7 +323,7 @@ export default function RegistryV2() {
             <Link
               href="/pricing"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               See pricing <ArrowRight size={14} />
             </Link>

@@ -50,7 +50,7 @@ function SpecCard({
       </div>
       <ul
         className="mt-6 space-y-2 font-mono-v2 text-[11px] uppercase tracking-widest"
-        style={{ color: onDark ? "rgba(255,255,255,0.7)" : "var(--v2-ink-soft)" }}
+        style={{ color: onDark ? "#ffffff" : "var(--v2-ink-soft)" }}
       >
         {specs.map((s) => (
           <li key={s} className="flex items-start gap-2">
@@ -83,7 +83,7 @@ function ComponentSection({
   bgVar: string;
 }) {
   const headlineColour = onDark ? "#FFFFFF" : "var(--v2-ink)";
-  const bodyColour = onDark ? "rgba(255,255,255,0.65)" : "var(--v2-ink-soft)";
+  const bodyColour = onDark ? "#ffffff" : "var(--v2-ink-soft)";
   const frostClass =
     bgVar === "var(--v2-panel-dark)" ? "frost-panel-dark"
     : bgVar === "var(--v2-paper-raised)" ? "frost-paper-raised"
@@ -332,7 +332,7 @@ export default function TechnologyV2() {
           >
             Five components.<br />Every submission.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             Every MintVault submission ships in a slab with all five components.
             No tiers, no upgrades, no premium shells. One standard.
           </p>
@@ -347,7 +347,7 @@ export default function TechnologyV2() {
             <Link
               href="/pricing"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               See pricing <ArrowRight size={14} />
             </Link>

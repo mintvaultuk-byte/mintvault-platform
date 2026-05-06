@@ -199,9 +199,9 @@ export default function VaultClubV2() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
             <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
               Four perks.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>All enforced.</span>
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>All enforced.</span>
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
               Every Silver perk is wired into code &mdash; the discount applies at
               checkout, the credits land in your account, the Showroom activates
               on first billing, the badge renders on your certs. Nothing promised
@@ -220,7 +220,7 @@ export default function VaultClubV2() {
                 <p
                   className="font-display italic font-medium leading-none"
                   style={{
-                    color: "rgba(212, 175, 55, 0.35)",
+                    color: "var(--v2-gold)",
                     fontSize: "clamp(2rem, 4vw, 3rem)",
                   }}
                 >
@@ -230,7 +230,7 @@ export default function VaultClubV2() {
                   <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
                     {perk.title}
                   </h3>
-                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
                     {perk.body}
                   </p>
                   {perk.value && (
@@ -415,7 +415,7 @@ export default function VaultClubV2() {
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             Ready when you are.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             {poundsFromPence(SILVER.monthly_price_pence)}/month or {poundsFromPence(SILVER.annual_price_pence)}/year (14-day free trial). Cancel anytime.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">

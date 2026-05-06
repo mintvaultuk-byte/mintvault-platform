@@ -299,9 +299,9 @@ export default function HomeV2() {
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
               <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-                Three tiers.<br /><span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One standard.</span>
+                Three tiers.<br /><span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One standard.</span>
               </h2>
-              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
                 Every card, regardless of service level, passes the same four-point
                 inspection (centering, corners, edges, surface). Tier only changes
                 how quickly you see it back.
@@ -416,7 +416,7 @@ export default function HomeV2() {
               </div>
             </div>
 
-            <p className="font-body text-xs text-center mt-8" style={{ color: "rgba(255,255,255,0.85)" }}>
+            <p className="font-body text-xs text-center mt-8" style={{ color: "#ffffff" }}>
               Bulk discounts from 10 cards.
             </p>
           </div>
@@ -449,7 +449,7 @@ export default function HomeV2() {
                 <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "#FFFFFF" }}>
                   Every slab knows who owns it.
                 </h3>
-                <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+                <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "#ffffff" }}>
                   A sub-millimetre NFC chip inside each slab links to an ownership
                   registry. Tap with any phone &mdash; instantly see provenance and
                   transfer history. Slabs reported stolen flag publicly on the cert
@@ -632,7 +632,7 @@ export default function HomeV2() {
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             Submit a card.<br />See yourself on the registry.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             From &pound;19. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
@@ -646,7 +646,7 @@ export default function HomeV2() {
             <Link
               href="/tools/estimate"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>

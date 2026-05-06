@@ -349,9 +349,9 @@ export default function VerifyV2() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
             <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
               Three layers.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold-soft)" }}>One truth.</span>
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One truth.</span>
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "rgba(255,255,255,0.6)" }}>
+            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
               Every MintVault slab has three ways into the registry: the NFC chip, the
               printed cert number, and the visible ownership chain. Any one opens the
               same record — the tamper-evident slab is what ties that record to the
@@ -371,7 +371,7 @@ export default function VerifyV2() {
               >
                 <p
                   className="font-display italic font-medium leading-none"
-                  style={{ color: "rgba(212, 175, 55, 0.35)", fontSize: "clamp(2rem, 4vw, 3rem)" }}
+                  style={{ color: "var(--v2-gold)", fontSize: "clamp(2rem, 4vw, 3rem)" }}
                 >
                   {m.number}
                 </p>
@@ -379,7 +379,7 @@ export default function VerifyV2() {
                   <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
                     {m.title}
                   </h3>
-                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "rgba(255,255,255,0.6)" }}>
+                  <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
                     {m.body}
                   </p>
                 </div>
@@ -481,7 +481,7 @@ export default function VerifyV2() {
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
             Scan. Tap. Type.<br />Know.
           </h2>
-          <p className="font-body text-sm md:text-base mb-10" style={{ color: "rgba(255,255,255,0.5)" }}>
+          <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             Free, unlimited, no account. Before you buy, before you sell, before you trust.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
@@ -495,7 +495,7 @@ export default function VerifyV2() {
             <Link
               href="/registry"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.7)" }}
+              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               Browse the registry <ArrowRight size={14} />
             </Link>

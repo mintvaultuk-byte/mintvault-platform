@@ -98,7 +98,7 @@ export default function FooterV2() {
                     <a
                       href={link.href}
                       className="font-body text-sm no-underline transition-colors hover:underline"
-                      style={{ color: "rgba(255,255,255,0.85)" }}
+                      style={{ color: "#ffffff" }}
                     >
                       {link.label}
                     </a>
@@ -117,7 +117,7 @@ export default function FooterV2() {
           {/* Mark */}
           <span
             className="font-display italic text-lg font-medium"
-            style={{ color: "rgba(255,255,255,0.7)" }}
+            style={{ color: "#ffffff" }}
           >
             {COMPANY.tradingName}
           </span>
@@ -125,7 +125,7 @@ export default function FooterV2() {
           {/* Legal line */}
           <p
             className="font-body text-xs leading-relaxed"
-            style={{ color: "rgba(255,255,255,0.6)" }}
+            style={{ color: "#ffffff" }}
           >
             &copy; 2026 {COMPANY.legalName} &middot; Registered in England &amp; Wales
             &middot; Company No. {COMPANY.companyNumber}
