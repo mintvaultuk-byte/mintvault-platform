@@ -200,15 +200,15 @@ export default function VaultClubV2() {
                     {perk.body}
                   </p>
                   {perk.value && (
-                    <p className="md:hidden font-mono-v2 text-[10px] uppercase tracking-widest mt-3" style={{ color: "var(--v2-gold)" }}>
+                    <p className="md:hidden font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-3" style={{ color: "#ffffff" }}>
                       {perk.value}
                     </p>
                   )}
                 </div>
                 {perk.value && (
                   <p
-                    className="hidden md:block font-mono-v2 text-[10px] uppercase tracking-widest self-start text-right whitespace-nowrap"
-                    style={{ color: "var(--v2-gold)" }}
+                    className="hidden md:block font-mono-v2 text-xs md:text-sm uppercase tracking-widest self-start text-right whitespace-nowrap"
+                    style={{ color: "#ffffff" }}
                   >
                     {perk.value}
                   </p>

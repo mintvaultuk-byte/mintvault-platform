@@ -321,7 +321,7 @@ export default function AiPreGradeV2() {
             </div>
           </div>
 
-          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-10 text-center" style={{ color: "var(--v2-gold)" }}>
+          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-10 text-center" style={{ color: "#ffffff" }}>
             Vault Club Silver members will get 100 credits every month when the club reopens.
           </p>
           <p className="font-body text-xs text-center mt-2" style={{ color: "var(--v2-ink-mute)" }}>

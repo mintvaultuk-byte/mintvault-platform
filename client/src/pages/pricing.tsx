@@ -238,8 +238,8 @@ export default function PricingV2() {
           {/* Black Label editorial callout — not a 4th tier card */}
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
-              className="font-mono-v2 text-[9px] uppercase tracking-[0.3em] mb-3"
-              style={{ color: "var(--v2-gold)" }}
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] mb-3"
+              style={{ color: "#ffffff" }}
             >
               Black Label &middot; Earned, not sold
             </p>
