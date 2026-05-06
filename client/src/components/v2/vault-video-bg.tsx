@@ -65,7 +65,10 @@ export default function VaultVideoBg() {
     };
 
     const onMetadata = () => {
-      // Set initial frame to current scroll position, then track scroll.
+      // autoPlay warms up the decoder pipeline so currentTime seeks
+      // actually render frames; pause immediately so scroll position
+      // (not 1x playback) drives the timeline.
+      video.pause();
       updateVideoTime();
       window.addEventListener("scroll", onScroll, { passive: true });
     };
@@ -88,6 +91,7 @@ export default function VaultVideoBg() {
       <video
         ref={videoRef}
         src="/videos/hero-vault.mp4"
+        autoPlay
         muted
         playsInline
         preload="auto"
