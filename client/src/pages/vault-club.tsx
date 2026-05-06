@@ -4,7 +4,6 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
-import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 import { apiRequest } from "@/lib/queryClient";
 import { VAULT_CLUB_SILVER_DISCOUNT_PERCENT } from "@shared/schema";
 
@@ -108,87 +107,54 @@ export default function VaultClubV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
-        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
-          {/* Left — copy */}
-          <div>
-            <p
-              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
-              style={{ color: "var(--v2-gold)" }}
+        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
+          <p
+            className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+            style={{ color: "var(--v2-gold)" }}
+          >
+            Est. Kent &middot; Vault Club
+          </p>
+          <h1
+            className="font-display italic font-medium leading-[0.95] mb-6"
+            style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+          >
+            For the<br />regular submitter.
+          </h1>
+          <p
+            className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
+            style={{ color: "var(--v2-ink-soft)" }}
+          >
+            Silver is a paid membership for collectors who submit regularly.
+            {" "}{SILVER.grading_discount_percent}% off every grading fee, {SILVER.ai_credits_monthly} AI Pre-Grade credits
+            every month, your own public Showroom, and a member badge across the
+            registry.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
+            <button
+              type="button"
+              onClick={() => checkoutMutation.mutate({ interval: "month" })}
+              disabled={checkoutMutation.isPending}
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
-              Est. Kent &middot; Vault Club
-            </p>
-            <h1
-              className="font-display italic font-medium leading-[0.95] mb-6"
-              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+              {checkoutMutation.isPending
+                ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
+                : <>Subscribe — {poundsFromPence(SILVER.monthly_price_pence)}/mo <ArrowRight size={14} /></>}
+            </button>
+            <Link
+              href="/tools/estimate"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
+              style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
             >
-              For the<br />regular submitter.
-            </h1>
-            <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
-              style={{ color: "var(--v2-ink-soft)" }}
-            >
-              Silver is a paid membership for collectors who submit regularly.
-              {" "}{SILVER.grading_discount_percent}% off every grading fee, {SILVER.ai_credits_monthly} AI Pre-Grade credits
-              every month, your own public Showroom, and a member badge across the
-              registry.
-            </p>
-            <div className="flex flex-wrap items-center gap-3 mb-5">
-              <button
-                type="button"
-                onClick={() => checkoutMutation.mutate({ interval: "month" })}
-                disabled={checkoutMutation.isPending}
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
-                {checkoutMutation.isPending
-                  ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                  : <>Subscribe — {poundsFromPence(SILVER.monthly_price_pence)}/mo <ArrowRight size={14} /></>}
-              </button>
-              <Link
-                href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
-              >
-                Try AI Pre-Grade (free) <ArrowRight size={14} />
-              </Link>
-            </div>
-            <p
-              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
-              style={{ color: "var(--v2-ink-mute)" }}
-            >
-              {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year (14-day free trial) &middot; Available now
-            </p>
+              Try AI Pre-Grade (free) <ArrowRight size={14} />
+            </Link>
           </div>
-
-          {/* Right — perk-preview slab fan. Top = grading discount (primary value
-              prop), middle = AI credits (recurring monthly benefit), back = Showroom
-              (membership identity). Silver badge implicit in copy. */}
-          {(() => {
-            const slabs: [SlabContent, SlabContent, SlabContent] = [
-              {
-                topBadge: "GRADING DISCOUNT",
-                mainLabel: `${SILVER.grading_discount_percent}% off`,
-                rightLabel: "Per card",
-                footnote: "EVERY SUBMISSION",
-                key: "discount",
-              },
-              {
-                topBadge: "AI CREDITS",
-                mainLabel: `×${SILVER.ai_credits_monthly}`,
-                rightLabel: "/mo",
-                footnote: "PRE-GRADE TESTING",
-                key: "credits",
-              },
-              {
-                topBadge: "SHOWROOM",
-                mainLabel: "Public",
-                rightLabel: "page",
-                footnote: "PERSONAL URL",
-                key: "showroom",
-              },
-            ];
-            return <HeroSlabFan slabs={slabs} />;
-          })()}
+          <p
+            className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+            style={{ color: "var(--v2-ink-mute)" }}
+          >
+            {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year (14-day free trial) &middot; Available now
+          </p>
         </div>
       </section>
 

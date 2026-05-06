@@ -5,7 +5,6 @@ import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import CertIdInput from "@/components/cert-id-input";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
-import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 
 // ── API types ──────────────────────────────────────────────────────────────
 
@@ -227,8 +226,7 @@ export default function VerifyV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section id="verify" className="relative scroll-mt-20">
-        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
-          {/* Left — copy + form */}
+        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32">
           <div>
             <p
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
@@ -311,34 +309,6 @@ export default function VerifyV2() {
               </p>
             )}
           </div>
-
-          {/* Right — trust-signal slab fan */}
-          {(() => {
-            const slabs: [SlabContent, SlabContent, SlabContent] = [
-              {
-                topBadge: "NFC TAP",
-                mainLabel: "1 second",
-                rightLabel: "Instant",
-                footnote: "NO APP NEEDED",
-                key: "nfc",
-              },
-              {
-                topBadge: "CERTIFICATE",
-                mainLabel: "Signed",
-                rightLabel: "Unique",
-                footnote: "ONLINE-VERIFIABLE",
-                key: "cert",
-              },
-              {
-                topBadge: "OWNERSHIP",
-                mainLabel: "Tracked",
-                rightLabel: "Chain",
-                footnote: "KEEPER HISTORY",
-                key: "ownership",
-              },
-            ];
-            return <HeroSlabFan slabs={slabs} />;
-          })()}
         </div>
       </section>
 
