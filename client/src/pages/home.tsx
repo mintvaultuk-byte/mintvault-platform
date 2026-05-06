@@ -620,8 +620,6 @@ export default function HomeV2() {
         style={{
           position: "relative",
           overflow: "hidden",
-          backgroundImage:
-            "radial-gradient(ellipse 70% 60% at center, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.3) 45%, rgba(0,0,0,0) 80%)",
         }}
       >
         <DarkSectionGlow />
