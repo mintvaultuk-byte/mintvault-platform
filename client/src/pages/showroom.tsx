@@ -75,16 +75,7 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
             {card.grade !== null && (
               <>
                 <span className="text-[#CCCCCC] mx-1">·</span>
-                <span
-                  style={{
-                    color: card.is_black_label
-                      ? "#1A1A1A"
-                      : card.grade >= 10 ? "#B8960C"
-                      : card.grade >= 9 ? "#22c55e"
-                      : card.grade >= 8 ? "#3b82f6"
-                      : "#9ca3af",
-                  }}
-                >
+                <span style={{ color: "#D4AF37" }}>
                   Grade {card.grade}
                 </span>
               </>
@@ -123,16 +114,7 @@ function CardListItem({ card }: { card: ShowroomCard }) {
           {card.grade !== null && (
             <>
               <span className="text-[#CCCCCC] mx-1">·</span>
-              <span
-                style={{
-                  color: card.is_black_label
-                    ? "#1A1A1A"
-                    : card.grade >= 10 ? "#B8960C"
-                    : card.grade >= 9 ? "#22c55e"
-                    : card.grade >= 8 ? "#3b82f6"
-                    : "#9ca3af",
-                }}
-              >
+              <span style={{ color: "#D4AF37" }}>
                 Grade {card.grade}
               </span>
             </>
