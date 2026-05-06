@@ -1,31 +1,32 @@
 import { memo, useMemo } from "react";
 
-// 3-layer parallax starfield with randomised positions and shooting stars.
-// Far layer drifts slowest, front layer fastest — creates depth via differential
-// motion. Star coordinates regenerate on each component mount, so the layout
-// differs per page navigation.
+// 3-layer parallax sparkle starfield with shooting stars.
+// Stars render as 4-point sparkle <symbol> shapes (not plain dots), pulse
+// via scale+opacity, and randomise positions per mount. Front-layer stars
+// also carry a cream-coloured core for visible depth contrast.
 //
-// All stars render in MintVault gold (#D4AF37). Shooter A is white, Shooter B
-// is gold — provides a subtle accent contrast.
+// All sparkle paths fill MintVault gold (#D4AF37). Front-layer core is cream
+// (#fff5dc). Shooting stars alternate white and gold streaks, four total,
+// staggered so the screen sees one cross every ~2-3 seconds on average.
 
 interface StarShape {
   cx: number;
   cy: number;
-  r: number;
+  size: number;
   cls: string;
   key: number;
 }
 
 function generateStars(
   count: number,
-  rMin: number,
-  rMax: number,
+  sizeMin: number,
+  sizeMax: number,
   classes: string[],
 ): StarShape[] {
   return Array.from({ length: count }, (_, i) => ({
     cx: Math.random() * 1000,
     cy: Math.random() * 600,
-    r: rMin + Math.random() * (rMax - rMin),
+    size: sizeMin + Math.random() * (sizeMax - sizeMin),
     cls: classes[Math.floor(Math.random() * classes.length)],
     key: i,
   }));
@@ -35,18 +36,21 @@ function StarLayer({
   stars,
   opacity,
   driftClass,
+  symbolId,
 }: {
   stars: StarShape[];
   opacity: number;
   driftClass: string;
+  symbolId: string;
 }) {
-  const circles = stars.map((s) => (
-    <circle
+  const uses = stars.map((s) => (
+    <use
       key={s.key}
-      cx={s.cx}
-      cy={s.cy}
-      r={s.r}
-      fill="#D4AF37"
+      href={`#${symbolId}`}
+      x={s.cx - s.size / 2}
+      y={s.cy - s.size / 2}
+      width={s.size}
+      height={s.size}
       className={s.cls}
     />
   ));
@@ -54,10 +58,10 @@ function StarLayer({
     <div className="sf-layer" style={{ opacity }}>
       <div className={driftClass}>
         <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice">
-          {circles}
+          {uses}
         </svg>
         <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice">
-          {circles}
+          {uses}
         </svg>
       </div>
     </div>
@@ -67,9 +71,9 @@ function StarLayer({
 function Starfield() {
   const stars = useMemo(
     () => ({
-      far: generateStars(30, 0.3, 0.5, ["t1", "t2", "t3", "t4"]),
-      mid: generateStars(22, 0.8, 1.0, ["t1", "t2", "t3", "t4"]),
-      front: generateStars(12, 1.6, 2.0, ["tb1", "tb2"]),
+      far:   generateStars(60, 4,  6,  ["t1", "t2", "t3", "t4"]),
+      mid:   generateStars(45, 7,  10, ["t1", "t2", "t3", "t4"]),
+      front: generateStars(20, 12, 16, ["tb1", "tb2"]),
     }),
     [],
   );
@@ -79,30 +83,30 @@ function Starfield() {
       <style>{`
         @keyframes sf-drift {
           from { transform: translateY(0); }
-          to { transform: translateY(-50%); }
+          to   { transform: translateY(-50%); }
         }
         @keyframes sf-twinkle {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 1; }
+          0%, 100% { opacity: 0.4; transform: scale(0.85); }
+          50%      { opacity: 1;   transform: scale(1); }
         }
         @keyframes sf-twinkle-bright {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
+          0%, 100% { opacity: 0.6; transform: scale(0.9); }
+          50%      { opacity: 1;   transform: scale(1.05); }
         }
         @keyframes sf-shoot {
           0%   { transform: translate(-120px, -60px) rotate(25deg); opacity: 0; }
           8%   { opacity: 0; }
           12%  { opacity: 1; }
-          42%  { transform: translate(800px, 250px) rotate(25deg); opacity: 1; }
-          46%  { opacity: 0; }
+          35%  { transform: translate(800px, 250px) rotate(25deg); opacity: 1; }
+          38%  { opacity: 0; }
           100% { transform: translate(800px, 250px) rotate(25deg); opacity: 0; }
         }
         @keyframes sf-shoot2 {
           0%   { transform: translate(-150px, 0px) rotate(20deg); opacity: 0; }
           8%   { opacity: 0; }
           12%  { opacity: 1; }
-          37%  { transform: translate(900px, 350px) rotate(20deg); opacity: 1; }
-          41%  { opacity: 0; }
+          35%  { transform: translate(900px, 350px) rotate(20deg); opacity: 1; }
+          38%  { opacity: 0; }
           100% { transform: translate(900px, 350px) rotate(20deg); opacity: 0; }
         }
 
@@ -136,6 +140,13 @@ function Starfield() {
           height: 50%;
         }
 
+        /* Sparkle stars need transform-box so scale animates around their own
+           bounding-box centre rather than the SVG viewport origin. */
+        .sf-wrap .t1, .sf-wrap .t2, .sf-wrap .t3, .sf-wrap .t4,
+        .sf-wrap .tb1, .sf-wrap .tb2 {
+          transform-origin: center;
+          transform-box: fill-box;
+        }
         .sf-wrap .t1  { animation: sf-twinkle 2.5s ease-in-out infinite; }
         .sf-wrap .t2  { animation: sf-twinkle 3.5s ease-in-out infinite; animation-delay: 0.6s; }
         .sf-wrap .t3  { animation: sf-twinkle 4.5s ease-in-out infinite; animation-delay: 1.4s; }
@@ -143,28 +154,42 @@ function Starfield() {
         .sf-wrap .tb1 { animation: sf-twinkle-bright 3s ease-in-out infinite; }
         .sf-wrap .tb2 { animation: sf-twinkle-bright 4s ease-in-out infinite; animation-delay: 1s; }
 
-        .shooter-a, .shooter-b {
+        /* 4 shooters — 2 white via sf-shoot (25° angle), 2 gold via sf-shoot2 (20° angle).
+           Staggered durations + delays so on average one streak crosses every ~2-3s. */
+        .shooter-1, .shooter-2, .shooter-3, .shooter-4 {
           position: absolute;
           left: 0;
           width: 80px;
           pointer-events: none;
           transform-origin: left center;
+          opacity: 0;
         }
-        .shooter-a {
-          top: 25%;
+        .shooter-1 {
+          top: 15%;
           height: 1.2px;
           background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.9) 100%);
-          animation: sf-shoot 11s ease-out infinite;
-          animation-delay: 2s;
-          opacity: 0;
+          animation: sf-shoot 7s ease-out infinite;
         }
-        .shooter-b {
-          top: 50%;
+        .shooter-2 {
+          top: 35%;
           height: 1.5px;
           background: linear-gradient(90deg, transparent 0%, #D4AF37 100%);
-          animation: sf-shoot2 16s ease-out infinite;
-          animation-delay: 8s;
-          opacity: 0;
+          animation: sf-shoot2 9s ease-out infinite;
+          animation-delay: 3s;
+        }
+        .shooter-3 {
+          top: 55%;
+          height: 1.2px;
+          background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.9) 100%);
+          animation: sf-shoot 8s ease-out infinite;
+          animation-delay: 5s;
+        }
+        .shooter-4 {
+          top: 75%;
+          height: 1.5px;
+          background: linear-gradient(90deg, transparent 0%, #D4AF37 100%);
+          animation: sf-shoot2 10s ease-out infinite;
+          animation-delay: 7s;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -172,16 +197,42 @@ function Starfield() {
           .sf-drift-mid,
           .sf-drift-front { animation: none; }
           .sf-wrap .t1, .sf-wrap .t2, .sf-wrap .t3, .sf-wrap .t4,
-          .sf-wrap .tb1, .sf-wrap .tb2 { animation: none; opacity: 0.6; }
-          .shooter-a, .shooter-b { animation: none; opacity: 0; }
+          .sf-wrap .tb1, .sf-wrap .tb2 {
+            animation: none;
+            opacity: 0.6;
+            transform: none;
+          }
+          .shooter-1, .shooter-2, .shooter-3, .shooter-4 {
+            animation: none;
+            opacity: 0;
+          }
         }
       `}</style>
+
+      {/* Sparkle symbol defs — defined once, referenced by all layer SVGs via <use>. */}
+      <svg
+        aria-hidden="true"
+        style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}
+      >
+        <defs>
+          <symbol id="sf-star-sm" viewBox="-5 -5 10 10">
+            <path d="M0,-5 L1,-1 L5,0 L1,1 L0,5 L-1,1 L-5,0 L-1,-1 Z" fill="#D4AF37" />
+          </symbol>
+          <symbol id="sf-star-lg" viewBox="-8 -8 16 16">
+            <path d="M0,-8 L1.5,-1.5 L8,0 L1.5,1.5 L0,8 L-1.5,1.5 L-8,0 L-1.5,-1.5 Z" fill="#D4AF37" />
+            <circle r="1.5" fill="#fff5dc" />
+          </symbol>
+        </defs>
+      </svg>
+
       <div className="sf-wrap" aria-hidden="true">
-        <StarLayer stars={stars.far}   opacity={0.4}  driftClass="sf-drift-far" />
-        <StarLayer stars={stars.mid}   opacity={0.75} driftClass="sf-drift-mid" />
-        <StarLayer stars={stars.front} opacity={1.0}  driftClass="sf-drift-front" />
-        <div className="shooter-a" />
-        <div className="shooter-b" />
+        <StarLayer stars={stars.far}   opacity={0.4}  driftClass="sf-drift-far"   symbolId="sf-star-sm" />
+        <StarLayer stars={stars.mid}   opacity={0.75} driftClass="sf-drift-mid"   symbolId="sf-star-sm" />
+        <StarLayer stars={stars.front} opacity={1.0}  driftClass="sf-drift-front" symbolId="sf-star-lg" />
+        <div className="shooter-1" />
+        <div className="shooter-2" />
+        <div className="shooter-3" />
+        <div className="shooter-4" />
       </div>
     </>
   );
