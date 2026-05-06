@@ -84,7 +84,7 @@ export default function RegistryV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 pt-12 md:pt-20 pb-14 md:pb-16 text-center">
           <p
-            className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
             style={{ color: "var(--v2-gold)" }}
           >
             Est. Kent &middot; Registry
@@ -199,10 +199,10 @@ export default function RegistryV2() {
                     )}
                     {cert.grade !== null && (
                       <div
-                        className="absolute top-3 right-3 px-2.5 py-1 rounded-full font-mono-v2 text-[10px] font-bold uppercase tracking-widest"
-                        style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                        className="absolute bottom-0 left-0 right-0 px-3 py-2 font-mono-v2 text-xs font-bold uppercase tracking-widest text-center"
+                        style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-gold)" }}
                       >
-                        {cert.label_type === "Black Label" ? "BL" : cert.grade}
+                        {cert.label_type === "Black Label" ? "Black Label" : `Grade ${cert.grade}`}
                       </div>
                     )}
                   </div>

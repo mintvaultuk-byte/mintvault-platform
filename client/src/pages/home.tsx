@@ -219,7 +219,7 @@ export default function HomeV2() {
       <section className="relative vault-hero-section">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
-              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
               style={{ color: "#ffffff" }}
             >
               Est. Kent &middot; MintVault UK
@@ -649,7 +649,7 @@ export default function HomeV2() {
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>
           </div>
-          <p className="font-mono-v2 text-[9px] uppercase tracking-widest" style={{ color: "#ffffff" }}>
+          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-widest" style={{ color: "#ffffff" }}>
             No login required for pre-grade &middot; Submission in 3 minutes
           </p>
         </div>

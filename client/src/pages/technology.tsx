@@ -133,7 +133,7 @@ export default function TechnologyV2() {
           {/* Left — copy */}
           <div>
             <p
-              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
               style={{ color: "var(--v2-gold)" }}
             >
               Est. Kent &middot; Technology
