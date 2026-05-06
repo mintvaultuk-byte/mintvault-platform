@@ -154,7 +154,7 @@ export default function TechnologyV2() {
               verify, and display a graded card for decades.
             </p>
             <p
-              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
               Designed for permanence &middot; Made in Kent

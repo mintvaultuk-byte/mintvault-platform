@@ -114,7 +114,7 @@ export default function PricingV2() {
               </Link>
             </div>
             <p
-              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
               From &pound;19 &middot; 3 tiers &middot; Free Black Label upgrade

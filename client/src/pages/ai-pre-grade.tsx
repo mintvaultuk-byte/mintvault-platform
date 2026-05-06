@@ -175,7 +175,7 @@ export default function AiPreGradeV2() {
             </div>
 
             <p
-              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
               From 10p per estimate &middot; First one free &middot; No account needed

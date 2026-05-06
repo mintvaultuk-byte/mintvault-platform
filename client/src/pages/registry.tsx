@@ -104,7 +104,7 @@ export default function RegistryV2() {
             (when claimed) ownership history. The registry is open to everyone.
           </p>
           <p
-            className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
             style={{ color: "var(--v2-ink-mute)" }}
           >
             Public &middot; Permanent &middot; Searchable
