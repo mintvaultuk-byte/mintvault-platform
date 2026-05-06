@@ -13,7 +13,6 @@ import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
 import SeoHead from "@/components/seo-head";
-import Starfield from "@/components/starfield";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface CustomerSubmission {
@@ -1005,7 +1004,6 @@ export default function DashboardPage() {
           overflow: "hidden",
         }}
       >
-        <Starfield />
       <div className="max-w-3xl mx-auto px-4 py-8" style={{ position: "relative", zIndex: 1 }}>
 
         {/* Premium / standard header — switches on Vault Club Silver membership */}

@@ -175,7 +175,6 @@ import Journal from "@/pages/journal";
 import JournalDetail from "@/pages/journal-detail";
 import Technology from "@/pages/technology";
 import Registry from "@/pages/registry";
-import VaultBgPreviewPage from "@/pages/preview/vault-bg";
 
 // Redirect helper — wouter has no built-in redirect, so we replace the URL
 // on mount and render nothing. Used for legacy URLs that moved during cutover.
@@ -215,7 +214,6 @@ function Router() {
         <Route path="/admin">
           <AdminPage />
         </Route>
-        <Route path="/preview/vault-bg" component={VaultBgPreviewPage} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />

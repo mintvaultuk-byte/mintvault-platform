@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Shield, Award, Layers } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import VaultClubBadge from "@/components/vault-club-badge";
-import Starfield from "@/components/starfield";
 
 interface ShowroomEntry {
   username: string;
@@ -50,7 +49,6 @@ export default function ShowroomsListPage() {
         overflow: "hidden",
       }}
     >
-      <Starfield />
       <div style={{ position: "relative", zIndex: 1 }}>
       <SeoHead
         title="Showrooms | MintVault UK"

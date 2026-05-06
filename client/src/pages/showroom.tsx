@@ -7,10 +7,9 @@ import {
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import VaultClubBadge from "@/components/vault-club-badge";
-import Starfield from "@/components/starfield";
 
-// Dark page shell with animated starfield. Wraps all 4 states (loading,
-// not-found, reserved, active) so the bg is consistent across transitions.
+// Plain dark page shell. Wraps all 4 states (loading, not-found, reserved,
+// active) so the bg is consistent across transitions.
 function ShowroomShell({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -22,7 +21,6 @@ function ShowroomShell({ children }: { children: React.ReactNode }) {
         overflow: "hidden",
       }}
     >
-      <Starfield />
       <div style={{ position: "relative", zIndex: 1 }}>
         {children}
       </div>
