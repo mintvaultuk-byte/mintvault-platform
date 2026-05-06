@@ -127,18 +127,21 @@ export default function PopulationPage() {
         <div className="max-w-6xl mx-auto px-6 text-center">
           <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-3">Public Registry</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] tracking-tight mb-4">Population Report</h1>
-          <p className="text-base text-[#555555] max-w-2xl mx-auto mb-10">
+          <p className="text-base text-[#555555] max-w-2xl mx-auto">
             Browse every card graded by MintVault. Tap any certificate to see its full ownership logbook.
           </p>
 
+          {/* Stats hidden until meaningful volume — restore when CARDS_GRADED >= 1000 */}
+          {/*
           {counters && counters.total_graded > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto mt-10">
               <CounterTile label="Cards Graded" value={counters.total_graded.toLocaleString()} />
               <CounterTile label="Unique Cards" value={counters.unique_cards.toLocaleString()} />
               <CounterTile label="Sets Covered" value={counters.unique_sets.toLocaleString()} />
               <CounterTile label="Avg Grade" value={counters.avg_grade > 0 ? counters.avg_grade.toFixed(1) : "—"} />
             </div>
           )}
+          */}
         </div>
       </section>
 
