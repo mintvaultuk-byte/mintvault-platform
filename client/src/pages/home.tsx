@@ -4,7 +4,6 @@ import { Link } from "wouter";
 import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
-import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 
@@ -26,9 +25,6 @@ interface HomepageStats {
     front_image_path: string | null;
   }[];
 }
-
-type RecentCert = HomepageStats["recent_certs"][number];
-
 
 // ── Animated counter — REMOVED 2026-04-27 ──────────────────────────────────
 // The CountUp helper and the homepage stats trio (cards graded / sets
@@ -245,9 +241,7 @@ export default function HomeV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative vault-hero-section">
-        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
-          {/* Left — copy */}
-          <div>
+        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
               style={{ color: "var(--v2-gold)" }}
@@ -261,13 +255,13 @@ export default function HomeV2() {
               The standard for<br />graded collectibles.
             </h1>
             <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
+              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
               AI-powered precision grading with NFC-linked certification.
               Every grade logged, every slab traceable.
             </p>
-            <div className="flex flex-wrap items-center gap-3 mb-5">
+            <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
               <Link
                 href="/submit"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
@@ -289,28 +283,6 @@ export default function HomeV2() {
             >
               From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
             </p>
-          </div>
-
-          {/* Right — slab fan. Live data from /api/v2/homepage-stats → recent_certs.
-              Fallback: 3 monogram slabs when API returns 0 rows or errors.
-              Newest cert on top (slot 0) per HeroSlabFan's z-stacking. */}
-          {(() => {
-            const slots = recentCerts.length > 0
-              ? recentCerts.slice(0, 3)
-              : [null, null, null];
-            const padded: (RecentCert | null)[] = [...slots, null, null, null].slice(0, 3);
-            const slabs = padded.map((cert, i): SlabContent => {
-              const hasCardName = !!(cert?.card_name && cert.card_name.trim());
-              return {
-                topBadge: cert?.cert_number ?? null,
-                mainLabel: hasCardName ? cert!.card_name : "MintVault",
-                rightLabel: cert?.grade ? `MV ${cert.grade}` : null,
-                footnote: "NFC \u00b7 Tracked",
-                key: cert ? String(cert.id) : `slot-${i}`,
-              };
-            }) as [SlabContent, SlabContent, SlabContent];
-            return <HeroSlabFan slabs={slabs} scrollResponse />;
-          })()}
         </div>
       </section>
 
