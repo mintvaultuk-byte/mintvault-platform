@@ -212,30 +212,6 @@ export default function HomeV2() {
 
   return (
     <div className="min-h-screen flex flex-col relative">
-      <style>{`
-        /* Hero section sits transparent so the site-wide vault video shows
-           through, with a diagonal cream overlay so the headline area on the
-           left reads cleanly while the SlabFan side stays unobstructed. */
-        .vault-hero-section {
-          position: relative;
-        }
-        .vault-hero-section::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(105deg,
-            rgba(248, 244, 232, 0.85) 0%,
-            rgba(248, 244, 232, 0.65) 35%,
-            rgba(248, 244, 232, 0.25) 60%,
-            rgba(248, 244, 232, 0) 80%);
-          pointer-events: none;
-          z-index: 0;
-        }
-        .vault-hero-section > * {
-          position: relative;
-          z-index: 1;
-        }
-      `}</style>
       <AmbientLayer />
       <HeaderV2 />
 
