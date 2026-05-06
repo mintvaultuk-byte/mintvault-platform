@@ -168,6 +168,44 @@
     background-color: transparent;
   }
 
+  /* Text-on-vault: within transparent section wrappers and the hero,
+     redefine the ink CSS variables to white variants and add a
+     drop-shadow so text reads cleanly over the vault image. Children
+     that carry their own paper-variant inline backgroundColor reset
+     back to dark text + no shadow (cards, ticker boxes, the registry
+     table rows, form inputs, etc.). */
+  .frost-paper,
+  .frost-paper-raised,
+  .frost-paper-sunk,
+  .frost-panel-dark,
+  .vault-hero-section {
+    --v2-ink: #ffffff;
+    --v2-ink-soft: rgba(255, 255, 255, 0.85);
+    --v2-ink-mute: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+  .frost-paper [style*="--v2-paper"],
+  .frost-paper-raised [style*="--v2-paper"],
+  .frost-paper-sunk [style*="--v2-paper"],
+  .frost-panel-dark [style*="--v2-paper"],
+  .vault-hero-section [style*="--v2-paper"] {
+    --v2-ink: #0F0E0B;
+    --v2-ink-soft: #3A362E;
+    --v2-ink-mute: #6B6454;
+    text-shadow: none;
+  }
+  /* Utility classes for elements that don't use the ink CSS vars
+     (e.g. text with hardcoded inline color) but still need on-vault
+     legibility — add manually where needed. */
+  .text-on-vault {
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+  .text-on-vault-muted {
+    color: rgba(255, 255, 255, 0.85);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;
   }
