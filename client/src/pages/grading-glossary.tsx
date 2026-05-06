@@ -145,8 +145,8 @@ export default function GradingGlossaryPage() {
           </Link>
           <Link
             href="/grading-scale"
-            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-            style={{ borderColor: "rgba(212, 175, 55, 0.4)", color: "var(--v2-gold)" }}
+            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
           >
             Grading Scale <ArrowRight size={14} />
           </Link>

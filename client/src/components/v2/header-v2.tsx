@@ -400,8 +400,8 @@ export default function HeaderV2() {
               <Link
                 href="/customer-login"
                 onClick={() => setMobileOpen(false)}
-                className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full border"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Sign in
               </Link>

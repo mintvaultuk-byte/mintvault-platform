@@ -231,7 +231,7 @@ export default function HomeV2() {
               The standard for<br />graded collectibles.
             </h1>
             <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
+              className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
               AI-powered precision grading with NFC-linked certification.
@@ -247,14 +247,14 @@ export default function HomeV2() {
               </Link>
               <Link
                 href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Try AI Pre-Grade <ArrowRight size={14} />
               </Link>
             </div>
             <p
-              className="font-mono-v2 text-[9px] md:text-[10px] uppercase tracking-wider"
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
               From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
@@ -604,8 +604,8 @@ export default function HomeV2() {
             <div className="mt-8 text-center">
               <Link
                 href="/registry"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Browse the full registry <ArrowRight size={14} />
               </Link>
@@ -643,8 +643,8 @@ export default function HomeV2() {
             </Link>
             <Link
               href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>

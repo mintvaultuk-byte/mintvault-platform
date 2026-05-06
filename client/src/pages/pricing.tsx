@@ -107,8 +107,8 @@ export default function PricingV2() {
               </Link>
               <Link
                 href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Try AI Pre-Grade <ArrowRight size={14} />
               </Link>
@@ -550,7 +550,7 @@ export default function PricingV2() {
             </Link>
             <Link
               href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
               style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />

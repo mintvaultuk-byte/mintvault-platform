@@ -307,7 +307,7 @@ export default function ToolsEstimateV2() {
           >
             {credits !== null && (
               <span
-                className="absolute top-4 right-4 font-mono-v2 text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-full border"
+                className="absolute top-4 right-4 font-mono-v2 text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-full"
                 style={{ color: "var(--v2-gold)", borderColor: "var(--v2-gold-soft)", backgroundColor: "rgba(212,175,55,0.06)" }}
               >
                 {credits} credits left
@@ -379,8 +379,8 @@ export default function ToolsEstimateV2() {
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full border transition-all hover:scale-[1.02]"
-                    style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
+                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                   >
                     Replace photo
                   </button>
@@ -570,8 +570,8 @@ export default function ToolsEstimateV2() {
                   <button
                     type="button"
                     onClick={handleReset}
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full border transition-all hover:scale-[1.02]"
-                    style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
+                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                   >
                     Estimate another card
                   </button>
@@ -728,7 +728,7 @@ export default function ToolsEstimateV2() {
                         onClick={handleRestoreCredits}
                         disabled={restoreLoading || !isValidEmail(restoreEmail)}
                         className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all disabled:opacity-50"
-                        style={{ borderColor: "var(--v2-line)", border: "1px solid var(--v2-line)", color: "var(--v2-ink)" }}
+                        style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                       >
                         {restoreLoading && <Loader2 size={14} className="animate-spin" />}
                         Check
@@ -762,8 +762,8 @@ export default function ToolsEstimateV2() {
                 <button
                   type="button"
                   onClick={() => setError(null)}
-                  className="mt-4 inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full border transition-all hover:scale-[1.02]"
-                  style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                  className="mt-4 inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
+                  style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
                 >
                   Try again
                 </button>

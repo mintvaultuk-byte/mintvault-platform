@@ -464,8 +464,8 @@ export default function VerifyV2() {
             </a>
             <Link
               href="/registry"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
               Browse the registry <ArrowRight size={14} />
             </Link>

@@ -143,8 +143,8 @@ export default function VaultClubV2() {
             </button>
             <Link
               href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>
@@ -400,8 +400,8 @@ export default function VaultClubV2() {
               type="button"
               onClick={() => checkoutMutation.mutate({ interval: "year" })}
               disabled={checkoutMutation.isPending}
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03] disabled:opacity-60"
-              style={{ borderColor: "var(--v2-gold)", color: "var(--v2-gold)" }}
+              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
               {checkoutMutation.isPending
                 ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
