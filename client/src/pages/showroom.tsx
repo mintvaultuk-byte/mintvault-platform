@@ -7,6 +7,28 @@ import {
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import VaultClubBadge from "@/components/vault-club-badge";
+import Starfield from "@/components/starfield";
+
+// Dark page shell with animated starfield. Wraps all 4 states (loading,
+// not-found, reserved, active) so the bg is consistent across transitions.
+function ShowroomShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="showroom-page"
+      style={{
+        backgroundColor: "#0a0e1a",
+        minHeight: "100vh",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <Starfield />
+      <div style={{ position: "relative", zIndex: 1 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -221,84 +243,90 @@ export default function ShowroomPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="w-8 h-8 rounded-full border-2 border-[#D4AF37] border-t-transparent animate-spin" />
-      </div>
+      <ShowroomShell>
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border-2 border-[#D4AF37] border-t-transparent animate-spin" />
+        </div>
+      </ShowroomShell>
     );
   }
 
   // State 1 — not found
   if (isError || !data) {
     return (
-      <div className="min-h-[60vh] bg-[#FAFAF8] flex items-center justify-center px-4 py-16">
-        <SeoHead title="Showroom Not Found | MintVault UK" description="" canonical="" />
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 rounded-full bg-[#F5F2EB] border border-[#E8E4DC] flex items-center justify-center mx-auto mb-6">
-            <Hash size={28} className="text-[#CCCCCC]" />
-          </div>
-          <h1 className="text-2xl font-black text-[#1A1A1A] mb-3">
-            Showroom not found
-          </h1>
-          <p className="text-sm text-[#888888] mb-8">
-            The username <strong className="text-[#1A1A1A]">{username}</strong> isn't registered with MintVault.
-          </p>
-          <div className="flex items-center justify-center gap-3 flex-wrap">
-            <Link href="/showrooms">
-              <button className="px-5 py-2.5 rounded-xl border border-[#D4AF37]/40 text-[#B8960C] text-sm font-bold hover:bg-[#D4AF37]/5 transition-all">
-                Browse Showrooms
-              </button>
-            </Link>
-            <Link href="/dashboard">
-              <button className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
-                style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}>
-                Claim your own
-              </button>
-            </Link>
+      <ShowroomShell>
+        <div className="min-h-[60vh] flex items-center justify-center px-4 py-16">
+          <SeoHead title="Showroom Not Found | MintVault UK" description="" canonical="" />
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-[#F5F2EB] border border-[#E8E4DC] flex items-center justify-center mx-auto mb-6">
+              <Hash size={28} className="text-[#CCCCCC]" />
+            </div>
+            <h1 className="text-2xl font-black text-white mb-3">
+              Showroom not found
+            </h1>
+            <p className="text-sm text-white/70 mb-8">
+              The username <strong className="text-white">{username}</strong> isn't registered with MintVault.
+            </p>
+            <div className="flex items-center justify-center gap-3 flex-wrap">
+              <Link href="/showrooms">
+                <button className="px-5 py-2.5 rounded-xl border border-[#D4AF37]/40 text-[#D4AF37] text-sm font-bold hover:bg-[#D4AF37]/10 transition-all">
+                  Browse Showrooms
+                </button>
+              </Link>
+              <Link href="/dashboard">
+                <button className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
+                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}>
+                  Claim your own
+                </button>
+              </Link>
+            </div>
           </div>
         </div>
-      </div>
+      </ShowroomShell>
     );
   }
 
   // State 2 — reserved / not yet active
   if (!data.active) {
     return (
-      <div className="min-h-[60vh] bg-[#FAFAF8] flex items-center justify-center px-4 py-16">
-        <SeoHead
-          title={`${data.username}'s Showroom | MintVault UK`}
-          description="This Showroom is reserved."
-          canonical={`https://mintvaultuk.com/showroom/${data.username}`}
-        />
-        <div className="text-center max-w-md">
-          {/* Faded mock with lock overlay */}
-          <div className="relative w-full rounded-2xl border border-[#E8E4DC] overflow-hidden mb-8 select-none pointer-events-none" style={{ height: 180 }}>
-            <div className="absolute inset-0 grid grid-cols-4 gap-2 p-3 opacity-20">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="aspect-[2.5/3.5] bg-[#D4AF37]/30 rounded-lg" />
-              ))}
+      <ShowroomShell>
+        <div className="min-h-[60vh] flex items-center justify-center px-4 py-16">
+          <SeoHead
+            title={`${data.username}'s Showroom | MintVault UK`}
+            description="This Showroom is reserved."
+            canonical={`https://mintvaultuk.com/showroom/${data.username}`}
+          />
+          <div className="text-center max-w-md">
+            {/* Faded mock with lock overlay */}
+            <div className="relative w-full rounded-2xl border border-white/10 overflow-hidden mb-8 select-none pointer-events-none" style={{ height: 180 }}>
+              <div className="absolute inset-0 grid grid-cols-4 gap-2 p-3 opacity-20">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="aspect-[2.5/3.5] bg-[#D4AF37]/30 rounded-lg" />
+                ))}
+              </div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-sm">
+                <Lock size={32} className="text-[#D4AF37] mb-2" />
+                <span className="text-xs font-bold text-[#888888] uppercase tracking-widest">Not yet activated</span>
+              </div>
             </div>
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-sm">
-              <Lock size={32} className="text-[#D4AF37] mb-2" />
-              <span className="text-xs font-bold text-[#888888] uppercase tracking-widest">Not yet activated</span>
-            </div>
-          </div>
 
-          <h1 className="text-2xl font-black text-[#1A1A1A] mb-3">
-            {data.username}'s Showroom
-          </h1>
-          <p className="text-sm text-[#888888] mb-6">
-            This Showroom is reserved. The owner hasn't activated their Vault Club membership yet.
-          </p>
-          <div className="flex flex-col items-center gap-3">
-            <Link href="/vault-club" className="text-sm text-[#B8960C] font-semibold hover:text-[#D4AF37] transition-colors">
-              Are you {data.username}? Activate your Showroom →
-            </Link>
-            <Link href="/showrooms" className="text-xs text-[#AAAAAA] hover:text-[#888888] transition-colors">
-              Browse other Showrooms →
-            </Link>
+            <h1 className="text-2xl font-black text-white mb-3">
+              {data.username}'s Showroom
+            </h1>
+            <p className="text-sm text-white/70 mb-6">
+              This Showroom is reserved. The owner hasn't activated their Vault Club membership yet.
+            </p>
+            <div className="flex flex-col items-center gap-3">
+              <Link href="/vault-club" className="text-sm text-[#D4AF37] font-semibold hover:text-[#E8C76A] transition-colors">
+                Are you {data.username}? Activate your Showroom →
+              </Link>
+              <Link href="/showrooms" className="text-xs text-white/50 hover:text-white/70 transition-colors">
+                Browse other Showrooms →
+              </Link>
+            </div>
           </div>
         </div>
-      </div>
+      </ShowroomShell>
     );
   }
 
@@ -308,7 +336,7 @@ export default function ShowroomPage() {
     : "";
 
   return (
-    <div className="bg-[#FAFAF8] min-h-screen">
+    <ShowroomShell>
       <SeoHead
         title={`${data.display_name}'s Showroom | MintVault UK`}
         description={data.bio || `${data.display_name}'s verified MintVault collection — ${data.stats?.total_cards ?? 0} graded cards.`}
@@ -414,7 +442,7 @@ export default function ShowroomPage() {
 
         {/* Cards */}
         {filtered.length === 0 ? (
-          <div className="text-center py-16 text-[#999999] text-sm">No cards match this filter.</div>
+          <div className="text-center py-16 text-white/60 text-sm">No cards match this filter.</div>
         ) : layout === "grid" ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {filtered.map(c => <CardGridItem key={c.cert_id} card={c} />)}
@@ -426,8 +454,8 @@ export default function ShowroomPage() {
         )}
 
         {/* Footer CTA */}
-        <div className="mt-16 border-t border-[#E8E4DC] pt-8 text-center">
-          <p className="text-sm text-[#888888] mb-3">Want your own Showroom?</p>
+        <div className="mt-16 border-t border-white/10 pt-8 text-center">
+          <p className="text-sm text-white/60 mb-3">Want your own Showroom?</p>
           <Link href="/dashboard">
             <button
               className="px-6 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
@@ -438,6 +466,6 @@ export default function ShowroomPage() {
           </Link>
         </div>
       </div>
-    </div>
+    </ShowroomShell>
   );
 }

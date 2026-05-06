@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Shield, Award, Layers } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import VaultClubBadge from "@/components/vault-club-badge";
+import Starfield from "@/components/starfield";
 
 interface ShowroomEntry {
   username: string;
@@ -40,7 +41,17 @@ export default function ShowroomsListPage() {
   const showrooms = data?.showrooms ?? [];
 
   return (
-    <div className="bg-[#FAFAF8] min-h-screen">
+    <div
+      className="showroom-page"
+      style={{
+        backgroundColor: "#0a0e1a",
+        minHeight: "100vh",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <Starfield />
+      <div style={{ position: "relative", zIndex: 1 }}>
       <SeoHead
         title="Showrooms | MintVault UK"
         description="Browse verified MintVault collector Showrooms — public collections of graded trading cards."
@@ -82,12 +93,12 @@ export default function ShowroomsListPage() {
               <Shield size={36} className="text-[#D4AF37]" />
             </div>
             <h2
-              className="text-2xl font-black text-[#1A1A1A] mb-3"
-             
+              className="text-2xl font-black text-white mb-3"
+
             >
               Showrooms is just getting started
             </h2>
-            <p className="text-sm text-[#888888] max-w-sm mx-auto mb-8">
+            <p className="text-sm text-white/70 max-w-sm mx-auto mb-8">
               Be one of the first to claim your Showroom and showcase your verified MintVault collection to the world.
             </p>
             <Link href="/dashboard">
@@ -111,6 +122,7 @@ export default function ShowroomsListPage() {
             {showrooms.map(s => <ShowroomRow key={s.username} showroom={s} />)}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
