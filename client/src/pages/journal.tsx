@@ -38,11 +38,11 @@ export default function JournalV2() {
     : rest;
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ─────────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 pt-12 md:pt-20 pb-10 md:pb-14">
           <p
             className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
@@ -174,7 +174,7 @@ export default function JournalV2() {
       )}
 
       {/* ── SECTION C: ARCHIVE ──────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 py-16 md:py-24">
           <SectionEyebrow numeral="II" label="Archive" className="mb-4" />
           <h2

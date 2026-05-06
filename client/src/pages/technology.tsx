@@ -84,8 +84,13 @@ function ComponentSection({
 }) {
   const headlineColour = onDark ? "#FFFFFF" : "var(--v2-ink)";
   const bodyColour = onDark ? "rgba(255,255,255,0.65)" : "var(--v2-ink-soft)";
+  const frostClass =
+    bgVar === "var(--v2-panel-dark)" ? "frost-panel-dark"
+    : bgVar === "var(--v2-paper-raised)" ? "frost-paper-raised"
+    : bgVar === "var(--v2-paper-sunk)" ? "frost-paper-sunk"
+    : "frost-paper";
   return (
-    <section style={{ backgroundColor: bgVar }}>
+    <section className={frostClass}>
       <div className="mx-auto max-w-5xl px-6 py-20 md:py-28">
         <SectionEyebrow numeral={numeral} label={label} className="mb-6" />
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-10 md:gap-16 items-start">
@@ -119,11 +124,11 @@ function ComponentSection({
 
 export default function TechnologyV2() {
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ─────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-7xl px-6 pt-12 md:pt-20 pb-16 md:pb-24 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
           {/* Left — copy */}
           <div>
@@ -279,7 +284,7 @@ export default function TechnologyV2() {
       />
 
       {/* ── SECTION VI: SPECIFICATIONS ───────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      <section className="frost-paper-raised">
         <div className="mx-auto max-w-3xl px-6 py-20 md:py-28">
           <SectionEyebrow numeral="VI" label="Specifications" className="mb-6" />
           <h2
@@ -318,7 +323,7 @@ export default function TechnologyV2() {
       </section>
 
       {/* ── SECTION VII: FINAL CTA (dark) ───────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+      <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-20 md:py-28 text-center">
           <SectionEyebrow numeral="VII" label="Next" className="mb-4" />
           <h2

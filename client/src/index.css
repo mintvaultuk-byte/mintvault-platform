@@ -158,6 +158,30 @@
 }
 
 @layer utilities {
+  /* Frosted-glass section wrappers — sit on top of the site-wide vault
+     image background. Applied to outer <section> wrappers only; cards
+     and commerce surfaces inside keep their solid backgrounds. */
+  .frost-paper {
+    background-color: rgba(248, 244, 232, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .frost-paper-raised {
+    background-color: rgba(244, 240, 226, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .frost-paper-sunk {
+    background-color: rgba(238, 233, 217, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .frost-panel-dark {
+    background-color: rgba(12, 15, 20, 0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;
   }

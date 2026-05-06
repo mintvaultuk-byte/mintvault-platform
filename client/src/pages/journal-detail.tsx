@@ -124,9 +124,9 @@ export default function JournalDetailV2() {
   // ── 404 fallback ──
   if (!guide) {
     return (
-      <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+      <div className="min-h-screen flex flex-col">
         <HeaderV2 />
-        <section style={{ backgroundColor: "var(--v2-paper)" }}>
+        <section className="frost-paper">
           <div className="mx-auto max-w-2xl px-6 py-32 text-center">
             <h1
               className="font-display italic"
@@ -152,12 +152,12 @@ export default function JournalDetailV2() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <style>{PROSE_CSS}</style>
       <HeaderV2 />
 
       {/* ── SECTION A: BACK LINK ───────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pt-8 md:pt-12">
           <Link
             href="/journal"
@@ -170,7 +170,7 @@ export default function JournalDetailV2() {
       </section>
 
       {/* ── SECTION B: HEADER ──────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pt-6 md:pt-8 pb-10">
           <p
             className="font-mono-v2 text-[10px] uppercase tracking-[0.25em]"
@@ -206,7 +206,7 @@ export default function JournalDetailV2() {
       </section>
 
       {/* ── SECTION C: BODY ────────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
           <article
             className="mv-prose"

@@ -222,7 +222,7 @@ export default function VerifyV2() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
@@ -343,7 +343,7 @@ export default function VerifyV2() {
       </section>
 
       {/* ── SECTION I: HOW IT WORKS (dark) ───────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+      <section className="frost-panel-dark">
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="I" label="How It Works" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
@@ -390,7 +390,7 @@ export default function VerifyV2() {
       </section>
 
       {/* ── SECTION II: WHAT YOU SEE ─────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="What You See" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -427,7 +427,7 @@ export default function VerifyV2() {
       </section>
 
       {/* ── SECTION III: FOR BUYERS ──────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="For Buyers" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-10" style={{ color: "var(--v2-ink)" }}>
@@ -453,7 +453,7 @@ export default function VerifyV2() {
       </section>
 
       {/* ── SECTION IV: FAQ ──────────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="FAQ" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
@@ -475,7 +475,7 @@ export default function VerifyV2() {
       </section>
 
       {/* ── SECTION V: FINAL CTA (dark) ──────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+      <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
           <SectionEyebrow numeral="V" label="Verify" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>

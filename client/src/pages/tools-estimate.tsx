@@ -256,11 +256,11 @@ export default function ToolsEstimateV2() {
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <HeaderV2 />
 
       {/* ── SECTION A: COMPACT HEADER ──────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 pt-12 md:pt-20 pb-10 md:pb-12 text-center">
           <p
             className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-4"
@@ -295,7 +295,7 @@ export default function ToolsEstimateV2() {
       </section>
 
       {/* ── SECTION B: TOOL PANEL ──────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
           <div
             className="relative rounded-xl p-6 md:p-10"
@@ -774,7 +774,7 @@ export default function ToolsEstimateV2() {
       </section>
 
       {/* ── SECTION C: HONEST LIMITS ────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)", borderTop: "1px solid var(--v2-line)" }}>
+      <section className="frost-paper-raised" style={{ borderTop: "1px solid var(--v2-line)" }}>
         <div className="mx-auto max-w-3xl px-6 py-12 md:py-16">
           <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
             Honesty

@@ -77,11 +77,11 @@ export default function RegistryV2() {
   const recent = data?.recent ?? [];
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ─────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 pt-12 md:pt-20 pb-14 md:pb-16 text-center">
           <p
             className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
@@ -113,7 +113,7 @@ export default function RegistryV2() {
       </section>
 
       {/* ── SECTION I: RECENT GALLERY ────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
           <SectionEyebrow numeral="I" label="Recently graded" className="mb-4" />
           <h2
@@ -236,7 +236,7 @@ export default function RegistryV2() {
       </section>
 
       {/* ── SECTION II: HOW THE REGISTRY WORKS ──────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 py-16 md:py-24">
           <SectionEyebrow numeral="II" label="How it works" className="mb-4" />
           <h2
@@ -273,7 +273,7 @@ export default function RegistryV2() {
       </section>
 
       {/* ── SECTION III: SEARCH LINK ────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)", borderTop: "1px solid var(--v2-line)" }}>
+      <section className="frost-paper-raised" style={{ borderTop: "1px solid var(--v2-line)" }}>
         <div className="mx-auto max-w-4xl px-6 py-16 md:py-20 text-center">
           <SectionEyebrow numeral="III" label="Browse" className="mb-4" />
           <h2
@@ -300,7 +300,7 @@ export default function RegistryV2() {
       </section>
 
       {/* ── SECTION IV: FINAL CTA ────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)" }}>
+      <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-20 md:py-28 text-center">
           <SectionEyebrow numeral="IV" label="Submit" className="mb-4" />
           <h2

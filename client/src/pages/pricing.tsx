@@ -72,7 +72,7 @@ export default function PricingV2() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col relative" style={{ backgroundColor: "var(--v2-paper)" }}>
+    <div className="min-h-screen flex flex-col relative">
       <AmbientLayer />
       <HeaderV2 />
 
@@ -157,7 +157,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION I: GRADING TIERS (dark) ──────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+      <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="I" label="Grading Tiers" className="mb-4" />
@@ -290,7 +290,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION II: VALUE PROTECTION ─────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="Value Protection" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -339,7 +339,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION III: ADD-ONS ─────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      <section className="frost-paper-raised">
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="Add-ons" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -376,7 +376,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION IV: RETURN SHIPPING ──────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-sunk)" }}>
+      <section className="frost-paper-sunk">
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="Return Shipping" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -416,7 +416,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION V: VAULT CLUB TEASER ─────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="V" label="Vault Club" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-10">
@@ -480,7 +480,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION VI: BULK DISCOUNTS ────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+      <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="VI" label="Bulk Discounts" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-8" style={{ color: "var(--v2-ink)" }}>
@@ -520,7 +520,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION VII: FAQ ─────────────────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-paper)" }}>
+      <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="VII" label="FAQ" className="mb-4" />
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
@@ -564,7 +564,7 @@ export default function PricingV2() {
       </section>
 
       {/* ── SECTION VIII: FINAL CTA (dark) ───────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+      <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="VIII" label="Submit" className="mb-4" />

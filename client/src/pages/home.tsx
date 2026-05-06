@@ -316,7 +316,7 @@ export default function HomeV2() {
 
       {/* ── SECTION B: STATS + PROMISES ──────────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "transparent" }}>
+        <section className="frost-paper-raised">
           <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
             {/* Founding members CTA + 3-step process strip
                 Replaces the original stats trio (2026-04-27). */}
@@ -343,7 +343,7 @@ export default function HomeV2() {
 
       {/* ── SECTION C: GRADING TIERS (dark) ──────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+        <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
           <DarkSectionGlow />
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
@@ -477,7 +477,7 @@ export default function HomeV2() {
 
       {/* ── SECTION D: INFRASTRUCTURE ────────────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "transparent" }}>
+        <section className="frost-paper">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
               II &middot; Infrastructure
@@ -592,7 +592,7 @@ export default function HomeV2() {
 
       {/* ── SECTION E: POPULATION REGISTRY ───────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "transparent" }}>
+        <section className="frost-paper-sunk">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
               III &middot; Population Registry
@@ -667,7 +667,7 @@ export default function HomeV2() {
       </FadeIn>
 
       {/* ── SECTION F: FINAL CTA (dark) ──────────────────────────────── */}
-      <section style={{ backgroundColor: "var(--v2-panel-dark)", position: "relative", overflow: "hidden" }}>
+      <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
