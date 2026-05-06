@@ -162,24 +162,24 @@
      image background. Applied to outer <section> wrappers only; cards
      and commerce surfaces inside keep their solid backgrounds. */
   .frost-paper {
-    background-color: rgba(248, 244, 232, 0.85);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background-color: rgba(248, 244, 232, 0.45);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
   .frost-paper-raised {
-    background-color: rgba(244, 240, 226, 0.88);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background-color: rgba(244, 240, 226, 0.5);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
   .frost-paper-sunk {
-    background-color: rgba(238, 233, 217, 0.85);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background-color: rgba(238, 233, 217, 0.45);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
   .frost-panel-dark {
-    background-color: rgba(12, 15, 20, 0.88);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    background-color: rgba(12, 15, 20, 0.55);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
   }
 
   input[type="search"]::-webkit-search-cancel-button {
