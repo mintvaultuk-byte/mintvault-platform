@@ -316,7 +316,7 @@ export default function HomeV2() {
 
       {/* ── SECTION B: STATS + PROMISES ──────────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "var(--v2-paper-raised)" }}>
+        <section style={{ backgroundColor: "transparent" }}>
           <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
             {/* Founding members CTA + 3-step process strip
                 Replaces the original stats trio (2026-04-27). */}
@@ -477,7 +477,7 @@ export default function HomeV2() {
 
       {/* ── SECTION D: INFRASTRUCTURE ────────────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "var(--v2-paper)" }}>
+        <section style={{ backgroundColor: "transparent" }}>
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
               II &middot; Infrastructure
@@ -592,7 +592,7 @@ export default function HomeV2() {
 
       {/* ── SECTION E: POPULATION REGISTRY ───────────────────────────── */}
       <FadeIn>
-        <section style={{ backgroundColor: "var(--v2-paper-sunk)" }}>
+        <section style={{ backgroundColor: "transparent" }}>
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
             <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
               III &middot; Population Registry
