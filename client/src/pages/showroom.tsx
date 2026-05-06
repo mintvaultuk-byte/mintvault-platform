@@ -214,6 +214,28 @@ export default function ShowroomPage() {
     enabled: !!username,
   });
 
+  // Hooks must be called unconditionally before any early returns (Rules of Hooks).
+  // Safe-guarded so they don't crash when data is undefined during loading / error states.
+  const sets = useMemo(() => {
+    if (!data?.cards) return [];
+    const s = new Set<string>();
+    data.cards.forEach(c => { if (c.set_name) s.add(c.set_name); });
+    return Array.from(s).sort();
+  }, [data?.cards]);
+
+  const filtered = useMemo(() => {
+    if (!data?.cards) return [];
+    let cards = data.cards;
+    if (gradeFilter !== "all") {
+      const target = parseFloat(gradeFilter);
+      cards = cards.filter(c => c.grade !== null && Math.floor(c.grade) === Math.floor(target));
+    }
+    if (setFilter !== "all") {
+      cards = cards.filter(c => c.set_name === setFilter);
+    }
+    return sortCards(cards, sort);
+  }, [data?.cards, sort, gradeFilter, setFilter]);
+
   if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -298,24 +320,6 @@ export default function ShowroomPage() {
   }
 
   // State 3 — active showroom
-  const sets = useMemo(() => {
-    const s = new Set<string>();
-    data.cards.forEach(c => { if (c.set_name) s.add(c.set_name); });
-    return Array.from(s).sort();
-  }, [data.cards]);
-
-  const filtered = useMemo(() => {
-    let cards = data.cards;
-    if (gradeFilter !== "all") {
-      const target = parseFloat(gradeFilter);
-      cards = cards.filter(c => c.grade !== null && Math.floor(c.grade) === Math.floor(target));
-    }
-    if (setFilter !== "all") {
-      cards = cards.filter(c => c.set_name === setFilter);
-    }
-    return sortCards(cards, sort);
-  }, [data.cards, sort, gradeFilter, setFilter]);
-
   const memberSince = data.claimed_at
     ? new Date(data.claimed_at).toLocaleDateString("en-GB", { month: "long", year: "numeric" })
     : "";
