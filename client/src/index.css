@@ -231,6 +231,14 @@
   .vault-page a.btn * {
     text-shadow: none !important;
   }
+  /* Cover wouter <Link> rendered as plain <a> with inline gold-pill
+     styling — most CTA Links carry the gold variable in their inline
+     style, so an attribute-substring match catches them all without
+     touching decorative anchors. */
+  .vault-page a[style*="--v2-gold"],
+  .vault-page a[style*="--v2-gold"] * {
+    text-shadow: none !important;
+  }
 
   input[type="search"]::-webkit-search-cancel-button {
     @apply hidden;

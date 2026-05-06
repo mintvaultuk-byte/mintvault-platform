@@ -4,7 +4,6 @@ import { ArrowRight, Check } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
-import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import {
@@ -78,9 +77,7 @@ export default function PricingV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
-        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
-          {/* Left — copy */}
-          <div>
+        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
               style={{ color: "var(--v2-gold)" }}
@@ -94,13 +91,13 @@ export default function PricingV2() {
               Grade it once.<br />Get it right.
             </h1>
             <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
+              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
               Three tiers, 5 to 40 working day turnaround, same four-point inspection on every
               card. Black Label upgrade when your card earns it &mdash; free, never sold.
             </p>
-            <div className="flex flex-wrap items-center gap-3 mb-5">
+            <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
               <Link
                 href="/submit"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
@@ -122,37 +119,6 @@ export default function PricingV2() {
             >
               From &pound;19 &middot; 3 tiers &middot; Free Black Label upgrade
             </p>
-          </div>
-
-          {/* Right — tier slab fan. Mirrors home-v2 visually; content swaps
-              cert data for locked tier pricing. Slot 0 (top z) = Standard
-              (featured), slot 1 = Vault Queue, slot 2 = Express. */}
-          {(() => {
-            const tierSlabs: [SlabContent, SlabContent, SlabContent] = [
-              {
-                topBadge: "STANDARD",
-                mainLabel: "\u00a325",
-                rightLabel: "15 DAY",
-                footnote: "MOST CHOSEN",
-                key: "standard",
-              },
-              {
-                topBadge: "VAULT QUEUE",
-                mainLabel: "\u00a319",
-                rightLabel: "40 DAY",
-                footnote: "BEST VALUE",
-                key: "vault-queue",
-              },
-              {
-                topBadge: "EXPRESS",
-                mainLabel: "\u00a345",
-                rightLabel: "5 DAY",
-                footnote: "FASTEST",
-                key: "express",
-              },
-            ];
-            return <HeroSlabFan slabs={tierSlabs} />;
-          })()}
         </div>
       </section>
 

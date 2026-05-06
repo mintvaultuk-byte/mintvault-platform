@@ -22,7 +22,7 @@ const INELIGIBLE = [
 
 export default function EligibleCardsPage() {
   return (
-    <>
+    <div className="vault-page">
       <SeoHead
         title="Eligible Cards — What We Grade | MintVault UK"
         description="MintVault grades Pokémon, Magic: The Gathering, Yu-Gi-Oh!, sports cards, and more. See the full list of eligible trading cards."
@@ -99,6 +99,6 @@ export default function EligibleCardsPage() {
           </Link>
         </div>
       </section>
-    </>
+    </div>
   );
 }

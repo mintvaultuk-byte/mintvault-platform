@@ -119,7 +119,7 @@ function FoundingMembersStrip() {
             type="submit"
             disabled={submitting || !email.trim()}
             data-testid="button-waitlist-submit"
-            className="font-body text-sm font-semibold px-5 py-3 rounded-md transition-opacity disabled:opacity-60"
+            className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
             style={{
               backgroundColor: "var(--v2-gold)",
               color: "var(--v2-panel-dark)",
@@ -646,7 +646,7 @@ export default function HomeV2() {
             <Link
               href="/tools/estimate"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full border transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
+              style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
             >
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>

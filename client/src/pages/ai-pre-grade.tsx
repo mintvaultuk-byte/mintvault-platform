@@ -3,7 +3,6 @@ import { ArrowRight } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
-import HeroSlabFan, { type SlabContent } from "@/components/v2/hero-slab";
 
 // ── Steps (Section I) ──────────────────────────────────────────────────────
 
@@ -81,9 +80,7 @@ export default function AiPreGradeV2() {
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
-        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 grid grid-cols-1 md:grid-cols-[1.4fr_1fr] gap-12 md:gap-16 items-center">
-          {/* Left — copy */}
-          <div>
+        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
               style={{ color: "var(--v2-gold)" }}
@@ -97,13 +94,13 @@ export default function AiPreGradeV2() {
               A quick<br />second opinion.
             </h1>
             <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
+              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
               Upload one photo. Get a subgrade breakdown, card identity, and a grade range
               in seconds. Free first estimate, no account needed, credit packs from &pound;2.
             </p>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <Link
                 href="/tools/estimate"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
@@ -183,35 +180,6 @@ export default function AiPreGradeV2() {
             >
               From 10p per estimate &middot; First one free &middot; No account needed
             </p>
-          </div>
-
-          {/* Right — capability slab fan */}
-          {(() => {
-            const slabs: [SlabContent, SlabContent, SlabContent] = [
-              {
-                topBadge: "SUBGRADES",
-                mainLabel: "\u00d74 scores",
-                rightLabel: "1\u201310",
-                footnote: "CENTERING \u00b7 CORNERS \u00b7 EDGES \u00b7 SURFACE",
-                key: "subgrades",
-              },
-              {
-                topBadge: "GRADE RANGE",
-                mainLabel: "Low\u2013High",
-                rightLabel: "+ likely",
-                footnote: "WITH CONFIDENCE",
-                key: "range",
-              },
-              {
-                topBadge: "CARD ID",
-                mainLabel: "Auto-match",
-                rightLabel: "AI lookup",
-                footnote: "NAME \u00b7 SET \u00b7 YEAR",
-                key: "id",
-              },
-            ];
-            return <HeroSlabFan slabs={slabs} />;
-          })()}
         </div>
       </section>
 

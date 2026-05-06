@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import SeoHead from "@/components/seo-head";
-import { Shield, Target, CheckCircle } from "lucide-react";
+import { Shield, Target, CheckCircle, ArrowRight } from "lucide-react";
 
 const grades = [
   { grade: "10",  label: "GEM MINT",           desc: "Virtually perfect. Flawless corners, edges, and surface. Centering within 55/45 on front, 75/25 on back." },
@@ -140,15 +140,19 @@ export default function GradingScalePage() {
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to grade your cards?</h3>
         <p className="text-[#666666] text-sm mb-4">Submit online and receive expert grading with a verifiable certificate.</p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Link href="/submit">
-            <span className="inline-flex items-center gap-2 gold-shimmer text-[#1A1400] px-6 py-2.5 rounded-lg font-bold text-sm tracking-wide cursor-pointer">
-              Submit Cards
-            </span>
+          <Link
+            href="/submit"
+            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
+            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+          >
+            Submit Cards <ArrowRight size={14} />
           </Link>
-          <Link href="/grading-glossary">
-            <span className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#B8960C] px-6 py-2.5 rounded-lg font-medium text-sm tracking-wide cursor-pointer hover:bg-[#FFF9E6]">
-              Grading Glossary →
-            </span>
+          <Link
+            href="/grading-glossary"
+            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
+            style={{ borderColor: "rgba(212, 175, 55, 0.4)", color: "var(--v2-gold)" }}
+          >
+            Grading Glossary <ArrowRight size={14} />
           </Link>
         </div>
       </div>
