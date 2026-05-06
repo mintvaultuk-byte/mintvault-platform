@@ -616,7 +616,15 @@ export default function HomeV2() {
       </FadeIn>
 
       {/* ── SECTION F: FINAL CTA (dark) ──────────────────────────────── */}
-      <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
+      <section
+        className="frost-panel-dark"
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          backgroundImage:
+            "radial-gradient(ellipse 70% 60% at center, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.3) 45%, rgba(0,0,0,0) 80%)",
+        }}
+      >
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
