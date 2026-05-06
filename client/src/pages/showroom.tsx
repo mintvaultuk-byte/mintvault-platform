@@ -38,27 +38,6 @@ interface ShowroomData {
   cards: ShowroomCard[];
 }
 
-// ── Grade badge ───────────────────────────────────────────────────────────────
-
-function GradeBadge({ grade, isBlackLabel }: { grade: number | null; isBlackLabel: boolean }) {
-  if (grade === null) return null;
-  const bg = isBlackLabel
-    ? "#1A1A1A"
-    : grade >= 10 ? "#D4AF37"
-    : grade >= 9 ? "#22c55e"
-    : grade >= 8 ? "#3b82f6"
-    : "#9ca3af";
-  const text = isBlackLabel ? "#D4AF37" : grade >= 10 ? "#1A1400" : "#fff";
-  return (
-    <span
-      className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black shadow-lg"
-      style={{ background: bg, color: text, border: isBlackLabel ? "1px solid #D4AF37" : "none" }}
-    >
-      {grade}
-    </span>
-  );
-}
-
 // ── Card grid item ────────────────────────────────────────────────────────────
 
 function CardGridItem({ card }: { card: ShowroomCard }) {
@@ -81,7 +60,6 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
               <Award size={32} />
             </div>
           )}
-          <GradeBadge grade={card.grade} isBlackLabel={card.is_black_label} />
           {card.is_black_label && (
             <div className="absolute bottom-2 left-2">
               <span className="text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#D4AF37] px-1.5 py-0.5 rounded">
@@ -94,6 +72,23 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
         <div className="p-2.5">
           <p className="text-xs font-bold text-[#1A1A1A] truncate">
             {card.card_name || card.cert_id}
+            {card.grade !== null && (
+              <>
+                <span className="text-[#CCCCCC] mx-1">·</span>
+                <span
+                  style={{
+                    color: card.is_black_label
+                      ? "#1A1A1A"
+                      : card.grade >= 10 ? "#B8960C"
+                      : card.grade >= 9 ? "#22c55e"
+                      : card.grade >= 8 ? "#3b82f6"
+                      : "#9ca3af",
+                  }}
+                >
+                  Grade {card.grade}
+                </span>
+              </>
+            )}
           </p>
           <p className="text-[10px] text-[#999999] truncate mt-0.5">
             {[card.set_name, card.year].filter(Boolean).join(" · ")}
@@ -125,6 +120,23 @@ function CardListItem({ card }: { card: ShowroomCard }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-[#1A1A1A] truncate">
           {card.card_name || card.cert_id}
+          {card.grade !== null && (
+            <>
+              <span className="text-[#CCCCCC] mx-1">·</span>
+              <span
+                style={{
+                  color: card.is_black_label
+                    ? "#1A1A1A"
+                    : card.grade >= 10 ? "#B8960C"
+                    : card.grade >= 9 ? "#22c55e"
+                    : card.grade >= 8 ? "#3b82f6"
+                    : "#9ca3af",
+                }}
+              >
+                Grade {card.grade}
+              </span>
+            </>
+          )}
         </p>
         <p className="text-xs text-[#888888] truncate">
           {[card.set_name, card.year].filter(Boolean).join(" · ")}
@@ -136,19 +148,8 @@ function CardListItem({ card }: { card: ShowroomCard }) {
           </span>
         )}
       </div>
-      {/* Grade + link */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {card.grade !== null && (
-          <span
-            className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black"
-            style={{
-              background: card.is_black_label ? "#1A1A1A" : card.grade >= 10 ? "#D4AF37" : card.grade >= 9 ? "#22c55e" : card.grade >= 8 ? "#3b82f6" : "#9ca3af",
-              color: card.is_black_label ? "#D4AF37" : card.grade >= 10 ? "#1A1400" : "#fff",
-            }}
-          >
-            {card.grade}
-          </span>
-        )}
+      {/* Vault link */}
+      <div className="flex-shrink-0">
         <Link href={`/vault/${card.cert_id}`} className="text-xs text-[#B8960C] font-semibold hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors">
           Vault <ExternalLink size={10} />
         </Link>
