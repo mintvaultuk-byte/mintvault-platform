@@ -71,9 +71,9 @@ function StarLayer({
 function Starfield() {
   const stars = useMemo(
     () => ({
-      far:   generateStars(60, 4,  6,  ["t1", "t2", "t3", "t4"]),
-      mid:   generateStars(45, 7,  10, ["t1", "t2", "t3", "t4"]),
-      front: generateStars(20, 12, 16, ["tb1", "tb2"]),
+      far:   generateStars(180, 3, 5, ["t1", "t2", "t3", "t4"]),
+      mid:   generateStars(130, 4, 7, ["t1", "t2", "t3", "t4"]),
+      front: generateStars(60,  5, 7, ["tb1", "tb2"]),
     }),
     [],
   );
@@ -220,13 +220,13 @@ function Starfield() {
           </symbol>
           <symbol id="sf-star-lg" viewBox="-8 -8 16 16">
             <path d="M0,-8 L1.5,-1.5 L8,0 L1.5,1.5 L0,8 L-1.5,1.5 L-8,0 L-1.5,-1.5 Z" fill="#D4AF37" />
-            <circle r="1.5" fill="#fff5dc" />
+            <circle r="0.8" fill="#fff5dc" />
           </symbol>
         </defs>
       </svg>
 
       <div className="sf-wrap" aria-hidden="true">
-        <StarLayer stars={stars.far}   opacity={0.4}  driftClass="sf-drift-far"   symbolId="sf-star-sm" />
+        <StarLayer stars={stars.far}   opacity={0.55} driftClass="sf-drift-far"   symbolId="sf-star-sm" />
         <StarLayer stars={stars.mid}   opacity={0.75} driftClass="sf-drift-mid"   symbolId="sf-star-sm" />
         <StarLayer stars={stars.front} opacity={1.0}  driftClass="sf-drift-front" symbolId="sf-star-lg" />
         <div className="shooter-1" />
