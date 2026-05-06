@@ -76,7 +76,7 @@ const FAQS = [
 
 export default function AiPreGradeV2() {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col vault-page">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}

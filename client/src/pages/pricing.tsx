@@ -72,7 +72,7 @@ export default function PricingV2() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col relative">
+    <div className="min-h-screen flex flex-col relative vault-page">
       <AmbientLayer />
       <HeaderV2 />
 
@@ -185,7 +185,7 @@ export default function PricingV2() {
                     className="tier-card-v2 relative rounded-xl flex flex-col"
                     style={{
                       padding: "48px 40px",
-                      backgroundColor: "transparent",
+                      backgroundColor: "var(--v2-paper)",
                       border: d.featured
                         ? "1px solid rgba(212, 175, 55, 0.6)"
                         : "1px solid rgba(212, 175, 55, 0.25)",
@@ -200,7 +200,7 @@ export default function PricingV2() {
                       </span>
                     )}
 
-                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "var(--v2-gold)" }}>
                       {d.shortName}
                     </p>
 
@@ -209,7 +209,7 @@ export default function PricingV2() {
                       <span
                         className="font-numeral font-semibold absolute"
                         style={{
-                          color: "rgba(255,255,255,0.4)",
+                          color: "var(--v2-ink-mute)",
                           fontSize: "clamp(28px, 3vw, 36px)",
                           top: "4px",
                           left: "-2px",
@@ -221,7 +221,7 @@ export default function PricingV2() {
                       <span
                         className="font-numeral font-semibold"
                         style={{
-                          color: "#FFFFFF",
+                          color: "var(--v2-ink)",
                           fontSize: "clamp(72px, 6vw, 96px)",
                           marginLeft: "20px",
                         }}
@@ -232,20 +232,20 @@ export default function PricingV2() {
 
                     <p
                       className="font-mono-v2 text-[10px] uppercase mb-6"
-                      style={{ color: "#888888", letterSpacing: "0.15em" }}
+                      style={{ color: "var(--v2-ink-mute)", letterSpacing: "0.15em" }}
                     >
                       {days} day turnaround
                     </p>
 
                     {d.blurb && (
-                      <p className="font-body text-sm leading-relaxed mb-8" style={{ color: "rgba(255,255,255,0.7)" }}>
+                      <p className="font-body text-sm leading-relaxed mb-8" style={{ color: "var(--v2-ink-soft)" }}>
                         {d.blurb}
                       </p>
                     )}
 
                     <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                       {tier.features.slice(0, 5).map((f) => (
-                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "#E8E4DC" }}>
+                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
                           <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
                           {f}
                         </li>

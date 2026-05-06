@@ -38,7 +38,7 @@ export default function JournalV2() {
     : rest;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col vault-page">
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ─────────────────────────────────────────── */}

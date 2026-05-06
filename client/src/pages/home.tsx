@@ -87,8 +87,8 @@ function FoundingMembersStrip() {
     <div className="grid md:grid-cols-2 gap-8 md:gap-12 mb-12 md:mb-16 items-start">
       {/* Block A — Founding Members CTA */}
       <div>
-        <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
-          Founding members · Limited cohort
+        <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mb-3" style={{ color: "#ffffff" }}>
+          Founding members &middot; Limited cohort
         </p>
         <h3 className="font-display italic font-medium text-2xl md:text-3xl leading-tight mb-3" style={{ color: "var(--v2-ink)" }}>
           Founding member submissions now open
@@ -123,6 +123,7 @@ function FoundingMembersStrip() {
             style={{
               backgroundColor: "var(--v2-gold)",
               color: "var(--v2-panel-dark)",
+              border: "1px solid rgba(0,0,0,0.2)",
             }}
           >
             {submitting ? "Joining…" : "Join the waitlist"}
@@ -145,7 +146,7 @@ function FoundingMembersStrip() {
         {PROCESS_STEPS.map((step) => (
           <div key={step.num} data-testid={`process-step-${step.num}`}>
             <div className="flex items-baseline gap-3 mb-2">
-              <span className="font-mono-v2 text-xs tracking-widest" style={{ color: "var(--v2-gold)" }}>
+              <span className="font-mono-v2 text-xs tracking-widest" style={{ color: "#ffffff" }}>
                 {step.num}
               </span>
               <span className="font-display italic font-medium text-base md:text-lg" style={{ color: "var(--v2-ink)" }}>
@@ -211,7 +212,7 @@ export default function HomeV2() {
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
-    <div className="min-h-screen flex flex-col relative">
+    <div className="min-h-screen flex flex-col relative vault-page">
       <AmbientLayer />
       <HeaderV2 />
 
@@ -220,7 +221,7 @@ export default function HomeV2() {
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
               className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-6"
-              style={{ color: "var(--v2-gold)" }}
+              style={{ color: "#ffffff" }}
             >
               Est. Kent &middot; MintVault UK
             </p>
@@ -241,14 +242,14 @@ export default function HomeV2() {
               <Link
                 href="/submit"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)", border: "1px solid rgba(0,0,0,0.2)" }}
               >
                 Submit a card <ArrowRight size={14} />
               </Link>
               <Link
                 href="/tools/estimate"
                 className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full border transition-all hover:scale-[1.03]"
-                style={{ borderColor: "var(--v2-line)", color: "var(--v2-ink-soft)" }}
+                style={{ borderColor: "rgba(255,255,255,0.4)", color: "var(--v2-ink-soft)" }}
               >
                 Try AI Pre-Grade <ArrowRight size={14} />
               </Link>
@@ -294,7 +295,7 @@ export default function HomeV2() {
         <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
           <DarkSectionGlow />
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
-            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
               I &middot; Grading Tiers
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -330,7 +331,7 @@ export default function HomeV2() {
                     className="relative rounded-xl flex flex-col"
                     style={{
                       padding: "48px 40px",
-                      backgroundColor: "transparent",
+                      backgroundColor: "var(--v2-paper)",
                       border: tier.featured
                         ? "1px solid rgba(212, 175, 55, 0.6)"
                         : "1px solid rgba(212, 175, 55, 0.25)",
@@ -351,7 +352,7 @@ export default function HomeV2() {
                     )}
 
                     {/* Tier name */}
-                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "var(--v2-gold)" }}>
                       {tier.name}
                     </p>
 
@@ -360,7 +361,7 @@ export default function HomeV2() {
                       <span
                         className="font-numeral font-semibold absolute"
                         style={{
-                          color: "rgba(255,255,255,0.4)",
+                          color: "var(--v2-ink-mute)",
                           fontSize: "clamp(28px, 3vw, 36px)",
                           top: "4px",
                           left: "-2px",
@@ -372,7 +373,7 @@ export default function HomeV2() {
                       <span
                         className="font-numeral font-semibold"
                         style={{
-                          color: "#FFFFFF",
+                          color: "var(--v2-ink)",
                           fontSize: "clamp(72px, 6vw, 96px)",
                           marginLeft: "20px",
                         }}
@@ -384,7 +385,7 @@ export default function HomeV2() {
                     {/* Turnaround — mono */}
                     <p
                       className="font-mono-v2 text-[10px] uppercase mb-8"
-                      style={{ color: "#888888", letterSpacing: "0.15em" }}
+                      style={{ color: "var(--v2-ink-mute)", letterSpacing: "0.15em" }}
                     >
                       {tier.days} turnaround
                     </p>
@@ -392,7 +393,7 @@ export default function HomeV2() {
                     {/* Feature bullets — em-dash prefix */}
                     <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                       {tier.features.map((f) => (
-                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "#E8E4DC" }}>
+                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
                           <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
                           {f}
                         </li>
@@ -416,7 +417,7 @@ export default function HomeV2() {
               </div>
             </div>
 
-            <p className="font-body text-xs text-center mt-8" style={{ color: "rgba(255,255,255,0.35)" }}>
+            <p className="font-body text-xs text-center mt-8" style={{ color: "rgba(255,255,255,0.85)" }}>
               Bulk discounts from 10 cards.
             </p>
           </div>
@@ -427,7 +428,7 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
               II &middot; Infrastructure
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -542,7 +543,7 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper-sunk">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+            <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
               III &middot; Population Registry
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -618,7 +619,7 @@ export default function HomeV2() {
       <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
-          <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+          <p className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
             IV &middot; Submit
           </p>
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
@@ -631,7 +632,7 @@ export default function HomeV2() {
             <Link
               href="/submit"
               className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)", border: "1px solid rgba(0,0,0,0.2)" }}
             >
               Submit a card <ArrowRight size={14} />
             </Link>
@@ -643,7 +644,7 @@ export default function HomeV2() {
               Try AI Pre-Grade (free) <ArrowRight size={14} />
             </Link>
           </div>
-          <p className="font-mono-v2 text-[9px] uppercase tracking-widest" style={{ color: "var(--v2-gold)" }}>
+          <p className="font-mono-v2 text-[9px] uppercase tracking-widest" style={{ color: "#ffffff" }}>
             No login required for pre-grade &middot; Submission in 3 minutes
           </p>
         </div>

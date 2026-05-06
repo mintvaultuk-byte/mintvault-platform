@@ -124,7 +124,7 @@ export default function JournalDetailV2() {
   // ── 404 fallback ──
   if (!guide) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col vault-page">
         <HeaderV2 />
         <section className="frost-paper">
           <div className="mx-auto max-w-2xl px-6 py-32 text-center">
@@ -152,7 +152,7 @@ export default function JournalDetailV2() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col vault-page">
       <style>{PROSE_CSS}</style>
       <HeaderV2 />
 

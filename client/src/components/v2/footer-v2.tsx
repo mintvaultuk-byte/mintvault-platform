@@ -77,8 +77,8 @@ export default function FooterV2() {
     <footer
       className="border-t"
       style={{
-        backgroundColor: "var(--v2-paper-sunk)",
-        borderColor: "var(--v2-line)",
+        backgroundColor: "var(--v2-ink)",
+        borderColor: "rgba(255,255,255,0.08)",
       }}
     >
       <div className="mx-auto max-w-7xl px-6 py-16">
@@ -88,7 +88,7 @@ export default function FooterV2() {
             <div key={col.title}>
               <p
                 className="font-body text-xs font-semibold uppercase tracking-widest mb-4"
-                style={{ color: "var(--v2-ink-mute)" }}
+                style={{ color: "var(--v2-gold)" }}
               >
                 {col.title}
               </p>
@@ -98,7 +98,7 @@ export default function FooterV2() {
                     <a
                       href={link.href}
                       className="font-body text-sm no-underline transition-colors hover:underline"
-                      style={{ color: "var(--v2-ink-soft)" }}
+                      style={{ color: "rgba(255,255,255,0.85)" }}
                     >
                       {link.label}
                     </a>
@@ -112,12 +112,12 @@ export default function FooterV2() {
         {/* Bottom strip */}
         <div
           className="border-t pt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-          style={{ borderColor: "var(--v2-line)" }}
+          style={{ borderColor: "rgba(255,255,255,0.08)" }}
         >
           {/* Mark */}
           <span
             className="font-display italic text-lg font-medium"
-            style={{ color: "var(--v2-ink-mute)" }}
+            style={{ color: "rgba(255,255,255,0.7)" }}
           >
             {COMPANY.tradingName}
           </span>
@@ -125,7 +125,7 @@ export default function FooterV2() {
           {/* Legal line */}
           <p
             className="font-body text-xs leading-relaxed"
-            style={{ color: "var(--v2-ink-mute)" }}
+            style={{ color: "rgba(255,255,255,0.6)" }}
           >
             &copy; 2026 {COMPANY.legalName} &middot; Registered in England &amp; Wales
             &middot; Company No. {COMPANY.companyNumber}

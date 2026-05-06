@@ -256,7 +256,7 @@ export default function ToolsEstimateV2() {
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col vault-page">
       <HeaderV2 />
 
       {/* ── SECTION A: COMPACT HEADER ──────────────────────────────── */}
