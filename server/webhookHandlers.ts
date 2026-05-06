@@ -235,8 +235,8 @@ export class WebhookHandlers {
       eventType: 'subscription.created', tier, status,
     });
 
-    // Fetch user for email
-    const userRows = await db.execute(sql`SELECT email, display_name FROM users WHERE id = ${userId} LIMIT 1`);
+    // Fetch user for email + username (username determines whether showroom_active flipped on)
+    const userRows = await db.execute(sql`SELECT email, display_name, username FROM users WHERE id = ${userId} LIMIT 1`);
     const user = userRows.rows[0] as any;
     if (user?.email) {
       sendVaultClubWelcomeEmail({
@@ -247,6 +247,9 @@ export class WebhookHandlers {
     }
 
     await writeAuthAudit('vault_club.subscribed', userId, 'webhook', { tier, status });
+    if (user?.username) {
+      await writeAuthAudit('showroom.activated', userId, 'stripe-webhook', { tier, subscriptionId });
+    }
     console.log(`[webhook] Vault Club subscribed: user=${userId} tier=${tier} status=${status}`);
   }
 
@@ -339,6 +342,11 @@ export class WebhookHandlers {
     }
 
     await writeAuthAudit('vault_club.canceled', userId, 'webhook', {});
+    await writeAuthAudit('showroom.deactivated', userId, 'stripe-webhook', {
+      tier: 'silver',
+      subscriptionId: sub.id,
+      reason: 'subscription_cancelled',
+    });
     console.log(`[webhook] Vault Club canceled: user=${userId}`);
   }
 

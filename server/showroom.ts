@@ -131,6 +131,18 @@ export function registerShowroomRoutes(app: Express): void {
     },
   });
 
+  // Rate limit for unauthenticated showroom lookups — protects against
+  // enumeration scraping. Mirror of lookupRateLimit in server/routes.ts.
+  // Two separate per-IP buckets (one each module); combined ceiling 120/min
+  // is acceptable for the showroom + cert-lookup surface together.
+  const lookupRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests. Limit: 60 per minute per IP." },
+  });
+
   // GET /api/showroom/check-username?username=xxx
   app.get("/api/showroom/check-username", checkUsernameLimit, async (req: Request, res: Response) => {
     const raw = typeof req.query.username === "string" ? req.query.username : "";
@@ -231,7 +243,8 @@ export function registerShowroomRoutes(app: Express): void {
   });
 
   // GET /api/showroom/:username
-  app.get("/api/showroom/:username", async (req: Request, res: Response) => {
+  app.get("/api/showroom/:username", lookupRateLimit, async (req: Request, res: Response) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
     const username = String(req.params.username).toLowerCase().trim();
     const cached = showroomCache.get(username);
     if (cached) return res.json(cached);
@@ -342,7 +355,8 @@ export function registerShowroomRoutes(app: Express): void {
   });
 
   // GET /api/showrooms?limit=50&offset=0
-  app.get("/api/showrooms", async (req: Request, res: Response) => {
+  app.get("/api/showrooms", lookupRateLimit, async (req: Request, res: Response) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
     const limit = Math.min(parseInt(String(req.query.limit || "50"), 10), 100);
     const offset = parseInt(String(req.query.offset || "0"), 10);
     const cacheKey = `list:${limit}:${offset}`;

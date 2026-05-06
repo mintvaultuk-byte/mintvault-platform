@@ -999,6 +999,18 @@ export async function registerRoutes(
     },
   });
 
+  // Rate limit for unauthenticated public lookup endpoints — protects against
+  // enumeration scrapers (cert IDs are sequential MV1, MV2, ...).
+  // Applied to /api/cert/:id, /api/cert/:id/population, /api/logbook/:certId,
+  // and (via parallel definition in server/showroom.ts) the showroom GETs.
+  const lookupRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests. Limit: 60 per minute per IP." },
+  });
+
   // ── Health check — tests DB connectivity for Fly/monitoring ───────────────
   // No auth, no rate limit. Returns 503 if DB unreachable.
   const serverStartedAt = Date.now();
@@ -1107,8 +1119,8 @@ export async function registerRoutes(
     return null;
   }
 
-  app.get("/api/cert/:id", async (req, res) => {
-    const certId = req.params.id;
+  app.get("/api/cert/:id", lookupRateLimit, async (req, res) => {
+    const certId = String(req.params.id);
     const viewerUserId = (req.session as any)?.userId as string | undefined;
 
     const dbCert = await findCertByIdFlex(certId);
@@ -1202,9 +1214,9 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/cert/:id/population", async (req, res) => {
+  app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
-      const certId = req.params.id;
+      const certId = String(req.params.id);
       const dbCert = await findCertByIdFlex(certId);
       if (!dbCert || (dbCert.status !== "active" && dbCert.status !== "published")) {
         return res.status(404).json({ error: "Certificate not found" });
@@ -2635,10 +2647,10 @@ export async function registerRoutes(
 
   // ── Logbook endpoints ──────────────────────────────────────────────────────
 
-  app.get("/api/logbook/:certId", async (req, res) => {
+  app.get("/api/logbook/:certId", lookupRateLimit, async (req, res) => {
     try {
       const { buildLogbookData, toPublicPayload } = await import("./logbook-service");
-      const data = await buildLogbookData(req.params.certId);
+      const data = await buildLogbookData(String(req.params.certId));
       if (!data) return res.status(404).json({ error: "Certificate not found" });
       res.json(toPublicPayload(data));
     } catch (err: any) {
