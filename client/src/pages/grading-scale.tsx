@@ -44,18 +44,18 @@ const criteria = [
 
 export default function GradingScalePage() {
   return (
-    <div className="px-4 py-10 max-w-3xl mx-auto">
+    <div className="px-4 py-10 max-w-3xl mx-auto vault-page">
       <SeoHead
         title="MintVault Grading Scale | 1–10 Trading Card Grading Standards"
         description="Full breakdown of the MintVault 1–10 grading scale. Understand what each grade means, what graders examine, and how to assess your own cards before submission."
         canonical="https://mintvaultuk.com/grading-scale"
       />
 
-      <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-2" data-testid="text-h1-grading-scale">
+      <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-2" data-testid="text-h1-grading-scale">
         MintVault Grading Scale
       </h1>
-      <p className="text-[#666666] text-base leading-relaxed mb-10">
-        Every card graded by MintVault is assessed on our professional 1–10 scale. Grades are whole numbers only — no half-point grades. Grades reflect the overall condition of the card at the time of grading.
+      <p className="text-white text-base leading-relaxed mb-10">
+        Every card graded by MintVault is assessed on our professional 1&ndash;10 scale. Grades are whole numbers only &mdash; no half-point grades. Grades reflect the overall condition of the card at the time of grading.
       </p>
 
       {/* Grade table */}
@@ -106,16 +106,16 @@ export default function GradingScalePage() {
           <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
             <Target size={16} className="text-[#1A1400]" />
           </div>
-          <h2 className="text-xl font-bold text-[#1A1A1A] tracking-wide">What We Examine</h2>
+          <h2 className="text-xl font-bold text-white tracking-wide">What We Examine</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {criteria.map((c, i) => (
             <div key={i} className="border border-[#D4AF37]/20 rounded-xl p-5" data-testid={`card-criteria-${i}`}>
-              <h3 className="text-[#1A1A1A] font-bold text-sm mb-2 flex items-center gap-2">
+              <h3 className="text-white font-bold text-sm mb-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] flex-shrink-0" />
                 {c.title}
               </h3>
-              <p className="text-[#666666] text-xs leading-relaxed">{c.desc}</p>
+              <p className="text-white text-xs leading-relaxed">{c.desc}</p>
             </div>
           ))}
         </div>
@@ -126,10 +126,10 @@ export default function GradingScalePage() {
         <div className="border-l-4 border-[#D4AF37] pl-5 py-2">
           <div className="flex items-center gap-2 mb-2">
             <Shield size={16} className="text-[#D4AF37]" />
-            <h2 className="text-[#1A1A1A] font-bold text-sm uppercase tracking-widest">Our Grading Promise</h2>
+            <h2 className="text-white font-bold text-sm uppercase tracking-widest">Our Grading Promise</h2>
           </div>
-          <p className="text-[#444444] text-sm leading-relaxed">
-            Every card is graded by trained professionals using consistent, documented standards. MintVault does not buy or sell cards — eliminating any conflict of interest in the grading process. Our goal is to give you an honest, accurate grade every time.
+          <p className="text-white text-sm leading-relaxed">
+            Every card is graded by trained professionals using consistent, documented standards. MintVault does not buy or sell cards &mdash; eliminating any conflict of interest in the grading process. Our goal is to give you an honest, accurate grade every time.
           </p>
         </div>
       </section>

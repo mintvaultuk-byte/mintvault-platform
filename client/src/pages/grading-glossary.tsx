@@ -72,7 +72,7 @@ const terms = [
 
 export default function GradingGlossaryPage() {
   return (
-    <div className="px-4 py-10 max-w-3xl mx-auto">
+    <div className="px-4 py-10 max-w-3xl mx-auto vault-page">
       <SeoHead
         title="Grading Glossary | MintVault Card Grading Terms Explained"
         description="Plain-English definitions of every term used in professional trading card grading. Understand centering, corner wear, silvering, print lines, and more."
@@ -83,11 +83,11 @@ export default function GradingGlossaryPage() {
         <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
           <BookOpen size={18} className="text-[#1A1400]" />
         </div>
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide" data-testid="text-h1-grading-glossary">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide" data-testid="text-h1-grading-glossary">
           Grading Glossary
         </h1>
       </div>
-      <p className="text-[#666666] text-base leading-relaxed mb-10">
+      <p className="text-white text-base leading-relaxed mb-10">
         Plain-English definitions of every term used in professional trading card grading. Bookmark this page before submitting your first order.
       </p>
 
@@ -116,8 +116,8 @@ export default function GradingGlossaryPage() {
       {/* Cross-link to grading scale */}
       <section className="mb-12 reveal-on-scroll">
         <div className="border-l-4 border-[#D4AF37] pl-5 py-2">
-          <p className="text-[#444444] text-sm leading-relaxed">
-            <span className="font-semibold text-[#1A1A1A]">Want to see how these factors affect grades?</span>{" "}
+          <p className="text-white text-sm leading-relaxed">
+            <span className="font-semibold text-white">Want to see how these factors affect grades?</span>{" "}
             Visit the{" "}
             <Link href="/grading-scale">
               <span className="text-[#B8960C] font-semibold underline underline-offset-2 cursor-pointer">
