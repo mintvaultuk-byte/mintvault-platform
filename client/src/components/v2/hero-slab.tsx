@@ -24,7 +24,7 @@ export interface SlabContent {
   topBadge: string | null;
   /** Bottom-left primary label. E.g. a card name or "£25". */
   mainLabel: string;
-  /** Bottom-right mono accent. E.g. "MV 9.5" or "15 DAY". Falsy hides it. */
+  /** Bottom-right mono accent. E.g. "MV 9" or "15 DAY". Falsy hides it. */
   rightLabel: string | null;
   /** Bottom footnote row (md+ only). E.g. "NFC · Tracked" or "MOST CHOSEN". */
   footnote: string | null;

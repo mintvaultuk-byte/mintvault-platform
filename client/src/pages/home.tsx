@@ -483,12 +483,12 @@ export default function HomeV2() {
                 <div className="rounded-lg p-4 font-mono-v2 text-[10px] leading-relaxed" style={{ backgroundColor: "var(--v2-paper-sunk)", color: "var(--v2-ink-soft)" }}>
                   <p style={{ color: "var(--v2-ink)" }}>1999 Holo Charizard #4</p>
                   <div className="mt-2 space-y-0.5">
-                    <div className="flex justify-between"><span>Centering</span><span style={{ color: "var(--v2-ink)" }}>9.5</span></div>
-                    <div className="flex justify-between"><span>Corners</span><span style={{ color: "var(--v2-ink)" }}>9.0</span></div>
-                    <div className="flex justify-between"><span>Edges</span><span style={{ color: "var(--v2-ink)" }}>9.5</span></div>
-                    <div className="flex justify-between"><span>Surface</span><span style={{ color: "var(--v2-ink)" }}>10.0</span></div>
+                    <div className="flex justify-between"><span>Centering</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
+                    <div className="flex justify-between"><span>Corners</span><span style={{ color: "var(--v2-ink)" }}>9</span></div>
+                    <div className="flex justify-between"><span>Edges</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
+                    <div className="flex justify-between"><span>Surface</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
                     <div className="flex justify-between border-t pt-1 mt-1 font-semibold" style={{ borderColor: "var(--v2-line)", color: "var(--v2-gold)" }}>
-                      <span>Predicted</span><span>MV 9.5</span>
+                      <span>Predicted</span><span>MV 9</span>
                     </div>
                   </div>
                 </div>
