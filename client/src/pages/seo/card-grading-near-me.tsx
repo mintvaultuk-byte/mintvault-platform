@@ -49,7 +49,7 @@ const schema = [
 
 export default function CardGradingNearMe() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="Card Grading Near Me | UK Card Grading by Post | MintVault"
         description="Looking for card grading near you in the UK? MintVault accepts postal submissions from anywhere in the UK. Professional grading from £19 — no drop-off needed."

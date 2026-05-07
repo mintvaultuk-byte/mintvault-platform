@@ -49,7 +49,7 @@ const schema = [
 
 export default function SportsCardGradingUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="Sports Card Grading UK | Football & Basketball Card Grading | MintVault"
         description="Professional sports card grading in the UK. Grade your football, basketball, and cricket cards with MintVault — verified ownership, tamper-evident slabs."

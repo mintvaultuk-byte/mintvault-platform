@@ -26,7 +26,7 @@ export default function OurStoryPage() {
       </section>
 
       {/* Content */}
-      <div className="max-w-2xl mx-auto px-6 py-16 md:py-24 space-y-16">
+      <div className="max-w-2xl mx-auto my-8 px-6 py-16 md:py-24 space-y-16 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
 
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Beginning</p>

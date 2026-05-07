@@ -49,7 +49,7 @@ const schema = [
 
 export default function CardGradingCostUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="Card Grading Cost UK | How Much Does Card Grading Cost? | MintVault"
         description="How much does card grading cost in the UK? MintVault offers transparent all-inclusive pricing from £19 per card with insured return shipping."

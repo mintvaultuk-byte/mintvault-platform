@@ -49,7 +49,7 @@ const schema = [
 
 export default function YugiohCardGradingUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault"
         description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking, from £19 per card."

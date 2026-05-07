@@ -59,7 +59,7 @@ const schema = [
 
 export default function TcgGradingUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="TCG Grading UK | Professional Trading Card Game Grading | MintVault"
         description="Professional TCG grading in the UK for Pokemon, Yu-Gi-Oh!, Magic: The Gathering and all major trading card games. For collectors, investors, and resellers. From £19/card."

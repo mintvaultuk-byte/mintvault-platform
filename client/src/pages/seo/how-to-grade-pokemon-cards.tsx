@@ -80,7 +80,7 @@ const schema = [
 
 export default function HowToGradePokemonCards() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="How to Grade Pokemon Cards | Step-by-Step Guide | MintVault UK"
         description="Learn how to grade Pokemon cards step by step. Card preparation, packaging, submission process, and what graders look for. Complete guide for UK collectors."

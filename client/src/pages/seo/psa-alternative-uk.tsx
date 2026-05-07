@@ -55,7 +55,7 @@ const schema = [
 
 export default function PsaAlternativeUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="PSA Alternative UK | UK Card Grading Service | MintVault"
         description="Looking for a PSA alternative in the UK? MintVault offers professional card grading without international shipping, customs fees, or long wait times. Grade locally from £19/card."

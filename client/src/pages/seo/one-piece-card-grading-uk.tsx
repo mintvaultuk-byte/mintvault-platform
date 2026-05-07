@@ -49,7 +49,7 @@ const schema = [
 
 export default function OnePieceCardGradingUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="One Piece Card Grading UK | Professional TCG Grading | MintVault"
         description="Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £19."

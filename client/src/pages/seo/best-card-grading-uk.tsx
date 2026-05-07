@@ -49,7 +49,7 @@ const schema = [
 
 export default function BestCardGradingUk() {
   return (
-    <div className="px-4 py-10">
+    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
       <SeoHead
         title="Best Card Grading UK | Top UK Card Grading Company | MintVault"
         description="Looking for the best card grading in the UK? MintVault offers professional grading, NFC slabs, and a verified ownership registry — from £19 per card."
