@@ -826,9 +826,12 @@ interface AuthMe {
   email_verified: boolean;
 }
 
-// ── Account welcome banner (shown when logged in via email+password system) ───
+// ── Email verification warning (only shown when authMe.email_verified === false) ───
+// The "Welcome back" greeting + Account Settings link previously rendered here
+// were merged into MemberHeader (v545); this component now only surfaces the
+// unverified-email warning + Resend button so the dashboard collapses cleanly
+// when verification is complete.
 function AccountBanner({ authMe }: { authMe: AuthMe }) {
-  const queryClient = useQueryClient();
   const [resendSent, setResendSent] = useState(false);
 
   const resendMutation = useMutation({
@@ -836,43 +839,27 @@ function AccountBanner({ authMe }: { authMe: AuthMe }) {
     onSuccess: () => setResendSent(true),
   });
 
-  const name = authMe.display_name || authMe.email.split("@")[0];
+  if (authMe.email_verified) return null;
 
   return (
-    <div className="mb-6 space-y-3">
-      {/* Welcome row */}
-      <div className="flex items-center justify-between flex-wrap gap-2 bg-[#FAFAF8] border border-[#D4AF37]/20 rounded-xl px-4 py-3">
-        <span className="text-sm text-[#1A1A1A] font-semibold">
-          Welcome back, <span className="text-[#B8960C]">{name}</span>
-        </span>
-        <Link href="/account/settings" className="text-xs text-[#B8960C] font-semibold hover:text-[#D4AF37] flex items-center gap-1 transition-colors">
-          <Settings size={11} />
-          Account Settings
-        </Link>
+    <div className="mb-6 flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+      <div className="flex items-start gap-2">
+        <AlertCircle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+        <p className="text-xs text-amber-800 font-medium">
+          Please verify your email address to unlock all features.
+        </p>
       </div>
-
-      {/* Email verification warning */}
-      {!authMe.email_verified && (
-        <div className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle size={14} className="text-amber-600 shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-800 font-medium">
-              Please verify your email address to unlock all features.
-            </p>
-          </div>
-          {resendSent ? (
-            <span className="text-xs text-emerald-700 font-semibold whitespace-nowrap">Link sent!</span>
-          ) : (
-            <button
-              onClick={() => resendMutation.mutate()}
-              disabled={resendMutation.isPending}
-              className="text-xs text-amber-700 font-bold hover:text-amber-900 flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-60"
-            >
-              {resendMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
-              Resend
-            </button>
-          )}
-        </div>
+      {resendSent ? (
+        <span className="text-xs text-emerald-700 font-semibold whitespace-nowrap">Link sent!</span>
+      ) : (
+        <button
+          onClick={() => resendMutation.mutate()}
+          disabled={resendMutation.isPending}
+          className="text-xs text-amber-700 font-bold hover:text-amber-900 flex items-center gap-1 whitespace-nowrap transition-colors disabled:opacity-60"
+        >
+          {resendMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+          Resend
+        </button>
       )}
     </div>
   );
@@ -934,6 +921,21 @@ export default function DashboardPage() {
     enabled: !!authMe,
   });
   const isMember = !!(vcMe?.tier === "silver" && vcMe?.status && (vcMe.status === "active" || vcMe.status === "trialing"));
+
+  // Showroom username — lifted to page level so MemberHeader can render the
+  // user's full display name as a gold link to their Showroom. ShowroomSection
+  // still calls the same query; React Query dedupes via shared cache key.
+  const { data: showroomMe } = useQuery<{ username: string | null } | null>({
+    queryKey: ["/api/showroom-me"],
+    queryFn: async () => {
+      const res = await fetch("/api/showroom-me");
+      if (!res.ok) return null;
+      return res.json();
+    },
+    retry: false,
+    staleTime: 60_000,
+    enabled: !!authMe,
+  });
 
   const logoutMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/customer/logout", {}),
@@ -1018,6 +1020,7 @@ export default function DashboardPage() {
           vcMe={vcMe ?? null}
           isMember={isMember}
           onLogout={() => logoutMutation.mutate()}
+          showroomUsername={showroomMe?.username ?? null}
         />
 
         {/* Account welcome + verification banner */}

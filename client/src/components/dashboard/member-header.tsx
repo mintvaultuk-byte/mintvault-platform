@@ -1,4 +1,5 @@
-import { LogOut } from "lucide-react";
+import { LogOut, Settings } from "lucide-react";
+import { Link } from "wouter";
 
 interface VaultClubMeMinimal {
   tier: string | null;
@@ -18,6 +19,9 @@ interface Props {
   vcMe: VaultClubMeMinimal | null | undefined;
   isMember: boolean;
   onLogout: () => void;
+  /** Showroom username — when present, the full display name renders as a
+   *  gold link to /showroom/[username]. Otherwise falls back to /account/settings. */
+  showroomUsername?: string | null;
 }
 
 function fmtMonthYear(iso: string | null | undefined): string | null {
@@ -30,13 +34,15 @@ function fmtDate(iso: string | null | undefined): string | null {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout }: Props) {
+export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout, showroomUsername }: Props) {
   const firstName =
     authMe?.display_name?.split(" ")[0] ||
     me.email.split("@")[0] ||
     "there";
+  const fullName = authMe?.display_name?.trim() || null;
   const avatarSource = (authMe?.display_name || me.email).trim();
   const avatarLetter = (avatarSource[0] || "?").toUpperCase();
+  const showroomHref = showroomUsername ? `/showroom/${showroomUsername}` : null;
 
   if (isMember) {
     const memberSince = fmtMonthYear(vcMe?.started_at);
@@ -51,6 +57,17 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout }: P
             <h1 className="text-xl font-medium text-[#FAF9F5] leading-tight">
               Welcome back, <span className="text-[#D4AF37]">{firstName}</span>
             </h1>
+            {fullName && fullName !== firstName && (
+              <p className="text-sm text-[#d4d4d4] mt-1.5">
+                {showroomHref ? (
+                  <Link href={showroomHref} className="text-[#D4AF37] hover:text-[#D4AF37]/80 transition-colors">
+                    {fullName}
+                  </Link>
+                ) : (
+                  <span className="text-[#d4d4d4]">{fullName}</span>
+                )}
+              </p>
+            )}
             {(memberSince || renews) && (
               <p className="text-[11px] text-[#888888] mt-1.5">
                 {memberSince && <>Member since {memberSince}</>}
@@ -71,6 +88,14 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout }: P
             <div className="w-7 h-7 rounded-full bg-[#D4AF37] flex items-center justify-center text-[#0F0F0F] text-xs font-bold">
               {avatarLetter}
             </div>
+            <Link
+              href="/account/settings"
+              className="text-[10px] text-[#888888] hover:text-[#D4AF37] transition-colors flex items-center gap-1"
+              aria-label="Account Settings"
+            >
+              <Settings size={11} />
+              <span className="hidden sm:inline">Account Settings</span>
+            </Link>
             <button
               onClick={onLogout}
               className="text-[10px] text-[#888888] hover:text-[#D4AF37] transition-colors flex items-center gap-1"
@@ -99,14 +124,24 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout }: P
           <p className="text-xs text-[#888888] truncate">{me.email}</p>
         </div>
       </div>
-      <button
-        onClick={onLogout}
-        className="text-xs text-[#888888] hover:text-[#666666] transition-colors flex items-center gap-1.5 flex-shrink-0"
-        aria-label="Log out"
-      >
-        <LogOut size={13} />
-        Log out
-      </button>
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <Link
+          href="/account/settings"
+          className="text-xs text-[#888888] hover:text-[#666666] transition-colors flex items-center gap-1.5"
+          aria-label="Account Settings"
+        >
+          <Settings size={13} />
+          <span className="hidden sm:inline">Account Settings</span>
+        </Link>
+        <button
+          onClick={onLogout}
+          className="text-xs text-[#888888] hover:text-[#666666] transition-colors flex items-center gap-1.5"
+          aria-label="Log out"
+        >
+          <LogOut size={13} />
+          Log out
+        </button>
+      </div>
     </div>
   );
 }
