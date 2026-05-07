@@ -156,7 +156,7 @@ export default function CardGradingCostUk() {
               { href: "/card-grading-service-uk", label: "Card Grading Service UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

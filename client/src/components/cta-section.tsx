@@ -21,12 +21,12 @@ export default function CtaSection({
           </span>
         </Link>
         <Link href="/">
-          <span className="inline-flex items-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37]/70 px-6 py-2.5 rounded font-medium text-sm tracking-wide transition-all hover:text-[#D4AF37] hover:border-[#D4AF37]/50 cursor-pointer" data-testid="button-cta-pricing">
+          <span className="inline-flex items-center gap-2 border border-[#D4AF37]/45 text-[#D4AF37] px-6 py-2.5 rounded font-medium text-sm tracking-wide transition-all hover:border-[#D4AF37]/70 cursor-pointer" data-testid="button-cta-pricing">
             <CreditCard size={16} /> View Pricing
           </span>
         </Link>
         <Link href="/verify">
-          <span className="inline-flex items-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37]/70 px-6 py-2.5 rounded font-medium text-sm tracking-wide transition-all hover:text-[#D4AF37] hover:border-[#D4AF37]/50 cursor-pointer" data-testid="button-cta-certs">
+          <span className="inline-flex items-center gap-2 border border-[#D4AF37]/45 text-[#D4AF37] px-6 py-2.5 rounded font-medium text-sm tracking-wide transition-all hover:border-[#D4AF37]/70 cursor-pointer" data-testid="button-cta-certs">
             <Search size={16} /> Check Certificates
           </span>
         </Link>

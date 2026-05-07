@@ -16,7 +16,7 @@ export default function FaqSection({ faqs, title = "Frequently Asked Questions" 
         {faqs.map((faq, i) => (
           <div
             key={i}
-            className="border border-[#D4AF37]/20 rounded-lg overflow-hidden"
+            className="border border-[#D4AF37]/40 rounded-lg overflow-hidden bg-[#0a0e1a]/70 backdrop-blur-sm"
             data-testid={`faq-item-${i}`}
           >
             <button
