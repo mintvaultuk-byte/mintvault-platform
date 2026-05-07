@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft } from "lucide-react";
+import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 // ── New /api/admin/ai-dashboard-stats response shape ───────────────────────
@@ -162,6 +162,24 @@ export default function AdminLearningPage() {
       if (!res.ok) return { flags: [] };
       return res.json();
     },
+  });
+
+  // RAG Phase 0 corpus status — passive panel until retrieval is built
+  const { data: embedStatus } = useQuery<{
+    embedded_count: number;
+    total_approved: number;
+    percentage: number;
+    oldest_unembedded_cert_id: string | null;
+    ready?: boolean;
+    error?: string;
+  }>({
+    queryKey: ["/api/admin/embedding-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/embedding-status", { credentials: "include" });
+      if (!res.ok) return null as any;
+      return res.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
   });
 
   const o = overview?.overview;
@@ -475,6 +493,42 @@ export default function AdminLearningPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* RAG Phase 0 — corpus status. Passive panel showing how many
+              approved cards have been embedded into pgvector for the
+              future retrieval system. Hourly background job populates
+              the column; retrieval logic is deferred until ~200 cards. */}
+          {embedStatus && (
+            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-3">
+              <div className="flex items-center gap-2">
+                <Database size={16} className="text-[#D4AF37]" />
+                <h2 className="text-[#1A1A1A] font-bold">RAG Corpus</h2>
+              </div>
+              {embedStatus.ready === false ? (
+                <p className="text-[#555555] text-sm">
+                  Pending migration — pgvector is not yet enabled on the database. Once the migration runs, the hourly embed-corpus job will start populating this panel.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[#1A1A1A] text-sm">
+                    <strong>{embedStatus.embedded_count}</strong> / <strong>{embedStatus.total_approved}</strong> cards embedded for future retrieval system
+                    {" "}({embedStatus.percentage}%).
+                  </p>
+                  <div className="h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#D4AF37] rounded-full transition-all" style={{ width: `${embedStatus.percentage}%` }} />
+                  </div>
+                  {embedStatus.oldest_unembedded_cert_id && (
+                    <p className="text-[#888888] text-xs">
+                      Next up: <span className="font-mono">{embedStatus.oldest_unembedded_cert_id}</span> · hourly job picks up to 50 per tick.
+                    </p>
+                  )}
+                  {embedStatus.embedded_count === embedStatus.total_approved && embedStatus.total_approved > 0 && (
+                    <p className="text-emerald-600 text-xs">All approved cards embedded ✓</p>
+                  )}
+                </>
+              )}
             </div>
           )}
 

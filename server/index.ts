@@ -397,6 +397,20 @@ async function runTransferV2Sweep() {
   setTimeout(runTransferV2Sweep, 30_000);
   setInterval(runTransferV2Sweep, 60 * 60 * 1000);
 
+  // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
+  // server is fully serving before we touch OpenAI; thereafter every
+  // hour. Job fail-softs if the migration hasn't run yet, so it's safe
+  // to ship the code before approving the migration.
+  setTimeout(async () => {
+    try {
+      const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
+      await runEmbedCorpusJob();
+      setInterval(() => { runEmbedCorpusJob().catch(e => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus")); }, 60 * 60 * 1000);
+    } catch (err: any) {
+      log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
+    }
+  }, 60_000);
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

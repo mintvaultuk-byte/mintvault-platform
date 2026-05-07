@@ -9546,6 +9546,46 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── RAG Phase 0 corpus status ────────────────────────────────────────────
+  // Surfaces the embed-corpus job's progress so the dashboard can show
+  // "X/Y cards embedded for future retrieval system." Fail-softs to
+  // sensible nulls when the embedding column doesn't exist yet (pre-
+  // migration), so the dashboard panel doesn't break the whole page.
+  app.get("/api/admin/embedding-status", requireAdmin, async (_req, res) => {
+    try {
+      const r = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL)::int           AS total_approved,
+          COUNT(*) FILTER (WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL AND embedded_at IS NOT NULL)::int AS embedded_count,
+          (SELECT certificate_number FROM certificates
+             WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL AND embedded_at IS NULL
+             ORDER BY grade_approved_at ASC NULLS LAST LIMIT 1) AS oldest_unembedded_cert_id
+        FROM certificates
+      `);
+      const row = (r.rows[0] || {}) as any;
+      const total = Number(row.total_approved || 0);
+      const embedded = Number(row.embedded_count || 0);
+      res.json({
+        embedded_count: embedded,
+        total_approved: total,
+        percentage: total > 0 ? Math.round((embedded / total) * 1000) / 10 : 0,
+        oldest_unembedded_cert_id: row.oldest_unembedded_cert_id || null,
+      });
+    } catch (err: any) {
+      // Migration likely hasn't run — return a graceful "ready: false"
+      // shape rather than 500'ing the whole panel.
+      console.warn("[embedding-status] query failed (migration may be pending):", err?.message || err);
+      res.json({
+        embedded_count: 0,
+        total_approved: 0,
+        percentage: 0,
+        oldest_unembedded_cert_id: null,
+        ready: false,
+        error: err?.message || "embedding column not present",
+      });
+    }
+  });
+
   // PUT /api/admin/certificates/:id/status
   app.put("/api/admin/certificates/:id/status", requireAdmin, async (req, res) => {
     try {

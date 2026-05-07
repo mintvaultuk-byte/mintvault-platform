@@ -1,7 +1,26 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, numeric, uniqueIndex, index, jsonb, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, numeric, uniqueIndex, index, jsonb, bigint, customType } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+/**
+ * pgvector column type — drizzle-orm doesn't ship a first-class pgvector
+ * helper as of 0.39.x. We declare it via customType: pg returns vector
+ * values as the literal string "[0.123,0.456,...]" and accepts the same
+ * format on insert, so toDriver/fromDriver just bridge that to a JS
+ * number[]. Dimension is fixed at 1536 to match OpenAI text-embedding-3-small.
+ *
+ * Phase 0 of the RAG workstream — populated by the hourly embed-corpus
+ * job (server/jobs/embed-corpus.ts), read by future similarity-search
+ * code that does NOT exist yet.
+ */
+const vector1536 = customType<{ data: number[]; driverData: string }>({
+  dataType() { return "vector(1536)"; },
+  toDriver(value: number[]): string { return "[" + value.join(",") + "]"; },
+  fromDriver(value: string): number[] {
+    return value.replace(/[\[\]]/g, "").split(",").map(Number);
+  },
+});
 
 /**
  * ── Certificate-ID naming convention ────────────────────────────────────────
@@ -358,6 +377,13 @@ export const certificates = pgTable("certificates", {
     hasStaining?: boolean; hasIndentation?: boolean; hasRollerMarks?: boolean;
     hasColorRegistration?: boolean; hasCrease?: boolean; hasTear?: boolean;
   } | null>(),
+  // ── RAG Phase 0: passive embedding for future retrieval ─────────────────
+  // Populated by the hourly embed-corpus cron over the existing approved
+  // corpus. embedded_at = NULL means "not yet embedded"; non-null is the
+  // timestamp of the last successful embed. Re-embedding on model change
+  // is a future op (set embedded_at = NULL to re-queue).
+  embedding:   vector1536("embedding"),
+  embeddedAt:  timestamp("embedded_at", { withTimezone: true }),
 });
 
 export const certificateImages = pgTable("certificate_images", {
