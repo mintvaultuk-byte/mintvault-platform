@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MintVault Scanner Guide</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Drag handle: a thin strip across the top so the operator can move the
+       window. -webkit-app-region:drag is set in CSS. The close-toggle would
+       go here too if we ever wanted minimise; skipped for now. -->
+  <header class="drag-strip" id="dragStrip">
+    <span class="title">MintVault Scanner</span>
+    <span class="updated" id="updated"></span>
+  </header>
+
+  <main id="panel" class="panel state-loading">
+    <!-- Renderer fills this dynamically. Initial content is the "loading"
+         placeholder so the first paint isn't blank. -->
+    <div class="big-icon" id="icon">⏳</div>
+    <div class="big-text" id="bigText">Loading…</div>
+    <div class="subtext" id="subtext">Waiting for watcher state file</div>
+    <div class="meta" id="meta"></div>
+    <div class="buttons" id="buttons"></div>
+  </main>
+
+  <footer class="footer" id="footer"></footer>
+
+  <script src="poll.js"></script>
+</body>
+</html>

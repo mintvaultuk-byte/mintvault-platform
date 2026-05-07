@@ -1,0 +1,155 @@
+/* MintVault Scanner Guide — vanilla CSS, no framework.
+   Dark mode via prefers-color-scheme; one palette, no themer.
+   Sizing tuned for 420×320px frameless window. */
+
+:root {
+  --bg:        #FAFAF8;
+  --fg:        #1A1A1A;
+  --muted:     #888888;
+  --border:    #E8E4DC;
+  --accent:    #D4AF37;
+  --green:     #10B981;
+  --orange:    #F59E0B;
+  --blue:      #3B82F6;
+  --red:       #DC2626;
+  --shadow:    rgba(0, 0, 0, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:      #1A1A1A;
+    --fg:      #F5F5F0;
+    --muted:   #888888;
+    --border:  #333333;
+    --accent:  #D4AF37;
+    --green:   #34D399;
+    --orange:  #FBBF24;
+    --blue:    #60A5FA;
+    --red:     #F87171;
+    --shadow:  rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.drag-strip {
+  -webkit-app-region: drag;
+  height: 28px;
+  background: linear-gradient(180deg, var(--border) 0%, transparent 100%);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+.drag-strip .title { font-weight: 700; color: var(--accent); }
+.drag-strip .updated { font-family: "SF Mono", Menlo, monospace; }
+
+.panel {
+  height: calc(100% - 28px - 32px);
+  padding: 16px 24px 8px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.big-icon {
+  font-size: 56px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.big-text {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  text-transform: uppercase;
+}
+.subtext {
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.meta {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: "SF Mono", Menlo, monospace;
+  margin-top: 4px;
+}
+
+/* State-driven accents */
+.state-idle .big-icon, .state-idle .big-text { color: var(--green); }
+.state-front_buffered .big-icon, .state-front_buffered .big-text { color: var(--orange); }
+.state-uploading .big-icon, .state-uploading .big-text { color: var(--blue); }
+.state-success .big-icon, .state-success .big-text { color: var(--green); }
+.state-error .big-icon, .state-error .big-text { color: var(--red); }
+.state-loading .big-icon, .state-loading .big-text { color: var(--muted); }
+
+.buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  -webkit-app-region: no-drag;
+}
+.buttons button {
+  -webkit-app-region: no-drag;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+.buttons button:hover { border-color: var(--accent); color: var(--accent); }
+.buttons button:active { transform: scale(0.97); }
+.buttons button.danger:hover { border-color: var(--red); color: var(--red); }
+.buttons button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1A1A1A;
+}
+.buttons button.primary:hover {
+  background: #C19E2E;
+  border-color: #C19E2E;
+  color: #1A1A1A;
+}
+.buttons button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.footer {
+  height: 32px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 10px;
+  color: var(--muted);
+  font-family: "SF Mono", Menlo, monospace;
+}
+.footer .ok { color: var(--green); }
+.footer .warn { color: var(--orange); }
+.footer .err { color: var(--red); }

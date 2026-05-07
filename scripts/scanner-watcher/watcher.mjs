@@ -1,28 +1,30 @@
 #!/usr/bin/env node
 /**
- * MintVault Scanner Watcher
+ * MintVault Scanner Watcher — strict-alternating mode.
  *
  * Watches ~/mintvault-scans/inbox/ for .tif files from SilverFast SE.
- * Pairs them by 60-second timestamp proximity (first = front, second = back)
- * and uploads each pair to /api/admin/scan-ingest using a static
- * SCANNER_API_TOKEN header (no admin cookie needed).
+ * Pairing is now strict-alternating, NOT timer-based:
  *
- * On success: moved to ~/mintvault-scans/processed/YYYY-MM-DD/
- * On failure: moved to ~/mintvault-scans/failed/YYYY-MM-DD/ + .error.txt sibling
+ *   IDLE          → scan #1 = front, buffer it, expect "back"
+ *   FRONT_BUFFERED → scan #2 = back, upload pair, reset to IDLE
+ *
+ * No timeout. No misassignment when grading takes >60s. The Guide
+ * Window (scripts/scanner-watcher/guide-window) tells the operator
+ * which side is expected next, so it's impossible to lose track.
  *
  * Required env:
  *   SCANNER_API_TOKEN        — matching the server's Fly secret
  *
  * Optional env:
- *   MINTVAULT_INGEST_URL     — defaults to prod scan-ingest URL; override
- *                              with the staging URL for dev testing
+ *   MINTVAULT_INGEST_URL     — defaults to prod scan-ingest URL
+ *   GUIDE_CONTROL_PORT       — defaults to 54871; set if 54871 is taken
  *
- * Logs to stdout. Under launchd the plist redirects stdout/stderr to
- * ~/mintvault-scans/watcher.log so the daemon's output ends up there. For
- * manual runs, pipe into `tee` if a file is wanted. Rotation is a manual /
- * Phase 6 concern — see docs/scanner-watcher-todo.md.
+ * Local control server (loopback only):
+ *   POST 127.0.0.1:54871/control/reset
+ *   POST 127.0.0.1:54871/control/upload-front-only
+ *   POST 127.0.0.1:54871/control/retry
  *
- * Launch: `npm start` (or via launchd — see install.sh in the same dir)
+ * Logs to stdout (launchd captures to watcher.log via plist).
  */
 
 import chokidar from "chokidar";
@@ -31,106 +33,126 @@ import fetch from "node-fetch";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import http from "node:http";
 import { spawn } from "node:child_process";
 
 // ── Config ────────────────────────────────────────────────────────────────
 const INGEST_URL = process.env.MINTVAULT_INGEST_URL || "https://mintvaultuk.com/api/admin/scan-ingest";
 const TOKEN = process.env.SCANNER_API_TOKEN || "";
+const CONTROL_PORT = parseInt(process.env.GUIDE_CONTROL_PORT || "54871", 10);
 
 const BASE = path.join(os.homedir(), "mintvault-scans");
 const INBOX = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED = path.join(BASE, "failed");
+const DISCARDED = path.join(BASE, "discarded");
 const STATE_FILE = path.join(BASE, "watcher-state.json");
 const STATE_TMP = path.join(BASE, "watcher-state.json.tmp");
 
-const PAIR_TIMEOUT_MS = 45_000;
-const SUCCESS_DWELL_MS = 3_000;   // success banner dwell before auto-reset to idle
-const ERROR_DWELL_MS = 10_000;    // error banner dwell before auto-reset to idle
+const SUCCESS_DWELL_MS = 1_500;
+const ERROR_DWELL_MS   = 10_000;
 
 // Only TIF from SilverFast. JPGs are duplicates we deliberately ignore.
 const ACCEPTED_EXT = new Set([".tif", ".tiff"]);
-const IGNORED_EXT = new Set([".jpg", ".jpeg", ".png", ".bmp", ".gif"]);
+const IGNORED_EXT  = new Set([".jpg", ".jpeg", ".png", ".bmp", ".gif"]);
 
 // ── Ensure directory tree exists ─────────────────────────────────────────
-for (const dir of [BASE, INBOX, PROCESSED, FAILED]) {
+for (const dir of [BASE, INBOX, PROCESSED, FAILED, DISCARDED]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
 // ── Logging ──────────────────────────────────────────────────────────────
-// Stdout only — under launchd, plist redirects stdout to watcher.log.
-// For manual runs, pipe to tee if file output is desired.
 function log(msg, level = "info") {
   const line = `[${new Date().toISOString()}] [${level}] ${msg}\n`;
   process.stdout.write(line);
 }
 
-// ── macOS notification (best-effort, darwin-only) ────────────────────────
-// Posts a native banner so Cornelius doesn't have to watch the Terminal.
-// Silently no-ops on Linux/CI so the code still runs anywhere. osascript is
-// invoked via spawn (no shell) to avoid shell-metachar issues; the message
-// is escaped for AppleScript string syntax (\, ").
+// ── macOS notification (best-effort) ─────────────────────────────────────
 function escapeAppleScript(s) {
   return String(s ?? "")
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
     .replace(/[\r\n]+/g, " ");
 }
-
 function notify(title, message) {
   if (process.platform !== "darwin") return;
   try {
     const script = `display notification "${escapeAppleScript(message)}" with title "${escapeAppleScript(title)}" sound name "Glass"`;
     const child = spawn("osascript", ["-e", script], { stdio: "ignore", detached: true });
-    child.on("error", () => { /* best-effort — don't break uploads */ });
+    child.on("error", () => {});
     child.unref();
-  } catch {
-    /* best-effort */
-  }
+  } catch {}
 }
 
-// ── State file (for the SwiftBar plugin + status.mjs live display) ───────
-// Written atomically (temp + rename) on every state transition. Schema
-// matches the Phase AB SwiftBar spec — see ~/.mintvault-scanner-tools.
-// Write failures are swallowed so state IO can never break upload flow.
-// last_cert sticks across the idle that follows success, so the menu bar
-// can always show "Last cert: MV145" until the next cycle starts.
-let stateResetTimer = null;
-let lastCert = null;
-let lastSide = null;
+// ── State machine ────────────────────────────────────────────────────────
+// Single source of truth for what the watcher is doing right now. Mutated
+// only inside transition helpers (setIdle, setFrontBuffered, setUploading,
+// etc.) so it's hard to leave state and watcher-state.json out of sync.
 
-function writeState(state, opts = {}) {
+let state = "idle";                 // "idle" | "front_buffered" | "uploading" | "success" | "error"
+let bufferedFront = null;           // absolute path of buffered front .tif, or null
+let lastUploadedCert = null;        // most-recent successful MV<n> for predicting next
+let sessionPairedCount = 0;         // cards completed since startup
+let lastPair = null;                // { frontPath, backPath } — for "Retry" after error
+let lastError = null;
+let dwellTimer = null;
+
+function nextCertGuess() {
+  // Best-effort prediction so the guide can show "MV<n>". Server actually
+  // allocates the id, so this is just UI hint — fall back to "—" if we can't
+  // parse a sensible integer out of the last cert.
+  if (!lastUploadedCert) return null;
+  const m = /^MV(\d+)$/i.exec(lastUploadedCert);
+  if (!m) return null;
+  return `MV${parseInt(m[1], 10) + 1}`;
+}
+
+function writeState() {
+  if (dwellTimer) {
+    clearTimeout(dwellTimer);
+    dwellTimer = null;
+  }
+  // expected_next_side is derived from state — keep it in payload for the
+  // guide window's convenience (so it doesn't have to map state→side).
+  let expectedNextSide;
+  switch (state) {
+    case "idle":            expectedNextSide = "front"; break;
+    case "front_buffered":  expectedNextSide = "back";  break;
+    default:                expectedNextSide = null;
+  }
+
+  const payload = {
+    state,
+    expected_next_side:    expectedNextSide,
+    buffered_front:        bufferedFront,
+    buffered_front_name:   bufferedFront ? path.basename(bufferedFront) : null,
+    next_cert_guess:       nextCertGuess(),
+    last_uploaded_cert:    lastUploadedCert,
+    session_paired_count:  sessionPairedCount,
+    last_error:            lastError,
+    ingest_url:            INGEST_URL,
+    control_port:          CONTROL_PORT,
+    updated_at:            new Date().toISOString(),
+    // Legacy fields retained so the SwiftBar plugin and status.mjs don't
+    // break — pairing_window_expires_at is null forever now (no timer).
+    pairing_window_expires_at: null,
+    last_cert:             lastUploadedCert,
+    last_side:             state === "front_buffered" ? "front" : (state === "success" ? "back" : null),
+  };
+
   try {
-    if (stateResetTimer) {
-      clearTimeout(stateResetTimer);
-      stateResetTimer = null;
-    }
-    if (opts.last_cert) lastCert = opts.last_cert;
-    if (opts.last_side !== undefined) lastSide = opts.last_side;
-    // On idle transition, clear the sticky side so the menu bar doesn't keep
-    // showing "front" after a cycle has finished.
-    if (state === "idle") lastSide = null;
-
-    const payload = {
-      state,
-      pairing_window_expires_at: opts.pairing_window_expires_at ?? null,
-      last_cert: lastCert,
-      last_side: lastSide,
-      last_error: opts.last_error ?? null,
-      ingest_url: INGEST_URL,
-      updated_at: new Date().toISOString(),
-    };
-
     fs.writeFileSync(STATE_TMP, JSON.stringify(payload, null, 2));
     fs.renameSync(STATE_TMP, STATE_FILE);
-
-    if (state === "success") {
-      stateResetTimer = setTimeout(() => writeState("idle"), SUCCESS_DWELL_MS);
-    } else if (state === "error") {
-      stateResetTimer = setTimeout(() => writeState("idle"), ERROR_DWELL_MS);
-    }
   } catch (err) {
-    try { log(`writeState failed (${err.message}) — continuing`, "warn"); } catch {}
+    log(`writeState failed (${err.message}) — continuing`, "warn");
+  }
+
+  // Auto-revert from success/error back to idle after dwell. We keep
+  // bufferedFront/lastUploadedCert; only the transient banner expires.
+  if (state === "success") {
+    dwellTimer = setTimeout(() => { state = "idle"; writeState(); }, SUCCESS_DWELL_MS);
+  } else if (state === "error") {
+    dwellTimer = setTimeout(() => { state = "idle"; lastError = null; writeState(); }, ERROR_DWELL_MS);
   }
 }
 
@@ -146,7 +168,6 @@ function moveFile(src, destDir) {
   const name = path.basename(src);
   const dest = path.join(destDir, name);
   let target = dest;
-  // Collision handling: append (2), (3) etc — never overwrite
   let suffix = 2;
   while (fs.existsSync(target)) {
     const { name: base, ext } = path.parse(dest);
@@ -165,15 +186,19 @@ function moveFile(src, destDir) {
 function writeErrorFile(targetPath, reason) {
   const errPath = `${targetPath}.error.txt`;
   const payload = `${new Date().toISOString()}\n${reason}\n`;
-  try { fs.writeFileSync(errPath, payload); } catch { /* best-effort */ }
+  try { fs.writeFileSync(errPath, payload); } catch {}
 }
 
-// ── Upload ───────────────────────────────────────────────────────────────
-async function upload(frontPath, backPath) {
+// ── Upload (front+back, or front-only) ───────────────────────────────────
+async function uploadPair(frontPath, backPath) {
   const frontName = path.basename(frontPath);
-  const backName = backPath ? path.basename(backPath) : null;
+  const backName  = backPath ? path.basename(backPath) : null;
   log(`Uploading: front=${frontName}${backName ? ` back=${backName}` : " (front-only)"}`);
-  writeState("uploading", { last_side: backName ? "back" : "front" });
+
+  state = "uploading";
+  lastError = null;
+  lastPair = { frontPath, backPath };
+  writeState();
 
   const form = new FormData();
   form.append("front", fs.createReadStream(frontPath));
@@ -184,153 +209,247 @@ async function upload(frontPath, backPath) {
   try {
     response = await fetch(INGEST_URL, {
       method: "POST",
-      headers: {
-        "x-scanner-token": TOKEN,
-        ...form.getHeaders(),
-      },
+      headers: { "x-scanner-token": TOKEN, ...form.getHeaders() },
       body: form,
     });
   } catch (err) {
-    const reason = `network error: ${err.message}`;
-    log(`FAILED ${frontName}: ${reason}`, "error");
-    const failDir = dateFolder(FAILED);
-    const moved = moveFile(frontPath, failDir);
-    writeErrorFile(moved, reason);
-    if (backPath) {
-      const movedBack = moveFile(backPath, failDir);
-      writeErrorFile(movedBack, reason);
-    }
-    log(`READY FOR NEXT SCAN`);
-    writeState("error", { last_error: reason });
-    notify("MintVault ✗", `FAILED — see watcher.log`);
-    return;
+    return failUpload(frontPath, backPath, `network error: ${err.message}`);
   }
 
   let data;
   try { data = await response.json(); } catch { data = {}; }
 
   if (!response.ok) {
-    const reason = `HTTP ${response.status}: ${data.error || JSON.stringify(data)}`;
-    log(`FAILED ${frontName}: ${reason}`, "error");
-    const failDir = dateFolder(FAILED);
-    const moved = moveFile(frontPath, failDir);
-    writeErrorFile(moved, reason);
-    if (backPath) {
-      const movedBack = moveFile(backPath, failDir);
-      writeErrorFile(movedBack, reason);
-    }
-    log(`READY FOR NEXT SCAN`);
-    writeState("error", { last_error: reason });
-    notify("MintVault ✗", `FAILED HTTP ${response.status} — see watcher.log`);
-    return;
+    return failUpload(frontPath, backPath, `HTTP ${response.status}: ${data.error || JSON.stringify(data)}`);
   }
 
+  // Success path — move TIFs to processed/, advance state.
   log(`SUCCESS ${frontName}: ${data.certId} (${data.aiStatus || "queued"}) — ${data.message || ""}`);
   const processedDir = dateFolder(PROCESSED);
   moveFile(frontPath, processedDir);
   if (backPath) moveFile(backPath, processedDir);
+
+  lastUploadedCert = data.certId || lastUploadedCert;
+  sessionPairedCount += 1;
+  bufferedFront = null;
+  lastPair = null;
+  state = "success";
+  writeState();
   log(`READY FOR NEXT SCAN`);
-  writeState("success", { last_cert: data.certId || null });
   notify("MintVault ✓", data.certId ? `READY — ${data.certId} uploaded` : `READY — uploaded`);
 }
 
-// ── Pairing (simplified FIFO, 60s timestamp proximity) ───────────────────
-/** The one pending scan awaiting a pair, or null. */
-let pending = null; // { path, time, timerId }
+function failUpload(frontPath, backPath, reason) {
+  const frontName = path.basename(frontPath);
+  log(`FAILED ${frontName}: ${reason}`, "error");
+  const failDir = dateFolder(FAILED);
+  const movedFront = moveFile(frontPath, failDir);
+  writeErrorFile(movedFront, reason);
+  let movedBack = null;
+  if (backPath) {
+    movedBack = moveFile(backPath, failDir);
+    writeErrorFile(movedBack, reason);
+  }
+  bufferedFront = null;
+  // Track the POST-MOVE paths so /control/retry can find the files in
+  // failed/ and re-upload from there (no second move needed before retry).
+  lastPair = { frontPath: movedFront, backPath: movedBack };
+  lastError = reason;
+  state = "error";
+  writeState();
+  notify("MintVault ✗", `FAILED — ${reason.slice(0, 80)}`);
+}
 
+// ── New-file handler ─────────────────────────────────────────────────────
 function handleNewFile(filePath) {
   const filename = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase();
 
-  // Skip hidden files and macOS metadata
   if (filename.startsWith(".") || filename === ".DS_Store") {
-    log(`Ignored (hidden): ${filename}`, "debug");
-    return;
+    log(`Ignored (hidden): ${filename}`, "debug"); return;
   }
-
-  // Skip non-TIF images (SilverFast emits .jpg duplicates we don't want)
   if (IGNORED_EXT.has(ext)) {
-    log(`Ignored (${ext} not accepted — TIF only): ${filename}`, "debug");
-    return;
+    log(`Ignored (${ext} not accepted — TIF only): ${filename}`, "debug"); return;
   }
-
   if (!ACCEPTED_EXT.has(ext)) {
-    log(`Ignored (unknown extension ${ext}): ${filename}`, "debug");
+    log(`Ignored (unknown extension ${ext}): ${filename}`, "debug"); return;
+  }
+
+  log(`New scan: ${filename} (state=${state})`);
+
+  if (state === "idle" || state === "success" || state === "error") {
+    // Treat as the front of a new card. (success/error states auto-revert
+    // to idle after dwell, but a scan arriving mid-dwell shouldn't be lost.)
+    bufferedFront = filePath;
+    state = "front_buffered";
+    writeState();
+    log(`  Buffered as FRONT — waiting for BACK`);
+    notify("MintVault", `Front captured — scan back`);
     return;
   }
 
-  const now = Date.now();
-  log(`New scan: ${filename}`);
+  if (state === "front_buffered") {
+    // Treat as the back of the in-flight card.
+    const front = bufferedFront;
+    log(`  Pairing with buffered front (${path.basename(front)}) — uploading`);
+    uploadPair(front, filePath);
+    return;
+  }
 
-  if (pending) {
-    const age = now - pending.time;
-    if (age < PAIR_TIMEOUT_MS) {
-      // Pair found
-      clearTimeout(pending.timerId);
-      const front = pending.path;
-      const back = filePath;
-      pending = null;
-      log(`  Paired with ${path.basename(front)} (${age}ms since front)`);
-      upload(front, back);
+  if (state === "uploading") {
+    // A scan arrived while we're mid-upload. Park it in inbox under a
+    // staging name so the operator can decide later. This is rare —
+    // upload finishes in <2s usually.
+    log(`Scan arrived during upload — leaving ${filename} in inbox; will be processed when state returns to idle`, "warn");
+    return;
+  }
+}
+
+// ── Control server (localhost-only) ──────────────────────────────────────
+// The guide window's buttons POST here. Loopback bind only — no auth, no
+// CORS, no exposed port. If 54871 is in use, the watcher logs an error
+// and continues without the control surface (scans still work; only
+// Reset/Upload-front-only/Retry buttons will 404).
+
+function handleControl(req, res) {
+  const url = new URL(req.url, "http://127.0.0.1");
+  if (req.method !== "POST") {
+    res.statusCode = 405; res.end("POST only"); return;
+  }
+
+  if (url.pathname === "/control/reset") {
+    if (state !== "front_buffered") {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: `state=${state}; reset only valid in front_buffered` }));
       return;
     }
-    // Stale pending shouldn't reach here (timer fires first) — defensive clear
-    clearTimeout(pending.timerId);
-    pending = null;
+    const front = bufferedFront;
+    const discardedDir = dateFolder(DISCARDED);
+    const moved = moveFile(front, discardedDir);
+    log(`Reset: discarded ${path.basename(front)} → ${moved}`);
+    bufferedFront = null;
+    state = "idle";
+    writeState();
+    res.statusCode = 200; res.end(JSON.stringify({ ok: true }));
+    return;
   }
 
-  // Start a new pending window
-  const deadline = now + PAIR_TIMEOUT_MS;
-  const timerId = setTimeout(() => {
-    if (pending && pending.path === filePath) {
-      log(`  Timeout: ${filename} had no pair in 60s — uploading as front-only`);
-      const lone = pending.path;
-      pending = null;
-      upload(lone, null);
+  if (url.pathname === "/control/upload-front-only") {
+    if (state !== "front_buffered") {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: `state=${state}; upload-front-only only valid in front_buffered` }));
+      return;
     }
-  }, PAIR_TIMEOUT_MS);
-  pending = { path: filePath, time: now, timerId };
-  log(`  Waiting up to 60s for a pair...`);
-  writeState("front-received", { pairing_window_expires_at: new Date(deadline).toISOString(), last_side: "front" });
+    const front = bufferedFront;
+    log(`Upload-front-only: ${path.basename(front)}`);
+    uploadPair(front, null);
+    res.statusCode = 202; res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (url.pathname === "/control/retry") {
+    if (state !== "error" || !lastPair) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: `no failed upload to retry` }));
+      return;
+    }
+    // lastPair tracks the post-failure paths in failed/. uploadPair reads
+    // from those paths directly; failUpload moves them again on a second
+    // failure, succeed-path moves them to processed/. Either way the
+    // files end up in the right place.
+    const { frontPath, backPath } = lastPair;
+    if (!fs.existsSync(frontPath)) {
+      res.statusCode = 409;
+      res.end(JSON.stringify({ ok: false, error: `front file missing — was moved or deleted manually` }));
+      return;
+    }
+    log(`Retry triggered — re-uploading ${path.basename(frontPath)}${backPath ? " + " + path.basename(backPath) : ""}`);
+    uploadPair(frontPath, backPath);
+    res.statusCode = 202; res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  res.statusCode = 404; res.end("not found");
+}
+
+const controlServer = http.createServer((req, res) => {
+  res.setHeader("content-type", "application/json");
+  try {
+    handleControl(req, res);
+  } catch (err) {
+    log(`control server handler error: ${err.message}`, "error");
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
+  }
+});
+controlServer.on("error", err => log(`control server error: ${err.message}`, "error"));
+controlServer.listen(CONTROL_PORT, "127.0.0.1", () => {
+  log(`Control server listening on 127.0.0.1:${CONTROL_PORT}`);
+});
+
+// ── Startup hydration ────────────────────────────────────────────────────
+// If a previous run left a buffered_front, we want to pick up where we
+// left off — operator was mid-pair when the watcher restarted. If the
+// file still exists at its recorded path, restore the FRONT_BUFFERED
+// state. Otherwise reset to IDLE.
+
+function hydrateOnStartup() {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return;
+    const prev = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    if (prev.last_uploaded_cert) lastUploadedCert = prev.last_uploaded_cert;
+    if (typeof prev.session_paired_count === "number") sessionPairedCount = prev.session_paired_count;
+    if (prev.buffered_front && fs.existsSync(prev.buffered_front)) {
+      bufferedFront = prev.buffered_front;
+      state = "front_buffered";
+      log(`Hydrated FRONT_BUFFERED from previous run: ${path.basename(bufferedFront)}`);
+      return;
+    }
+    if (prev.buffered_front) {
+      log(`Previous run had buffered_front=${prev.buffered_front} but file is gone — resetting to idle`, "warn");
+    }
+  } catch (err) {
+    log(`Hydration failed (${err.message}) — starting fresh`, "warn");
+  }
+  state = "idle";
+  bufferedFront = null;
 }
 
 // ── Startup validation ───────────────────────────────────────────────────
 if (!TOKEN) {
-  const msg = `FATAL: SCANNER_API_TOKEN env var is required. Refusing to start — a token-less POST would just 401 the server.`;
-  console.error(msg);
-  console.error(`Create ~/.mintvault-scanner.env with:`);
-  console.error(`  SCANNER_API_TOKEN=<your-64-char-hex-token>`);
-  console.error(`Then restart via launchctl, or run with the env var exported.`);
+  console.error(`FATAL: SCANNER_API_TOKEN env var is required. Refusing to start.`);
+  console.error(`Create ~/.mintvault-scanner.env with SCANNER_API_TOKEN=<hex>`);
   process.exit(1);
 }
 
 log(`─────────────────────────────────────────────────────────`);
-log(`MintVault Scanner Watcher starting`);
+log(`MintVault Scanner Watcher starting (strict-alternating mode)`);
 log(`Ingest URL: ${INGEST_URL}`);
 log(`Inbox: ${INBOX}`);
 log(`State file: ${STATE_FILE}`);
+log(`Control: 127.0.0.1:${CONTROL_PORT}`);
 log(`Accepted: .tif, .tiff   |   Ignored: .jpg, .jpeg, .png, .bmp, .gif, dotfiles`);
-log(`Pairing: 60s FIFO timestamp proximity (first=front, second=back)`);
+log(`Pairing: strict alternating (front → back → upload → next)`);
 log(`─────────────────────────────────────────────────────────`);
 
-writeState("idle");
+hydrateOnStartup();
+writeState();
 
 const watcher = chokidar.watch(INBOX, {
   ignoreInitial: true,
   awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 250 },
 });
-
 watcher.on("add", handleNewFile);
 watcher.on("error", err => log(`Watcher error: ${err.message}`, "error"));
 
-// Graceful shutdown
+// Graceful shutdown — preserves buffered_front so the next launch can
+// hydrate and continue mid-card.
 function shutdown(signal) {
-  log(`Received ${signal}, shutting down gracefully`);
-  if (pending) {
-    clearTimeout(pending.timerId);
-    log(`  Unpaired scan at shutdown: ${path.basename(pending.path)} — remains in inbox`);
-  }
+  log(`Received ${signal}, shutting down gracefully (state=${state}, buffered_front=${bufferedFront ? path.basename(bufferedFront) : "none"})`);
+  controlServer.close();
   watcher.close().finally(() => process.exit(0));
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGINT",  () => shutdown("SIGINT"));

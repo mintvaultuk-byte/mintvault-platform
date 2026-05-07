@@ -2,49 +2,56 @@
 #
 # MintVault Scanner Watcher — launchd uninstaller (idempotent).
 #
-# Boots the agent out of launchd and removes the plist from
-# ~/Library/LaunchAgents. Intentionally leaves ~/mintvault-scans/ and
-# ~/.mintvault-scanner.env in place — user data and credentials are never
-# auto-deleted. Prints manual cleanup commands at the end.
+# Boots out BOTH agents (watcher + guide window) and removes their plists
+# from ~/Library/LaunchAgents. Leaves user data + token in place.
 
 set -eu
 
-AGENT_LABEL="com.mintvault.scanner-watcher"
-PLIST_NAME="com.mintvault.scanner-watcher.plist"
+WATCHER_LABEL="com.mintvault.scanner-watcher"
+WATCHER_PLIST_NAME="com.mintvault.scanner-watcher.plist"
+GUIDE_LABEL="com.mintvault.scanner-guide"
+GUIDE_PLIST_NAME="com.mintvault.scanner-guide.plist"
+
 LAUNCHAGENTS="$HOME/Library/LaunchAgents"
-PLIST_TARGET="$LAUNCHAGENTS/$PLIST_NAME"
+WATCHER_PLIST_TARGET="$LAUNCHAGENTS/$WATCHER_PLIST_NAME"
+GUIDE_PLIST_TARGET="$LAUNCHAGENTS/$GUIDE_PLIST_NAME"
 UID_VAL="$(id -u)"
 BASE="$HOME/mintvault-scans"
 ENV_FILE="$HOME/.mintvault-scanner.env"
 
-echo "[uninstall] MintVault scanner watcher uninstall"
+echo "[uninstall] MintVault scanner watcher uninstall (watcher + guide)"
 
-# 1) Bootout if loaded
-if launchctl print "gui/$UID_VAL/$AGENT_LABEL" >/dev/null 2>&1; then
-  launchctl bootout "gui/$UID_VAL/$AGENT_LABEL"
-  echo "[uninstall] ✓ Booted out service (gui/$UID_VAL/$AGENT_LABEL)"
-else
-  echo "[uninstall] Service wasn't loaded — skipping bootout"
-fi
+bootout() {
+  local label="$1" plist="$2"
+  if launchctl print "gui/$UID_VAL/$label" >/dev/null 2>&1; then
+    launchctl bootout "gui/$UID_VAL/$label"
+    echo "[uninstall] ✓ Booted out $label"
+  else
+    echo "[uninstall] $label wasn't loaded — skipping"
+  fi
+  if [ -f "$plist" ]; then
+    rm "$plist"
+    echo "[uninstall] ✓ Removed $plist"
+  else
+    echo "[uninstall] $plist not present"
+  fi
+}
 
-# 2) Remove plist
-if [ -f "$PLIST_TARGET" ]; then
-  rm "$PLIST_TARGET"
-  echo "[uninstall] ✓ Removed $PLIST_TARGET"
-else
-  echo "[uninstall] Plist not present at $PLIST_TARGET — nothing to remove"
-fi
+bootout "$WATCHER_LABEL" "$WATCHER_PLIST_TARGET"
+bootout "$GUIDE_LABEL"   "$GUIDE_PLIST_TARGET"
 
 echo ""
 echo "───────────────────────────────────────────────────────────"
 echo "Uninstall complete. User data preserved — nothing auto-deleted:"
 echo ""
-echo "  $BASE/        (scans: inbox/processed/failed + watcher.log)"
+echo "  $BASE/        (scans + logs)"
 echo "  $ENV_FILE     (SCANNER_API_TOKEN)"
+echo "  $HOME/.mintvault-scanner-tools/   (guide window position)"
 echo ""
 echo "To fully clean up, run manually:"
 echo ""
 echo "  rm -rf $BASE"
 echo "  rm $ENV_FILE"
+echo "  rm -rf $HOME/.mintvault-scanner-tools"
 echo ""
 echo "───────────────────────────────────────────────────────────"

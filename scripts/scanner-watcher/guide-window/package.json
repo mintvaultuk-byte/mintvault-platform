@@ -1,0 +1,12 @@
+{
+  "name": "mintvault-scanner-guide",
+  "version": "1.0.0",
+  "description": "Always-on-top window guiding the operator which side (front/back) to scan next. Polls watcher-state.json once a second.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}

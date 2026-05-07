@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MintVault Scanner Guide — always-on-top Electron window.
+  install.sh substitutes __GUIDE_DIR__ and __HOME__ before copying this
+  file into ~/Library/LaunchAgents/. Do not load this source file directly.
+
+  Runs the local Electron binary against the guide-window/ folder. The
+  watcher must be running for the window to show useful state — but if
+  the watcher is offline, the guide window shows "WATCHER OFFLINE" and
+  recovers automatically when the watcher comes back.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mintvault.scanner-guide</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__GUIDE_DIR__/node_modules/.bin/electron</string>
+        <string>__GUIDE_DIR__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/mintvault-scans/guide.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/mintvault-scans/guide.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>__GUIDE_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
