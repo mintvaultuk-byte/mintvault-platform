@@ -42,7 +42,7 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout }: P
     const memberSince = fmtMonthYear(vcMe?.started_at);
     const renews = fmtDate(vcMe?.renews_at);
     return (
-      <div className="bg-[#0F0F0F] border-b-[1.5px] border-[#D4AF37] rounded-xl px-5 py-5 mb-[480px]">
+      <div className="relative z-10 -mt-20 md:-mt-24 bg-[#0F0F0F] border-b-[1.5px] border-[#D4AF37] rounded-xl px-5 py-5 mb-12">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] font-bold tracking-[0.15em] text-[#D4AF37] uppercase mb-1.5">

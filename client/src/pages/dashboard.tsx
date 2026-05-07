@@ -996,17 +996,19 @@ export default function DashboardPage() {
         canonical="https://mintvaultuk.com/dashboard"
       />
       <div
-        className="dashboard-page"
+        className="dashboard-page bg-[#0a0e1a]"
         style={{
-          backgroundImage: "url('/images/vault-club-lounge.webp')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundAttachment: "fixed",
           minHeight: "100vh",
           position: "relative",
           overflow: "hidden",
         }}
       >
+      {/* Banner — vault-club-room photograph at top of dashboard */}
+      <div
+        className="w-full h-[200px] md:h-[280px] bg-cover bg-center bg-[#0a0e1a]"
+        style={{ backgroundImage: "url('/images/vault-club-room.webp')" }}
+        aria-hidden="true"
+      />
       <div className="max-w-3xl mx-auto px-4 pt-0 pb-8" style={{ position: "relative", zIndex: 1 }}>
 
         {/* Premium / standard header — switches on Vault Club Silver membership */}
@@ -1018,7 +1020,6 @@ export default function DashboardPage() {
           onLogout={() => logoutMutation.mutate()}
         />
 
-        <div className="bg-[#0a0e1a] rounded-xl px-6 py-8">
         {/* Account welcome + verification banner */}
         {authMe && <AccountBanner authMe={authMe} />}
 
@@ -1206,7 +1207,6 @@ export default function DashboardPage() {
               "Your Cards" above. The standalone OwnedCertRow component +
               the duplicated cert metadata it displayed were collapsed in
               favour of one card per cert. ──────────────────────────── */}
-        </div>
       </div>
       </div>
     </>
