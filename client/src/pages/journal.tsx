@@ -45,8 +45,8 @@ export default function JournalV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-5xl px-6 pt-12 md:pt-20 pb-10 md:pb-14">
           <p
-            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-            style={{ color: "var(--v2-gold)" }}
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+            style={{ color: "#D4AF37" }}
           >
             Est. Kent &middot; Journal
           </p>

@@ -133,8 +133,8 @@ export default function TechnologyV2() {
           {/* Left — copy */}
           <div>
             <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-              style={{ color: "var(--v2-gold)" }}
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; Technology
             </p>
@@ -154,8 +154,8 @@ export default function TechnologyV2() {
               verify, and display a graded card for decades.
             </p>
             <p
-              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
-              style={{ color: "var(--v2-ink-mute)" }}
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider no-text-shadow"
+              style={{ color: "#D4AF37" }}
             >
               Designed for permanence &middot; Made in Kent
             </p>

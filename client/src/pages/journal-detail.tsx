@@ -173,8 +173,8 @@ export default function JournalDetailV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pt-6 md:pt-8 pb-10">
           <p
-            className="font-mono-v2 text-[10px] uppercase tracking-[0.25em]"
-            style={{ color: "var(--v2-gold)" }}
+            className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] no-text-shadow"
+            style={{ color: "#D4AF37" }}
           >
             Journal &middot; {formatDate(guide.publishedDate)}
           </p>

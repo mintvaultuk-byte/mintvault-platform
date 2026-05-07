@@ -84,8 +84,8 @@ export default function RegistryV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 pt-12 md:pt-20 pb-14 md:pb-16 text-center">
           <p
-            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-            style={{ color: "var(--v2-gold)" }}
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+            style={{ color: "#D4AF37" }}
           >
             Est. Kent &middot; Registry
           </p>
@@ -104,8 +104,8 @@ export default function RegistryV2() {
             (when claimed) ownership history. The registry is open to everyone.
           </p>
           <p
-            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
-            style={{ color: "var(--v2-ink-mute)" }}
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider no-text-shadow"
+            style={{ color: "#D4AF37" }}
           >
             Public &middot; Permanent &middot; Searchable
           </p>

@@ -2,11 +2,11 @@
  * SectionEyebrow — v2 roman-numeral section marker.
  *
  * Mirrors the pattern used across home-v2 (e.g. "I · Grading Tiers",
- * "II · Infrastructure"). JetBrains Mono, white-on-vault, uppercase,
- * tight tracking. Always rendered at section level on transparent
- * .frost-* sections — gold disappeared against the gold deposit boxes
- * in the v524 vault image, so we use solid white with the inherited
- * .vault-page text-shadow for legibility.
+ * "II · Infrastructure"). JetBrains Mono, gold (#D4AF37 — the v2-gold
+ * standard used for SILVER MEMBER badges, gold borders, etc.), uppercase,
+ * tight tracking. The .no-text-shadow class strips the .vault-page
+ * cascade shadow so gold reads cleanly against the v532 dark scrim
+ * baked into the site-wide vault background.
  */
 export default function SectionEyebrow({
   numeral,
@@ -19,8 +19,8 @@ export default function SectionEyebrow({
 }) {
   return (
     <p
-      className={`font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] ${className}`}
-      style={{ color: "#ffffff" }}
+      className={`font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow ${className}`}
+      style={{ color: "#D4AF37" }}
     >
       {numeral} &middot; {label}
     </p>

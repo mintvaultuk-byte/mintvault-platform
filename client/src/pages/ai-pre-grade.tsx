@@ -82,8 +82,8 @@ export default function AiPreGradeV2() {
       <section className="relative">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-              style={{ color: "var(--v2-gold)" }}
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; AI Pre-Grade
             </p>

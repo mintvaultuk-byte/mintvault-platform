@@ -219,8 +219,8 @@ export default function HomeV2() {
       <section className="relative vault-hero-section">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-              style={{ color: "#ffffff" }}
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; MintVault UK
             </p>
@@ -294,7 +294,7 @@ export default function HomeV2() {
         <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
           <DarkSectionGlow />
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
+            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
               I &middot; Grading Tiers
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -427,7 +427,7 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
+            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
               II &middot; Infrastructure
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -542,7 +542,7 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper-sunk">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
+            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
               III &middot; Population Registry
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
@@ -624,7 +624,7 @@ export default function HomeV2() {
       >
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
-          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] mb-4" style={{ color: "#ffffff" }}>
+          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
             IV &middot; Submit
           </p>
           <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>

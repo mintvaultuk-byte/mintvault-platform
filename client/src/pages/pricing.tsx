@@ -79,8 +79,8 @@ export default function PricingV2() {
       <section className="relative">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"
-              style={{ color: "var(--v2-gold)" }}
+              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; Pricing
             </p>
@@ -238,8 +238,8 @@ export default function PricingV2() {
           {/* Black Label editorial callout — not a 4th tier card */}
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
-              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] mb-3"
-              style={{ color: "#ffffff" }}
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] no-text-shadow mb-3"
+              style={{ color: "#D4AF37" }}
             >
               Black Label &middot; Earned, not sold
             </p>
