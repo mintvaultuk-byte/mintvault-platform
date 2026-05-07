@@ -49,7 +49,7 @@ const schema = [
 
 export default function SportsCardGradingUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Sports Card Grading UK | Football & Basketball Card Grading | MintVault"
         description="Professional sports card grading in the UK. Grade your football, basketball, and cricket cards with MintVault — verified ownership, tamper-evident slabs."
@@ -61,29 +61,29 @@ export default function SportsCardGradingUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-sports-grading">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-sports-grading">
           Sports Card Grading UK
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault UK provides professional sports card grading for collectors and investors in the United Kingdom. Whether you collect Premier League football cards, NBA basketball cards, cricket cards, or other sports collectibles, our expert grading service authenticates and protects your cards in tamper-evident precision slabs.
         </p>
 
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           The UK sports card market has grown significantly, with top Premier League rookie cards, player parallels, and autographs commanding considerable prices on the secondary market. Professional grading is now essential for any serious sports card investor or collector.
         </p>
 
         <section className="mb-10" data-testid="section-sports-why">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Sports Cards?</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
-              <strong className="text-[#1A1A1A]">Protect rookie card value</strong> — a professionally graded Erling Haaland or Jude Bellingham rookie card in Gem Mint condition sells for dramatically more than an ungraded equivalent. The grade removes buyer uncertainty about card condition.
+              <strong className="text-white">Protect rookie card value</strong> — a professionally graded Erling Haaland or Jude Bellingham rookie card in Gem Mint condition sells for dramatically more than an ungraded equivalent. The grade removes buyer uncertainty about card condition.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Verify authenticity</strong> — with the rise of counterfeit sports cards, grading provides authentication from an independent third party. Each MintVault certificate is verifiable online.
+              <strong className="text-white">Verify authenticity</strong> — with the rise of counterfeit sports cards, grading provides authentication from an independent third party. Each MintVault certificate is verifiable online.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">UK-based processing</strong> — no customs delays, no international shipping risks. Your cards stay within the UK throughout the entire process.
+              <strong className="text-white">UK-based processing</strong> — no customs delays, no international shipping risks. Your cards stay within the UK throughout the entire process.
             </p>
           </div>
         </section>
@@ -96,21 +96,21 @@ export default function SportsCardGradingUk() {
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
-                <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#555555] text-sm">{t.days}</span>
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+                <span className="text-white text-sm font-medium">{t.tier}</span>
+                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#555555] text-sm mt-3">
+          <p className="text-[#d4d4d4] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-sports-ownership">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership for Sports Cards</h2>
-          <p className="text-[#555555] text-sm leading-relaxed">
+          <p className="text-[#d4d4d4] text-sm leading-relaxed">
             MintVault is the only UK grading company with a verified ownership registry. When you sell a graded sports card, ownership can be transferred to the buyer through a secure two-step email-verified process. This gives buyers confidence that the card's ownership history is verified and recorded — particularly valuable for high-profile player cards where provenance matters.
           </p>
         </section>
@@ -123,11 +123,11 @@ export default function SportsCardGradingUk() {
               { icon: <CheckCircle size={16} />, title: "Verified ownership", desc: "Register and transfer card ownership through our registry." },
               { icon: <CheckCircle size={16} />, title: "Insured return shipping", desc: "Cards returned via fully insured tracked delivery." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -149,7 +149,7 @@ export default function SportsCardGradingUk() {
               { href: "/psa-alternative-uk", label: "PSA Alternative UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

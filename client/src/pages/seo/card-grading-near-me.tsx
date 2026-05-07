@@ -49,7 +49,7 @@ const schema = [
 
 export default function CardGradingNearMe() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Near Me | UK Card Grading by Post | MintVault"
         description="Looking for card grading near you in the UK? MintVault accepts postal submissions from anywhere in the UK. Professional grading from £19 — no drop-off needed."
@@ -61,15 +61,15 @@ export default function CardGradingNearMe() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-near-me">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-near-me">
           Card Grading Near Me
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault UK is a fully postal card grading service, accepting submissions from anywhere in the United Kingdom. Whether you're in London, Glasgow, Cardiff, Belfast, or anywhere in between — you have access to professional UK card grading without needing to travel to a physical location.
         </p>
 
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           Submit your cards online, pack them securely using our guidance, and post them to our UK facility. We'll grade, encapsulate, and return them via fully insured tracked delivery. No drop-off, no travel, no hassle.
         </p>
 
@@ -82,13 +82,13 @@ export default function CardGradingNearMe() {
               { step: "3", title: "We grade your cards", desc: "Our graders assess each card on centering, corners, edges, and surface. You'll be notified when grading is complete." },
               { step: "4", title: "Cards returned in slabs", desc: "Your graded cards are sealed in tamper-evident NFC-enabled precision slabs and returned via insured tracked delivery." },
             ].map((item) => (
-              <div key={item.step} className="flex gap-4 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
+              <div key={item.step} className="flex gap-4 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="shrink-0 w-8 h-8 rounded-full bg-[#D4AF37] text-[#1A1400] font-bold text-sm flex items-center justify-center">
                   {item.step}
                 </div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -104,11 +104,11 @@ export default function CardGradingNearMe() {
               { icon: <CheckCircle size={16} />, title: "Online tracking", desc: "Track your submission status online at any time using your submission reference." },
               { icon: <CheckCircle size={16} />, title: "NFC-tracked slabs", desc: "Every slab has an NFC chip — buyers can verify your certificate with a phone scan." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -123,14 +123,14 @@ export default function CardGradingNearMe() {
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
-                <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#555555] text-sm">{t.days}</span>
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+                <span className="text-white text-sm font-medium">{t.tier}</span>
+                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#555555] text-sm mt-3">
+          <p className="text-[#d4d4d4] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
@@ -150,7 +150,7 @@ export default function CardGradingNearMe() {
               { href: "/trading-card-grading-uk", label: "Trading Card Grading UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

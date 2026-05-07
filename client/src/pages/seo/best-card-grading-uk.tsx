@@ -49,7 +49,7 @@ const schema = [
 
 export default function BestCardGradingUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Best Card Grading UK | Top UK Card Grading Company | MintVault"
         description="Looking for the best card grading in the UK? MintVault offers professional grading, NFC slabs, and a verified ownership registry — from £19 per card."
@@ -61,15 +61,15 @@ export default function BestCardGradingUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-best-grading">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-best-grading">
           Best Card Grading UK
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault UK is the leading professional card grading service in the United Kingdom. We grade Pokemon, Yu-Gi-Oh, Magic: The Gathering, One Piece, sports cards, and all other standard-size trading cards — providing tamper-evident precision slabs with NFC tracking and a verified ownership registry that no other UK grader offers.
         </p>
 
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           Unlike sending your cards overseas to PSA or CGC, MintVault processes everything within the UK. That means no international shipping risk, no customs fees, no import duties, and no cards sitting at a border for weeks. Your collection stays in safe hands from submission to return.
         </p>
 
@@ -82,11 +82,11 @@ export default function BestCardGradingUk() {
               { icon: <CheckCircle size={16} />, title: "Verified ownership registry", desc: "The only UK grader with an ownership registry. Transfer ownership securely when you sell." },
               { icon: <Clock size={16} />, title: "Fast turnarounds", desc: "Vault Queue (40 days), Standard (15 days), or Express (5 days). Choose the speed you need." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -98,10 +98,10 @@ export default function BestCardGradingUk() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="border-b border-[#E8E4DC]">
-                  <th className="text-left py-2 pr-4 text-[#1A1A1A] font-semibold">Feature</th>
+                <tr className="border-b border-[#D4AF37]/20">
+                  <th className="text-left py-2 pr-4 text-white font-semibold">Feature</th>
                   <th className="text-center py-2 px-4 text-[#D4AF37] font-semibold">MintVault UK</th>
-                  <th className="text-center py-2 pl-4 text-[#555555] font-semibold">Overseas (PSA etc.)</th>
+                  <th className="text-center py-2 pl-4 text-[#d4d4d4] font-semibold">Overseas (PSA etc.)</th>
                 </tr>
               </thead>
               <tbody>
@@ -113,8 +113,8 @@ export default function BestCardGradingUk() {
                   ["Online cert lookup", "✓", "✓"],
                   ["Insured return shipping", "✓", "✓"],
                 ].map(([feature, mv, overseas]) => (
-                  <tr key={feature} className="border-b border-[#E8E4DC]">
-                    <td className="py-2.5 pr-4 text-[#555555]">{feature}</td>
+                  <tr key={feature} className="border-b border-[#D4AF37]/20">
+                    <td className="py-2.5 pr-4 text-[#d4d4d4]">{feature}</td>
                     <td className="py-2.5 px-4 text-center text-emerald-600 font-medium">{mv}</td>
                     <td className="py-2.5 pl-4 text-center text-[#888888]">{overseas}</td>
                   </tr>
@@ -132,14 +132,14 @@ export default function BestCardGradingUk() {
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
-                <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#555555] text-sm">{t.days}</span>
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+                <span className="text-white text-sm font-medium">{t.tier}</span>
+                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#555555] text-sm mt-3">
+          <p className="text-[#d4d4d4] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
@@ -159,7 +159,7 @@ export default function BestCardGradingUk() {
               { href: "/pricing", label: "View All Pricing" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

@@ -55,7 +55,7 @@ const schema = [
 
 export default function PsaAlternativeUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="PSA Alternative UK | UK Card Grading Service | MintVault"
         description="Looking for a PSA alternative in the UK? MintVault offers professional card grading without international shipping, customs fees, or long wait times. Grade locally from £19/card."
@@ -67,20 +67,20 @@ export default function PsaAlternativeUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-psa-alternative">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-psa-alternative">
           PSA Alternative UK: Grade Your Cards Locally
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           UK collectors no longer need to send their cards overseas to receive a professional grading service. MintVault delivers expert card grading, tamper-evident encapsulation, and fully verifiable certificates — all without leaving the UK. No customs paperwork, no import duties, no weeks spent waiting for international shipping.
         </p>
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           While PSA, BGS, and CGC are well-known names in the grading world, MintVault was built specifically for UK collectors who want a faster, more predictable, and more cost-effective grading experience. This page explains the practical advantages of grading your cards domestically.
         </p>
 
         <section className="mb-10" data-testid="section-comparison">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">UK vs US Grading: A Practical Comparison</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Grading with a US-based company from the UK introduces several layers of cost, risk, and delay that simply do not exist when you grade domestically. MintVault eliminates these friction points while delivering the same core outcome: a professionally assessed, encapsulated, and verifiable graded card.
             </p>
@@ -126,8 +126,8 @@ export default function PsaAlternativeUk() {
               <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -136,11 +136,11 @@ export default function PsaAlternativeUk() {
 
         <section className="mb-10" data-testid="section-when-to-choose">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why UK Collectors Choose MintVault</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               For UK-based collectors, MintVault is the practical choice for professional card grading. Here is why:
             </p>
-            <ul className="list-disc list-inside space-y-2 text-[#555555] text-sm pl-2">
+            <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
               <li>Your cards stay in the UK — no international transit risk for irreplaceable items</li>
               <li>Zero customs paperwork, zero import charges, zero VAT surprises</li>
               <li>Predictable turnaround: 5 to 40 working days, with no international shipping delays added</li>
@@ -156,7 +156,7 @@ export default function PsaAlternativeUk() {
 
         <section className="mb-10" data-testid="section-how-it-works">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How MintVault Works</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Getting your cards graded with MintVault is simple. <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">Create a submission</Link> online, choose your service tier, and post your cards to us. Our graders assess each card on a 1 to 10 scale, encapsulate them in tamper-evident slabs, and return them via fully insured shipping.
             </p>

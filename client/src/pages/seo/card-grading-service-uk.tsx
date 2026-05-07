@@ -59,7 +59,7 @@ const schema = [
 
 export default function CardGradingServiceUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Service UK | Professional Trading Card Grading | MintVault"
         description="Professional card grading service in the UK. Grade your Pokemon, Yu-Gi-Oh!, Magic and TCG cards locally. No customs, fast turnaround, insured shipping. From £19/card."
@@ -71,20 +71,20 @@ export default function CardGradingServiceUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-card-grading-service">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-card-grading-service">
           Card Grading Service UK
         </h1>
 
-        <p className="text-[#555555] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault is a professional card grading service based in the United Kingdom, purpose-built for UK collectors who want to grade their trading cards without the hassle, cost, and risk of sending them overseas. We provide the same rigorous grading standards you would expect from any professional service, combined with the convenience and security of keeping your cards within the UK.
         </p>
-        <p className="text-[#555555] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           From Pokemon and Yu-Gi-Oh! to Magic: The Gathering and beyond, MintVault grades cards from all major trading card games. Every card is assessed by trained graders, sealed in a tamper-evident precision slab, and returned with fully insured shipping.
         </p>
 
         <section className="mb-10" data-testid="section-why-local">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why UK Collectors Choose a Local Grading Service</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               For years, UK trading card collectors had limited options for professional grading. Most services were based in the United States, meaning collectors had to navigate international shipping, customs declarations, import duties, and weeks of additional waiting time just for transit alone.
             </p>
@@ -111,8 +111,8 @@ export default function CardGradingServiceUk() {
               <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-advantage-${i}`}>
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#555555] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -121,52 +121,52 @@ export default function CardGradingServiceUk() {
 
         <section className="mb-10" data-testid="section-how-it-works">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How Our Card Grading Service Works</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Using MintVault's card grading service is straightforward. The entire process is managed through our website, from submission to tracking to certificate verification.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 1: Create Your Submission</strong> — visit our <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> and choose your service tier. Enter the details for each card you want graded, including the card name, set, and any relevant identifiers. Pay securely online.
+              <strong className="text-white">Step 1: Create Your Submission</strong> — visit our <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> and choose your service tier. Enter the details for each card you want graded, including the card name, set, and any relevant identifiers. Pay securely online.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 2: Post Your Cards</strong> — package your cards securely using penny sleeves and top loaders, then send them to our facility via tracked, insured shipping. Our <Link href="/how-to-grade-pokemon-cards" className="text-[#D4AF37] hover:underline" data-testid="link-how-to">preparation guide</Link> has detailed packaging instructions.
+              <strong className="text-white">Step 2: Post Your Cards</strong> — package your cards securely using penny sleeves and top loaders, then send them to our facility via tracked, insured shipping. Our <Link href="/how-to-grade-pokemon-cards" className="text-[#D4AF37] hover:underline" data-testid="link-how-to">preparation guide</Link> has detailed packaging instructions.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 3: Grading</strong> — our trained assessors evaluate each card for centering, corners, edges, and surface quality. Cards are graded on a 1 to 10 scale under controlled conditions with proper lighting and magnification.
+              <strong className="text-white">Step 3: Grading</strong> — our trained assessors evaluate each card for centering, corners, edges, and surface quality. Cards are graded on a 1 to 10 scale under controlled conditions with proper lighting and magnification.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 4: Encapsulation</strong> — graded cards are sealed in tamper-evident precision slabs with a professionally printed label showing the card details, grade, and unique certificate number.
+              <strong className="text-white">Step 4: Encapsulation</strong> — graded cards are sealed in tamper-evident precision slabs with a professionally printed label showing the card details, grade, and unique certificate number.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Step 5: Insured Return</strong> — your graded cards are returned via fully insured tracked shipping. Once delivered, you can verify your certificates online at any time using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>.
+              <strong className="text-white">Step 5: Insured Return</strong> — your graded cards are returned via fully insured tracked shipping. Once delivered, you can verify your certificates online at any time using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-who-grades">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Who Uses Our Grading Service?</h2>
-          <div className="text-[#555555] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               MintVault serves a wide range of UK-based trading card enthusiasts:
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Collectors</strong> — serious collectors grade their most prized cards to protect them, verify authenticity, and create a professional-looking collection. Graded cards are easier to store, display, and catalogue.
+              <strong className="text-white">Collectors</strong> — serious collectors grade their most prized cards to protect them, verify authenticity, and create a professional-looking collection. Graded cards are easier to store, display, and catalogue.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Investors</strong> — card investors grade high-value cards to maximise their resale potential. A professional grade from a recognised service adds confidence for buyers and typically increases the selling price.
+              <strong className="text-white">Investors</strong> — card investors grade high-value cards to maximise their resale potential. A professional grade from a recognised service adds confidence for buyers and typically increases the selling price.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Resellers</strong> — traders and resellers use grading to differentiate their inventory and justify premium pricing. Graded cards attract more attention on marketplaces and sell with fewer disputes about condition.
+              <strong className="text-white">Resellers</strong> — traders and resellers use grading to differentiate their inventory and justify premium pricing. Graded cards attract more attention on marketplaces and sell with fewer disputes about condition.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Casual Players</strong> — even casual TCG players sometimes have high-value pulls from booster packs that are worth protecting. Grading ensures these cards are preserved in top condition.
+              <strong className="text-white">Casual Players</strong> — even casual TCG players sometimes have high-value pulls from booster packs that are worth protecting. Grading ensures these cards are preserved in top condition.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-pricing-overview">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Pricing Overview</h2>
-          <p className="text-[#555555] text-sm leading-relaxed mb-4">
+          <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
             MintVault offers three service tiers. All tiers include the same professional grading process, tamper-evident slab, certificate, and insured return shipping.
           </p>
           <div className="border border-[#D4AF37]/20 rounded-lg overflow-hidden mb-4">
@@ -176,13 +176,13 @@ export default function CardGradingServiceUk() {
               { tier: "Express", price: "£45", turnaround: "5 working days" },
             ].map((t, i) => (
               <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#D4AF37]/10" : ""}`} data-testid={`row-tier-${i}`}>
-                <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#555555] text-sm">{t.turnaround}</span>
+                <span className="text-white text-sm font-medium">{t.tier}</span>
+                <span className="text-[#d4d4d4] text-sm">{t.turnaround}</span>
                 <span className="text-[#D4AF37] text-sm font-semibold">{t.price}/card</span>
               </div>
             ))}
           </div>
-          <p className="text-[#555555] text-sm">
+          <p className="text-[#d4d4d4] text-sm">
             Bulk discounts of up to 15% are available for larger submissions. Visit our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for full details.
           </p>
         </section>

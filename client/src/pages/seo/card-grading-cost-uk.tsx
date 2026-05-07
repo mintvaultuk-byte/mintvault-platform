@@ -49,7 +49,7 @@ const schema = [
 
 export default function CardGradingCostUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Cost UK | How Much Does Card Grading Cost? | MintVault"
         description="How much does card grading cost in the UK? MintVault offers transparent all-inclusive pricing from £19 per card with insured return shipping."
@@ -61,15 +61,15 @@ export default function CardGradingCostUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-cost">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-cost">
           Card Grading Cost UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault UK offers transparent, all-inclusive card grading pricing with no hidden fees. Every tier includes the professional grade assessment, tamper-evident precision slab with NFC chip, and fully insured return shipping. Choose the turnaround speed that suits your needs.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           Unlike sending cards abroad, MintVault's UK pricing means no international shipping costs, no customs duties, and no import VAT. What you see is what you pay.
         </p>
 
@@ -81,19 +81,19 @@ export default function CardGradingCostUk() {
               { tier: "Standard", days: "15 working days", price: "£25/card", desc: "A balanced turnaround for most submissions." },
               { tier: "Express", days: "5 working days", price: "£45/card", desc: "Priority processing for urgent or high-value cards." },
             ].map((t) => (
-              <div key={t.tier} className="border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
+              <div key={t.tier} className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
+                  <span className="text-white text-sm font-medium">{t.tier}</span>
                   <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[#999999] text-xs">{t.desc}</span>
-                  <span className="text-[#666666] text-xs">{t.days}</span>
+                  <span className="text-[#d4d4d4] text-xs">{t.days}</span>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#d4d4d4] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing & bulk discounts</Link>.
           </p>
         </section>
@@ -108,7 +108,7 @@ export default function CardGradingCostUk() {
               "Claim code to register verified ownership in the MintVault registry",
               "Fully insured return shipping based on declared card value",
             ].map((item) => (
-              <div key={item} className="flex items-start gap-2 text-[#444444] text-sm">
+              <div key={item} className="flex items-start gap-2 text-[#d4d4d4] text-sm">
                 <span className="text-[#D4AF37] mt-0.5 shrink-0">✓</span>
                 <span>{item}</span>
               </div>
@@ -118,10 +118,10 @@ export default function CardGradingCostUk() {
 
         <section className="mb-10" data-testid="section-cost-vs-overseas">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">True Cost: UK vs Overseas Grading</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-4">
+          <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
             When UK collectors send cards to overseas graders, the advertised grade fee is only part of the cost. Here's a realistic cost breakdown for sending 10 cards to a US grader:
           </p>
-          <div className="border border-[#E8E4DC] bg-[#FAFAF8] rounded-lg p-4 space-y-2 text-sm mb-4">
+          <div className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg p-4 space-y-2 text-sm mb-4">
             {[
               ["Grading fee (10 cards @ ~$25)", "~£200"],
               ["International tracked shipping (outbound)", "~£30"],
@@ -130,14 +130,14 @@ export default function CardGradingCostUk() {
               ["Import VAT (20% on value + duty)", "~£45"],
               ["Total estimated cost", "~£325"],
             ].map(([label, value], i) => (
-              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#E8E4DC] font-semibold text-[#1A1A1A]" : "text-[#444444]"}`}>
+              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#D4AF37]/20 font-semibold text-white" : "text-[#d4d4d4]"}`}>
                 <span>{label}</span>
                 <span className={i === 5 ? "text-[#D4AF37]" : ""}>{value}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#444444] text-sm leading-relaxed">
-            The same 10 cards on the MintVault Vault Queue tier: <strong className="text-[#1A1A1A]">about £186 all-inclusive</strong> (£190 grading, minus 5% bulk discount, plus insured return shipping). No customs. No import VAT. No surprises.
+          <p className="text-[#d4d4d4] text-sm leading-relaxed">
+            The same 10 cards on the MintVault Vault Queue tier: <strong className="text-white">about £186 all-inclusive</strong> (£190 grading, minus 5% bulk discount, plus insured return shipping). No customs. No import VAT. No surprises.
           </p>
         </section>
 
@@ -156,7 +156,7 @@ export default function CardGradingCostUk() {
               { href: "/card-grading-service-uk", label: "Card Grading Service UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

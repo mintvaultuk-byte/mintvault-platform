@@ -49,7 +49,7 @@ const schema = [
 
 export default function YugiohCardGradingUk() {
   return (
-    <div className="max-w-5xl mx-auto my-8 px-4 py-10 bg-[#FAFAF8] rounded-2xl border border-[#E8E4DC]">
+    <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault"
         description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking, from £19 per card."
@@ -61,29 +61,29 @@ export default function YugiohCardGradingUk() {
       <div className="max-w-3xl mx-auto">
         <BreadcrumbNav items={breadcrumbs} />
 
-        <h1 className="text-3xl md:text-4xl font-bold text-[#1A1A1A] tracking-wide mb-6" data-testid="text-h1-yugioh-grading">
+        <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide mb-6" data-testid="text-h1-yugioh-grading">
           Yu-Gi-Oh Card Grading UK
         </h1>
 
-        <p className="text-[#444444] text-base leading-relaxed mb-4">
+        <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
           MintVault UK offers professional Yu-Gi-Oh card grading for collectors and investors across the United Kingdom. Whether you have vintage first edition Blue-Eyes White Dragon cards, high-value tournament rewards, or modern collector and starlight rares, our grading service provides expert assessment and tamper-evident encapsulation to protect and authenticate your cards.
         </p>
 
-        <p className="text-[#666666] text-sm leading-relaxed mb-8">
+        <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
           Every graded Yu-Gi-Oh card receives a unique certificate number and is placed in a precision slab with an NFC chip for instant verification. Ownership can be registered and transferred through our verified ownership registry — the only service of its kind offered by a UK grading company.
         </p>
 
         <section className="mb-10" data-testid="section-why-grade-ygo">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Your Yu-Gi-Oh Cards?</h2>
-          <div className="text-[#444444] text-sm leading-relaxed space-y-3">
+          <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
-              <strong className="text-[#1A1A1A]">Increased resale value</strong> — professionally graded Yu-Gi-Oh cards consistently sell for significantly more than their raw counterparts. A high-grade first edition card can command a considerable premium on platforms like eBay and TCGPlayer.
+              <strong className="text-white">Increased resale value</strong> — professionally graded Yu-Gi-Oh cards consistently sell for significantly more than their raw counterparts. A high-grade first edition card can command a considerable premium on platforms like eBay and TCGPlayer.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Authentication</strong> — counterfeit Yu-Gi-Oh cards are increasingly common, particularly for high-value vintage cards. Grading confirms your card is genuine. Each MintVault certificate can be <Link href="/verify" className="text-[#D4AF37] hover:underline">verified online</Link>.
+              <strong className="text-white">Authentication</strong> — counterfeit Yu-Gi-Oh cards are increasingly common, particularly for high-value vintage cards. Grading confirms your card is genuine. Each MintVault certificate can be <Link href="/verify" className="text-[#D4AF37] hover:underline">verified online</Link>.
             </p>
             <p>
-              <strong className="text-[#1A1A1A]">Protection</strong> — sealed in a tamper-evident precision slab, your Yu-Gi-Oh card is shielded from fingerprints, moisture, UV exposure, and bending. The card's condition is preserved indefinitely.
+              <strong className="text-white">Protection</strong> — sealed in a tamper-evident precision slab, your Yu-Gi-Oh card is shielded from fingerprints, moisture, UV exposure, and bending. The card's condition is preserved indefinitely.
             </p>
           </div>
         </section>
@@ -96,24 +96,24 @@ export default function YugiohCardGradingUk() {
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-lg px-4 py-3">
-                <span className="text-[#1A1A1A] text-sm font-medium">{t.tier}</span>
-                <span className="text-[#666666] text-sm">{t.days}</span>
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+                <span className="text-white text-sm font-medium">{t.tier}</span>
+                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
                 <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
-          <p className="text-[#666666] text-sm mt-3">
+          <p className="text-[#d4d4d4] text-sm mt-3">
             All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-ygo-ownership">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership for Yu-Gi-Oh Cards</h2>
-          <p className="text-[#444444] text-sm leading-relaxed mb-3">
+          <p className="text-[#d4d4d4] text-sm leading-relaxed mb-3">
             MintVault is the only UK grading company offering a verified ownership registry. After your Yu-Gi-Oh card is graded and returned, you can register as the verified owner using the unique claim code included with your slab. Your ownership is then recorded on the MintVault registry and can be transferred to a new owner when you sell.
           </p>
-          <p className="text-[#444444] text-sm leading-relaxed">
+          <p className="text-[#d4d4d4] text-sm leading-relaxed">
             This makes it straightforward for buyers to verify that the card being sold matches its certificate and that the seller is the registered owner — a significant trust advantage when selling high-value vintage Yu-Gi-Oh cards.
           </p>
         </section>
@@ -127,11 +127,11 @@ export default function YugiohCardGradingUk() {
               { icon: <Clock size={16} />, title: "Fast turnaround", desc: "Express tier available in 5 working days." },
               { icon: <CheckCircle size={16} />, title: "Verified ownership", desc: "Register and transfer card ownership through the MintVault registry." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded-2xl p-4">
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
-                  <h3 className="text-[#1A1A1A] font-semibold text-sm mb-1">{item.title}</h3>
-                  <p className="text-[#666666] text-xs leading-relaxed">{item.desc}</p>
+                  <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
+                  <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))}
@@ -154,7 +154,7 @@ export default function YugiohCardGradingUk() {
               { href: "/pricing", label: "View All Pricing" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#FAFAF8] rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37]/70 text-sm hover:text-[#D4AF37] hover:border-[#D4AF37]/40 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>
