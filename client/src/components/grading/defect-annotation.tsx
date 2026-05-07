@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { X, Plus, Check } from "lucide-react";
+import { X } from "lucide-react";
 
 export interface Defect {
   id: number;
@@ -40,140 +39,32 @@ const SEV_COLOR: Record<string, string> = {
   significant: "bg-red-50 text-red-600 border-red-200",
 };
 
-interface PendingDefect {
-  type: string;
-  severity: "minor" | "moderate" | "significant";
-  description: string;
-  location: string;
-  image_side: string;
-  x_percent: number;
-  y_percent: number;
-}
+/** Defect type list — used by image-viewer.tsx's anchored dropdown so admin
+ *  can place + tag in two clicks. Keep this export in sync with severity
+ *  cycling logic below. */
+export { DEFECT_TYPES };
 
-interface DefectFormProps {
-  pending: PendingDefect;
-  onChange: (p: PendingDefect) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}
+const SEVERITY_CYCLE: Defect["severity"][] = ["minor", "moderate", "significant"];
 
-export function DefectForm({ pending, onChange, onSave, onCancel }: DefectFormProps) {
-  return (
-    <div className="bg-[#F7F7F5] border border-[#D4D0C8] rounded-lg p-3 space-y-2">
-      <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">New Defect</p>
-
-      <div>
-        <label className="text-[#333333] text-[10px] block mb-1">Type</label>
-        <select
-          value={pending.type}
-          onChange={e => onChange({ ...pending, type: e.target.value })}
-          className="w-full bg-white border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1.5"
-        >
-          {DEFECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-      </div>
-
-      <div>
-        <label className="text-[#333333] text-[10px] block mb-1">Severity</label>
-        <div className="flex gap-2">
-          {(["minor", "moderate", "significant"] as const).map(s => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onChange({ ...pending, severity: s })}
-              className={`flex-1 text-[10px] font-bold uppercase px-2 py-1 rounded border transition-all ${
-                pending.severity === s ? SEV_COLOR[s] : "bg-white border-[#D4D0C8] text-[#555555] hover:border-[#D4AF37]/40"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="text-[#333333] text-[10px] block mb-1">Description</label>
-        <textarea
-          value={pending.description}
-          onChange={e => onChange({ ...pending, description: e.target.value })}
-          placeholder="Optional notes"
-          rows={2}
-          className="w-full bg-white border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1.5 placeholder-[#AAAAAA] resize-none"
-        />
-      </div>
-
-      <div>
-        <label className="text-[#333333] text-[10px] block mb-1">Location</label>
-        <input
-          type="text"
-          value={pending.location}
-          onChange={e => onChange({ ...pending, location: e.target.value })}
-          className="w-full bg-white border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1.5"
-        />
-      </div>
-
-      <div className="flex gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={!pending.type}
-          className="flex-1 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase px-3 py-1.5 rounded hover:bg-[#D4AF37]/20 disabled:opacity-40"
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="flex-1 bg-[#F0EEE8] border border-[#D4D0C8] text-[#333333] text-xs px-3 py-1.5 rounded hover:bg-[#E8E4DC]"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight, candidates, onCandidatesChange }: Props) {
-  const [showForm, setShowForm] = useState(false);
-  const [pending, setPending] = useState<PendingDefect>({
-    type: "Scratch",
-    severity: "minor",
-    description: "",
-    location: "",
-    image_side: "front",
-    x_percent: 50,
-    y_percent: 50,
-  });
-
-  function saveDefect() {
-    const nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
-    onChange([...defects, { ...pending, id: nextId }]);
-    setPending({ type: "Scratch", severity: "minor", description: "", location: "", image_side: "front", x_percent: 50, y_percent: 50 });
-    setShowForm(false);
-  }
-
+export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight, candidates }: Props) {
   function removeDefect(id: number) {
     onChange(defects.filter(d => d.id !== id));
     if (highlightId === id) onHighlight(null);
   }
 
-  function confirmCandidate(idx: number) {
-    if (!candidates || !onCandidatesChange) return;
-    const c = candidates[idx];
-    if (!c) return;
-    const nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
-    onChange([...defects, { ...c, id: nextId }]);
-    onCandidatesChange(candidates.filter((_, i) => i !== idx));
-  }
-
-  function rejectCandidate(idx: number) {
-    if (!candidates || !onCandidatesChange) return;
-    onCandidatesChange(candidates.filter((_, i) => i !== idx));
+  function cycleSeverity(id: number) {
+    onChange(defects.map(d => {
+      if (d.id !== id) return d;
+      const i = SEVERITY_CYCLE.indexOf(d.severity);
+      const next = SEVERITY_CYCLE[(i + 1) % SEVERITY_CYCLE.length];
+      return { ...d, severity: next };
+    }));
   }
 
   return (
     <div className="space-y-3">
-      {/* Defect list */}
+      {/* Defect list — admin-placed only. Click body to highlight on image,
+          click severity chip to cycle minor → moderate → significant, X to remove. */}
       {defects.length > 0 && (
         <div className="space-y-1.5">
           {defects.map(d => (
@@ -192,12 +83,16 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[#1A1A1A] text-[10px] font-bold">{d.type}</span>
-                  <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_COLOR[d.severity]}`}>
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); cycleSeverity(d.id); }}
+                    title="Click to cycle severity"
+                    className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border cursor-pointer hover:opacity-80 ${SEV_COLOR[d.severity]}`}
+                  >
                     {d.severity}
-                  </span>
+                  </button>
                   <span className="text-[#555555] text-[9px]">{d.location}</span>
                 </div>
-                {d.description && <p className="text-[#333333] text-[10px] mt-0.5 leading-relaxed">{d.description}</p>}
               </div>
               <button
                 type="button"
@@ -211,10 +106,12 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
         </div>
       )}
 
-      {/* AI-suggested candidates — confirm or reject each */}
+      {/* AI-suggested candidates — read-only decorative info. Admin places
+          their own defects via image clicks; AI suggestions are not promoted
+          automatically and have no confirm/reject UI here. */}
       {candidates && candidates.length > 0 && (
         <div className="space-y-1.5 border-t border-dashed border-[#D4AF37]/30 pt-2">
-          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length})</p>
+          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length}) — info only</p>
           {candidates.map((c, i) => (
             <div
               key={`cand-${i}`}
@@ -231,54 +128,14 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
                   </span>
                   <span className="text-[#555555] text-[9px]">{c.location}</span>
                 </div>
-                {c.description && <p className="text-[#333333] text-[10px] mt-0.5 leading-relaxed">{c.description}</p>}
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => confirmCandidate(i)}
-                  title="Confirm — add to defect list"
-                  className="text-[#16A34A] hover:bg-green-50 rounded p-1"
-                >
-                  <Check size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => rejectCandidate(i)}
-                  title="Reject"
-                  className="text-[#888888] hover:text-red-600 hover:bg-red-50 rounded p-1"
-                >
-                  <X size={14} />
-                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {defects.length === 0 && (!candidates || candidates.length === 0) && !showForm && (
-        <p className="text-[#555555] text-xs text-center py-2">No defects marked. Click on the image or use Add Defect.</p>
-      )}
-
-      {/* Add defect form */}
-      {showForm && (
-        <DefectForm
-          pending={pending}
-          onChange={setPending}
-          onSave={saveDefect}
-          onCancel={() => setShowForm(false)}
-        />
-      )}
-
-      {!showForm && (
-        <button
-          type="button"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] text-xs transition-colors"
-        >
-          <Plus size={12} />
-          Add Defect
-        </button>
+      {defects.length === 0 && (!candidates || candidates.length === 0) && (
+        <p className="text-[#555555] text-xs text-center py-2">No defects marked. Click "Mark Defects" and tap the image to start.</p>
       )}
     </div>
   );

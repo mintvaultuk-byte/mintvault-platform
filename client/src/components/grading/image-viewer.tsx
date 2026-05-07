@@ -3,7 +3,7 @@ import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, 
 
 const ManualCrop = lazy(() => import("./manual-crop"));
 import DefectHeatmap from "./defect-heatmap";
-import { DefectForm } from "./defect-annotation";
+import { DEFECT_TYPES } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
 
 type Side = "front" | "back" | "angled" | "closeup";
@@ -147,7 +147,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
   const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
-    type: "Scratch", severity: "minor" as "minor" | "moderate" | "significant",
+    type: "Scratch", severity: "moderate" as "minor" | "moderate" | "significant",
     description: "", location: "", image_side: "front",
     x_percent: 50, y_percent: 50,
   });
@@ -159,28 +159,22 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
   const frontDefectCount = defects.filter(d => d.image_side === "front").length;
   const backDefectCount = defects.filter(d => d.image_side === "back").length;
 
-  // Keyboard shortcuts for fullscreen mode
+  // Keyboard shortcuts for fullscreen mode. Esc cancels the pending dropdown
+  // first, then exits mark mode on a second press. F/B switch sides.
   useEffect(() => {
     if (!fullscreen) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setFullscreen(false); setMarkMode(false); setPendingXY(null); }
+      if (e.key === "Escape") {
+        if (pendingXY) { setPendingXY(null); return; }
+        setFullscreen(false); setMarkMode(false);
+      }
       else if (e.key === "f" || e.key === "F") setSide("front");
       else if (e.key === "b" || e.key === "B") setSide("back");
-      // Severity shortcuts when defect popup is open
-      if (pendingXY) {
-        if (e.key === "1") setPendingDefect(p => ({ ...p, severity: "minor" }));
-        if (e.key === "2") setPendingDefect(p => ({ ...p, severity: "moderate" }));
-        if (e.key === "3") setPendingDefect(p => ({ ...p, severity: "significant" }));
-        if (e.key === "Enter" && pendingDefect.type && pendingDefect.description.trim()) {
-          e.preventDefault();
-          saveNewDefect();
-        }
-      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen, pendingXY, pendingDefect]);
+  }, [fullscreen, pendingXY]);
 
   function enterMarkMode() {
     setMarkMode(true);
@@ -237,11 +231,12 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
 
   function handleMouseUp() { setDragging(false); }
 
-  function saveNewDefect() {
+  function saveNewDefect(typeOverride?: string) {
     const nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
-    onDefectAdded({ ...pendingDefect, id: nextId });
+    const type = typeOverride ?? pendingDefect.type;
+    onDefectAdded({ ...pendingDefect, type, id: nextId });
     setPendingXY(null);
-    setPendingDefect({ type: "Scratch", severity: "minor", description: "", location: "", image_side: side, x_percent: 50, y_percent: 50 });
+    setPendingDefect({ type: "Scratch", severity: "moderate", description: "", location: "", image_side: side, x_percent: 50, y_percent: 50 });
   }
 
   const transformStyle = zoom > 1
@@ -494,18 +489,54 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             </div>
           </div>
 
-          {/* Defect form modal — centered over fullscreen */}
+          {/* Anchored type dropdown — appears next to the click point. Single
+              click on a type label saves the defect with default severity
+              "moderate" (admin can change after via the side panel chip).
+              Clickaway / Esc cancels. */}
           {pendingXY && (
-            <div className="absolute inset-0 flex items-center justify-center z-[60] pointer-events-none">
-              <div className="pointer-events-auto w-80">
-                <DefectForm
-                  pending={pendingDefect}
-                  onChange={setPendingDefect}
-                  onSave={saveNewDefect}
-                  onCancel={() => setPendingXY(null)}
-                />
+            <>
+              <div
+                className="absolute inset-0 z-[55]"
+                onClick={() => setPendingXY(null)}
+              />
+              <div
+                className="absolute z-[60] bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
+                style={{
+                  // Anchor near click; nudge to keep on-screen on edges.
+                  left: pendingXY.x > 70 ? "auto" : `calc(${pendingXY.x}% + 24px)`,
+                  right: pendingXY.x > 70 ? `calc(${100 - pendingXY.x}% + 24px)` : "auto",
+                  top: pendingXY.y > 60 ? "auto" : `calc(${pendingXY.y}% + 24px)`,
+                  bottom: pendingXY.y > 60 ? `calc(${100 - pendingXY.y}% + 24px)` : "auto",
+                  width: 240,
+                  maxHeight: 360,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
+                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingXY(null)}
+                    className="text-[#888888] hover:text-red-600 transition-colors"
+                    aria-label="Cancel"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto" style={{ maxHeight: 320 }}>
+                  {DEFECT_TYPES.map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => saveNewDefect(t)}
+                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A] border-b border-[#F0EEE8] last:border-b-0 transition-colors"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {/* Bottom toolbar */}
