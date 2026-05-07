@@ -13,7 +13,7 @@ export default function CtaSection({
   return (
     <section className="max-w-3xl mx-auto border border-[#D4AF37]/30 rounded-lg p-6 md:p-8 bg-[#D4AF37]/5 text-center" data-testid="section-cta">
       <h2 className="text-xl md:text-2xl font-bold text-[#D4AF37] tracking-wide mb-3">{title}</h2>
-      <p className="text-[#666666] text-sm mb-6 max-w-lg mx-auto">{subtitle}</p>
+      <p className="text-[#d4d4d4] text-sm mb-6 max-w-lg mx-auto">{subtitle}</p>
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
         <Link href="/submit">
           <span className="inline-flex items-center gap-2 border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-6 py-2.5 rounded font-semibold text-sm tracking-wide transition-all hover:bg-[#D4AF37]/20 cursor-pointer" data-testid="button-cta-submit">

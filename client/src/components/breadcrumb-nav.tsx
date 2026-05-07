@@ -8,17 +8,17 @@ interface BreadcrumbItem {
 
 export default function BreadcrumbNav({ items }: { items: BreadcrumbItem[] }) {
   return (
-    <nav aria-label="Breadcrumb" className="text-xs text-[#D4AF37]/50 mb-6" data-testid="nav-breadcrumb">
+    <nav aria-label="Breadcrumb" className="text-xs text-[#D4AF37]/85 mb-6" data-testid="nav-breadcrumb">
       <ol className="flex items-center gap-1 flex-wrap">
         {items.map((item, i) => (
           <li key={i} className="flex items-center gap-1">
-            {i > 0 && <ChevronRight size={12} className="text-[#D4AF37]/30" />}
+            {i > 0 && <ChevronRight size={12} className="text-[#D4AF37]/60" />}
             {item.href && i < items.length - 1 ? (
               <Link href={item.href} className="hover:text-[#D4AF37] transition-colors">
                 {item.label}
               </Link>
             ) : (
-              <span className={i === items.length - 1 ? "text-[#D4AF37]/70" : ""}>{item.label}</span>
+              <span className={i === items.length - 1 ? "text-white" : ""}>{item.label}</span>
             )}
           </li>
         ))}
