@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT, HAIKU_GRADING_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
+import { FEATURE_FLAGS } from "./config/feature-flags";
 import { anthropicFetch } from "./anthropic-fetch";
 import { getR2Client } from "./r2";
 
@@ -584,6 +585,9 @@ export async function analyzeCardFromBuffers(
   cardGame?: string,
   certId?: string | number,
 ): Promise<GradingAnalysis> {
+  if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+    throw new Error("AI_FULL_GRADE_ENABLED=false");
+  }
   await rateLimit();
 
   const frontB64 = frontBuffer.toString("base64");
@@ -825,6 +829,7 @@ function normalizeCardNumber(result: CardIdentification): CardIdentification {
 // ── GPT-5 second opinion for card identification ──────────────────────────
 
 async function identifyWithGpt(base64: string): Promise<CardIdentification | null> {
+  if (!FEATURE_FLAGS.AI_GPT_SECOND_OPINION_ENABLED) return null;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
@@ -916,6 +921,9 @@ export async function identifyCardFromBuffer(
   _mimeType: string,
   certId?: string | number,
 ): Promise<CardIdentification> {
+  if (!FEATURE_FLAGS.AI_IDENTIFY_ENABLED) {
+    throw new Error("AI_IDENTIFY_ENABLED=false");
+  }
   await rateLimit();
   const { buffer: resized, mediaType } = await resizeForClaude(buffer);
   const base64 = resized.toString("base64");
@@ -1023,6 +1031,7 @@ export async function suggestDefectsFromBuffer(
   backBuffer: Buffer | null,
   certId?: string | number,
 ): Promise<DefectCandidate[]> {
+  if (!FEATURE_FLAGS.AI_DEFECT_SUGGEST_ENABLED) return [];
   await rateLimit();
   const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
   const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
@@ -1166,6 +1175,7 @@ export async function gradeCardFromBuffer(
   backBuffer: Buffer | null,
   certId?: string | number,
 ): Promise<AiGrading | null> {
+  if (!FEATURE_FLAGS.AI_HAIKU_QUICK_GRADE_ENABLED) return null;
   await rateLimit();
   const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
   const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
@@ -1303,6 +1313,9 @@ export async function gradeCardFromBuffer(
 // ── Card identification ────────────────────────────────────────────────────
 
 export async function identifyCard(frontKey: string): Promise<CardIdentification> {
+  if (!FEATURE_FLAGS.AI_IDENTIFY_ENABLED) {
+    throw new Error("AI_IDENTIFY_ENABLED=false");
+  }
   await rateLimit();
   const frontBase64 = await r2KeyToBase64(frontKey);
   if (!frontBase64) throw new Error("Failed to fetch front image for identification");
@@ -1438,6 +1451,9 @@ export async function analyzeCard(
   keys: ImageKeys,
   cardGame?: string
 ): Promise<GradingAnalysis> {
+  if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+    throw new Error("AI_FULL_GRADE_ENABLED=false");
+  }
   await rateLimit();
 
   // Fetch images in parallel

@@ -425,6 +425,21 @@ async function runTransferV2Sweep() {
     },
     () => {
       log(`serving on port ${port}`);
+      // Resolved AI feature-flag state at boot — surfaces in Fly logs so we can
+      // confirm which AI features are live without exec'ing into the machine.
+      const { FEATURE_FLAGS: FF } = require("./config/feature-flags");
+      console.log("[ai-flags]", JSON.stringify({
+        identify:           FF.AI_IDENTIFY_ENABLED,
+        defect_suggest:     FF.AI_DEFECT_SUGGEST_ENABLED,
+        haiku_quick_grade:  FF.AI_HAIKU_QUICK_GRADE_ENABLED,
+        full_grade:         FF.AI_FULL_GRADE_ENABLED,
+        centering:          FF.AI_CENTERING_ENABLED,
+        standalone_detect:  FF.AI_STANDALONE_DETECT_ENABLED,
+        standalone_grade:   FF.AI_STANDALONE_GRADE_ENABLED,
+        description_gen:    FF.AI_DESCRIPTION_GEN_ENABLED,
+        gpt_second_opinion: FF.AI_GPT_SECOND_OPINION_ENABLED,
+        public_estimate:    FF.AI_PUBLIC_ESTIMATE_ENABLED,
+      }));
     }
   );
 })();

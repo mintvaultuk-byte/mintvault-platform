@@ -2147,6 +2147,10 @@ export async function registerRoutes(
   // OLD endpoint stub — kept to avoid 404 on any lingering clients; real impl in Build 5 below
   app.post("/api/admin/certificates/:id/analyze-v1-legacy", requireAdmin, aiRateLimit, async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+        return res.status(503).json({ error: "AI legacy analyze is disabled" });
+      }
       const _unused = ""; // placeholder
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -7125,6 +7129,10 @@ export async function registerRoutes(
   // overwrites grade_explanation; the audit_log row records every call.
   app.post("/api/admin/certificates/:id/generate-description", requireAdmin, async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_DESCRIPTION_GEN_ENABLED) {
+        return res.status(503).json({ error: "AI description generation is disabled" });
+      }
       const id = parseInt(String(req.params.id), 10);
       if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid certificate id" });
       const cert = await storage.getCertificate(id);
@@ -8134,6 +8142,10 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/measure-centering — Sonnet centering-only
   app.post("/api/admin/certificates/:id/measure-centering", requireAdmin, async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_CENTERING_ENABLED) {
+        return res.status(503).json({ error: "AI centering measurement is disabled" });
+      }
       const { CENTERING_ONLY_PROMPT } = await import("./grading-prompt");
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -8260,6 +8272,10 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/detect-defects — Sonnet defect-only
   app.post("/api/admin/certificates/:id/detect-defects", requireAdmin, async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_STANDALONE_DETECT_ENABLED) {
+        return res.status(503).json({ error: "AI defect detection is disabled" });
+      }
       const { DEFECTS_ONLY_PROMPT } = await import("./grading-prompt");
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -8350,6 +8366,10 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/grade-card — Sonnet grade-only using context from previous steps
   app.post("/api/admin/certificates/:id/grade-card", requireAdmin, async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_STANDALONE_GRADE_ENABLED) {
+        return res.status(503).json({ error: "AI grade-card is disabled" });
+      }
       const { GRADE_ONLY_PROMPT } = await import("./grading-prompt");
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -8908,6 +8928,10 @@ Defects (admin-confirmed): ${defectLines}`;
   // No rate limit for paid users (email + credits > 0); free uses get the standard limit.
   app.post("/api/tools/estimate", estimateRateLimit, toolsUpload.single("image"), async (req, res) => {
     try {
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      if (!FEATURE_FLAGS.AI_PUBLIC_ESTIMATE_ENABLED) {
+        return res.status(503).json({ error: "AI Pre-Grade tool is temporarily paused. Please try again later." });
+      }
       if (!req.file) return res.status(400).json({ error: "No image uploaded" });
       const apiKey = process.env.ANTHROPIC_API_KEY;
       console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
