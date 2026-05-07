@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2, Crop } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
@@ -145,7 +146,14 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
 
   useEffect(() => { onSideChange?.("front"); }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
-  const [pendingXY, setPendingXY] = useState<{ x: number; y: number } | null>(null);
+  // pendingXY: x/y are image-relative percents (drives the marker render and
+  // the 4-quadrant flip thresholds for the dropdown). pxX/pxY are
+  // viewport-absolute pixel coords from the click event — used by the
+  // dropdown anchor. Dropdown is rendered via a Portal into document.body
+  // so any ancestor transform on the image container doesn't break the
+  // viewport-pixel positioning (transform creates a fixed-position
+  // containing block).
+  const [pendingXY, setPendingXY] = useState<{ x: number; y: number; pxX: number; pxY: number } | null>(null);
   const [pendingDefect, setPendingDefect] = useState({
     type: "Scratch", severity: "moderate" as "minor" | "moderate" | "significant",
     description: "", location: "", image_side: "front",
@@ -195,7 +203,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       const yPct = ((e.clientY - imgRect.top) / imgRect.height) * 100;
       const cx = Math.max(0, Math.min(100, xPct));
       const cy = Math.max(0, Math.min(100, yPct));
-      setPendingXY({ x: cx, y: cy });
+      setPendingXY({ x: cx, y: cy, pxX: e.clientX, pxY: e.clientY });
       const locDesc = locationFromPercent(cx, cy, side);
       setPendingDefect(p => ({ ...p, image_side: side, x_percent: cx, y_percent: cy, location: locDesc }));
       return;
@@ -489,55 +497,10 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             </div>
           </div>
 
-          {/* Anchored type dropdown — appears next to the click point. Single
-              click on a type label saves the defect with default severity
-              "moderate" (admin can change after via the side panel chip).
-              Clickaway / Esc cancels. */}
-          {pendingXY && (
-            <>
-              <div
-                className="absolute inset-0 z-[55]"
-                onClick={() => setPendingXY(null)}
-              />
-              <div
-                className="absolute z-[60] bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
-                style={{
-                  // Anchor near click; nudge to keep on-screen on edges.
-                  left: pendingXY.x > 70 ? "auto" : `calc(${pendingXY.x}% + 24px)`,
-                  right: pendingXY.x > 70 ? `calc(${100 - pendingXY.x}% + 24px)` : "auto",
-                  top: pendingXY.y > 60 ? "auto" : `calc(${pendingXY.y}% + 24px)`,
-                  bottom: pendingXY.y > 60 ? `calc(${100 - pendingXY.y}% + 24px)` : "auto",
-                  width: 240,
-                  maxHeight: 360,
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
-                  <button
-                    type="button"
-                    onClick={() => setPendingXY(null)}
-                    className="text-[#888888] hover:text-red-600 transition-colors"
-                    aria-label="Cancel"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                <div className="overflow-y-auto" style={{ maxHeight: 320 }}>
-                  {DEFECT_TYPES.map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => saveNewDefect(t)}
-                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A] border-b border-[#F0EEE8] last:border-b-0 transition-colors"
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+          {/* Dropdown rendered below via Portal — see DropdownPortal at the
+              bottom of the fullscreen JSX so it escapes any ancestor
+              transform (the image container has transform: scale(...) for
+              zoom, which would break position: fixed otherwise). */}
 
           {/* Bottom toolbar */}
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
@@ -553,6 +516,79 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             </div>
           </div>
         </div>
+        {pendingXY && (() => {
+          // Portal into document.body — bypasses any ancestor transform
+          // (image container has transform: scale(...) for zoom which would
+          // otherwise break position: fixed positioning).
+          const DROPDOWN_W = 180;
+          const DROPDOWN_H = 360;
+          const GAP = 6;
+          const flipLeft = pendingXY.x > 70;   // click in right ~30% of image
+          const flipUp   = pendingXY.y > 70;   // click in bottom ~30% of image
+          const left = flipLeft
+            ? pendingXY.pxX - GAP - DROPDOWN_W
+            : pendingXY.pxX + GAP;
+          const top = flipUp
+            ? pendingXY.pxY - GAP - DROPDOWN_H
+            : pendingXY.pxY + GAP;
+          // Final viewport-edge clamp (don't render off-screen):
+          const clampedLeft = Math.max(8, Math.min(window.innerWidth - DROPDOWN_W - 8, left));
+          const clampedTop  = Math.max(8, Math.min(window.innerHeight - DROPDOWN_H - 8, top));
+          // Diagnostic — leave in for now, easy to drop after one more click test.
+          // eslint-disable-next-line no-console
+          console.log("[defect-dropdown]", {
+            click: { pxX: pendingXY.pxX, pxY: pendingXY.pxY, x_pct: pendingXY.x, y_pct: pendingXY.y },
+            viewport: { w: window.innerWidth, h: window.innerHeight },
+            flips: { flipLeft, flipUp },
+            anchor: { left, top },
+            final: { left: clampedLeft, top: clampedTop },
+          });
+          return createPortal(
+            <>
+              <div
+                className="fixed inset-0"
+                style={{ zIndex: 9998 }}
+                onClick={() => setPendingXY(null)}
+              />
+              <div
+                className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
+                style={{
+                  zIndex: 9999,
+                  left: clampedLeft,
+                  top: clampedTop,
+                  width: DROPDOWN_W,
+                  maxHeight: DROPDOWN_H,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
+                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingXY(null)}
+                    className="text-[#888888] hover:text-red-600 transition-colors"
+                    aria-label="Cancel"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 36 }}>
+                  {DEFECT_TYPES.map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => saveNewDefect(t)}
+                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>,
+            document.body
+          );
+        })()}
       </>
     );
   }
