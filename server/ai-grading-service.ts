@@ -8,7 +8,10 @@ import sharp from "sharp";
 import { GRADING_SYSTEM_PROMPT, CARD_IDENTIFICATION_PROMPT, HAIKU_GRADING_PROMPT } from "./grading-prompt";
 import { CARD_GAME_MODULES } from "./card-game-knowledge";
 import { lookupCard } from "./card-database";
-import { FEATURE_FLAGS } from "./config/feature-flags";
+import { FEATURE_FLAGS, getFeatureFlag } from "./config/feature-flags";
+import { db } from "./db";
+import { aiPredictions } from "@shared/schema";
+import { createHash } from "crypto";
 import { anthropicFetch } from "./anthropic-fetch";
 import { getR2Client } from "./r2";
 
@@ -585,7 +588,7 @@ export async function analyzeCardFromBuffers(
   cardGame?: string,
   certId?: string | number,
 ): Promise<GradingAnalysis> {
-  if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+  if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
     throw new Error("AI_FULL_GRADE_ENABLED=false");
   }
   await rateLimit();
@@ -612,6 +615,7 @@ export async function analyzeCardFromBuffers(
       systemPrompt,
       label: "grade",
       certId,
+      callType: "full_grade",
     });
   } catch (err: any) {
     throw new Error(`Claude API call failed: ${err.message}`);
@@ -622,7 +626,7 @@ export async function analyzeCardFromBuffers(
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix", certId });
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix", certId, callType: "json_fix" });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -717,11 +721,34 @@ function isRetryableClaudeError(err: any, response?: Response | null): { retry: 
   return { retry: false, reason: "other" };
 }
 
+/**
+ * Call types written to ai_predictions for the dashboard analytics. Add new
+ * names here whenever a new gated AI call is wired through callClaude — keeps
+ * /api/admin/ai-dashboard-stats grouping consistent with the gates.
+ */
+type AiCallType =
+  | "full_grade"
+  | "quick_grade"
+  | "identify"
+  | "defect_suggest"
+  | "centering"
+  | "standalone_detect"
+  | "standalone_grade"
+  | "description_gen"
+  | "json_fix"
+  | "public_estimate";
+
 async function callClaude(
   content: object[],
   maxTokens: number,
   model = "claude-opus-4-7",
-  options?: { thinking?: boolean; systemPrompt?: string; label?: string; certId?: string | number },
+  options?: {
+    thinking?: boolean;
+    systemPrompt?: string;
+    label?: string;
+    certId?: string | number;
+    callType?: AiCallType;
+  },
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
@@ -747,6 +774,7 @@ async function callClaude(
   }
 
   const certTag = options?.certId != null ? `cert=${options.certId}` : (options?.label || "unknown");
+  const callStartedAt = Date.now();
   let response: Response | null = null;
   let lastErr: any = null;
 
@@ -810,6 +838,37 @@ async function callClaude(
   if (!textBlock?.text) {
     throw new Error(`Claude returned no text block. Content types: [${contentArr.map(b => b.type).join(", ")}]`);
   }
+
+  // ── Persist to ai_predictions for the AI Learning dashboard ───────────────
+  // Skip when there's no certId (e.g. /api/tools/estimate) or no callType.
+  // Best-effort: any DB error is swallowed so a logging failure can never
+  // break a live grading call.
+  if (options?.certId != null && options?.callType) {
+    const latencyMs = Date.now() - callStartedAt;
+    const promptHash = options.systemPrompt
+      ? createHash("sha256").update(options.systemPrompt).digest("hex").slice(0, 12)
+      : null;
+    let prediction: unknown;
+    try {
+      prediction = JSON.parse((textBlock.text || "").replace(/```json|```/g, "").trim());
+    } catch {
+      prediction = { raw: textBlock.text };
+    }
+    db.insert(aiPredictions).values({
+      certId:        String(options.certId),
+      model,
+      promptVersion: promptHash,
+      callType:      options.callType,
+      prediction:    prediction as object,
+      latencyMs,
+      inputTokens,
+      outputTokens,
+      costGbp:       costGbp.toFixed(5),
+    }).then(undefined, (err) => {
+      console.warn(`[ai-predictions] insert failed for ${certTag}: ${err?.message || err}`);
+    });
+  }
+
   return textBlock.text;
 }
 
@@ -829,7 +888,7 @@ function normalizeCardNumber(result: CardIdentification): CardIdentification {
 // ── GPT-5 second opinion for card identification ──────────────────────────
 
 async function identifyWithGpt(base64: string): Promise<CardIdentification | null> {
-  if (!FEATURE_FLAGS.AI_GPT_SECOND_OPINION_ENABLED) return null;
+  if (!(await getFeatureFlag("AI_GPT_SECOND_OPINION_ENABLED"))) return null;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
@@ -921,7 +980,7 @@ export async function identifyCardFromBuffer(
   _mimeType: string,
   certId?: string | number,
 ): Promise<CardIdentification> {
-  if (!FEATURE_FLAGS.AI_IDENTIFY_ENABLED) {
+  if (!(await getFeatureFlag("AI_IDENTIFY_ENABLED"))) {
     throw new Error("AI_IDENTIFY_ENABLED=false");
   }
   await rateLimit();
@@ -934,7 +993,7 @@ export async function identifyCardFromBuffer(
       [imageBlock(base64, mediaType), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
       1024,
       "claude-haiku-4-5-20251001",
-      { label: "identify-haiku", certId }
+      { label: "identify-haiku", certId, callType: "identify" }
     ),
     identifyWithGpt(base64),
   ]);
@@ -1031,7 +1090,7 @@ export async function suggestDefectsFromBuffer(
   backBuffer: Buffer | null,
   certId?: string | number,
 ): Promise<DefectCandidate[]> {
-  if (!FEATURE_FLAGS.AI_DEFECT_SUGGEST_ENABLED) return [];
+  if (!(await getFeatureFlag("AI_DEFECT_SUGGEST_ENABLED"))) return [];
   await rateLimit();
   const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
   const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
@@ -1043,7 +1102,7 @@ export async function suggestDefectsFromBuffer(
 
   let text: string;
   try {
-    text = await callClaude(content, 2048, "claude-haiku-4-5-20251001", { label: "suggest-defects-haiku", certId });
+    text = await callClaude(content, 2048, "claude-haiku-4-5-20251001", { label: "suggest-defects-haiku", certId, callType: "defect_suggest" });
   } catch (err: any) {
     console.warn(`[suggest-defects] call failed for cert=${certId}: ${err.message}`);
     return [];
@@ -1175,7 +1234,7 @@ export async function gradeCardFromBuffer(
   backBuffer: Buffer | null,
   certId?: string | number,
 ): Promise<AiGrading | null> {
-  if (!FEATURE_FLAGS.AI_HAIKU_QUICK_GRADE_ENABLED) return null;
+  if (!(await getFeatureFlag("AI_HAIKU_QUICK_GRADE_ENABLED"))) return null;
   await rateLimit();
   const { buffer: frontResized, mediaType: frontMime } = await resizeForClaude(frontBuffer);
   const content: object[] = [imageBlock(frontResized.toString("base64"), frontMime)];
@@ -1191,6 +1250,7 @@ export async function gradeCardFromBuffer(
       systemPrompt: HAIKU_GRADING_PROMPT,
       label: "grade-haiku",
       certId,
+      callType: "quick_grade",
     });
   } catch (err: any) {
     console.warn(`[grade-haiku] call failed for cert=${certId}: ${err.message}`);
@@ -1313,7 +1373,7 @@ export async function gradeCardFromBuffer(
 // ── Card identification ────────────────────────────────────────────────────
 
 export async function identifyCard(frontKey: string): Promise<CardIdentification> {
-  if (!FEATURE_FLAGS.AI_IDENTIFY_ENABLED) {
+  if (!(await getFeatureFlag("AI_IDENTIFY_ENABLED"))) {
     throw new Error("AI_IDENTIFY_ENABLED=false");
   }
   await rateLimit();
@@ -1324,7 +1384,7 @@ export async function identifyCard(frontKey: string): Promise<CardIdentification
     [imageBlock(frontBase64), { type: "text", text: CARD_IDENTIFICATION_PROMPT }],
     1024,
     "claude-haiku-4-5-20251001",
-    { label: "identify-haiku-r2" }
+    { label: "identify-haiku-r2", callType: "identify" }
   );
 
   try {
@@ -1451,7 +1511,7 @@ export async function analyzeCard(
   keys: ImageKeys,
   cardGame?: string
 ): Promise<GradingAnalysis> {
-  if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+  if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
     throw new Error("AI_FULL_GRADE_ENABLED=false");
   }
   await rateLimit();

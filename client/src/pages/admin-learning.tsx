@@ -1,5 +1,49 @@
-import { useQuery } from "@tanstack/react-query";
-import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+// ── New /api/admin/ai-dashboard-stats response shape ───────────────────────
+interface AiDashboardStats {
+  total_graded: number;
+  this_month: number;
+  average_grade: number | null;
+  avg_time_seconds: number | null;
+  grade_distribution: { grade: string; count: number }[];
+  black_labels_count: number;
+  ai_accuracy: {
+    prediction_count: number;
+    approved_count: number;
+    exact_agreement_pct: number | null;
+    within_half_point_pct: number | null;
+    mean_absolute_error: number | null;
+  };
+  last_30_days: { day: string; count: number }[];
+}
+
+// ── /api/admin/ai-feature-flags response shape ─────────────────────────────
+interface AiFeatureFlag {
+  name: string;
+  enabled: boolean;
+  envDefault: boolean;
+  overrideSet: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  reason: string | null;
+}
+
+const FLAG_COPY: Record<string, { title: string; description: string }> = {
+  AI_IDENTIFY_ENABLED:           { title: "Card identification",       description: "Claude Haiku identifies the card from front-image scans during ingest." },
+  AI_DEFECT_SUGGEST_ENABLED:     { title: "AI defect suggestions",     description: "Haiku suggests candidate defects on scan; admin reviews before approval." },
+  AI_HAIKU_QUICK_GRADE_ENABLED:  { title: "Haiku quick-grade",         description: "Pre-fills the grading form with subgrades from a fast Haiku pass." },
+  AI_FULL_GRADE_ENABLED:         { title: "Full Opus grade",           description: "Heavy Opus 4.7 grading run with adaptive thinking — slower, more thorough." },
+  AI_CENTERING_ENABLED:          { title: "Centering measurement",     description: "Standalone Sonnet pass that returns centering ratios and a subgrade." },
+  AI_STANDALONE_DETECT_ENABLED:  { title: "Standalone defect detect",  description: "On-demand Sonnet defect run, separate from the scan-time Haiku pass." },
+  AI_STANDALONE_GRADE_ENABLED:   { title: "Standalone grade-card",     description: "On-demand Sonnet grade-only run that uses prior step context." },
+  AI_DESCRIPTION_GEN_ENABLED:    { title: "Grade description",         description: "Generates the public-facing grade explanation after subgrades are set." },
+  AI_GPT_SECOND_OPINION_ENABLED: { title: "GPT-4o second opinion",     description: "Optional OpenAI call run alongside Claude for identification reconciliation." },
+  AI_PUBLIC_ESTIMATE_ENABLED:    { title: "Public Pre-Grade tool",     description: "Powers /tools/estimate — public-facing free AI grading estimate." },
+};
 
 interface LearningOverview {
   overview: {
@@ -93,11 +137,29 @@ export default function AdminLearningPage() {
     },
   });
 
-  const { data: accuracy, isLoading: loadingAccuracy } = useQuery<AccuracyData>({
+  const { data: accuracy } = useQuery<AccuracyData>({
     queryKey: ["/api/admin/learning/accuracy"],
     queryFn: async () => {
       const res = await fetch("/api/admin/learning/accuracy", { credentials: "include" });
-      if (!res.ok) return null;
+      if (!res.ok) return null as any;
+      return res.json();
+    },
+  });
+
+  const { data: stats } = useQuery<AiDashboardStats>({
+    queryKey: ["/api/admin/ai-dashboard-stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/ai-dashboard-stats", { credentials: "include" });
+      if (!res.ok) return null as any;
+      return res.json();
+    },
+  });
+
+  const { data: flagsData, refetch: refetchFlags } = useQuery<{ flags: AiFeatureFlag[] }>({
+    queryKey: ["/api/admin/ai-feature-flags"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/ai-feature-flags", { credentials: "include" });
+      if (!res.ok) return { flags: [] };
       return res.json();
     },
   });
@@ -112,6 +174,48 @@ export default function AdminLearningPage() {
 
   const suggestions = generateSuggestions(accuracy);
   const hasAiData = accuracy?.overall_accuracy !== null && accuracy?.overall_accuracy !== undefined;
+
+  // Prefer the new ai-dashboard-stats avg_time_seconds (read from
+  // certificates.grading_time_seconds) over the legacy grading_sessions
+  // value — both are populated for new approvals, but the new one is the
+  // canonical source going forward.
+  const avgTimeSeconds = stats?.avg_time_seconds ?? o?.avg_seconds ?? 0;
+
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [pendingFlag, setPendingFlag] = useState<{ flag: AiFeatureFlag; nextEnabled: boolean } | null>(null);
+  const [submittingFlag, setSubmittingFlag] = useState<string | null>(null);
+
+  async function applyFlagToggle(flag: AiFeatureFlag, nextEnabled: boolean) {
+    setSubmittingFlag(flag.name);
+    try {
+      // Reverting to env default = DELETE the override, not POST a matching value.
+      // This way the row vanishes and the flag follows env going forward.
+      if (nextEnabled === flag.envDefault) {
+        const res = await fetch(`/api/admin/ai-feature-flags/${flag.name}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+      } else {
+        const res = await fetch(`/api/admin/ai-feature-flags`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: flag.name, enabled: nextEnabled, reason: null }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+      }
+      toast({ title: `${FLAG_COPY[flag.name]?.title || flag.name} ${nextEnabled ? "enabled" : "disabled"}` });
+      await refetchFlags();
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/ai-dashboard-stats"] });
+    } catch (e: any) {
+      toast({ title: "Toggle failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSubmittingFlag(null);
+      setPendingFlag(null);
+    }
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
@@ -136,7 +240,7 @@ export default function AdminLearningPage() {
               { label: "Total Graded",    value: o?.total_graded ?? 0,    icon: <BarChart3 size={16} className="text-[#D4AF37]" /> },
               { label: "This Month",      value: o?.this_month ?? 0,       icon: <TrendingUp size={16} className="text-[#D4AF37]" /> },
               { label: "Average Grade",   value: o?.avg_grade ? Number(o.avg_grade).toFixed(1) : "—", icon: <CheckCircle2 size={16} className="text-[#D4AF37]" /> },
-              { label: "Avg Time/Card",   value: formatSeconds(Number(o?.avg_seconds ?? 0)), icon: <Clock size={16} className="text-[#D4AF37]" /> },
+              { label: "Avg Time/Card",   value: formatSeconds(Number(avgTimeSeconds)), icon: <Clock size={16} className="text-[#D4AF37]" /> },
             ].map(({ label, value, icon }) => (
               <div key={label} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-4">
                 <div className="flex items-center gap-1.5 mb-2">{icon}<p className="text-[#888888] text-xs uppercase tracking-widest">{label}</p></div>
@@ -209,6 +313,50 @@ export default function AdminLearningPage() {
             </div>
           )}
 
+          {/* AI Predictions Accuracy — fed from ai_predictions table.
+              Until 30 cards have been approved with a captured prediction,
+              the panel shows an insufficient-data state with the count we
+              still need before the numbers stabilise. */}
+          {stats && (
+            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <Brain size={16} className="text-[#D4AF37]" />
+                <h2 className="text-[#1A1A1A] font-bold">AI Accuracy (Predictions)</h2>
+              </div>
+              {stats.ai_accuracy.approved_count >= 30 ? (
+                <>
+                  <p className="text-[#555555] text-sm">
+                    Based on <strong className="text-[#1A1A1A]">{stats.ai_accuracy.approved_count}</strong> approved card{stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions
+                    {" "}(out of {stats.ai_accuracy.prediction_count} total predictions logged).
+                  </p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Exact match</p>
+                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.exact_agreement_pct ?? "—"}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Within ½ point</p>
+                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.within_half_point_pct ?? "—"}%</p>
+                    </div>
+                    <div>
+                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Mean abs. error</p>
+                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.mean_absolute_error ?? "—"}</p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-2">
+                  <p className="text-[#555555] text-sm">
+                    Need <strong className="text-[#D4AF37]">{Math.max(0, 30 - stats.ai_accuracy.approved_count)}</strong> more graded card{30 - stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions before accuracy figures are statistically meaningful.
+                  </p>
+                  <p className="text-[#888888] text-xs mt-2">
+                    Currently {stats.ai_accuracy.approved_count} approved · {stats.ai_accuracy.prediction_count} predictions logged.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Prompt suggestions */}
           <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
             <div className="flex items-center gap-2">
@@ -265,6 +413,71 @@ export default function AdminLearningPage() {
             </div>
           )}
 
+          {/* AI Feature Toggles — DB-backed runtime overrides.
+              Flipping any of these is immediate (no redeploy); the server
+              writes to feature_overrides and invalidates its 30s cache so
+              the very next AI call reflects the change. "Default" badge
+              means the override row is absent and the env-var default is
+              in effect; "Custom" means an override row is set. */}
+          {flagsData?.flags && flagsData.flags.length > 0 && (
+            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <ToggleLeft size={16} className="text-[#D4AF37]" />
+                <h2 className="text-[#1A1A1A] font-bold">AI Feature Toggles</h2>
+              </div>
+              <p className="text-[#555555] text-xs">
+                Per-feature kill-switches. Disabling a flag stops that AI call within ~1 second — no redeploy. Reverting to "default" clears the override.
+              </p>
+              <div className="space-y-3">
+                {flagsData.flags.map((f) => {
+                  const copy = FLAG_COPY[f.name] || { title: f.name, description: "" };
+                  const isSubmitting = submittingFlag === f.name;
+                  return (
+                    <div key={f.name} className="flex items-start justify-between gap-4 border-t border-[#E8E4DC] pt-3 first:border-t-0 first:pt-0">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-bold text-[#1A1A1A]">{copy.title}</p>
+                          <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
+                            f.overrideSet
+                              ? "border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37]"
+                              : "border-[#D4D0C8] bg-white text-[#888888]"
+                          }`}>
+                            {f.overrideSet ? "Custom" : "Default"}
+                          </span>
+                          <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
+                            f.enabled
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                              : "border-red-200 bg-red-50 text-red-600"
+                          }`}>
+                            {f.enabled ? "Enabled" : "Disabled"}
+                          </span>
+                        </div>
+                        <p className="text-[#555555] text-xs mt-1">{copy.description}</p>
+                        {f.overrideSet && (
+                          <p className="text-[#888888] text-[10px] mt-1">
+                            Last toggled by {f.updatedBy || "—"} {f.updatedAt ? `on ${new Date(f.updatedAt).toLocaleString()}` : ""}
+                            {f.reason ? ` · ${f.reason}` : ""}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => setPendingFlag({ flag: f, nextEnabled: !f.enabled })}
+                        className={`flex-shrink-0 inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
+                          f.enabled ? "bg-[#D4AF37] border-[#D4AF37]" : "bg-[#E8E4DC] border-[#D4D0C8]"
+                        } ${isSubmitting ? "opacity-60" : ""}`}
+                        title={`Toggle ${copy.title}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${f.enabled ? "translate-x-6" : "translate-x-1"}`} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {!o?.total_graded && (
             <div className="text-center py-12 text-[#888888]">
               <Brain size={32} className="mx-auto mb-3 text-[#CCCCCC]" />
@@ -273,6 +486,49 @@ export default function AdminLearningPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Confirm dialog for flag toggle. Plain inline modal — no shadcn Dialog
+          dependency to keep the patch self-contained on this page. */}
+      {pendingFlag && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setPendingFlag(null)}
+        >
+          <div
+            className="bg-white rounded-xl border border-[#E8E4DC] p-6 max-w-md w-full mx-4 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-[#1A1A1A] font-bold">
+              {pendingFlag.nextEnabled ? "Enable" : "Disable"} {FLAG_COPY[pendingFlag.flag.name]?.title || pendingFlag.flag.name}?
+            </h3>
+            <p className="text-[#555555] text-sm">
+              {pendingFlag.nextEnabled
+                ? "This AI call will start running again on the next request."
+                : "This AI call will stop running within ~1 second of confirming."}
+              {pendingFlag.nextEnabled === pendingFlag.flag.envDefault
+                ? " The override will be cleared so the flag follows its env default going forward."
+                : " A custom override will be saved."}
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingFlag(null)}
+                className="px-3 py-1.5 text-sm rounded border border-[#D4D0C8] text-[#555555] hover:text-[#1A1A1A]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyFlagToggle(pendingFlag.flag, pendingFlag.nextEnabled)}
+                disabled={submittingFlag === pendingFlag.flag.name}
+                className="px-3 py-1.5 text-sm rounded bg-[#D4AF37] text-white font-bold disabled:opacity-60"
+              >
+                {submittingFlag === pendingFlag.flag.name ? "Applying…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

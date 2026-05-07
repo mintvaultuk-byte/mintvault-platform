@@ -2147,8 +2147,8 @@ export async function registerRoutes(
   // OLD endpoint stub — kept to avoid 404 on any lingering clients; real impl in Build 5 below
   app.post("/api/admin/certificates/:id/analyze-v1-legacy", requireAdmin, aiRateLimit, async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_FULL_GRADE_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
         return res.status(503).json({ error: "AI legacy analyze is disabled" });
       }
       const _unused = ""; // placeholder
@@ -2274,12 +2274,20 @@ export async function registerRoutes(
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const { centering, corners, edges, surface, overall, gradeType } = req.body;
+      const { centering, corners, edges, surface, overall, gradeType, grading_time_seconds } = req.body;
 
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
       const finalOverall = isNonNum ? null : parseFloat(overall);
       const computedLabel = (!isNonNum && finalOverall === 10) ? "black" : "Standard";
+
+      // Cap at 1800s (30 min) so a grader leaving the tab open all day doesn't
+      // skew the dashboard average. Anything over 30 min gets clamped — keeps
+      // honest sessions intact while flattening coffee-break outliers.
+      const rawTime = Number(grading_time_seconds);
+      const clampedTime = Number.isFinite(rawTime) && rawTime > 0
+        ? Math.min(1800, Math.round(rawTime))
+        : null;
 
       // P0 preservation helper — see /grade handler for rationale.
       const num = (v: unknown): number | null => {
@@ -2306,12 +2314,14 @@ export async function registerRoutes(
             THEN COALESCE(ai_defects, '[]'::jsonb)
             ELSE verified_defects
           END,
+          grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at        = NOW()
         WHERE id = ${id}
       `);
 
       await storage.writeAuditLog("certificate", cert.certId, "approve_grade", req.session.adminEmail || "admin", {
         centering, corners, edges, surface, overall, gradeType, labelType: computedLabel,
+        grading_time_seconds: clampedTime,
       });
 
       const updated = await storage.getCertificate(id);
@@ -7129,8 +7139,8 @@ export async function registerRoutes(
   // overwrites grade_explanation; the audit_log row records every call.
   app.post("/api/admin/certificates/:id/generate-description", requireAdmin, async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_DESCRIPTION_GEN_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_DESCRIPTION_GEN_ENABLED"))) {
         return res.status(503).json({ error: "AI description generation is disabled" });
       }
       const id = parseInt(String(req.params.id), 10);
@@ -7594,6 +7604,14 @@ Defects (admin-confirmed): ${defectLines}`;
       const sentEdges      = isNonNum ? null : num(b.grade_edges);
       const sentSurface    = isNonNum ? null : num(b.grade_surface);
 
+      // Grading time (admin opens the grading workstation → clicks Approve).
+      // Capped at 1800s (30 min) to keep the dashboard average representative —
+      // anything longer is almost certainly a coffee break / tab left open.
+      const rawTime = Number(b.grading_time_seconds);
+      const clampedTime = Number.isFinite(rawTime) && rawTime > 0
+        ? Math.min(1800, Math.round(rawTime))
+        : null;
+
       // Final state for label_type computation: payload value if present, else existing.
       // SQL COALESCE will produce the same final state in DB; we mirror it here so
       // label_type reflects what's actually saved when a partial payload comes in.
@@ -7642,14 +7660,17 @@ Defects (admin-confirmed): ${defectLines}`;
           grade_approved_by   = ${"Cornelius Oliver"},
           grade_approved_at   = NOW(),
           status              = 'active',
+          grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at          = NOW()
         WHERE id = ${id}
       `);
 
-      // Log to grading_sessions
+      // Log to grading_sessions. grading_duration_seconds also feeds the
+      // existing /api/admin/learning/overview avg_seconds metric — finally
+      // populating it after months of empty "—".
       try {
         await db.execute(sql`
-          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes, model_version)
+          INSERT INTO grading_sessions (cert_id, completed_at, grader, final_grade, ai_response, notes, model_version, grading_duration_seconds)
           VALUES (
             ${cert.certId},
             NOW(),
@@ -7657,7 +7678,8 @@ Defects (admin-confirmed): ${defectLines}`;
             ${gradeNum},
             ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
             ${b.private_notes || null},
-            'claude-opus-4-7'
+            'claude-opus-4-7',
+            ${clampedTime}
           )
         `);
       } catch (sessionErr) {
@@ -8142,8 +8164,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/measure-centering — Sonnet centering-only
   app.post("/api/admin/certificates/:id/measure-centering", requireAdmin, async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_CENTERING_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_CENTERING_ENABLED"))) {
         return res.status(503).json({ error: "AI centering measurement is disabled" });
       }
       const { CENTERING_ONLY_PROMPT } = await import("./grading-prompt");
@@ -8272,8 +8294,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/detect-defects — Sonnet defect-only
   app.post("/api/admin/certificates/:id/detect-defects", requireAdmin, async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_STANDALONE_DETECT_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_STANDALONE_DETECT_ENABLED"))) {
         return res.status(503).json({ error: "AI defect detection is disabled" });
       }
       const { DEFECTS_ONLY_PROMPT } = await import("./grading-prompt");
@@ -8366,8 +8388,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // POST /api/admin/certificates/:id/grade-card — Sonnet grade-only using context from previous steps
   app.post("/api/admin/certificates/:id/grade-card", requireAdmin, async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_STANDALONE_GRADE_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_STANDALONE_GRADE_ENABLED"))) {
         return res.status(503).json({ error: "AI grade-card is disabled" });
       }
       const { GRADE_ONLY_PROMPT } = await import("./grading-prompt");
@@ -8928,8 +8950,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // No rate limit for paid users (email + credits > 0); free uses get the standard limit.
   app.post("/api/tools/estimate", estimateRateLimit, toolsUpload.single("image"), async (req, res) => {
     try {
-      const { FEATURE_FLAGS } = await import("./config/feature-flags");
-      if (!FEATURE_FLAGS.AI_PUBLIC_ESTIMATE_ENABLED) {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_PUBLIC_ESTIMATE_ENABLED"))) {
         return res.status(503).json({ error: "AI Pre-Grade tool is temporarily paused. Please try again later." });
       }
       if (!req.file) return res.status(400).json({ error: "No image uploaded" });
@@ -9326,6 +9348,192 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json(rows.rows[0] || {});
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── AI feature flags (DB-backed runtime overrides) ───────────────────────
+  // Admin can flip any of the 10 AI flags at runtime without redeploying.
+  // Override write also drops the in-memory cache so the change takes effect
+  // on the very next AI call instead of waiting out the 30s TTL.
+
+  app.get("/api/admin/ai-feature-flags", requireAdmin, async (_req, res) => {
+    try {
+      const { getAllAiFlags, AI_FLAG_NAMES } = await import("./config/feature-flags");
+      const flags = await getAllAiFlags();
+
+      // Pull last-toggled metadata per flag from feature_overrides so the
+      // dashboard can show "set by X at Y, reason Z" alongside each row.
+      const meta = await db.execute(sql`
+        SELECT name, updated_at, updated_by, reason FROM feature_overrides
+        WHERE name = ANY(${AI_FLAG_NAMES as unknown as string[]})
+      `);
+      const metaByName = new Map<string, any>();
+      for (const r of meta.rows as any[]) metaByName.set(r.name, r);
+
+      res.json({
+        flags: flags.map(f => ({
+          ...f,
+          updatedAt: metaByName.get(f.name)?.updated_at || null,
+          updatedBy: metaByName.get(f.name)?.updated_by || null,
+          reason:    metaByName.get(f.name)?.reason     || null,
+        })),
+      });
+    } catch (err: any) {
+      console.error("[ai-feature-flags] GET failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/ai-feature-flags", requireAdmin, async (req, res) => {
+    try {
+      const { AI_FLAG_NAMES, invalidateFeatureFlagCache } = await import("./config/feature-flags");
+      const { name, enabled, reason } = req.body || {};
+      if (!AI_FLAG_NAMES.includes(name)) {
+        return res.status(400).json({ error: "Unknown flag name" });
+      }
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "enabled must be boolean" });
+      }
+      const adminEmail = req.session.adminEmail || "admin";
+      await db.execute(sql`
+        INSERT INTO feature_overrides (name, enabled, updated_at, updated_by, reason)
+        VALUES (${name}, ${enabled}, NOW(), ${adminEmail}, ${reason || null})
+        ON CONFLICT (name) DO UPDATE SET
+          enabled = EXCLUDED.enabled,
+          updated_at = NOW(),
+          updated_by = EXCLUDED.updated_by,
+          reason = EXCLUDED.reason
+      `);
+      invalidateFeatureFlagCache();
+      await storage.writeAuditLog("feature_flag", name, "override_set", adminEmail, { enabled, reason: reason || null });
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[ai-feature-flags] POST failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/ai-feature-flags/:name", requireAdmin, async (req, res) => {
+    try {
+      const { AI_FLAG_NAMES, invalidateFeatureFlagCache } = await import("./config/feature-flags");
+      const name = String(req.params.name);
+      if (!AI_FLAG_NAMES.includes(name as any)) {
+        return res.status(400).json({ error: "Unknown flag name" });
+      }
+      const adminEmail = req.session.adminEmail || "admin";
+      await db.execute(sql`DELETE FROM feature_overrides WHERE name = ${name}`);
+      invalidateFeatureFlagCache();
+      await storage.writeAuditLog("feature_flag", name, "override_cleared", adminEmail, {});
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[ai-feature-flags] DELETE failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── AI dashboard stats — single endpoint feeding the AI Learning page ────
+  // Combines top-line cert stats with the new ai_predictions accuracy view so
+  // the dashboard makes one fetch on load instead of fanning out to four.
+
+  app.get("/api/admin/ai-dashboard-stats", requireAdmin, async (_req, res) => {
+    try {
+      // Top-line cert metrics (only approved/published certs).
+      const top = await db.execute(sql`
+        SELECT
+          COUNT(*)::int                                                     AS total_graded,
+          COUNT(*) FILTER (WHERE DATE_TRUNC('month', grade_approved_at) = DATE_TRUNC('month', NOW()))::int AS this_month,
+          ROUND(AVG(grade)::numeric, 2)                                     AS average_grade,
+          ROUND(AVG(grading_time_seconds)::numeric, 0)::int                 AS avg_time_seconds,
+          COUNT(*) FILTER (WHERE label_type = 'black')::int                 AS black_labels_count
+        FROM certificates
+        WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL
+      `);
+      const topRow = top.rows[0] || {};
+
+      // Grade distribution (approved certs only).
+      const dist = await db.execute(sql`
+        SELECT grade::text AS grade, COUNT(*)::int AS count
+        FROM certificates
+        WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL AND grade IS NOT NULL
+        GROUP BY grade
+        ORDER BY grade DESC
+      `);
+
+      // Last-30-days activity, one row per day in the window even if zero.
+      const activity = await db.execute(sql`
+        SELECT TO_CHAR(d::date, 'YYYY-MM-DD') AS day,
+               COALESCE(c.cnt, 0)::int AS count
+        FROM generate_series(NOW() - INTERVAL '29 days', NOW(), INTERVAL '1 day') AS d
+        LEFT JOIN (
+          SELECT DATE(grade_approved_at) AS day, COUNT(*)::int AS cnt
+          FROM certificates
+          WHERE grade_approved_at >= NOW() - INTERVAL '30 days'
+            AND deleted_at IS NULL
+          GROUP BY day
+        ) c ON DATE(d) = c.day
+        ORDER BY day
+      `);
+
+      // AI accuracy from ai_predictions joined to approved certs. Only
+      // quick_grade and full_grade rows have an `overall_grade` to compare,
+      // so we restrict to those call_types. Returns null fields when
+      // approved_count < 30 (statistical-significance threshold).
+      const accuracy = await db.execute(sql`
+        WITH preds AS (
+          SELECT
+            p.cert_id,
+            COALESCE(
+              (p.prediction->>'overall_grade')::numeric,
+              (p.prediction->>'overall')::numeric
+            ) AS predicted,
+            c.grade::numeric AS actual
+          FROM ai_predictions p
+          JOIN certificates c ON c.cert_id = p.cert_id
+          WHERE p.call_type IN ('full_grade', 'quick_grade')
+            AND c.grade_approved_at IS NOT NULL
+            AND c.deleted_at IS NULL
+            AND c.grade IS NOT NULL
+        )
+        SELECT
+          (SELECT COUNT(*) FROM ai_predictions WHERE call_type IN ('full_grade','quick_grade'))::int AS prediction_count,
+          COUNT(*)::int                                                                        AS approved_count,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE predicted = actual) / NULLIF(COUNT(*), 0), 1)   AS exact_agreement_pct,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(predicted - actual) <= 0.5) / NULLIF(COUNT(*), 0), 1) AS within_half_point_pct,
+          ROUND(AVG(ABS(predicted - actual))::numeric, 2)                                      AS mean_absolute_error
+        FROM preds
+        WHERE predicted IS NOT NULL
+      `);
+      const accRow = (accuracy.rows[0] as any) || {};
+      const approvedCount = Number(accRow.approved_count || 0);
+      const aiAccuracy = approvedCount >= 30
+        ? {
+            prediction_count:      Number(accRow.prediction_count || 0),
+            approved_count:        approvedCount,
+            exact_agreement_pct:   accRow.exact_agreement_pct != null ? Number(accRow.exact_agreement_pct) : null,
+            within_half_point_pct: accRow.within_half_point_pct != null ? Number(accRow.within_half_point_pct) : null,
+            mean_absolute_error:   accRow.mean_absolute_error != null ? Number(accRow.mean_absolute_error) : null,
+          }
+        : {
+            prediction_count:      Number(accRow.prediction_count || 0),
+            approved_count:        approvedCount,
+            exact_agreement_pct:   null,
+            within_half_point_pct: null,
+            mean_absolute_error:   null,
+          };
+
+      res.json({
+        total_graded:       Number(topRow.total_graded || 0),
+        this_month:         Number(topRow.this_month || 0),
+        average_grade:      topRow.average_grade != null ? Number(topRow.average_grade) : null,
+        avg_time_seconds:   topRow.avg_time_seconds != null ? Number(topRow.avg_time_seconds) : null,
+        grade_distribution: dist.rows,
+        black_labels_count: Number(topRow.black_labels_count || 0),
+        ai_accuracy:        aiAccuracy,
+        last_30_days:       activity.rows,
+      });
+    } catch (err: any) {
+      console.error("[ai-dashboard-stats] failed:", err);
       res.status(500).json({ error: err.message });
     }
   });

@@ -282,6 +282,10 @@ export const certificates = pgTable("certificates", {
   verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
+  // Time spent in admin grading UI between open and approve, in seconds.
+  // Captured client-side, capped at 1800s (30 min) server-side to filter
+  // coffee-break sessions out of the dashboard average.
+  gradingTimeSeconds: integer("grading_time_seconds"),
   // Stolen card flag — set to "stolen" when a verified report exists; null otherwise
   stolenStatus: text("stolen_status"),            // null | "reported_stolen"
   stolenReportedAt: timestamp("stolen_reported_at"),
@@ -413,6 +417,38 @@ export const auditLog = pgTable("audit_log", {
   details: jsonb("details").$type<Record<string, unknown>>().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ── AI feature toggles (DB-backed, runtime-flippable) ─────────────────────
+// One row per env-var flag from server/config/feature-flags.ts. The DB row
+// overrides the env-var default at runtime. Absence of a row means "use env
+// default". Cleared via DELETE to revert.
+export const featureOverrides = pgTable("feature_overrides", {
+  name:      text("name").primaryKey(),
+  enabled:   boolean("enabled").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by").notNull(),
+  reason:    text("reason"),
+});
+
+// ── AI prediction history (append-only, queryable per call) ───────────────
+// Every Claude/GPT call writes a row here on success. Used by the AI Learning
+// dashboard for accuracy + cost analytics, and as the future RAG corpus.
+export const aiPredictions = pgTable("ai_predictions", {
+  id:            bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  certId:        text("cert_id").notNull(),
+  model:         text("model").notNull(),
+  promptVersion: text("prompt_version"),
+  callType:      text("call_type").notNull(), // "identify" | "defect_suggest" | "quick_grade" | "full_grade" | "centering" | ...
+  prediction:    jsonb("prediction").notNull(),
+  latencyMs:     integer("latency_ms"),
+  inputTokens:   integer("input_tokens"),
+  outputTokens:  integer("output_tokens"),
+  costGbp:       numeric("cost_gbp", { precision: 8, scale: 5 }),
+  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  certCallIdx: index("ai_predictions_cert_call_idx").on(t.certId, t.callType),
+  createdIdx:  index("ai_predictions_created_idx").on(t.createdAt),
+}));
 
 // Founding-member homepage waitlist (replaces the old stats trio CTA).
 // Soft-delete only (deleted_at) per project rules. Email is normalised

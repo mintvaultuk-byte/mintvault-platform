@@ -140,6 +140,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   const [saving, setSaving]   = useState(false);
   const [approving, setApproving] = useState(false);
+
+  // Wall-clock timestamp when this certificate's grading panel mounted.
+  // Sent on approve as `grading_time_seconds` so the dashboard can show a
+  // real average instead of "—". Server caps at 1800s (30 min) — anything
+  // longer is almost certainly a coffee break, not real grading effort.
+  // Reset on certId change so a navigate-to-next-cert resets the clock.
+  const gradingStartedAtRef = useRef<number>(Date.now());
+  useEffect(() => {
+    gradingStartedAtRef.current = Date.now();
+  }, [certId]);
   const [generatingDescription, setGeneratingDescription] = useState(false);
   // v413 auto-save: tracks the background save status. "saving" while a debounced
   // PUT is in flight; "saved" after a successful save (cleared after a few seconds);
@@ -672,11 +682,12 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
       }
+      const elapsedSeconds = Math.round((Date.now() - gradingStartedAtRef.current) / 1000);
       const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Approve failed");
