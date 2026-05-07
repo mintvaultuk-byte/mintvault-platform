@@ -208,6 +208,17 @@
     --v2-ink-mute: #6B6454;
     text-shadow: none;
   }
+  /* Tailwind-class light backgrounds (bg-white, bg-[#FAFAF8],
+     bg-[#FFF9E6], bg-[#FAF7F1] etc.) — strip the cascade text-shadow
+     for any descendant text. Mirrors the [style*="--v2-paper"] reset
+     above for elements that paint their backdrop via Tailwind classes
+     instead of inline CSS vars (grading pages, eligible-cards). */
+  .vault-page [class*="bg-white"],
+  .vault-page [class*="bg-white"] *,
+  .vault-page [class*="bg-[#F" i],
+  .vault-page [class*="bg-[#F" i] * {
+    text-shadow: none !important;
+  }
   /* Utility classes for elements that don't use the ink CSS vars
      (e.g. text with hardcoded inline color) but still need on-vault
      legibility — add manually where needed. */
