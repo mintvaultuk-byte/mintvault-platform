@@ -220,6 +220,13 @@
   .vault-page [class*="bg-[#F" i] * {
     text-shadow: none !important;
   }
+  /* Explicit opt-out for any element where the bg-class substring
+     selector above doesn't apply (inline style="background: …"
+     or backgrounds outside the bg-[#F…] family). */
+  .no-text-shadow,
+  .no-text-shadow * {
+    text-shadow: none !important;
+  }
   /* Utility classes for elements that don't use the ink CSS vars
      (e.g. text with hardcoded inline color) but still need on-vault
      legibility — add manually where needed. */

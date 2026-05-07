@@ -63,7 +63,7 @@ export default function EligibleCardsPage() {
         {/* What we don't grade */}
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-6">What We Don't Grade</p>
-          <div className="rounded-2xl overflow-hidden border border-[#E8E4DC]">
+          <div className="rounded-2xl overflow-hidden border border-[#E8E4DC] no-text-shadow">
             {INELIGIBLE.map((item, i) => (
               <div
                 key={item}
@@ -78,7 +78,7 @@ export default function EligibleCardsPage() {
         </section>
 
         {/* Conditions accepted */}
-        <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/20">
+        <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/20 no-text-shadow">
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-3">Card Conditions Accepted</p>
           <p className="text-[#1a1a1a] text-base leading-relaxed">
             We grade cards in any condition from grade 1 to grade 10 Black Label. Even heavily played cards can be graded for population reports and authentication purposes.
