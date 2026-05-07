@@ -15,7 +15,7 @@ import crypto from "crypto";
 import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, inArray } from "drizzle-orm";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendTransferV2OwnerInvitedByBuyer, sendTransferV2BuyerInitOwnerConfirmed, sendTransferV2BuyerInitOwnerRejected, sendCertificatePdf, sendMagicLink, sendPinResetLink, sendStolenVerificationEmail } from "./email";
 import { getOwnerChain } from "./ownership-service";
 import { generateCertificateDocument } from "./certificate-document";
@@ -7828,12 +7828,13 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/grading-queue", requireAdmin, async (_req, res) => {
     try {
       const rows = await db.execute(sql`
-        SELECT id, cert_id, card_name, set_name, card_game, created_at,
+        SELECT id, certificate_number AS cert_id, card_name, set_name, card_game,
+               issued_at AS created_at,
                grade_approved_at,
                (front_image_path IS NOT NULL OR grading_front_original IS NOT NULL) AS has_images
         FROM certificates
         WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL
-        ORDER BY created_at ASC
+        ORDER BY issued_at ASC
         LIMIT 100
       `);
       const queue = (rows.rows || []).map((r: any) => ({
@@ -7860,10 +7861,10 @@ Defects (admin-confirmed): ${defectLines}`;
     // Default: first ungraded
     try {
       const rows = await db.execute(sql`
-        SELECT cert_id FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1
+        SELECT certificate_number FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY issued_at ASC LIMIT 1
       `);
       const first = rows.rows?.[0] as any;
-      res.json({ certId: first ? normalizeCertId(first.cert_id) : null });
+      res.json({ certId: first ? normalizeCertId(first.certificate_number) : null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -9360,23 +9361,29 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/ai-feature-flags", requireAdmin, async (_req, res) => {
     try {
       const { getAllAiFlags, AI_FLAG_NAMES } = await import("./config/feature-flags");
+      const { featureOverrides } = await import("@shared/schema");
       const flags = await getAllAiFlags();
 
       // Pull last-toggled metadata per flag from feature_overrides so the
       // dashboard can show "set by X at Y, reason Z" alongside each row.
-      const meta = await db.execute(sql`
-        SELECT name, updated_at, updated_by, reason FROM feature_overrides
-        WHERE name = ANY(${AI_FLAG_NAMES as unknown as string[]})
-      `);
+      // Use Drizzle's inArray() — pg's wire protocol won't accept a raw JS
+      // array bound to ANY(...) without a column-type cast, and inArray
+      // emits standard `IN (?, ?, ...)` which always works.
+      const meta = await db.select({
+        name: featureOverrides.name,
+        updatedAt: featureOverrides.updatedAt,
+        updatedBy: featureOverrides.updatedBy,
+        reason: featureOverrides.reason,
+      }).from(featureOverrides).where(inArray(featureOverrides.name, AI_FLAG_NAMES as unknown as string[]));
       const metaByName = new Map<string, any>();
-      for (const r of meta.rows as any[]) metaByName.set(r.name, r);
+      for (const r of meta) metaByName.set(r.name, r);
 
       res.json({
         flags: flags.map(f => ({
           ...f,
-          updatedAt: metaByName.get(f.name)?.updated_at || null,
-          updatedBy: metaByName.get(f.name)?.updated_by || null,
-          reason:    metaByName.get(f.name)?.reason     || null,
+          updatedAt: metaByName.get(f.name)?.updatedAt || null,
+          updatedBy: metaByName.get(f.name)?.updatedBy || null,
+          reason:    metaByName.get(f.name)?.reason    || null,
         })),
       });
     } catch (err: any) {
@@ -9489,7 +9496,7 @@ Defects (admin-confirmed): ${defectLines}`;
             ) AS predicted,
             c.grade::numeric AS actual
           FROM ai_predictions p
-          JOIN certificates c ON c.cert_id = p.cert_id
+          JOIN certificates c ON c.certificate_number = p.cert_id
           WHERE p.call_type IN ('full_grade', 'quick_grade')
             AND c.grade_approved_at IS NOT NULL
             AND c.deleted_at IS NULL
