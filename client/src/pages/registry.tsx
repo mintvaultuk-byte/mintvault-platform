@@ -197,15 +197,15 @@ export default function RegistryV2() {
                         </span>
                       </div>
                     )}
-                    {cert.grade !== null && (
-                      <div
-                        className="absolute bottom-0 left-0 right-0 px-3 py-2 font-mono-v2 text-xs font-bold uppercase tracking-widest text-center"
-                        style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-gold)" }}
-                      >
-                        {cert.label_type === "Black Label" ? "Black Label" : `Grade ${cert.grade}`}
-                      </div>
-                    )}
                   </div>
+                  {cert.grade !== null && (
+                    <div
+                      className="px-3 py-2 font-mono-v2 text-xs font-bold uppercase tracking-widest text-center"
+                      style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-gold)" }}
+                    >
+                      {cert.label_type === "Black Label" ? "Black Label" : `Grade ${cert.grade}`}
+                    </div>
+                  )}
                   <div className="p-4">
                     <p
                       className="font-body text-sm font-semibold group-hover:underline"
