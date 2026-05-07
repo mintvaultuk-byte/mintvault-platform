@@ -106,7 +106,15 @@ export default function VaultClubV2() {
       <HeaderV2 />
 
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
-      <section className="relative">
+      <section
+        className="relative"
+        style={{
+          backgroundImage:
+            "linear-gradient(180deg, rgba(20,15,10,0.55) 0%, rgba(20,15,10,0.35) 40%, rgba(20,15,10,0.75) 100%), url('/images/vault-club-lounge.webp')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] mb-6"

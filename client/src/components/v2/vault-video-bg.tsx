@@ -15,7 +15,8 @@ export default function VaultVideoBg() {
         left: 0,
         width: "100vw",
         height: "100vh",
-        backgroundImage: "url('/images/hero-vault.webp')",
+        backgroundImage:
+          "linear-gradient(180deg, rgba(8,6,4,0.75) 0%, rgba(8,6,4,0.65) 40%, rgba(8,6,4,0.85) 100%), url('/images/hero-vault.webp')",
         backgroundSize: "cover",
         backgroundPosition: "center",
         backgroundRepeat: "no-repeat",

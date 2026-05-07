@@ -225,10 +225,10 @@ export default function HomeV2() {
               Est. Kent &middot; MintVault UK
             </p>
             <h1
-              className="font-display italic font-medium leading-[0.95] mb-6"
+              className="font-display font-medium leading-[0.95] mb-6"
               style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
             >
-              The standard for<br />graded collectibles.
+              The standard for<br /><span className="whitespace-nowrap">graded collectibles.</span>
             </h1>
             <p
               className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"

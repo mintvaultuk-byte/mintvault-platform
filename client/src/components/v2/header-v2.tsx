@@ -304,11 +304,11 @@ export default function HeaderV2() {
             )}
 
             <Link
-              href="/submit"
+              href="/pricing"
               className="hidden md:inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2 rounded-full transition-colors"
               style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
-              Submit a card
+              Pricing
               <ArrowRight size={14} />
             </Link>
 
@@ -389,12 +389,12 @@ export default function HeaderV2() {
 
           <div className="px-6 py-6 border-t flex flex-col gap-3" style={{ borderColor: "var(--v2-line)" }}>
             <Link
-              href="/submit"
+              href="/pricing"
               onClick={() => setMobileOpen(false)}
               className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full"
               style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
             >
-              Submit a card <ArrowRight size={14} />
+              Pricing <ArrowRight size={14} />
             </Link>
             {!isAuthed && (
               <Link
