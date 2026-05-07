@@ -146,6 +146,7 @@
     @apply font-sans antialiased bg-background text-foreground;
     background: #FFFFFF;
     min-height: 100vh;
+    font-weight: 500;
   }
 
   h1, h2, h3 {
