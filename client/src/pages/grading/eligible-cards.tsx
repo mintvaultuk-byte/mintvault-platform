@@ -36,7 +36,7 @@ export default function EligibleCardsPage() {
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] mb-4 leading-tight tracking-tight">
             Eligible Cards
           </h1>
-          <p className="text-lg text-[#666666]">What we grade</p>
+          <p className="text-lg text-[#1a1a1a]">What we grade</p>
         </div>
       </section>
 
@@ -53,7 +53,7 @@ export default function EligibleCardsPage() {
                 </div>
                 <div>
                   <p className="font-bold text-[#1A1A1A] mb-1">{game}</p>
-                  <p className="text-[#666666] text-sm leading-relaxed">{desc}</p>
+                  <p className="text-[#1a1a1a] text-sm leading-relaxed">{desc}</p>
                 </div>
               </div>
             ))}
@@ -71,7 +71,7 @@ export default function EligibleCardsPage() {
                 style={{ background: i % 2 === 0 ? "#fff" : "#FAFAF8", borderBottom: i < INELIGIBLE.length - 1 ? "1px solid #E8E4DC" : "none" }}
               >
                 <X size={14} className="text-[#CC4444] flex-shrink-0" />
-                <span className="text-sm text-[#555555]">{item}</span>
+                <span className="text-sm text-[#1a1a1a]">{item}</span>
               </div>
             ))}
           </div>
@@ -80,7 +80,7 @@ export default function EligibleCardsPage() {
         {/* Conditions accepted */}
         <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/20">
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-3">Card Conditions Accepted</p>
-          <p className="text-[#555555] text-base leading-relaxed">
+          <p className="text-[#1a1a1a] text-base leading-relaxed">
             We grade cards in any condition from grade 1 to grade 10 Black Label. Even heavily played cards can be graded for population reports and authentication purposes.
           </p>
         </section>
