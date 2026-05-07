@@ -42,6 +42,16 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 
+# Source files for one-off ops scripts (e.g. scripts/backfill-cert-metadata.ts).
+# The runtime app uses dist/index.cjs only — these are never imported in the
+# request path. They exist so admins can `fly ssh` and run `npx tsx scripts/*`
+# against prod, reusing the in-app helpers (server/ai-grading-service, etc.)
+# via their relative imports.
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/server ./server
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+
 ENV NODE_ENV=production
 ENV PORT=5000
 
