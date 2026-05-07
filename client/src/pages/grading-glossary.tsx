@@ -107,7 +107,7 @@ export default function GradingGlossaryPage() {
                 />
                 {item.term}
               </h2>
-              <p className="text-[#666666] text-xs leading-relaxed">{item.definition}</p>
+              <p className="text-[#1a1a1a] text-xs leading-relaxed">{item.definition}</p>
             </div>
           ))}
         </div>
@@ -132,7 +132,7 @@ export default function GradingGlossaryPage() {
       {/* CTA */}
       <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to submit your cards?</h3>
-        <p className="text-[#666666] text-sm mb-4">
+        <p className="text-[#1a1a1a] text-sm mb-4">
           Now you know the terminology — let's grade your collection.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">

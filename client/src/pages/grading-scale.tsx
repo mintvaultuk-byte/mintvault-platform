@@ -92,7 +92,7 @@ export default function GradingScalePage() {
                       </div>
                     )}
                   </div>
-                  <p className="text-[#666666] text-xs leading-relaxed">{row.desc}</p>
+                  <p className="text-[#1a1a1a] text-xs leading-relaxed">{row.desc}</p>
                 </div>
               </div>
             );
@@ -138,7 +138,7 @@ export default function GradingScalePage() {
       <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
         <CheckCircle size={24} className="text-[#D4AF37] mx-auto mb-3" />
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to grade your cards?</h3>
-        <p className="text-[#666666] text-sm mb-4">Submit online and receive expert grading with a verifiable certificate.</p>
+        <p className="text-[#1a1a1a] text-sm mb-4">Submit online and receive expert grading with a verifiable certificate.</p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <Link
             href="/submit"

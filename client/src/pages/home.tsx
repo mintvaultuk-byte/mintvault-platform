@@ -228,7 +228,7 @@ export default function HomeV2() {
               className="font-display font-medium leading-[0.95] mb-6"
               style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
             >
-              The standard for<br /><span className="whitespace-nowrap">graded collectibles.</span>
+              The standard for<br />graded collectibles.
             </h1>
             <p
               className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"
