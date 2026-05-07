@@ -1179,12 +1179,13 @@ export async function registerRoutes(
   app.get("/api/featured-certificates", async (_req, res) => {
     try {
       const result = await db.execute(sql`
-        SELECT cert_id, card_name, set_name, grade_overall, grade_type, card_game, front_image_path
+        SELECT certificate_number AS cert_id, card_name, set_name,
+               grade AS grade_overall, grade_type, card_game, front_image_path
         FROM certificates
         WHERE status = 'active'
           AND deleted_at IS NULL
           AND card_name IS NOT NULL
-          AND grade_overall IS NOT NULL
+          AND grade IS NOT NULL
           AND front_image_path IS NOT NULL
         ORDER BY issued_at DESC NULLS LAST
         LIMIT 5
