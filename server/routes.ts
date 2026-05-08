@@ -9811,6 +9811,65 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // GET /preview — light metadata used by Manual Mode UI to confirm cert
   // exists and which side(s) are populated before uploading.
+  // GET /api/admin/next-cert-id — read-only next-cert allocation.
+  // Used by the scanner-app to display the upcoming MV number before a scan
+  // arrives. Reservation is owned by the scan-ingest endpoint; this is just
+  // a hint, hence the comment "may differ from final allocation if multiple
+  // scans race". Skips soft-deleted rows so a deleted MV60 doesn't become
+  // the predicted next when the real next is MV62.
+  app.get("/api/admin/next-cert-id", requireScannerOrAdmin, async (_req, res) => {
+    try {
+      const r = await db.execute(sql`
+        SELECT COALESCE(
+          (SELECT MAX(NULLIF(regexp_replace(certificate_number, '\D', '', 'g'), '')::int)
+             FROM certificates WHERE deleted_at IS NULL),
+          0
+        ) + 1 AS next_numeric
+      `);
+      const n = parseInt(String((r.rows[0] as any)?.next_numeric ?? 1), 10);
+      res.json({ next: `MV${n}`, next_numeric: n });
+    } catch (err: any) {
+      console.error("[next-cert-id] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/orphan-certs — certs missing front and/or back image.
+  // Used by the scanner-app's "Fix orphan…" picker. Limited to 50 newest.
+  app.get("/api/admin/orphan-certs", requireScannerOrAdmin, async (_req, res) => {
+    try {
+      const r = await db.execute(sql`
+        SELECT
+          certificate_number AS cert_id,
+          card_name,
+          set_name,
+          (grading_front_original IS NULL) AS missing_front,
+          (grading_back_original  IS NULL) AS missing_back,
+          issued_at,
+          deleted_at
+        FROM certificates
+        WHERE deleted_at IS NULL
+          AND (grading_front_original IS NULL OR grading_back_original IS NULL)
+        ORDER BY issued_at DESC
+        LIMIT 50
+      `);
+      res.json({
+        orphans: r.rows.map((row: any) => ({
+          certId:        row.cert_id,
+          cardName:      row.card_name ?? null,
+          set:           row.set_name ?? null,
+          missingFront:  !!row.missing_front,
+          missingBack:   !!row.missing_back,
+          createdAt:     row.issued_at,
+          deleted:       !!row.deleted_at,
+        })),
+      });
+    } catch (err: any) {
+      console.error("[orphan-certs] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/certs/:certId/preview", requireScannerOrAdmin, async (req, res) => {
     try {
       const certIdRaw = String(req.params.certId);

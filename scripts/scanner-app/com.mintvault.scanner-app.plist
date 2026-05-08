@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MintVault Scanner — single-process LaunchAgent.
+  install.sh substitutes __WRAPPER_PATH__ and __HOME__ before copying this
+  file into ~/Library/LaunchAgents/. Do not load this source directly.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mintvault.scanner-app</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__WRAPPER_PATH__</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/mintvault-scans/scanner-app.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/mintvault-scans/scanner-app.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

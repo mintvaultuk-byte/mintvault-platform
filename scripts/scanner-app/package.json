@@ -1,0 +1,19 @@
+{
+  "name": "mintvault-scanner-app",
+  "version": "1.0.0",
+  "description": "MintVault scanner menu-bar app — single-process replacement for watcher.mjs + guide-window + swiftbar.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.1",
+    "form-data": "^4.0.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

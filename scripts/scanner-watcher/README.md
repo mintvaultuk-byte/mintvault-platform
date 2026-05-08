@@ -1,4 +1,8 @@
-# MintVault Scanner Watcher
+# MintVault Scanner Watcher — DEPRECATED
+
+> ⚠️ **This three-process setup (watcher.mjs + guide-window + SwiftBar plugin) is replaced by the single-process menu-bar app at `../scanner-app/`.** New installs should use that. This folder is kept on `main` only so the rollback step in `../scanner-app/CUTOVER.md` works. See that file for the cutover plan.
+
+---
 
 Daemon that watches a local folder for `.tif` scans from SilverFast SE, pairs
 them as front + back, and uploads each pair to MintVault's `/api/admin/scan-ingest`

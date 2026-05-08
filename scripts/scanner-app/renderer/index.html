@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MintVault Scanner</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hdr" id="hdr">
+    <span class="hdr-title">MintVault Scanner</span>
+    <div class="hdr-spacer"></div>
+    <button class="hdr-btn" id="restartBtn" title="Restart watcher">↻</button>
+    <button class="hdr-btn" id="hideBtn" title="Hide">×</button>
+  </header>
+
+  <section class="row" id="modeRow">
+    <span class="row-label">Mode</span>
+    <div class="seg">
+      <button class="seg-btn" data-mode="AUTO">AUTO</button>
+      <button class="seg-btn" data-mode="MANUAL">MANUAL</button>
+    </div>
+  </section>
+
+  <section class="row stat" id="statRow">
+    <div class="stat-line"><span class="stat-key">Next cert</span><span class="stat-val" id="nextCert">—</span></div>
+    <div class="stat-line"><span class="stat-key">Last scan</span><span class="stat-val" id="lastScan">—</span></div>
+    <div class="stat-line"><span class="stat-key">Session</span><span class="stat-val" id="session">0 scans</span></div>
+  </section>
+
+  <section class="row" id="statusRow">
+    <div class="status-text"><span class="dot" id="dot"></span><span id="statusText">Idle — waiting for scan</span></div>
+    <div class="status-sub" id="statusSub"></div>
+  </section>
+
+  <section class="row" id="recentRow">
+    <div class="row-header">RECENT</div>
+    <ul class="recent" id="recentList"></ul>
+  </section>
+
+  <section class="row actions">
+    <button class="btn" id="orphansBtn">Fix orphan…</button>
+    <button class="btn" id="forwardBtn">Forward to cert…</button>
+    <button class="btn ghost" id="logsBtn">Show logs</button>
+  </section>
+
+  <!-- Manual mode prompt — shown when a scan arrives in MANUAL mode -->
+  <div class="modal" id="manualModal">
+    <div class="modal-card">
+      <div class="modal-title">New scan detected</div>
+      <div class="modal-meta" id="manualMeta">—</div>
+      <label class="field">
+        <span>Attach to cert</span>
+        <input type="text" id="manualCert" placeholder="MV___" autocapitalize="characters" autocomplete="off" />
+      </label>
+      <div class="field-row">
+        <span>Side</span>
+        <label class="radio"><input type="radio" name="manualSide" value="front" checked /> Front</label>
+        <label class="radio"><input type="radio" name="manualSide" value="back" /> Back</label>
+      </div>
+      <label class="checkbox"><input type="checkbox" id="manualReplace" /> Replace existing image</label>
+      <div class="modal-actions">
+        <button class="btn ghost" id="manualCancel">Cancel — keep file</button>
+        <button class="btn primary" id="manualSubmit">Attach</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orphan picker -->
+  <div class="modal" id="orphanModal">
+    <div class="modal-card wide">
+      <div class="modal-title">Orphan certificates</div>
+      <div class="orphan-list" id="orphanList">Loading…</div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="orphanClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Forward-to-cert -->
+  <div class="modal" id="forwardModal">
+    <div class="modal-card">
+      <div class="modal-title">Override next cert</div>
+      <div class="modal-meta" id="forwardServerNext">Server says next is: —</div>
+      <label class="field">
+        <span>Override to</span>
+        <input type="text" id="forwardCert" placeholder="MV___" autocapitalize="characters" autocomplete="off" />
+      </label>
+      <p class="hint">Affects only the displayed "Next cert". Server still allocates via /api/admin/next-cert-id when you scan.</p>
+      <div class="modal-actions">
+        <button class="btn ghost" id="forwardCancel">Cancel</button>
+        <button class="btn primary" id="forwardApply">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Soft-delete confirm -->
+  <div class="modal" id="deleteModal">
+    <div class="modal-card">
+      <div class="modal-title">Soft-delete <span id="deleteCertId">—</span></div>
+      <label class="field">
+        <span>Reason (≥10 chars)</span>
+        <input type="text" id="deleteReason" placeholder="why this cert is being removed" />
+      </label>
+      <div class="modal-actions">
+        <button class="btn ghost" id="deleteCancel">Cancel</button>
+        <button class="btn danger" id="deleteConfirm">Soft-delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
