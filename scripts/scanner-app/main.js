@@ -341,6 +341,19 @@ function setupIpc() {
     shell.openPath(path.join(os.homedir(), "mintvault-scans", "scanner-app.log"));
     return { ok: true };
   });
+
+  // Open the public logbook page for the most-recently-uploaded cert.
+  // Reuses the existing lastUploadedCert state field (already set on every
+  // successful upload — auto + manual + one-shot all write to it). The
+  // /cert/:id route is public (no auth), shows images + grade.
+  ipcMain.handle("open-last-cert", () => {
+    const certId = stateMod.get().lastUploadedCert;
+    if (!certId) return { ok: false, error: "no cert uploaded yet this session" };
+    const base = server.API_BASE.replace(/\/$/, "");
+    const url = `${base}/cert/${encodeURIComponent(certId)}`;
+    shell.openExternal(url);
+    return { ok: true, url };
+  });
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────

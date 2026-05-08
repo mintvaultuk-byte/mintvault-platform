@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("scanner", {
   hidePopover:       ()            => ipcRenderer.invoke("hide-popover"),
   openInbox:         ()            => ipcRenderer.invoke("open-inbox"),
   openLogs:          ()            => ipcRenderer.invoke("open-logs"),
+  openLastCert:      ()            => ipcRenderer.invoke("open-last-cert"),
 
   // ── QoL toggles (added in scanner toggles pack) ────────────────────────
   setPaused:         (paused)      => ipcRenderer.invoke("set-paused", paused),

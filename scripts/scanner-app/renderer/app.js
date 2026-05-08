@@ -26,9 +26,11 @@ const els = {
   recentList: document.getElementById("recentList"),
 
   // Actions
-  orphansBtn: document.getElementById("orphansBtn"),
-  forwardBtn: document.getElementById("forwardBtn"),
-  logsBtn:    document.getElementById("logsBtn"),
+  orphansBtn:  document.getElementById("orphansBtn"),
+  forwardBtn:  document.getElementById("forwardBtn"),
+  inboxBtn:    document.getElementById("inboxBtn"),
+  lastCertBtn: document.getElementById("lastCertBtn"),
+  logsBtn:     document.getElementById("logsBtn"),
 
   // Manual scan modal
   manualModal:  document.getElementById("manualModal"),
@@ -142,6 +144,17 @@ function renderState(s) {
 
   // Server-next display in forward modal stays fresh while it's open
   els.forwardServerNext.textContent = `Server says next is: ${s.predictedNextCert || "—"}`;
+
+  // Quick-action button: only enabled once a cert has been uploaded.
+  // Tooltip surfaces the target cert so the operator knows what they'll open.
+  if (els.lastCertBtn) {
+    const lastCert = s.lastUploadedCert;
+    els.lastCertBtn.disabled = !lastCert;
+    els.lastCertBtn.title = lastCert
+      ? `Open ${lastCert} logbook page in browser`
+      : "No cert uploaded yet this session";
+    els.lastCertBtn.textContent = lastCert ? `Open ${lastCert}` : "Open last cert";
+  }
 }
 
 // ── Header buttons ───────────────────────────────────────────────────────
@@ -315,9 +328,14 @@ els.forwardApply.addEventListener("click", async () => {
   closeModal(els.forwardModal);
 });
 
-// ── Logs ─────────────────────────────────────────────────────────────────
+// ── Logs / quick actions ─────────────────────────────────────────────────
 
 els.logsBtn.addEventListener("click", () => window.scanner.openLogs());
+els.inboxBtn.addEventListener("click", () => window.scanner.openInbox());
+els.lastCertBtn.addEventListener("click", async () => {
+  if (els.lastCertBtn.disabled) return;
+  await window.scanner.openLastCert();
+});
 
 // ── Pause toggle ─────────────────────────────────────────────────────────
 
