@@ -5029,6 +5029,11 @@ export async function registerRoutes(
       if (!cert) {
         return res.status(404).json({ error: "Certificate not found." });
       }
+      if ((cert as any).stolenStatus === "reported_stolen") {
+        return res.status(403).json({
+          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+        });
+      }
       if (cert.ownershipStatus === "transfer_pending") {
         return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
       }
@@ -5140,6 +5145,9 @@ export async function registerRoutes(
 
       const result = await storage.confirmIncomingKeeperV2(token, referenceNumber);
       if (!result.success) {
+        if (result.stolen) {
+          return res.status(403).json({ error: result.error });
+        }
         return res.status(400).json({ error: result.error });
       }
 
@@ -5336,6 +5344,12 @@ export async function registerRoutes(
       const cert = await storage.getCertificateByCertId(normalizedCertId);
       if (!cert) {
         return res.status(404).json({ error: "Certificate not found." });
+      }
+
+      if ((cert as any).stolenStatus === "reported_stolen") {
+        return res.status(403).json({
+          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+        });
       }
 
       // Path discrimination — buyer-init only handles already-claimed certs.

@@ -127,8 +127,8 @@ export interface IStorage {
     certId: string; fromEmail: string; toEmail: string; newOwnerName?: string;
     outgoingKeeperUserId: string; referenceNumber: string;
   }): Promise<string>;
-  confirmOutgoingKeeperV2(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
-  confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  confirmOutgoingKeeperV2(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string; stolen?: boolean }>;
+  confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string; stolen?: boolean }>;
   getTransferV2(id: number): Promise<TransferVerification | undefined>;
   getTransferV2ByCertId(certId: string): Promise<TransferVerification | undefined>;
   listTransfersV2(filters?: { status?: string; certId?: string }): Promise<TransferVerification[]>;
@@ -143,7 +143,7 @@ export interface IStorage {
   createTransferV2BuyerInit(data: {
     certId: string; claimantEmail: string; claimantName?: string; currentOwnerEmail: string; currentOwnerUserId: string;
   }): Promise<{ ownerToken: string; transferId: number }>;
-  confirmBuyerInitTransfer(token: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string }>;
+  confirmBuyerInitTransfer(token: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string; stolen?: boolean }>;
   disputeBuyerInitTransfer(token: string, reason?: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; error?: string }>;
 
   // ── Customer dashboard queries ──────────────────────────────────────────────
@@ -1731,32 +1731,34 @@ export class DatabaseStorage implements IStorage {
     const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
     const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
-    await db.insert(transferVerifications).values({
-      certId: data.certId,
-      fromEmail: data.fromEmail.toLowerCase().trim(),
-      toEmail: data.toEmail.toLowerCase().trim(),
-      ownerTokenHash,
-      ownerExpiresAt,
-      newOwnerName: data.newOwnerName?.trim() || null,
-      flowVersion: "v2",
-      status: "pending_owner",
-      outgoingKeeperUserId: data.outgoingKeeperUserId,
-      referenceNumberProvided: null, // incoming keeper provides this at step 2
-    });
+    await db.transaction(async (tx) => {
+      await tx.insert(transferVerifications).values({
+        certId: data.certId,
+        fromEmail: data.fromEmail.toLowerCase().trim(),
+        toEmail: data.toEmail.toLowerCase().trim(),
+        ownerTokenHash,
+        ownerExpiresAt,
+        newOwnerName: data.newOwnerName?.trim() || null,
+        flowVersion: "v2",
+        status: "pending_owner",
+        outgoingKeeperUserId: data.outgoingKeeperUserId,
+        referenceNumberProvided: null, // incoming keeper provides this at step 2
+      });
 
-    // Mark cert as transfer_pending
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'transfer_pending', updated_at = NOW()
-      WHERE certificate_number = ${data.certId}
-    `);
+      // Mark cert as transfer_pending
+      await tx.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'transfer_pending', updated_at = NOW()
+        WHERE certificate_number = ${data.certId}
+      `);
+    });
 
     return ownerToken;
   }
 
   async confirmOutgoingKeeperV2(token: string): Promise<{
     success: boolean; certId?: string; fromEmail?: string; toEmail?: string;
-    newOwnerToken?: string; error?: string;
+    newOwnerToken?: string; error?: string; stolen?: boolean;
   }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
@@ -1772,6 +1774,17 @@ export class DatabaseStorage implements IStorage {
     if (new Date() > verification.ownerExpiresAt) return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
     if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+
+    // Stolen-cert block — refuse to advance the transfer if the cert was
+    // flagged after initiate. Check before any state mutation.
+    const certForCheck = await this.getCertificateByCertId(verification.certId);
+    if (certForCheck && (certForCheck as any).stolenStatus === "reported_stolen") {
+      return {
+        success: false,
+        stolen: true,
+        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+      };
+    }
 
     // Generate token for incoming keeper — 14-day deadline
     const newOwnerToken = crypto.randomBytes(32).toString("hex");
@@ -1798,7 +1811,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{
-    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string;
+    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string; stolen?: boolean;
   }> {
     const newOwnerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
@@ -1820,6 +1833,14 @@ export class DatabaseStorage implements IStorage {
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
 
+    if ((cert as any).stolenStatus === "reported_stolen") {
+      return {
+        success: false,
+        stolen: true,
+        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+      };
+    }
+
     const certRefNumber = (cert as any).referenceNumber as string | null;
     if (!certRefNumber) {
       return { success: false, error: "This certificate does not have a Document Reference Number. Please contact support." };
@@ -1828,18 +1849,21 @@ export class DatabaseStorage implements IStorage {
     // Normalise: strip dashes and compare uppercase
     const normalise = (s: string) => s.replace(/-/g, "").toUpperCase().trim();
     if (normalise(referenceNumberProvided) !== normalise(certRefNumber)) {
-      // Record the failed attempt (store what they provided for admin review)
-      await db.update(transferVerifications)
-        .set({ referenceNumberProvided: referenceNumberProvided.trim() })
-        .where(eq(transferVerifications.id, verification.id));
+      // Record the failed attempt + audit log atomically — admin review must
+      // never see one without the other.
+      await db.transaction(async (tx) => {
+        await tx.update(transferVerifications)
+          .set({ referenceNumberProvided: referenceNumberProvided.trim() })
+          .where(eq(transferVerifications.id, verification.id));
 
-      // Audit the failed attempt (do not log the actual ref number)
-      await db.insert(auditLog).values({
-        entityType: "transfer",
-        entityId: verification.certId,
-        action: "transfer_v2.ref_number_mismatch",
-        adminUser: null,
-        details: { transferId: verification.id, toEmail: verification.toEmail },
+        // Audit the failed attempt (do not log the actual ref number)
+        await tx.insert(auditLog).values({
+          entityType: "transfer",
+          entityId: verification.certId,
+          action: "transfer_v2.ref_number_mismatch",
+          adminUser: null,
+          details: { transferId: verification.id, toEmail: verification.toEmail },
+        });
       });
 
       return { success: false, error: "The Document Reference Number you entered does not match. Please check your Logbook and try again." };
@@ -1848,7 +1872,9 @@ export class DatabaseStorage implements IStorage {
     // Reference number correct — start dispute window (14 days from now)
     const disputeDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    // Create/find incoming keeper user
+    // Create/find incoming keeper user. Kept outside the transaction so a
+    // newly-created user persists even if the transfer update later rolls
+    // back — they can retry without an FK orphan.
     let incomingUser = await this.getUserByEmail(verification.toEmail);
     if (!incomingUser) {
       incomingUser = await this.createUser({ email: verification.toEmail });
@@ -1920,21 +1946,23 @@ export class DatabaseStorage implements IStorage {
       return { success: false, error: "The dispute window has closed." };
     }
 
-    await db.update(transferVerifications)
-      .set({
-        status: "disputed",
-        disputedAt: new Date(),
-        disputedBy,
-        disputeReason: reason.trim().slice(0, 2000),
-      })
-      .where(eq(transferVerifications.id, transferId));
+    await db.transaction(async (tx) => {
+      await tx.update(transferVerifications)
+        .set({
+          status: "disputed",
+          disputedAt: new Date(),
+          disputedBy,
+          disputeReason: reason.trim().slice(0, 2000),
+        })
+        .where(eq(transferVerifications.id, transferId));
 
-    // Reset cert to claimed (transfer no longer proceeding)
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'claimed', updated_at = NOW()
-      WHERE certificate_number = ${transfer.certId}
-    `);
+      // Reset cert to claimed (transfer no longer proceeding)
+      await tx.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'claimed', updated_at = NOW()
+        WHERE certificate_number = ${transfer.certId}
+      `);
+    });
 
     return { success: true };
   }
@@ -1953,20 +1981,22 @@ export class DatabaseStorage implements IStorage {
       return { success: false, error: "This transfer cannot be cancelled." };
     }
 
-    await db.update(transferVerifications)
-      .set({
-        status: "cancelled",
-        cancelledAt: new Date(),
-        cancellationReason: reason.trim().slice(0, 2000),
-      })
-      .where(eq(transferVerifications.id, transferId));
+    await db.transaction(async (tx) => {
+      await tx.update(transferVerifications)
+        .set({
+          status: "cancelled",
+          cancelledAt: new Date(),
+          cancellationReason: reason.trim().slice(0, 2000),
+        })
+        .where(eq(transferVerifications.id, transferId));
 
-    // Reset cert to claimed
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'claimed', updated_at = NOW()
-      WHERE certificate_number = ${transfer.certId}
-    `);
+      // Reset cert to claimed
+      await tx.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'claimed', updated_at = NOW()
+        WHERE certificate_number = ${transfer.certId}
+      `);
+    });
 
     return { success: true };
   }
@@ -2025,56 +2055,64 @@ export class DatabaseStorage implements IStorage {
       return { success: false, error: "Failed to generate unique reference number after 3 attempts — please try again." };
     }
 
-    // Transfer ownership on the certificate (rotate DRN + bump logbook version)
-    await db.execute(sql`
-      UPDATE certificates
-      SET current_owner_user_id = ${incomingUser.id},
-          ownership_status = 'claimed',
-          ownership_token = ${ownershipToken},
-          ownership_token_generated_at = NOW(),
-          owner_name = ${transfer.newOwnerName ?? null},
-          owner_email = ${transfer.toEmail},
-          reference_number = ${newReferenceNumber},
-          logbook_version = logbook_version + 1,
-          logbook_last_issued_at = NOW(),
-          updated_at = NOW()
-      WHERE certificate_number = ${transfer.certId}
-    `);
+    // Atomic finalise — cert UPDATE (DRN rotation + version bump), audit_log
+    // INSERT, ownership_history INSERT, and transfer UPDATE all succeed
+    // together or none. Without the wrapping transaction a partial failure
+    // could leave DRN rotated without an ownership_history row, or a transfer
+    // marked completed without the cert ever flipping owner. Recovery from
+    // partial state would require a manual repair script.
+    await db.transaction(async (tx) => {
+      // Transfer ownership on the certificate (rotate DRN + bump logbook version)
+      await tx.execute(sql`
+        UPDATE certificates
+        SET current_owner_user_id = ${incomingUser.id},
+            ownership_status = 'claimed',
+            ownership_token = ${ownershipToken},
+            ownership_token_generated_at = NOW(),
+            owner_name = ${transfer.newOwnerName ?? null},
+            owner_email = ${transfer.toEmail},
+            reference_number = ${newReferenceNumber},
+            logbook_version = logbook_version + 1,
+            logbook_last_issued_at = NOW(),
+            updated_at = NOW()
+        WHERE certificate_number = ${transfer.certId}
+      `);
 
-    // Audit log — DRN rotation event paired with transfer completion
-    await db.insert(auditLog).values({
-      entityType: "certificate",
-      entityId: transfer.certId,
-      action: "drn_rotated_on_transfer",
-      adminUser: null,
-      details: {
-        transferId,
-        previousDrn: oldReferenceNumber,
-        newDrn: newReferenceNumber,
-        logbookVersionBefore: currentLogbookVersion,
-        logbookVersionAfter: currentLogbookVersion + 1,
-      },
+      // Audit log — DRN rotation event paired with transfer completion
+      await tx.insert(auditLog).values({
+        entityType: "certificate",
+        entityId: transfer.certId,
+        action: "drn_rotated_on_transfer",
+        adminUser: null,
+        details: {
+          transferId,
+          previousDrn: oldReferenceNumber,
+          newDrn: newReferenceNumber,
+          logbookVersionBefore: currentLogbookVersion,
+          logbookVersionAfter: currentLogbookVersion + 1,
+        },
+      });
+
+      // Record in ownership history
+      await tx.insert(ownershipHistory).values({
+        certId: transfer.certId,
+        fromUserId: transfer.outgoingKeeperUserId || cert.currentOwnerUserId || null,
+        toUserId: incomingUser.id,
+        toEmail: transfer.toEmail,
+        eventType: "transfer_completed",
+        notes: `v2 transfer — ref number verified, dispute window passed. From ${transfer.fromEmail}`,
+      });
+
+      // Mark transfer as completed
+      await tx.update(transferVerifications)
+        .set({
+          status: "completed",
+          finalisedAt: new Date(),
+          usedAt: new Date(),
+          incomingKeeperUserId: incomingUser.id,
+        })
+        .where(eq(transferVerifications.id, transferId));
     });
-
-    // Record in ownership history
-    await db.insert(ownershipHistory).values({
-      certId: transfer.certId,
-      fromUserId: transfer.outgoingKeeperUserId || cert.currentOwnerUserId || null,
-      toUserId: incomingUser.id,
-      toEmail: transfer.toEmail,
-      eventType: "transfer_completed",
-      notes: `v2 transfer — ref number verified, dispute window passed. From ${transfer.fromEmail}`,
-    });
-
-    // Mark transfer as completed
-    await db.update(transferVerifications)
-      .set({
-        status: "completed",
-        finalisedAt: new Date(),
-        usedAt: new Date(),
-        incomingKeeperUserId: incomingUser.id,
-      })
-      .where(eq(transferVerifications.id, transferId));
 
     return {
       success: true,
@@ -2098,66 +2136,72 @@ export class DatabaseStorage implements IStorage {
   async expireStaleTransfersV2(): Promise<Array<{
     transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
   }>> {
-    // Expire pending_owner transfers where ownerExpiresAt has passed (24h seller-init)
-    const expiredOwner = await db.execute(sql`
-      UPDATE transfer_verifications
-      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Outgoing keeper did not confirm within 24 hours'
-      WHERE flow_version = 'v2'
-        AND transfer_status = 'pending_owner'
-        AND owner_expires_at < NOW()
-      RETURNING id, cert_id, from_email, to_email
-    `);
-
-    // Expire pending_incoming transfers where incoming_confirm_deadline has passed (14d seller-init)
-    const expiredIncoming = await db.execute(sql`
-      UPDATE transfer_verifications
-      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Incoming keeper did not confirm within 14 days'
-      WHERE flow_version = 'v2'
-        AND transfer_status = 'pending_incoming'
-        AND incoming_confirm_deadline < NOW()
-      RETURNING id, cert_id, from_email, to_email
-    `);
-
-    // v435 — Expire pending_owner_invited_by_buyer (buyer-init) where the
-    // owner's 14-day deadline has passed. SILENCE = REJECTION here. We do
-    // NOT auto-complete buyer-init transfers when the owner ignores the
-    // email — the owner must explicitly confirm to transfer.
-    const expiredBuyerInit = await db.execute(sql`
-      UPDATE transfer_verifications
-      SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Current keeper did not respond to buyer-initiated transfer within 14 days; original ownership preserved'
-      WHERE flow_version = 'v2'
-        AND transfer_status = 'pending_owner_invited_by_buyer'
-        AND owner_expires_at < NOW()
-      RETURNING id, cert_id, from_email, to_email
-    `);
-
+    // One sweep tick = one transaction. Three batched expiries + N cert
+    // resets all succeed together or none, so a crash mid-sweep can't leave
+    // a transfer marked expired with the cert still flagged transfer_pending.
     const collected: Array<{
       transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
     }> = [];
-    const map = (rows: any[], reason: string) => {
-      for (const r of rows) {
-        collected.push({
-          transferId: r.id,
-          certId: r.cert_id,
-          fromEmail: r.from_email,
-          toEmail: r.to_email,
-          reason,
-        });
-      }
-    };
-    map(expiredOwner.rows as any[], "Outgoing keeper did not confirm within 24 hours.");
-    map(expiredIncoming.rows as any[], "Incoming keeper did not verify the Document Reference Number within 14 days.");
-    map(expiredBuyerInit.rows as any[], "The current keeper did not respond to a buyer-initiated transfer within 14 days. Original ownership has been preserved.");
 
-    // Reset cert ownership status for any expired transfers
-    for (const row of collected) {
-      await db.execute(sql`
-        UPDATE certificates
-        SET ownership_status = 'claimed', updated_at = NOW()
-        WHERE certificate_number = ${row.certId}
-          AND ownership_status = 'transfer_pending'
+    await db.transaction(async (tx) => {
+      // Expire pending_owner transfers where ownerExpiresAt has passed (24h seller-init)
+      const expiredOwner = await tx.execute(sql`
+        UPDATE transfer_verifications
+        SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Outgoing keeper did not confirm within 24 hours'
+        WHERE flow_version = 'v2'
+          AND transfer_status = 'pending_owner'
+          AND owner_expires_at < NOW()
+        RETURNING id, cert_id, from_email, to_email
       `);
-    }
+
+      // Expire pending_incoming transfers where incoming_confirm_deadline has passed (14d seller-init)
+      const expiredIncoming = await tx.execute(sql`
+        UPDATE transfer_verifications
+        SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Incoming keeper did not confirm within 14 days'
+        WHERE flow_version = 'v2'
+          AND transfer_status = 'pending_incoming'
+          AND incoming_confirm_deadline < NOW()
+        RETURNING id, cert_id, from_email, to_email
+      `);
+
+      // v435 — Expire pending_owner_invited_by_buyer (buyer-init) where the
+      // owner's 14-day deadline has passed. SILENCE = REJECTION here. We do
+      // NOT auto-complete buyer-init transfers when the owner ignores the
+      // email — the owner must explicitly confirm to transfer.
+      const expiredBuyerInit = await tx.execute(sql`
+        UPDATE transfer_verifications
+        SET transfer_status = 'expired', cancelled_at = NOW(), cancellation_reason = 'Current keeper did not respond to buyer-initiated transfer within 14 days; original ownership preserved'
+        WHERE flow_version = 'v2'
+          AND transfer_status = 'pending_owner_invited_by_buyer'
+          AND owner_expires_at < NOW()
+        RETURNING id, cert_id, from_email, to_email
+      `);
+
+      const map = (rows: any[], reason: string) => {
+        for (const r of rows) {
+          collected.push({
+            transferId: r.id,
+            certId: r.cert_id,
+            fromEmail: r.from_email,
+            toEmail: r.to_email,
+            reason,
+          });
+        }
+      };
+      map(expiredOwner.rows as any[], "Outgoing keeper did not confirm within 24 hours.");
+      map(expiredIncoming.rows as any[], "Incoming keeper did not verify the Document Reference Number within 14 days.");
+      map(expiredBuyerInit.rows as any[], "The current keeper did not respond to a buyer-initiated transfer within 14 days. Original ownership has been preserved.");
+
+      // Reset cert ownership status for any expired transfers
+      for (const row of collected) {
+        await tx.execute(sql`
+          UPDATE certificates
+          SET ownership_status = 'claimed', updated_at = NOW()
+          WHERE certificate_number = ${row.certId}
+            AND ownership_status = 'transfer_pending'
+        `);
+      }
+    });
 
     return collected;
   }
@@ -2214,34 +2258,38 @@ export class DatabaseStorage implements IStorage {
     // Owner has 14 days to confirm or dispute before the transfer expires.
     const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    const inserted = await db.insert(transferVerifications).values({
-      certId: data.certId,
-      // For buyer-init, fromEmail = current owner (the keeper losing the cert),
-      // toEmail = new claimant (the buyer who used the claim code).
-      fromEmail: data.currentOwnerEmail.toLowerCase().trim(),
-      toEmail: data.claimantEmail.toLowerCase().trim(),
-      ownerTokenHash,
-      ownerExpiresAt,
-      newOwnerName: data.claimantName?.trim() || null,
-      flowVersion: "v2",
-      status: "pending_owner_invited_by_buyer",
-      outgoingKeeperUserId: data.currentOwnerUserId,
-      // Mark that the buyer (incoming keeper) initiated this with the claim
-      // code, so admin reviewers can see at a glance which path was used.
-      referenceNumberProvided: "BUYER_INIT_VIA_CLAIM_CODE",
-    }).returning({ id: transferVerifications.id });
+    let transferId = 0;
+    await db.transaction(async (tx) => {
+      const inserted = await tx.insert(transferVerifications).values({
+        certId: data.certId,
+        // For buyer-init, fromEmail = current owner (the keeper losing the cert),
+        // toEmail = new claimant (the buyer who used the claim code).
+        fromEmail: data.currentOwnerEmail.toLowerCase().trim(),
+        toEmail: data.claimantEmail.toLowerCase().trim(),
+        ownerTokenHash,
+        ownerExpiresAt,
+        newOwnerName: data.claimantName?.trim() || null,
+        flowVersion: "v2",
+        status: "pending_owner_invited_by_buyer",
+        outgoingKeeperUserId: data.currentOwnerUserId,
+        // Mark that the buyer (incoming keeper) initiated this with the claim
+        // code, so admin reviewers can see at a glance which path was used.
+        referenceNumberProvided: "BUYER_INIT_VIA_CLAIM_CODE",
+      }).returning({ id: transferVerifications.id });
+      transferId = inserted[0].id;
 
-    // Mark cert as transfer_pending — atomically guarded against any other
-    // active transfer on the same cert. The select-then-insert sequence
-    // upstream is wrapped by the caller, which checks `getTransferV2ByCertId`
-    // before calling us.
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'transfer_pending', updated_at = NOW()
-      WHERE certificate_number = ${data.certId}
-    `);
+      // Mark cert as transfer_pending — atomically guarded against any other
+      // active transfer on the same cert. The select-then-insert sequence
+      // upstream is wrapped by the caller, which checks `getTransferV2ByCertId`
+      // before calling us.
+      await tx.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'transfer_pending', updated_at = NOW()
+        WHERE certificate_number = ${data.certId}
+      `);
+    });
 
-    return { ownerToken, transferId: inserted[0].id };
+    return { ownerToken, transferId };
   }
 
   /**
@@ -2251,7 +2299,7 @@ export class DatabaseStorage implements IStorage {
    * before the existing sweep auto-finalises.
    */
   async confirmBuyerInitTransfer(token: string): Promise<{
-    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string;
+    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string; stolen?: boolean;
   }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const [verification] = await db.select()
@@ -2270,6 +2318,18 @@ export class DatabaseStorage implements IStorage {
     }
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
     if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
+
+    // Stolen-cert block — refuse to advance the buyer-init transfer if the
+    // cert was flagged after the buyer claimed by code. Check before any
+    // state mutation.
+    const certForCheck = await this.getCertificateByCertId(verification.certId);
+    if (certForCheck && (certForCheck as any).stolenStatus === "reported_stolen") {
+      return {
+        success: false,
+        stolen: true,
+        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+      };
+    }
 
     // Pre-create the incoming keeper user so finaliseTransferV2 can assign
     // ownership cleanly when the dispute window expires.
@@ -2326,21 +2386,23 @@ export class DatabaseStorage implements IStorage {
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
     if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
 
-    await db.update(transferVerifications)
-      .set({
-        status: "disputed",
-        disputedAt: new Date(),
-        disputedBy: "outgoing",
-        disputeReason: (reason || "Disputed by current keeper via buyer-init notification email").trim().slice(0, 2000),
-      })
-      .where(eq(transferVerifications.id, verification.id));
+    await db.transaction(async (tx) => {
+      await tx.update(transferVerifications)
+        .set({
+          status: "disputed",
+          disputedAt: new Date(),
+          disputedBy: "outgoing",
+          disputeReason: (reason || "Disputed by current keeper via buyer-init notification email").trim().slice(0, 2000),
+        })
+        .where(eq(transferVerifications.id, verification.id));
 
-    // Reset cert ownership status — original keeper retains the cert.
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'claimed', updated_at = NOW()
-      WHERE certificate_number = ${verification.certId}
-    `);
+      // Reset cert ownership status — original keeper retains the cert.
+      await tx.execute(sql`
+        UPDATE certificates
+        SET ownership_status = 'claimed', updated_at = NOW()
+        WHERE certificate_number = ${verification.certId}
+      `);
+    });
 
     return {
       success: true,
