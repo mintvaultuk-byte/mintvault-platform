@@ -7,7 +7,7 @@ import {
   LogOut, Plus, Edit, Download, Search, Eye, EyeOff,
   FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
-  Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain, Activity,
+  Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain, Activity, TrendingUp,
 } from "lucide-react";
 import StagingHarnessPanel from "@/components/staging-harness-panel";
 
@@ -24,6 +24,7 @@ import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
 import AdminCaptureHealthPage from "@/pages/admin-capture-health";
+import AdminDivergencePage from "@/pages/admin-divergence";
 import AdminCapacity from "@/pages/admin-capacity";
 import AdminTransfers from "@/pages/admin-transfers";
 import AdminScanHistory from "@/pages/admin-scan-history";
@@ -62,7 +63,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "transfers" | "scans">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans">("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -249,6 +250,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}
       {activeTab === "capture-health" && <AdminCaptureHealthPage />}
+      {activeTab === "divergence" && <AdminDivergencePage />}
       {activeTab === "transfers" && <AdminTransfers />}
       {activeTab === "scans" && <AdminScanHistory />}
       {activeTab === "grading" && (() => {
@@ -314,8 +316,8 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "transfers" | "scans";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "transfers" | "scans") => void;
+  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans";
+  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans") => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -448,6 +450,17 @@ function AdminHeader({
                 data-testid="tab-capture-health"
               >
                 <Activity size={12} /> Capture Health
+              </button>
+              <button
+                onClick={() => onTabChange("divergence")}
+                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
+                  activeTab === "divergence"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                }`}
+                data-testid="tab-divergence"
+              >
+                <TrendingUp size={12} /> AI Divergence
               </button>
               <button
                 onClick={() => onTabChange("transfers")}

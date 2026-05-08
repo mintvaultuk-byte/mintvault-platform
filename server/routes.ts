@@ -9546,6 +9546,202 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── AI Divergence dashboard ──────────────────────────────────────────────
+  // For every approved cert that ALSO has a grade-prediction row in
+  // ai_predictions, compute the per-zone divergence between AI and human:
+  //   divergence = ai - human  (positive = AI too generous, negative = AI too harsh)
+  //
+  // First concrete step toward a custom-model training pipeline — surfaces
+  // systematic bias in the current AI grader. One SQL query (DISTINCT ON
+  // for the latest prediction per cert), JS aggregation for summaries.
+  //
+  // Note on call_type values: the brief uses 'haiku_quick_grade' as a
+  // value but the canonical name written by callClaude is 'quick_grade'.
+  // SQL filters here use the canonical name; UI labels them
+  // human-friendly as "Haiku quick-grade".
+  app.get("/api/admin/ai-divergence", requireAdmin, async (req, res) => {
+    try {
+      const sinceDays = req.query.sinceDays == null || req.query.sinceDays === ""
+        ? 30
+        : Math.max(1, parseInt(String(req.query.sinceDays), 10) || 30);
+
+      // callType filter — accept both the canonical 'quick_grade' and the
+      // brief's 'haiku_quick_grade' alias for callers using the spec name.
+      const callTypeRaw = req.query.callType ? String(req.query.callType) : null;
+      const callType = callTypeRaw === "haiku_quick_grade" ? "quick_grade" : callTypeRaw;
+      const callTypeClause = (callType === "full_grade" || callType === "quick_grade")
+        ? sql` AND p.call_type = ${callType}`
+        : sql` AND p.call_type IN ('full_grade', 'quick_grade')`;
+
+      // ── Q: latest prediction per cert + paired human grade ──────────────
+      // DISTINCT ON (cert_id) + ORDER BY cert_id, created_at DESC picks the
+      // most recent prediction row per cert. Outer JOIN to certificates
+      // restricts to approved-with-numeric-grade certs in window.
+      const rowsRes = await db.execute(sql`
+        WITH latest_pred AS (
+          SELECT DISTINCT ON (p.cert_id)
+            p.cert_id,
+            p.model,
+            p.call_type,
+            p.created_at AS prediction_at,
+            COALESCE(
+              (p.prediction->>'overall_grade')::numeric,
+              (p.prediction->>'overall')::numeric
+            ) AS ai_overall,
+            (p.prediction->'centering'->>'subgrade')::numeric AS ai_centering,
+            (p.prediction->'corners'  ->>'subgrade')::numeric AS ai_corners,
+            (p.prediction->'edges'    ->>'subgrade')::numeric AS ai_edges,
+            (p.prediction->'surface'  ->>'subgrade')::numeric AS ai_surface
+          FROM ai_predictions p
+          WHERE 1 = 1
+            ${callTypeClause}
+          ORDER BY p.cert_id, p.created_at DESC
+        )
+        SELECT
+          c.certificate_number AS cert_id,
+          c.card_name,
+          c.grade_approved_at,
+          lp.model,
+          lp.call_type,
+          lp.prediction_at,
+          lp.ai_overall, lp.ai_centering, lp.ai_corners, lp.ai_edges, lp.ai_surface,
+          c.grade::numeric           AS human_overall,
+          c.centering_score::numeric AS human_centering,
+          c.corners_score::numeric   AS human_corners,
+          c.edges_score::numeric     AS human_edges,
+          c.surface_score::numeric   AS human_surface
+        FROM latest_pred lp
+        JOIN certificates c ON c.certificate_number = lp.cert_id
+        WHERE c.grade_approved_at IS NOT NULL
+          AND c.grade IS NOT NULL
+          AND c.deleted_at IS NULL
+          AND c.grade_approved_at >= NOW() - (${sinceDays} || ' days')::interval
+        ORDER BY c.grade_approved_at DESC
+      `);
+
+      const ZONES = ["overall", "centering", "corners", "edges", "surface"] as const;
+      type Zone = typeof ZONES[number];
+
+      type CertRow = {
+        cert_id: string;
+        card_name: string | null;
+        approved_at: string | null;
+        model: string;
+        call_type: string;
+        prediction_at: string | null;
+        grades: Record<Zone, { ai: number | null; human: number | null; divergence: number | null }>;
+        max_zone_divergence: number;
+        any_field_missing: boolean;
+      };
+
+      const certs: CertRow[] = (rowsRes.rows as any[]).map(r => {
+        const grades: CertRow["grades"] = {} as any;
+        let maxAbs = 0;
+        let anyMissing = false;
+        for (const z of ZONES) {
+          const ai    = r["ai_" + z]    != null ? Number(r["ai_" + z])    : null;
+          const human = r["human_" + z] != null ? Number(r["human_" + z]) : null;
+          const div   = (ai != null && human != null) ? Math.round((ai - human) * 100) / 100 : null;
+          if (div != null && Math.abs(div) > maxAbs) maxAbs = Math.abs(div);
+          if (ai == null) anyMissing = true;
+          grades[z] = { ai, human, divergence: div };
+        }
+        return {
+          cert_id:        String(r.cert_id),
+          card_name:      r.card_name ?? null,
+          approved_at:    r.grade_approved_at ? new Date(r.grade_approved_at).toISOString() : null,
+          model:          String(r.model || ""),
+          call_type:      String(r.call_type || ""),
+          prediction_at:  r.prediction_at ? new Date(r.prediction_at).toISOString() : null,
+          grades,
+          max_zone_divergence: maxAbs,
+          any_field_missing:   anyMissing,
+        };
+      });
+
+      // ── Aggregations ────────────────────────────────────────────────────
+      function zoneStats(divs: number[]) {
+        if (divs.length === 0) return { n: 0, mean_divergence: null, median_divergence: null, stddev: null, ai_too_generous_pct: null, ai_too_harsh_pct: null, exact_match_pct: null };
+        const sorted = [...divs].sort((a, b) => a - b);
+        const n = divs.length;
+        const mean = divs.reduce((a, b) => a + b, 0) / n;
+        const median = n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+        const variance = divs.reduce((s, x) => s + (x - mean) ** 2, 0) / n;
+        const stddev = Math.sqrt(variance);
+        const generous = divs.filter(d => d > 0).length;
+        const harsh    = divs.filter(d => d < 0).length;
+        const exact    = divs.filter(d => d === 0).length;
+        return {
+          n,
+          mean_divergence:     Math.round(mean * 100) / 100,
+          median_divergence:   Math.round(median * 100) / 100,
+          stddev:              Math.round(stddev * 100) / 100,
+          ai_too_generous_pct: Math.round((generous / n) * 100),
+          ai_too_harsh_pct:    Math.round((harsh    / n) * 100),
+          exact_match_pct:     Math.round((exact    / n) * 100),
+        };
+      }
+
+      const by_zone: Record<Zone, ReturnType<typeof zoneStats>> = {} as any;
+      for (const z of ZONES) {
+        by_zone[z] = zoneStats(certs.map(c => c.grades[z].divergence).filter((d): d is number => d != null));
+      }
+
+      // Grade bands — bucket by HUMAN overall grade.
+      const bandKey = (g: number | null): string | null => {
+        if (g == null) return null;
+        if (g === 10) return "10";
+        if (g >= 9.5) return "9.5-9.9";
+        if (g === 9)  return "9";
+        if (g === 8)  return "8";
+        if (g <  8)   return "below 8";
+        return null;
+      };
+      const bands: Record<string, number[]> = { "10": [], "9.5-9.9": [], "9": [], "8": [], "below 8": [] };
+      for (const c of certs) {
+        const k = bandKey(c.grades.overall.human);
+        const d = c.grades.overall.divergence;
+        if (k && d != null) bands[k].push(d);
+      }
+      const by_grade_band: Record<string, { n: number; mean_overall_divergence: number | null }> = {};
+      for (const [k, divs] of Object.entries(bands)) {
+        by_grade_band[k] = divs.length === 0
+          ? { n: 0, mean_overall_divergence: null }
+          : { n: divs.length, mean_overall_divergence: Math.round((divs.reduce((a, b) => a + b, 0) / divs.length) * 100) / 100 };
+      }
+
+      // Per-model — aggregated by model string from ai_predictions.
+      const byModelMap = new Map<string, number[]>();
+      for (const c of certs) {
+        const d = c.grades.overall.divergence;
+        if (d == null) continue;
+        if (!byModelMap.has(c.model)) byModelMap.set(c.model, []);
+        byModelMap.get(c.model)!.push(d);
+      }
+      const by_model: Record<string, { n: number; mean_overall_divergence: number | null }> = {};
+      for (const [model, divs] of byModelMap.entries()) {
+        by_model[model] = {
+          n: divs.length,
+          mean_overall_divergence: Math.round((divs.reduce((a, b) => a + b, 0) / divs.length) * 100) / 100,
+        };
+      }
+
+      // Sort per-cert by biggest disagreement first; the dashboard's primary
+      // value is "where did we miss the most" — easier to spot at the top.
+      certs.sort((a, b) => b.max_zone_divergence - a.max_zone_divergence);
+
+      res.json({
+        generated_at: new Date().toISOString(),
+        sample_size:  certs.length,
+        summary:      { by_zone, by_grade_band, by_model },
+        certs,
+      });
+    } catch (err: any) {
+      console.error("[ai-divergence] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── AI Capture Health dashboard ──────────────────────────────────────────
   // Read-only snapshot of how well the capture pipeline is doing on every
   // approved cert across 8 fields. Used by /admin (capture-health tab) to
