@@ -196,11 +196,16 @@ window.scanner.onScanDetected((evt) => {
 });
 
 els.manualSubmit.addEventListener("click", async () => {
-  const certId = (els.manualCert.value || "").toUpperCase().trim();
-  if (!/^MV\d+$/.test(certId)) {
+  // Backward-compatible parse: input is digits-only by design (the static
+  // MV prefix lives in HTML), but operators occasionally paste a full
+  // "MV58" / "mv 58" / "  MV 58  " from elsewhere. Strip everything
+  // that isn't a digit, then re-prefix MV — same result either way.
+  const digits = (els.manualCert.value || "").replace(/[^0-9]/g, "");
+  if (!digits) {
     els.manualCert.style.borderColor = "var(--red)";
     return;
   }
+  const certId = `MV${digits}`;
   const side = (document.querySelector('input[name="manualSide"]:checked') || {}).value || "front";
   const replaceExisting = !!els.manualReplace.checked;
   els.manualSubmit.disabled = true;
@@ -220,6 +225,14 @@ els.manualCancel.addEventListener("click", async () => {
   await window.scanner.attachManualScan({ cancel: true });
   pendingScanFile = null;
   closeModal(els.manualModal);
+});
+
+// Live-strip non-digits as the operator types — handles paste of "MV58"
+// without the operator having to backspace the prefix.
+els.manualCert.addEventListener("input", () => {
+  const cleaned = els.manualCert.value.replace(/[^0-9]/g, "");
+  if (cleaned !== els.manualCert.value) els.manualCert.value = cleaned;
+  els.manualCert.style.borderColor = "";
 });
 
 // ── Orphan picker ────────────────────────────────────────────────────────

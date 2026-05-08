@@ -78,7 +78,23 @@
       <div class="modal-meta" id="manualMeta">—</div>
       <label class="field">
         <span>Attach to cert</span>
-        <input type="text" id="manualCert" placeholder="MV___" autocapitalize="characters" autocomplete="off" />
+        <!-- Static MV prefix + digits-only input. Same pattern as the
+             override-next-cert modal (4ab00fd) — saves two keystrokes per
+             scan during high-volume grading sessions. Pasting "MV58" /
+             "mv 58" / "58" all still works — the JS handler strips
+             non-digits before validating. -->
+        <div class="prefixed-input">
+          <span class="prefix">MV</span>
+          <input
+            type="text"
+            id="manualCert"
+            placeholder="___"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+            maxlength="6"
+          />
+        </div>
       </label>
       <div class="field-row">
         <span>Side</span>
