@@ -15,6 +15,7 @@
  */
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require("electron");
+const fs    = require("node:fs");
 const path  = require("node:path");
 const os    = require("node:os");
 
@@ -42,11 +43,48 @@ const ASSETS = path.join(__dirname, "assets");
 
 // ── Tray ─────────────────────────────────────────────────────────────────
 
+// Last-ditch fallback: a 16×16 PNG of a solid black filled square with
+// rounded corners, base64-encoded inline. macOS WILL allocate a tray slot
+// for any non-empty nativeImage, so this guarantees the icon appears even
+// if the assets/ folder is missing on disk (which was today's bug —
+// nativeImage.createEmpty() is treated as "no icon" and gets no slot).
+const FALLBACK_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAQElEQVR42mNgGAWj" +
+  "YBSMgmEKGBkY/hMQ/A8RIIQYqWUAFAyCAYZRMApGwSgYBaNgFIyCUTAKRsEoGAWj" +
+  "YBQAAB3DBOAB1V0NAAAAAElFTkSuQmCC";
+let fallbackImage = null;
+function getFallbackImage() {
+  if (!fallbackImage) {
+    fallbackImage = nativeImage.createFromBuffer(Buffer.from(FALLBACK_PNG_B64, "base64"));
+    fallbackImage.setTemplateImage(true);
+  }
+  return fallbackImage;
+}
+
+function loadTrayPng(file) {
+  const fpath = path.join(ASSETS, file);
+  try {
+    if (!fs.existsSync(fpath)) {
+      console.warn(`[tray] missing PNG: ${fpath} — using inline fallback`);
+      return getFallbackImage();
+    }
+    const img = nativeImage.createFromPath(fpath);
+    if (img.isEmpty()) {
+      console.warn(`[tray] PNG loaded empty: ${fpath} — using inline fallback`);
+      return getFallbackImage();
+    }
+    return img;
+  } catch (err) {
+    console.warn(`[tray] PNG load error ${fpath}: ${err.message} — using inline fallback`);
+    return getFallbackImage();
+  }
+}
+
 function trayImageForState(s) {
-  // Template images are auto-tinted by macOS for dark/light menu bar. We
-  // ship 16/32px PNGs flagged template; main.js falls back to a text fallback
-  // when assets are missing so the app still works on first install before
-  // anyone has dropped real PNGs in.
+  // Template images are auto-tinted by macOS — black source becomes white
+  // in dark mode, accent in light mode. All three states ship as templates
+  // for visual consistency; differentiation is via glyph shape (M vs M+arrow
+  // vs M+exclamation), not colour.
   const map = {
     idle:            "tray-idle.png",
     front_buffered:  "tray-busy.png",
@@ -56,18 +94,10 @@ function trayImageForState(s) {
     manual_pending:  "tray-busy.png",
   };
   const file = map[s] || "tray-idle.png";
-  const fpath = path.join(ASSETS, file);
-  let img;
-  try {
-    img = nativeImage.createFromPath(fpath);
-    if (img.isEmpty()) throw new Error("empty");
-  } catch {
-    // Fallback: build a tiny coloured square so the tray slot is visible.
-    img = nativeImage.createEmpty();
-  }
-  // Template images render in the menu bar's accent colour; non-template
-  // (error / busy) keep the source colour.
-  if (file === "tray-idle.png") img.setTemplateImage(true);
+  const img = loadTrayPng(file);
+  // Always set template — the build-tray-icons.js outputs are pure black
+  // on transparent, which is what macOS expects for templates.
+  img.setTemplateImage(true);
   return img;
 }
 
@@ -113,13 +143,24 @@ function buildTrayMenu() {
 
 function setupTray() {
   const s = stateMod.get();
-  tray = new Tray(trayImageForState(s.state));
-  tray.setToolTip(trayTooltipForState(s));
-
-  // Left click → popover; right click → context menu (handled by setContextMenu).
-  tray.on("click", () => togglePopover());
-
-  buildTrayMenu();
+  let img;
+  try {
+    img = trayImageForState(s.state);
+    console.log(`[tray] created with image (empty=${img.isEmpty()}, template=${img.isTemplateImage()}, size=${JSON.stringify(img.getSize())})`);
+  } catch (err) {
+    console.error(`[tray] image load failed entirely: ${err.message} — using inline fallback`);
+    img = getFallbackImage();
+  }
+  try {
+    tray = new Tray(img);
+    tray.setToolTip(trayTooltipForState(s));
+    tray.on("click", () => togglePopover());
+    buildTrayMenu();
+    console.log(`[tray] tray bounds: ${JSON.stringify(tray.getBounds())}`);
+  } catch (err) {
+    console.error(`[tray] new Tray() failed: ${err.message}`);
+    throw err; // launchd will restart — better to crash than run iconless
+  }
 }
 
 // ── Popover (BrowserWindow) ──────────────────────────────────────────────
