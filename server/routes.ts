@@ -9546,6 +9546,93 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── Loyalty points (scaffold — no awards wired yet) ─────────────────────
+  // Customer self-view + admin adjustment. The award service lives in
+  // server/loyalty/award.ts; hooks are stubbed (server/loyalty/hooks.ts)
+  // and not invoked from any real completion code path. Migration must
+  // be applied separately (scripts/run-loyalty-migration.ts) — these
+  // routes will return 500 with a "table does not exist" error until
+  // then. That's the desired pre-migration state.
+
+  app.get("/api/loyalty/me", requireCustomer, async (req, res) => {
+    try {
+      const email = (req.session as any)?.customerEmail as string | undefined;
+      if (!email) return res.status(401).json({ error: "no customer session" });
+
+      // Map email → users.id (varchar). One email per user row (unique index).
+      const userRow = await db.execute(sql`SELECT id FROM users WHERE LOWER(email) = LOWER(${email}) LIMIT 1`);
+      const userId = (userRow.rows[0] as any)?.id as string | undefined;
+      if (!userId) {
+        // No users row yet — render empty state. Some legacy customers
+        // exist as cert-owner-emails without a users row.
+        return res.json({ user_id: null, balance: 0, ledger: [], total: 0 });
+      }
+
+      const limit  = Math.min(50, Math.max(1, parseInt(String(req.query.limit  ?? "20"), 10) || 20));
+      const offset = Math.max(0, parseInt(String(req.query.offset ?? "0"), 10) || 0);
+
+      const balanceRow = await db.execute(sql`
+        SELECT COALESCE(SUM(delta), 0)::int AS balance
+        FROM loyalty_ledger
+        WHERE user_id = ${userId}
+          AND (expires_at IS NULL OR expires_at > NOW())
+      `);
+      const balance = Number((balanceRow.rows[0] as any)?.balance ?? 0);
+
+      const totalRow = await db.execute(sql`SELECT COUNT(*)::int AS n FROM loyalty_ledger WHERE user_id = ${userId}`);
+      const total = Number((totalRow.rows[0] as any)?.n ?? 0);
+
+      const ledgerRows = await db.execute(sql`
+        SELECT id, delta, reason, source_type, source_id, metadata, expires_at, created_at
+        FROM loyalty_ledger
+        WHERE user_id = ${userId}
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `);
+
+      res.json({
+        user_id: userId,
+        balance,
+        total,
+        ledger:  ledgerRows.rows,
+      });
+    } catch (err: any) {
+      console.error("[loyalty/me] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/loyalty/adjust", requireAdmin, async (req, res) => {
+    try {
+      const { user_id, delta, reason, metadata } = req.body || {};
+      if (typeof user_id !== "string" || user_id.trim() === "") {
+        return res.status(400).json({ error: "user_id required" });
+      }
+      if (!Number.isFinite(Number(delta)) || !Number.isInteger(Number(delta)) || Number(delta) === 0) {
+        return res.status(400).json({ error: "delta must be a non-zero integer" });
+      }
+      if (typeof reason !== "string" || reason.trim() === "") {
+        return res.status(400).json({ error: "reason required" });
+      }
+
+      const { awardPoints } = await import("./loyalty/award");
+      const adminUser = req.session.adminEmail || "admin";
+      const result = await awardPoints({
+        userId:     user_id,
+        delta:      Number(delta),
+        reason:     "admin_adjust",
+        sourceType: "admin",
+        sourceId:   null,
+        metadata:   { ...(metadata || {}), human_reason: reason },
+        adminUser,
+      });
+      res.json(result);
+    } catch (err: any) {
+      console.error("[loyalty/admin/adjust] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── AI Divergence dashboard ──────────────────────────────────────────────
   // For every approved cert that ALSO has a grade-prediction row in
   // ai_predictions, compute the per-zone divergence between AI and human:

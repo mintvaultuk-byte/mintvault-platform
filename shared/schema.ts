@@ -444,6 +444,52 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ── Loyalty points (immutable ledger, scaffold) ─────────────────────────
+// Append-only ledger of every points transaction (earn / admin-adjust /
+// redeem / expire). Balance is computed via the `loyalty_balance` view
+// created in scripts/run-loyalty-migration.ts (drizzle doesn't model
+// views, so the SELECT view is migration-only).
+//
+// Idempotency: a partial UNIQUE index on
+//   (user_id, source_type, source_id, reason) WHERE source_id IS NOT NULL
+// prevents double-awards when a hook re-fires (e.g. submission completion
+// retried). Admin adjustments leave source_id NULL so they can be repeated.
+//
+// Award hooks ARE STUBBED in server/loyalty/hooks.ts — no real user has
+// points awarded by this PR. Wiring the stubs to actual completion code
+// paths waits on legal sign-off of the loyalty programme T&Cs.
+export const loyaltyLedger = pgTable("loyalty_ledger", {
+  id:         varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId:     varchar("user_id").notNull(),
+  delta:      integer("delta").notNull(),
+  reason:     text("reason").notNull(),     // 'order_completed' | 'admin_adjust' | 'redeem' | 'expire' | 'referral'
+  sourceType: text("source_type"),           // 'submission' | 'certificate' | 'admin' | 'redemption' | null
+  sourceId:   varchar("source_id"),
+  metadata:   jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  expiresAt:  timestamp("expires_at", { withTimezone: true }),
+  createdAt:  timestamp("created_at",  { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userTimeIdx: index("loyalty_ledger_user_created_idx").on(t.userId, t.createdAt),
+  // Partial UNIQUE (sourceId NOT NULL) lives in the migration SQL — drizzle
+  // doesn't express the WHERE clause on indexes. Repeating the index in
+  // schema.ts here without the WHERE would over-constrain admin adjusts
+  // (which leave sourceId NULL and need to be repeatable). Source of truth
+  // is the migration.
+}));
+
+export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
+  id:           varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId:       varchar("user_id").notNull(),
+  submissionId: varchar("submission_id"),
+  pointsSpent:  integer("points_spent").notNull(),
+  tier:         text("tier").notNull(),
+  ledgerId:     varchar("ledger_id").notNull(),
+  createdAt:    timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type LoyaltyLedgerRow      = typeof loyaltyLedger.$inferSelect;
+export type LoyaltyRedemptionRow  = typeof loyaltyRedemptions.$inferSelect;
+
 // ── AI feature toggles (DB-backed, runtime-flippable) ─────────────────────
 // One row per env-var flag from server/config/feature-flags.ts. The DB row
 // overrides the env-var default at runtime. Absence of a row means "use env

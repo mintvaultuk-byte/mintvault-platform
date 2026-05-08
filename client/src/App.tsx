@@ -135,6 +135,7 @@ import TransferAcceptPage from "@/pages/transfer-accept";
 import TransferClaimByCodePage from "@/pages/transfer-claim-by-code";
 import OwnershipPage from "@/pages/ownership";
 import DashboardPage from "@/pages/dashboard";
+import DashboardLoyaltyPage from "@/pages/dashboard-loyalty";
 import PopulationPage from "@/pages/population";
 import PopCertsPage from "@/pages/pop-certs";
 import ApiDocsPage from "@/pages/api-docs";
@@ -266,6 +267,7 @@ function Router() {
               <Route path="/transfer/accept" component={TransferAcceptPage} />
               <Route path="/transfer/claim-by-code" component={TransferClaimByCodePage} />
               <Route path="/dashboard" component={DashboardPage} />
+              <Route path="/dashboard/loyalty" component={DashboardLoyaltyPage} />
               <Route path="/population" component={PopulationPage} />
               <Route path="/population/certs" component={PopCertsPage} />
               <Route path="/api-docs" component={ApiDocsPage} />
