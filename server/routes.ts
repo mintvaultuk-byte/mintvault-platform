@@ -8542,18 +8542,26 @@ Defects (admin-confirmed): ${defectLines}`;
       const frontVariants = await generateImageVariants(frontRaw);
       const backVariants = backRaw ? await generateImageVariants(backRaw) : null;
 
-      // Step 3: Upload all variants to R2
+      // Step 3: Upload all variants to R2 — explicit allowlist (skips
+      // generateImageVariants's non-Buffer fields like cropGeometry/matRgb,
+      // which were added in commit 6b7ce9f and broke Object.entries()-based
+      // iteration with TypeError "Received an instance of Object")
       const prefix = `images/grading/${id}`;
       const uploadKeys: Record<string, string> = {};
       const uploads: Promise<void>[] = [];
+      const jpgVariants = ["original", "cropped", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
 
-      for (const [vName, buf] of Object.entries(frontVariants) as [string, Buffer][]) {
+      for (const vName of jpgVariants) {
+        const buf = (frontVariants as any)[vName] as Buffer | undefined;
+        if (!Buffer.isBuffer(buf)) continue;
         const k = `${prefix}/front_${vName}.jpg`;
         uploadKeys[`front_${vName}`] = k;
         uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
       }
       if (backVariants) {
-        for (const [vName, buf] of Object.entries(backVariants) as [string, Buffer][]) {
+        for (const vName of jpgVariants) {
+          const buf = (backVariants as any)[vName] as Buffer | undefined;
+          if (!Buffer.isBuffer(buf)) continue;
           const k = `${prefix}/back_${vName}.jpg`;
           uploadKeys[`back_${vName}`] = k;
           uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
