@@ -9821,7 +9821,7 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const r = await db.execute(sql`
         SELECT COALESCE(
-          (SELECT MAX(NULLIF(regexp_replace(certificate_number, '\D', '', 'g'), '')::int)
+          (SELECT MAX(NULLIF(regexp_replace(certificate_number, '[^0-9]', '', 'g'), '')::int)
              FROM certificates WHERE deleted_at IS NULL),
           0
         ) + 1 AS next_numeric
