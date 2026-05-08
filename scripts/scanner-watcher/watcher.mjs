@@ -437,6 +437,21 @@ log(`─────────────────────────
 hydrateOnStartup();
 writeState();
 
+// Heartbeat — touch the state file's mtime once a minute even when nothing
+// has happened. Strict-alternating mode only writes on transitions, which
+// can be hours apart on a quiet day; the SwiftBar plugin's 300s staleness
+// check would otherwise flag a healthy idle watcher as dead. Pure mtime
+// touch (utimesSync) so we don't re-trigger dwell timers or rewrite content.
+const HEARTBEAT_MS = 60_000;
+setInterval(() => {
+  try {
+    const now = new Date();
+    fs.utimesSync(STATE_FILE, now, now);
+  } catch (err) {
+    // File may be missing if writeState has never run — let next transition fix it.
+  }
+}, HEARTBEAT_MS);
+
 const watcher = chokidar.watch(INBOX, {
   ignoreInitial: true,
   awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 250 },
