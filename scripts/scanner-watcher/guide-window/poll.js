@@ -18,7 +18,14 @@ const els = {
   buttons:  document.getElementById("buttons"),
   footer:   document.getElementById("footer"),
   updated:  document.getElementById("updated"),
+  hideBtn:  document.getElementById("hideBtn"),
 };
+
+// × in the drag strip — hide the window. Process keeps running; show
+// again from SwiftBar dropdown or by clicking the dock icon.
+els.hideBtn.addEventListener("click", () => {
+  window.guide.hide();
+});
 
 let busy = false;       // disable buttons while a control fetch is in flight
 

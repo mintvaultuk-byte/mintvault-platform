@@ -9,4 +9,5 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("guide", {
   readState:   ()       => ipcRenderer.invoke("guide:read-state"),
   control:     (action) => ipcRenderer.invoke("guide:control", action),
+  hide:        ()       => ipcRenderer.invoke("guide:hide"),
 });

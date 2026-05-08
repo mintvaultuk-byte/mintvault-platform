@@ -18,10 +18,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const http = require("node:http");
 
-const POSITION_DIR = path.join(os.homedir(), ".mintvault-scanner-tools");
-const POSITION_FILE = path.join(POSITION_DIR, "guide-window-position.json");
+const TOOLS_DIR = path.join(os.homedir(), ".mintvault-scanner-tools");
+const POSITION_FILE  = path.join(TOOLS_DIR, "guide-window-position.json");
+const VISIBLE_FILE   = path.join(TOOLS_DIR, "guide-visible.json");
 const STATE_FILE = path.join(os.homedir(), "mintvault-scans", "watcher-state.json");
 const CONTROL_PORT_DEFAULT = 54871;
+const VISIBILITY_PORT = 54872;
 
 // ── Position persistence ─────────────────────────────────────────────────
 function loadPosition() {
@@ -34,10 +36,35 @@ function loadPosition() {
 
 function savePosition(pos) {
   try {
-    fs.mkdirSync(POSITION_DIR, { recursive: true });
+    fs.mkdirSync(TOOLS_DIR, { recursive: true });
     fs.writeFileSync(POSITION_FILE, JSON.stringify(pos, null, 2));
   } catch (err) {
     console.warn("[guide] could not persist position:", err.message);
+  }
+}
+
+// ── Visibility persistence ───────────────────────────────────────────────
+// Single source of truth for whether the window is currently shown. Read
+// by the SwiftBar plugin (cheap stat call) so it can flip "Show / Hide"
+// labels. Default = visible; missing file = first run = visible.
+function loadVisible() {
+  try {
+    const v = JSON.parse(fs.readFileSync(VISIBLE_FILE, "utf8"));
+    return v.visible !== false;
+  } catch {
+    return true;
+  }
+}
+function saveVisible(visible) {
+  try {
+    fs.mkdirSync(TOOLS_DIR, { recursive: true });
+    fs.writeFileSync(VISIBLE_FILE, JSON.stringify({
+      visible,
+      updated_at: new Date().toISOString(),
+      visibility_port: VISIBILITY_PORT,
+    }, null, 2));
+  } catch (err) {
+    console.warn("[guide] could not persist visibility:", err.message);
   }
 }
 
@@ -82,6 +109,15 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
+  // If last session ended hidden, respect that and start hidden. We still
+  // create the window (so .show() works instantly later); we just don't
+  // map it on screen until something asks.
+  if (!loadVisible()) {
+    mainWindow.hide();
+  } else {
+    saveVisible(true);
+  }
+
   // Persist position on move + size changes.
   let saveTimer = null;
   function debounceSave() {
@@ -94,13 +130,36 @@ function createWindow() {
   }
   mainWindow.on("move", debounceSave);
   mainWindow.on("resize", debounceSave);
+  mainWindow.on("show", () => saveVisible(true));
+  mainWindow.on("hide", () => saveVisible(false));
   mainWindow.on("closed", () => { mainWindow = null; });
+}
+
+// ── Show / hide helpers ─────────────────────────────────────────────────
+// Always pin alwaysOnTop after show — macOS sometimes drops the flag
+// when re-showing a hidden window into a different space.
+function showWindow() {
+  if (!mainWindow) return;
+  mainWindow.show();
+  mainWindow.setAlwaysOnTop(true, "floating");
+}
+function hideWindow() {
+  if (!mainWindow) return;
+  mainWindow.hide();
+}
+function isWindowVisible() {
+  return !!mainWindow && mainWindow.isVisible();
 }
 
 // ── IPC: state polling + control POSTs ───────────────────────────────────
 // The renderer asks main for the current state every second. Main reads
 // the state file directly (avoids exposing fs to the renderer) and
 // proxies control POSTs to the watcher's loopback HTTP server.
+
+ipcMain.handle("guide:hide", async () => {
+  hideWindow();
+  return { ok: true };
+});
 
 ipcMain.handle("guide:read-state", async () => {
   try {
@@ -144,11 +203,63 @@ ipcMain.handle("guide:control", async (_evt, action) => {
   });
 });
 
+// ── Visibility HTTP server (loopback only) ───────────────────────────────
+// SwiftBar plugin and any other local tooling can flip the window via:
+//   POST 127.0.0.1:54872/show
+//   POST 127.0.0.1:54872/hide
+//   POST 127.0.0.1:54872/toggle
+//   GET  127.0.0.1:54872/visible    → { visible: true|false }
+// No auth — loopback bind only, single-user machine.
+
+function startVisibilityServer() {
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    const url = new URL(req.url, "http://127.0.0.1");
+    try {
+      if (req.method === "GET" && url.pathname === "/visible") {
+        res.statusCode = 200;
+        res.end(JSON.stringify({ visible: isWindowVisible() }));
+        return;
+      }
+      if (req.method !== "POST") {
+        res.statusCode = 405; res.end(JSON.stringify({ ok: false, error: "POST only" })); return;
+      }
+      switch (url.pathname) {
+        case "/show":   showWindow(); res.statusCode = 200; res.end(JSON.stringify({ ok: true, visible: true  })); return;
+        case "/hide":   hideWindow(); res.statusCode = 200; res.end(JSON.stringify({ ok: true, visible: false })); return;
+        case "/toggle":
+          if (isWindowVisible()) hideWindow(); else showWindow();
+          res.statusCode = 200; res.end(JSON.stringify({ ok: true, visible: isWindowVisible() })); return;
+        default:
+          res.statusCode = 404; res.end(JSON.stringify({ ok: false, error: "not found" })); return;
+      }
+    } catch (err) {
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    }
+  });
+  server.on("error", err => console.warn("[guide] visibility server error:", err.message));
+  server.listen(VISIBILITY_PORT, "127.0.0.1", () => {
+    console.log(`[guide] visibility server listening on 127.0.0.1:${VISIBILITY_PORT}`);
+  });
+  return server;
+}
+
 // ── App lifecycle ────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   createWindow();
+  startVisibilityServer();
+  // Dock-icon click on macOS: if no windows are open OR the window is
+  // hidden, bring it back. This makes the dock icon a free toggle —
+  // operator who hid the window can click the dock to restore.
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    } else if (mainWindow && !mainWindow.isVisible()) {
+      showWindow();
+    }
   });
 });
 

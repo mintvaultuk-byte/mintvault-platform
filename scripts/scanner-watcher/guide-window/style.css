@@ -57,6 +57,35 @@ html, body {
 }
 .drag-strip .title { font-weight: 700; color: var(--accent); }
 .drag-strip .updated { font-family: "SF Mono", Menlo, monospace; }
+.drag-strip .header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.drag-strip .hide-btn {
+  -webkit-app-region: no-drag;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.drag-strip .hide-btn:hover {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+}
+.drag-strip .hide-btn:active { transform: scale(0.92); }
 
 .panel {
   height: calc(100% - 28px - 32px);
