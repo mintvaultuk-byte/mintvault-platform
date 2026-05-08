@@ -15,6 +15,7 @@
  */
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require("electron");
+const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
 const os    = require("node:os");
@@ -40,6 +41,26 @@ let watcher      = null;
 let isQuitting   = false;
 
 const ASSETS = path.join(__dirname, "assets");
+
+// ── Audible feedback ─────────────────────────────────────────────────────
+
+// Plays one of macOS's bundled system sounds via afplay. Detached + ignored
+// stdio so a slow sound subsystem never holds the main process. No-op on
+// non-darwin (the app is darwin-only in practice, but the guard keeps a
+// future Linux dev environment from crashing on missing afplay).
+function playSystemSound(filename) {
+  if (process.platform !== "darwin") return;
+  try {
+    const child = spawn("/usr/bin/afplay", [`/System/Library/Sounds/${filename}`], {
+      stdio: "ignore",
+      detached: true,
+    });
+    child.on("error", (e) => console.warn(`[sound] afplay ${filename} failed: ${e.message}`));
+    child.unref();
+  } catch (err) {
+    console.warn(`[sound] spawn afplay failed: ${err.message}`);
+  }
+}
 
 // ── Tray ─────────────────────────────────────────────────────────────────
 
@@ -365,18 +386,29 @@ app.whenReady().then(async () => {
 
   watcher = new Watcher();
   let lastErrorState = false;
+  let lastSuccessState = false;
   watcher.on("state-changed", () => {
     pushStateToRenderer();
-    // Auto-open popover on error transition. Only fires on the IDLE→ERROR
-    // edge, not every error tick — otherwise a stuck error would keep
-    // re-stealing focus. Suppressed when the popover is already visible.
     const s = stateMod.get();
-    const isError = s.state === "error";
+    const isError   = s.state === "error";
+    const isSuccess = s.state === "success";
+
+    // Auto-open popover on error transition (idle→error edge only).
     if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {
       console.log(`[main] auto-opening popover on error: ${s.lastError || "(no message)"}`);
       showPopover();
     }
-    lastErrorState = isError;
+
+    // Audible feedback — edge-triggered on success and error transitions.
+    // afplay is fire-and-forget; we don't wait for it. Each system sound
+    // is ~300ms, plenty of head-room before the next state-change tick.
+    if (s.soundEnabled !== false) {
+      if (isSuccess && !lastSuccessState) playSystemSound("Glass.aiff");
+      if (isError   && !lastErrorState)   playSystemSound("Sosumi.aiff");
+    }
+
+    lastErrorState   = isError;
+    lastSuccessState = isSuccess;
   });
   watcher.on("scan-detected", (evt) => {
     if (popover && !popover.isDestroyed()) {

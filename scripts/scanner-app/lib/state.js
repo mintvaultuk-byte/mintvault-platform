@@ -52,6 +52,9 @@ const DEFAULT = Object.freeze({
   pausedUntil:      null,
   // Settings — local prefs, never written to the server.
   autoOpenOnError:  true,
+  // Audible feedback. Plays Glass.aiff on success, Sosumi.aiff on error
+  // via macOS afplay. No-op on non-darwin.
+  soundEnabled:     true,
   updatedAt:        null,
 });
 
@@ -122,7 +125,7 @@ function isPaused() {
  * Generic settings setter for the popover's Settings section. Only allows
  * known keys to prevent the renderer from injecting arbitrary state.
  */
-const ALLOWED_SETTINGS = new Set(["autoOpenOnError"]);
+const ALLOWED_SETTINGS = new Set(["autoOpenOnError", "soundEnabled"]);
 function setSetting(key, value) {
   if (!ALLOWED_SETTINGS.has(key)) {
     console.warn(`[state] rejected unknown setting: ${key}`);

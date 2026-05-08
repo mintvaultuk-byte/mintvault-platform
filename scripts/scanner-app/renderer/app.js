@@ -64,6 +64,7 @@ const els = {
   settingsToggle:  document.getElementById("settingsToggle"),
   settingsBody:    document.getElementById("settingsBody"),
   autoOpenOnError: document.getElementById("autoOpenOnError"),
+  soundEnabled:    document.getElementById("soundEnabled"),
   testScanBtn:     document.getElementById("testScanBtn"),
 };
 
@@ -97,6 +98,9 @@ function renderState(s) {
   // Settings checkbox state — fall back to default true if absent.
   if (els.autoOpenOnError) {
     els.autoOpenOnError.checked = s.autoOpenOnError !== false;
+  }
+  if (els.soundEnabled) {
+    els.soundEnabled.checked = s.soundEnabled !== false;
   }
 
   // Stats — display server prediction unless operator has set an override.
@@ -362,6 +366,10 @@ els.settingsToggle.addEventListener("click", () => {
 
 els.autoOpenOnError.addEventListener("change", async () => {
   await window.scanner.setSetting("autoOpenOnError", !!els.autoOpenOnError.checked);
+});
+
+els.soundEnabled.addEventListener("change", async () => {
+  await window.scanner.setSetting("soundEnabled", !!els.soundEnabled.checked);
 });
 
 // ── Test scan ────────────────────────────────────────────────────────────
