@@ -89,13 +89,25 @@ function notify(title, message) {
 // only inside transition helpers (setIdle, setFrontBuffered, setUploading,
 // etc.) so it's hard to leave state and watcher-state.json out of sync.
 
-let state = "idle";                 // "idle" | "front_buffered" | "uploading" | "success" | "error"
+let state = "idle";                 // "idle" | "front_buffered" | "uploading" | "success" | "error" | "manual_pending"
 let bufferedFront = null;           // absolute path of buffered front .tif, or null
 let lastUploadedCert = null;        // most-recent successful MV<n> for predicting next
 let sessionPairedCount = 0;         // cards completed since startup
 let lastPair = null;                // { frontPath, backPath } — for "Retry" after error
 let lastError = null;
 let dwellTimer = null;
+
+// Manual mode: when state="manual_pending", the next inbox .tif is uploaded
+// to a SPECIFIC existing cert rather than starting a new strict-alternating
+// pair. Cleared on success / cancel / error.
+let manualPending = null;           // { certId: "MV57", side: "back", replaceExisting: bool }
+
+// Server endpoints that the watcher proxies for the guide window.
+function ingestOrigin() {
+  // INGEST_URL is the scan-ingest endpoint; the cert-image and cert-preview
+  // endpoints share the same origin.
+  try { return new URL(INGEST_URL).origin; } catch { return ""; }
+}
 
 function nextCertGuess() {
   // Best-effort prediction so the guide can show "MV<n>". Server actually
@@ -118,6 +130,7 @@ function writeState() {
   switch (state) {
     case "idle":            expectedNextSide = "front"; break;
     case "front_buffered":  expectedNextSide = "back";  break;
+    case "manual_pending":  expectedNextSide = manualPending?.side ?? null; break;
     default:                expectedNextSide = null;
   }
 
@@ -132,6 +145,7 @@ function writeState() {
     last_error:            lastError,
     ingest_url:            INGEST_URL,
     control_port:          CONTROL_PORT,
+    manual_pending:        manualPending,
     updated_at:            new Date().toISOString(),
     // Legacy fields retained so the SwiftBar plugin and status.mjs don't
     // break — pairing_window_expires_at is null forever now (no timer).
@@ -239,6 +253,67 @@ async function uploadPair(frontPath, backPath) {
   notify("MintVault ✓", data.certId ? `READY — ${data.certId} uploaded` : `READY — uploaded`);
 }
 
+// ── Manual mode upload (single-side attach to existing cert) ─────────────
+async function uploadManualAttach(filePath, certId, side, replaceExisting) {
+  const filename = path.basename(filePath);
+  log(`Manual mode: uploading ${filename} as ${side} for ${certId}${replaceExisting ? " (replace=true)" : ""}`);
+  state = "uploading";
+  lastError = null;
+  writeState();
+
+  const form = new FormData();
+  form.append("image", fs.createReadStream(filePath));
+  form.append("side", side);
+  form.append("replace_existing", replaceExisting ? "true" : "false");
+
+  const url = `${ingestOrigin()}/api/admin/certs/${encodeURIComponent(certId)}/image`;
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "x-scanner-token": TOKEN, ...form.getHeaders() },
+      body: form,
+    });
+  } catch (err) {
+    return failManual(filePath, certId, side, `network error: ${err.message}`);
+  }
+
+  let data;
+  try { data = await response.json(); } catch { data = {}; }
+
+  if (!response.ok) {
+    // 409 (already attached, no replace) is its own UI affordance — reflect
+    // distinctly so the guide can prompt for replace_existing.
+    const reason = response.status === 409
+      ? `409: ${side} already attached to ${certId} — set replace_existing=true to overwrite`
+      : `HTTP ${response.status}: ${data.error || JSON.stringify(data)}`;
+    return failManual(filePath, certId, side, reason);
+  }
+
+  log(`Manual SUCCESS: ${filename} → ${certId} ${side}${data.replaced ? " (replaced previous)" : ""}`);
+  const processedDir = dateFolder(PROCESSED);
+  moveFile(filePath, processedDir);
+
+  manualPending = null;
+  lastUploadedCert = certId;
+  state = "success";
+  writeState();
+  notify("MintVault ✓", `Attached to ${certId} ${side.toUpperCase()}`);
+}
+
+function failManual(filePath, certId, side, reason) {
+  log(`Manual FAILED ${path.basename(filePath)}: ${reason}`, "error");
+  const failDir = dateFolder(FAILED);
+  const moved = moveFile(filePath, failDir);
+  writeErrorFile(moved, reason);
+  manualPending = null;
+  lastError = reason;
+  state = "error";
+  writeState();
+  notify("MintVault ✗", `Manual attach failed: ${reason.slice(0, 80)}`);
+}
+
 function failUpload(frontPath, backPath, reason) {
   const frontName = path.basename(frontPath);
   log(`FAILED ${frontName}: ${reason}`, "error");
@@ -276,6 +351,14 @@ function handleNewFile(filePath) {
   }
 
   log(`New scan: ${filename} (state=${state})`);
+
+  // Manual mode — bypass strict-alternating entirely.
+  if (state === "manual_pending" && manualPending) {
+    const { certId, side, replaceExisting } = manualPending;
+    log(`  Manual mode active — attaching to ${certId} ${side}`);
+    uploadManualAttach(filePath, certId, side, replaceExisting);
+    return;
+  }
 
   if (state === "idle" || state === "success" || state === "error") {
     // Treat as the front of a new card. (success/error states auto-revert
@@ -344,6 +427,77 @@ function handleControl(req, res) {
     log(`Upload-front-only: ${path.basename(front)}`);
     uploadPair(front, null);
     res.statusCode = 202; res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // ── /control/manual-mode — guide window arms a single-side attach ─────
+  // Body: { certId, side: "front"|"back", replaceExisting: bool }. Watcher
+  // flips state to "manual_pending"; next inbox file routes through
+  // uploadManualAttach instead of normal pairing.
+  if (url.pathname === "/control/manual-mode") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        const certId = String(parsed.certId || "").trim();
+        const side   = String(parsed.side   || "").toLowerCase();
+        const replaceExisting = !!parsed.replaceExisting;
+        if (!certId || !/^MV\d+$/i.test(certId)) {
+          res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: "certId must look like MV123" })); return;
+        }
+        if (side !== "front" && side !== "back") {
+          res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: "side must be 'front' or 'back'" })); return;
+        }
+        if (state === "uploading") {
+          res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: "upload in flight; try again in a moment" })); return;
+        }
+        // Override any prior front-buffered context — manual mode wins.
+        // Buffered front (if any) stays on disk in inbox until the next
+        // cycle; we just stop tracking it.
+        bufferedFront = null;
+        manualPending = { certId: certId.toUpperCase(), side, replaceExisting };
+        state = "manual_pending";
+        writeState();
+        log(`Manual mode armed: ${manualPending.certId} ${side}${replaceExisting ? " (replace)" : ""}`);
+        res.statusCode = 200; res.end(JSON.stringify({ ok: true, manual_pending: manualPending }));
+      } catch (err) {
+        res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: String(err.message || err) }));
+      }
+    });
+    return;
+  }
+
+  // ── /control/cancel-manual — clear manual_pending without uploading ───
+  if (url.pathname === "/control/cancel-manual") {
+    if (state !== "manual_pending") {
+      res.statusCode = 409; res.end(JSON.stringify({ ok: false, error: `state=${state}; cancel only valid in manual_pending` })); return;
+    }
+    log(`Manual mode cancelled (was ${manualPending?.certId} ${manualPending?.side})`);
+    manualPending = null;
+    state = "idle";
+    writeState();
+    res.statusCode = 200; res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // ── /control/cert-preview — proxy to /api/admin/certs/:certId/preview ─
+  // Used by the Manual Mode modal's debounced lookup. Loopback-only;
+  // server side enforces auth via x-scanner-token.
+  if (url.pathname.startsWith("/control/cert-preview/")) {
+    const certId = decodeURIComponent(url.pathname.slice("/control/cert-preview/".length));
+    if (!certId) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: "missing certId" })); return; }
+    fetch(`${ingestOrigin()}/api/admin/certs/${encodeURIComponent(certId)}/preview`, {
+      method: "GET",
+      headers: { "x-scanner-token": TOKEN },
+    }).then(async r => {
+      const text = await r.text();
+      res.statusCode = r.status;
+      res.end(text);
+    }).catch(err => {
+      res.statusCode = 502;
+      res.end(JSON.stringify({ ok: false, error: `proxy error: ${err.message}` }));
+    });
     return;
   }
 

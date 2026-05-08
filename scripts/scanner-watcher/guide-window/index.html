@@ -29,6 +29,36 @@
 
   <footer class="footer" id="footer"></footer>
 
+  <!-- Manual Mode modal — hidden by default; .visible toggles display. -->
+  <div class="modal-backdrop" id="manualModal" role="dialog" aria-modal="true" aria-labelledby="manualTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="manualTitle">Manual mode — attach scan</span>
+        <button class="modal-close" id="manualClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">Cert ID</span>
+          <input type="text" id="manualCert" placeholder="MV57" autocapitalize="characters" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="preview" id="manualPreview"></div>
+        <div class="field-row">
+          <span class="field-label">Side</span>
+          <label class="radio"><input type="radio" name="manualSide" value="front" /><span>Front</span></label>
+          <label class="radio"><input type="radio" name="manualSide" value="back" checked /><span>Back</span></label>
+        </div>
+        <label class="checkbox" id="manualReplaceWrap">
+          <input type="checkbox" id="manualReplace" />
+          <span>Replace existing image (overwrites the file currently on this side)</span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="manualCancel">Cancel</button>
+        <button class="btn-primary" id="manualSubmit" disabled>Wait for next scan</button>
+      </div>
+    </div>
+  </div>
+
   <script src="poll.js"></script>
 </body>
 </html>

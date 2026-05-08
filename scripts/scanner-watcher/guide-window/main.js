@@ -170,37 +170,59 @@ ipcMain.handle("guide:read-state", async () => {
   }
 });
 
-ipcMain.handle("guide:control", async (_evt, action) => {
-  const allowed = ["reset", "upload-front-only", "retry"];
-  if (!allowed.includes(action)) return { ok: false, error: `unknown action: ${action}` };
-
+function watcherPort() {
   // Pick up the watcher's actual port from state if available, else default.
   let port = CONTROL_PORT_DEFAULT;
   try {
     const s = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     if (s.control_port) port = s.control_port;
   } catch {}
+  return port;
+}
 
+function watcherRequest(method, urlPath, body) {
   return new Promise((resolve) => {
+    const payload = body ? JSON.stringify(body) : null;
+    const headers = payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {};
     const req = http.request({
-      method: "POST",
+      method,
       hostname: "127.0.0.1",
-      port,
-      path: `/control/${action}`,
-      timeout: 5000,
+      port: watcherPort(),
+      path: urlPath,
+      headers,
+      timeout: 8000,
     }, (res) => {
-      let body = "";
-      res.on("data", chunk => body += chunk);
+      let buf = "";
+      res.on("data", chunk => buf += chunk);
       res.on("end", () => {
         let parsed = {};
-        try { parsed = body ? JSON.parse(body) : {}; } catch {}
+        try { parsed = buf ? JSON.parse(buf) : {}; } catch {}
         resolve({ ok: res.statusCode >= 200 && res.statusCode < 400, status: res.statusCode, body: parsed });
       });
     });
     req.on("error", err => resolve({ ok: false, error: err.message }));
     req.on("timeout", () => { req.destroy(); resolve({ ok: false, error: "timeout" }); });
+    if (payload) req.write(payload);
     req.end();
   });
+}
+
+ipcMain.handle("guide:control", async (_evt, action) => {
+  const allowed = ["reset", "upload-front-only", "retry", "cancel-manual"];
+  if (!allowed.includes(action)) return { ok: false, error: `unknown action: ${action}` };
+  return watcherRequest("POST", `/control/${action}`);
+});
+
+// Manual mode arm — send certId/side/replaceExisting to the watcher.
+ipcMain.handle("guide:manual-mode", async (_evt, args) => {
+  if (!args || typeof args !== "object") return { ok: false, error: "missing args" };
+  return watcherRequest("POST", "/control/manual-mode", args);
+});
+
+// Cert preview proxy — debounced lookup from the modal.
+ipcMain.handle("guide:cert-preview", async (_evt, certId) => {
+  if (typeof certId !== "string" || !certId.trim()) return { ok: false, error: "missing certId" };
+  return watcherRequest("GET", `/control/cert-preview/${encodeURIComponent(certId.trim())}`);
 });
 
 // ── Visibility HTTP server (loopback only) ───────────────────────────────

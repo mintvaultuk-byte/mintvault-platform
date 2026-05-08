@@ -9795,6 +9795,186 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── Manual cert-image attach + soft-delete + preview ─────────────────────
+  // Surgical-repair endpoints for orphan-cert recovery (e.g. when scanner
+  // pairing misses a back, or a misclick produces front-only). Designed to
+  // be callable by:
+  //   - admin web UI via session auth, AND
+  //   - the local scanner-watcher via SCANNER_API_TOKEN header
+  // (same dual-auth pattern as /api/admin/scan-ingest).
+  //
+  // Out of scope: variant generation (greyscale/highcontrast/etc). The
+  // attach path writes only `grading_{side}_original`. Run /reprocess-images
+  // afterward if variants are needed.
+
+  const certImgUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+  // GET /preview — light metadata used by Manual Mode UI to confirm cert
+  // exists and which side(s) are populated before uploading.
+  app.get("/api/admin/certs/:certId/preview", requireScannerOrAdmin, async (req, res) => {
+    try {
+      const certIdRaw = String(req.params.certId);
+      const certId = normalizeCertId(certIdRaw);
+      const r = await db.execute(sql`
+        SELECT
+          id,
+          certificate_number,
+          card_name,
+          (grading_front_original IS NOT NULL) AS has_front,
+          (grading_back_original  IS NOT NULL) AS has_back,
+          grade::text AS grade_overall,
+          grade_approved_at,
+          deleted_at,
+          status
+        FROM certificates
+        WHERE certificate_number = ${certId}
+        LIMIT 1
+      `);
+      const row = r.rows[0] as any;
+      if (!row) return res.status(404).json({ error: "cert not found", certId });
+      res.json({
+        cert_id:           row.certificate_number,
+        internal_id:       row.id,
+        card_name:         row.card_name ?? null,
+        has_front:         !!row.has_front,
+        has_back:          !!row.has_back,
+        grade_overall:     row.grade_overall ?? null,
+        grade_approved_at: row.grade_approved_at ?? null,
+        deleted:           !!row.deleted_at,
+        status:            row.status,
+      });
+    } catch (err: any) {
+      console.error("[cert-preview] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /image — attach a single-side image to an existing cert. sharp
+  // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
+  // R2 key follows the existing scan-ingest convention so /reprocess-images
+  // and the dashboard image fetcher both find it without changes.
+  app.post(
+    "/api/admin/certs/:certId/image",
+    requireScannerOrAdmin,
+    certImgUpload.single("image"),
+    async (req, res) => {
+      try {
+        const certIdRaw = String(req.params.certId);
+        const certId    = normalizeCertId(certIdRaw);
+        const side      = String(req.body?.side || "").toLowerCase();
+        const replaceExisting = String(req.body?.replace_existing || "false") === "true";
+
+        if (side !== "front" && side !== "back") {
+          return res.status(400).json({ error: "side must be 'front' or 'back'" });
+        }
+        const file = req.file;
+        if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
+
+        const certRow = await db.execute(sql`
+          SELECT id, certificate_number, grading_front_original, grading_back_original, deleted_at
+          FROM certificates
+          WHERE certificate_number = ${certId}
+          LIMIT 1
+        `);
+        const cert = certRow.rows[0] as any;
+        if (!cert) return res.status(404).json({ error: "cert not found", certId });
+        if (cert.deleted_at) return res.status(410).json({ error: "cert is soft-deleted; restore before attaching images" });
+
+        const sideCol = side === "front" ? "grading_front_original" : "grading_back_original";
+        const previousKey: string | null = cert[sideCol] || null;
+
+        if (previousKey && !replaceExisting) {
+          let currentSignedUrl: string | null = null;
+          try { currentSignedUrl = await getR2SignedUrl(previousKey, 600); } catch {}
+          return res.status(409).json({
+            error: `${side} already attached to ${certId}`,
+            current_key: previousKey,
+            current_signed_url: currentSignedUrl,
+          });
+        }
+
+        // sharp → JPEG. .rotate() applies EXIF orientation; resize cap mirrors
+        // scan-ingest-service.uploadImagesToCert (3000×3000 fit:inside).
+        const sharp = (await import("sharp")).default;
+        let jpegBuf: Buffer;
+        try {
+          jpegBuf = await sharp(file.buffer)
+            .rotate()
+            .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: 90 })
+            .toBuffer();
+        } catch (err: any) {
+          return res.status(400).json({ error: `image decode failed: ${err.message}` });
+        }
+
+        const newKey = `images/grading/${cert.id}/${side}_original.jpg`;
+        await uploadToR2(newKey, jpegBuf, "image/jpeg");
+
+        if (side === "front") {
+          await db.execute(sql`UPDATE certificates SET grading_front_original = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`);
+        } else {
+          await db.execute(sql`UPDATE certificates SET grading_back_original  = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`);
+        }
+
+        const adminUser = (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
+        await storage.writeAuditLog("certificate", certId, "image_attached_manual", adminUser, {
+          side,
+          replace_existing:  replaceExisting,
+          previous_key:      previousKey,
+          new_key:           newKey,
+          original_filename: file.originalname || null,
+          mime_received:     file.mimetype || null,
+          size_in_bytes:     file.size,
+        });
+
+        res.json({
+          ok:       true,
+          cert_id:  certId,
+          side,
+          new_key:  newKey,
+          previous_key: previousKey,
+          replaced: !!previousKey,
+        });
+      } catch (err: any) {
+        console.error("[cert-image-attach] failed:", err);
+        res.status(500).json({ error: err.message });
+      }
+    },
+  );
+
+  // DELETE — soft-delete only (sets deleted_at). Hard-delete is intentionally
+  // not exposed; project rule "no hard deletes on business tables" applies.
+  app.delete("/api/admin/certs/:certId", requireScannerOrAdmin, async (req, res) => {
+    try {
+      const certIdRaw = String(req.params.certId);
+      const certId    = normalizeCertId(certIdRaw);
+      const reason    = String(req.body?.reason || "").trim();
+      if (reason.length < 10) {
+        return res.status(400).json({ error: "reason must be at least 10 characters" });
+      }
+
+      const r = await db.execute(sql`
+        UPDATE certificates
+        SET deleted_at = NOW(), updated_at = NOW()
+        WHERE certificate_number = ${certId} AND deleted_at IS NULL
+        RETURNING id
+      `);
+      if (r.rows.length === 0) {
+        const exists = await db.execute(sql`SELECT id, deleted_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`);
+        if (exists.rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
+        return res.status(410).json({ error: "cert already soft-deleted", certId });
+      }
+
+      const adminUser = (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
+      await storage.writeAuditLog("certificate", certId, "soft_delete", adminUser, { reason });
+
+      res.json({ ok: true, cert_id: certId });
+    } catch (err: any) {
+      console.error("[cert-soft-delete] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── AI Divergence dashboard ──────────────────────────────────────────────
   // For every approved cert that ALSO has a grade-prediction row in
   // ai_predictions, compute the per-zone divergence between AI and human:
