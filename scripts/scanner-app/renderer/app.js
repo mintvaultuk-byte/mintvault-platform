@@ -56,6 +56,13 @@ const els = {
   deleteReason:  document.getElementById("deleteReason"),
   deleteCancel:  document.getElementById("deleteCancel"),
   deleteConfirm: document.getElementById("deleteConfirm"),
+
+  // Pause + Settings + Test scan (toggles QoL pack)
+  pauseBtn:        document.getElementById("pauseBtn"),
+  settingsToggle:  document.getElementById("settingsToggle"),
+  settingsBody:    document.getElementById("settingsBody"),
+  autoOpenOnError: document.getElementById("autoOpenOnError"),
+  testScanBtn:     document.getElementById("testScanBtn"),
 };
 
 // ── Modal helpers ────────────────────────────────────────────────────────
@@ -80,6 +87,16 @@ function renderState(s) {
     b.classList.toggle("active", b.dataset.mode === s.mode);
   }
 
+  // Pause button + status dot precedence: pause masks all other states.
+  const paused = s.pausedUntil != null && s.pausedUntil > Date.now();
+  els.pauseBtn.textContent = paused ? "Resume" : "Pause";
+  els.pauseBtn.classList.toggle("active", paused);
+
+  // Settings checkbox state — fall back to default true if absent.
+  if (els.autoOpenOnError) {
+    els.autoOpenOnError.checked = s.autoOpenOnError !== false;
+  }
+
   // Stats — display server prediction unless operator has set an override.
   els.nextCert.textContent = s.nextCertOverride || s.predictedNextCert || "—";
   if (s.recent && s.recent.length > 0) {
@@ -91,19 +108,26 @@ function renderState(s) {
   }
   els.session.textContent = `${s.sessionPaired || 0} scan${s.sessionPaired === 1 ? "" : "s"}`;
 
-  // Status
-  els.dot.className = `dot ${s.state}`;
-  els.statusText.textContent = STATE_LABELS[s.state] || s.state;
-  els.statusSub.textContent = (() => {
-    if (s.state === "manual_pending" && s.manualPending) {
-      return `→ ${s.manualPending.certId} ${s.manualPending.side.toUpperCase()}${s.manualPending.replaceExisting ? " (replace)" : ""}`;
-    }
-    if (s.state === "error" && s.lastError) return s.lastError.slice(0, 80);
-    if (s.state === "front_buffered" && s.bufferedFront) {
-      return `${s.bufferedFront.split("/").pop()} buffered — no timer, take your time`;
-    }
-    return "";
-  })();
+  // Status — paused wins over the underlying state.
+  if (paused) {
+    els.dot.className = "dot paused";
+    els.statusText.textContent = "Paused — clicking will resume";
+    const minsLeft = Math.max(0, Math.ceil((s.pausedUntil - Date.now()) / 60_000));
+    els.statusSub.textContent = `auto-resume in ${minsLeft} min`;
+  } else {
+    els.dot.className = `dot ${s.state}`;
+    els.statusText.textContent = STATE_LABELS[s.state] || s.state;
+    els.statusSub.textContent = (() => {
+      if (s.state === "manual_pending" && s.manualPending) {
+        return `→ ${s.manualPending.certId} ${s.manualPending.side.toUpperCase()}${s.manualPending.replaceExisting ? " (replace)" : ""}`;
+      }
+      if (s.state === "error" && s.lastError) return s.lastError.slice(0, 80);
+      if (s.state === "front_buffered" && s.bufferedFront) {
+        return `${s.bufferedFront.split("/").pop()} buffered — no timer, take your time`;
+      }
+      return "";
+    })();
+  }
 
   // Recent — last 5
   if (s.recent && s.recent.length > 0) {
@@ -222,7 +246,11 @@ els.orphansBtn.addEventListener("click", async () => {
       const row    = btn.closest(".orphan-row");
       const certId = row.dataset.cert;
       const side   = row.dataset.side;
-      const r = await window.scanner.armOneShot({ certId, side, replaceExisting: false });
+      // Orphan-attach defaults replaceExisting=true: the operator has
+      // explicitly chosen "Attach back to MVxx" from a list filtered to
+      // orphan certs — if the targeted side is somehow already present,
+      // they want to overwrite it, not get a 409.
+      const r = await window.scanner.armOneShot({ certId, side, replaceExisting: true, fromOrphanPicker: true });
       if (r.ok) {
         closeModal(els.orphanModal);
       } else {
@@ -290,6 +318,55 @@ els.forwardApply.addEventListener("click", async () => {
 // ── Logs ─────────────────────────────────────────────────────────────────
 
 els.logsBtn.addEventListener("click", () => window.scanner.openLogs());
+
+// ── Pause toggle ─────────────────────────────────────────────────────────
+
+els.pauseBtn.addEventListener("click", async () => {
+  const cur = await window.scanner.getState();
+  const isPaused = cur.pausedUntil != null && cur.pausedUntil > Date.now();
+  els.pauseBtn.disabled = true;
+  await window.scanner.setPaused(!isPaused);
+  els.pauseBtn.disabled = false;
+});
+
+// ── Settings collapsible ─────────────────────────────────────────────────
+
+els.settingsToggle.addEventListener("click", () => {
+  const open = !els.settingsBody.hasAttribute("hidden");
+  if (open) {
+    els.settingsBody.setAttribute("hidden", "");
+    els.settingsToggle.textContent = "Settings ⌄";
+  } else {
+    els.settingsBody.removeAttribute("hidden");
+    els.settingsToggle.textContent = "Settings ⌃";
+  }
+});
+
+els.autoOpenOnError.addEventListener("change", async () => {
+  await window.scanner.setSetting("autoOpenOnError", !!els.autoOpenOnError.checked);
+});
+
+// ── Test scan ────────────────────────────────────────────────────────────
+
+els.testScanBtn.addEventListener("click", async () => {
+  els.testScanBtn.disabled = true;
+  const original = els.testScanBtn.textContent;
+  els.testScanBtn.textContent = "Triggering…";
+  const r = await window.scanner.testScan();
+  if (r.ok) {
+    els.testScanBtn.textContent = "Triggered — watch tray";
+    setTimeout(() => {
+      els.testScanBtn.textContent = original;
+      els.testScanBtn.disabled = false;
+    }, 3000);
+  } else {
+    els.testScanBtn.textContent = `Failed: ${(r.error || "unknown").slice(0, 30)}`;
+    setTimeout(() => {
+      els.testScanBtn.textContent = original;
+      els.testScanBtn.disabled = false;
+    }, 4000);
+  }
+});
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 

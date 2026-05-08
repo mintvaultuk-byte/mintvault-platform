@@ -28,7 +28,11 @@
   </section>
 
   <section class="row" id="statusRow">
-    <div class="status-text"><span class="dot" id="dot"></span><span id="statusText">Idle — waiting for scan</span></div>
+    <div class="status-text">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">Idle — waiting for scan</span>
+      <button class="pause-btn" id="pauseBtn" title="Pause / resume scan detection">Pause</button>
+    </div>
     <div class="status-sub" id="statusSub"></div>
   </section>
 
@@ -41,6 +45,24 @@
     <button class="btn" id="orphansBtn">Fix orphan…</button>
     <button class="btn" id="forwardBtn">Forward to cert…</button>
     <button class="btn ghost" id="logsBtn">Show logs</button>
+  </section>
+
+  <!-- Settings — collapsible, footer-style. Local prefs only, no server sync. -->
+  <section class="row settings" id="settingsRow">
+    <button class="settings-toggle" id="settingsToggle">Settings ⌄</button>
+    <div class="settings-body" id="settingsBody" hidden>
+      <label class="checkbox">
+        <input type="checkbox" id="autoOpenOnError" />
+        <span>Auto-open this window on error <span class="hint inline">(default on)</span></span>
+      </label>
+      <div class="settings-test">
+        <button class="btn" id="testScanBtn">Test scan</button>
+        <p class="hint">
+          Drops a 1×1 px placeholder into the inbox. Creates a real cert.
+          Use sparingly — soft-delete via Fix orphan after testing.
+        </p>
+      </div>
+    </div>
   </section>
 
   <!-- Manual mode prompt — shown when a scan arrives in MANUAL mode -->

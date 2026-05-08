@@ -140,6 +140,14 @@ scripts/scanner-app/assets/tray-error@2x.png # 32×32, non-template
 
 Template images auto-tint with the menu bar (dark/light); non-template images keep their source colour.
 
+## QoL toggles (added after initial ship)
+
+- **Pause / Resume** — button in the status row. While paused, the watcher logs `paused — ignoring foo.tif` for any new arrival and leaves the file untouched in inbox. Auto-clears after 30 minutes (so a forgotten pause can't strand grading overnight). Tray icon switches to a pause-bars glyph; tooltip shows "Paused (Nm remaining)". State persists across app restarts via `pausedUntil` in state.json.
+- **Auto-open on error** — when the watcher transitions to `error` state, the popover auto-shows so the operator sees the failure without having to click the tray. Only fires on the idle→error edge, not every error tick. Toggle in Settings (default ON).
+- **Orphan-attach defaults to replace** — when you click "Attach back" in the orphan picker, the one-shot is armed with `replaceExisting: true`. Reasoning: the operator has already confirmed they want this orphan fixed, so a 409 (side already occupied) shouldn't block them. Manual mode (modal-prompted scans) still defaults replace OFF — only the orphan-flow changes.
+- **Test scan** — button in Settings that drops a 1×1 PNG named `test-scan-{timestamp}.tif` into inbox. Chokidar picks it up and routes through the normal pipeline → creates a real cert. Use sparingly, soft-delete via Fix orphan after testing.
+- **Manual mode supports back-only attach** — verified: the manual-prompt modal exposes both Front and Back radios with no enforced order, and `/api/admin/certs/:id/image` accepts `side=back` regardless of whether front exists. No code change needed.
+
 ## Manual decisions made during build
 
 Per spec §9: "make a call, document it, keep moving". Calls made:

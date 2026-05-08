@@ -126,6 +126,46 @@ html, body {
 .dot.success        { background: var(--green); }
 .dot.error          { background: var(--red); }
 .dot.manual_pending { background: var(--blue); }
+.dot.paused         { background: var(--muted); }
+
+/* Pause / resume toggle, sits to the right of the status text. */
+.pause-btn {
+  margin-left: auto;
+  background: var(--bg-3);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+.pause-btn:hover { color: var(--fg); border-color: var(--muted); }
+.pause-btn.active { background: var(--orange); color: #1a1400; border-color: var(--orange); }
+
+/* Settings — collapsible footer block. Vanilla JS toggles `hidden`. */
+.row.settings { padding-bottom: 14px; }
+.settings-toggle {
+  background: none; border: none;
+  color: var(--muted); font: inherit; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 1px;
+  cursor: pointer; padding: 0;
+}
+.settings-toggle:hover { color: var(--fg); }
+.settings-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.settings-body .checkbox {
+  font-size: 11px; color: var(--fg);
+}
+.settings-test { display: flex; flex-direction: column; gap: 4px; }
+.hint.inline { color: var(--muted); font-style: italic; font-size: 10px; }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }

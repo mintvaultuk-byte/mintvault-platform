@@ -51,6 +51,13 @@ const errorSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
   <rect x="7" y="0" width="2" height="3" fill="black"/>
 </svg>`;
 
+// paused: two solid vertical bars (universal pause glyph). Distinct from M
+// at-a-glance so the operator can tell pause from idle from the menu bar.
+const pausedSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <rect x="4"  y="3" width="3" height="10" fill="black"/>
+  <rect x="9"  y="3" width="3" height="10" fill="black"/>
+</svg>`;
+
 // ── Render ───────────────────────────────────────────────────────────────
 
 async function render(name, svg) {
@@ -69,9 +76,10 @@ async function render(name, svg) {
 }
 
 (async () => {
-  await render("tray-idle",  idleSvg);
-  await render("tray-busy",  busySvg);
-  await render("tray-error", errorSvg);
+  await render("tray-idle",   idleSvg);
+  await render("tray-busy",   busySvg);
+  await render("tray-error",  errorSvg);
+  await render("tray-paused", pausedSvg);
   console.log("done.");
 })().catch(err => {
   console.error("build-tray-icons failed:", err);

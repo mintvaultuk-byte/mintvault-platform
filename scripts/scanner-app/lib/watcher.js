@@ -191,6 +191,22 @@ class Watcher extends EventEmitter {
       return;
     }
 
+    // Pause check — runs before stable-write detection so a paused watcher
+    // doesn't even open the file. Clears expired pause as a side effect so
+    // the watcher self-heals without a click.
+    const cur = stateMod.get();
+    if (cur.pausedUntil) {
+      if (cur.pausedUntil > Date.now()) {
+        this.log(`paused — ignoring ${filename}`);
+        return;
+      } else {
+        // Auto-expire: 30-min ceiling has passed, clear the flag.
+        stateMod.set({ pausedUntil: null });
+        this.emitState();
+        this.log(`pause expired automatically — resuming`);
+      }
+    }
+
     // Wait for size to stabilise — SilverFast streams the .tif.
     const ok = await this.waitForStable(filePath);
     if (!ok) {

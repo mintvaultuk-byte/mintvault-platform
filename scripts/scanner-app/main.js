@@ -80,11 +80,18 @@ function loadTrayPng(file) {
   }
 }
 
-function trayImageForState(s) {
+function trayImageForState(s, paused) {
   // Template images are auto-tinted by macOS — black source becomes white
-  // in dark mode, accent in light mode. All three states ship as templates
-  // for visual consistency; differentiation is via glyph shape (M vs M+arrow
-  // vs M+exclamation), not colour.
+  // in dark mode, accent in light mode. All four states ship as templates
+  // for visual consistency; differentiation is via glyph shape (M / M+arrow
+  // / M+exclamation / pause-bars).
+  // Paused wins over any logical state — when the watcher is muted, the
+  // operator sees the pause glyph regardless of upload state.
+  if (paused) {
+    const img = loadTrayPng("tray-paused.png");
+    img.setTemplateImage(true);
+    return img;
+  }
   const map = {
     idle:            "tray-idle.png",
     front_buffered:  "tray-busy.png",
@@ -95,13 +102,16 @@ function trayImageForState(s) {
   };
   const file = map[s] || "tray-idle.png";
   const img = loadTrayPng(file);
-  // Always set template — the build-tray-icons.js outputs are pure black
-  // on transparent, which is what macOS expects for templates.
   img.setTemplateImage(true);
   return img;
 }
 
 function trayTooltipForState(s) {
+  const paused = stateMod.isPaused();
+  if (paused) {
+    const minsLeft = Math.max(0, Math.ceil((s.pausedUntil - Date.now()) / 60_000));
+    return `MintVault Scanner — Paused (${minsLeft}m remaining)`;
+  }
   const stateLabels = {
     idle:           "Idle — waiting for scan",
     front_buffered: "Front captured — scan back",
@@ -117,7 +127,8 @@ function trayTooltipForState(s) {
 function refreshTray() {
   if (!tray) return;
   const s = stateMod.get();
-  tray.setImage(trayImageForState(s.state));
+  const paused = stateMod.isPaused();
+  tray.setImage(trayImageForState(s.state, paused));
   tray.setToolTip(trayTooltipForState(s));
   buildTrayMenu();
 }
@@ -145,7 +156,7 @@ function setupTray() {
   const s = stateMod.get();
   let img;
   try {
-    img = trayImageForState(s.state);
+    img = trayImageForState(s.state, stateMod.isPaused());
     console.log(`[tray] created with image (empty=${img.isEmpty()}, template=${img.isTemplateImage()}, size=${JSON.stringify(img.getSize())})`);
   } catch (err) {
     console.error(`[tray] image load failed entirely: ${err.message} — using inline fallback`);
@@ -240,6 +251,50 @@ function setupIpc() {
     return { ok: true, mode };
   });
 
+  // Pause toggle. setPaused(true) sets a 30-min ceiling on pausedUntil so
+  // a forgotten pause auto-clears. Tray + popover update via the same
+  // state-update push that other transitions use.
+  ipcMain.handle("set-paused", (_e, paused) => {
+    stateMod.setPaused(!!paused);
+    pushStateToRenderer();
+    return { ok: true, paused: stateMod.isPaused(), pausedUntil: stateMod.get().pausedUntil };
+  });
+
+  // Generic settings setter — only allows keys whitelisted in lib/state.js.
+  // Used by the popover's Settings section (auto-open-on-error checkbox).
+  ipcMain.handle("set-setting", (_e, payload) => {
+    if (!payload || typeof payload.key !== "string") return { ok: false, error: "missing key" };
+    stateMod.setSetting(payload.key, payload.value);
+    pushStateToRenderer();
+    return { ok: true };
+  });
+
+  // Test-scan — write a 1×1 transparent PNG to ~/mintvault-scans/inbox/
+  // with a .tif extension. Chokidar will pick it up like a real scan and
+  // route through the same pipeline. Creates a real cert (server has no
+  // way to know it's a test), so the operator must soft-delete via the
+  // orphan picker afterwards. Documented in README.
+  ipcMain.handle("test-scan", () => {
+    try {
+      const { INBOX } = require("./lib/watcher");
+      const ts = Date.now();
+      const dest = path.join(INBOX, `test-scan-${ts}.tif`);
+      // 1×1 transparent PNG — sharp on the server side decodes it fine.
+      // Renamed to .tif so it passes the watcher's accepted-ext filter.
+      const TINY_PNG = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgYGD4DwABAQEAH" +
+        "9N6GgAAAABJRU5ErkJggg==",
+        "base64",
+      );
+      fs.writeFileSync(dest, TINY_PNG);
+      console.log(`[test-scan] wrote ${dest} (${TINY_PNG.length} bytes)`);
+      return { ok: true, path: dest };
+    } catch (err) {
+      console.error("[test-scan] failed:", err);
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.handle("attach-manual-scan", async (_e, payload) => {
     return watcher.attachManualScan(payload || {});
   });
@@ -296,7 +351,20 @@ app.whenReady().then(async () => {
   stateMod.load();
 
   watcher = new Watcher();
-  watcher.on("state-changed", () => pushStateToRenderer());
+  let lastErrorState = false;
+  watcher.on("state-changed", () => {
+    pushStateToRenderer();
+    // Auto-open popover on error transition. Only fires on the IDLE→ERROR
+    // edge, not every error tick — otherwise a stuck error would keep
+    // re-stealing focus. Suppressed when the popover is already visible.
+    const s = stateMod.get();
+    const isError = s.state === "error";
+    if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {
+      console.log(`[main] auto-opening popover on error: ${s.lastError || "(no message)"}`);
+      showPopover();
+    }
+    lastErrorState = isError;
+  });
   watcher.on("scan-detected", (evt) => {
     if (popover && !popover.isDestroyed()) {
       popover.webContents.send("scan-detected", evt);
