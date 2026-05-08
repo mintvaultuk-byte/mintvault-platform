@@ -268,6 +268,34 @@ html, body {
   text-transform: uppercase;
 }
 .field input[type="text"]:focus { outline: none; border-color: var(--gold); }
+
+/* Prefixed input — static "MV" sits to the left of a digits-only field. */
+.prefixed-input {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.prefixed-input:focus-within { border-color: var(--gold); }
+.prefixed-input .prefix {
+  background: var(--bg-3);
+  color: var(--gold);
+  font-family: "SF Mono", Menlo, monospace;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+}
+.prefixed-input input[type="text"] {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
 .field-row { display: flex; align-items: center; gap: 10px; }
 .field-row > span { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
 .radio, .checkbox {

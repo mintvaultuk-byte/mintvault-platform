@@ -319,17 +319,30 @@ els.forwardBtn.addEventListener("click", () => {
 });
 els.forwardCancel.addEventListener("click", () => closeModal(els.forwardModal));
 els.forwardApply.addEventListener("click", async () => {
-  const certId = (els.forwardCert.value || "").toUpperCase().trim();
-  if (!/^MV\d+$/.test(certId)) {
+  // Backward-compatible parse: input is digits-only by design (the static
+  // MV prefix lives in HTML), but operators occasionally paste a full
+  // "MV57" / "mv 57" / "  MV 57  " from elsewhere. Strip everything
+  // that isn't a digit, then re-prefix MV — same result either way.
+  const digits = (els.forwardCert.value || "").replace(/[^0-9]/g, "");
+  if (!digits) {
     els.forwardCert.style.borderColor = "var(--red)";
     return;
   }
+  const certId = `MV${digits}`;
   const r = await window.scanner.forwardToCert(certId);
   if (!r.ok) {
     alert(`Failed: ${r.error || "unknown"}`);
     return;
   }
   closeModal(els.forwardModal);
+});
+
+// Live-strip non-digits as the operator types — handles paste of "MV57"
+// without the operator having to backspace the prefix.
+els.forwardCert.addEventListener("input", () => {
+  const cleaned = els.forwardCert.value.replace(/[^0-9]/g, "");
+  if (cleaned !== els.forwardCert.value) els.forwardCert.value = cleaned;
+  els.forwardCert.style.borderColor = "";
 });
 
 // ── Logs / quick actions ─────────────────────────────────────────────────

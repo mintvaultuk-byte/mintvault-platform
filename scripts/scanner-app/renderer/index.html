@@ -111,7 +111,22 @@
       <div class="modal-meta" id="forwardServerNext">Server says next is: —</div>
       <label class="field">
         <span>Override to</span>
-        <input type="text" id="forwardCert" placeholder="MV___" autocapitalize="characters" autocomplete="off" />
+        <!-- Static MV prefix + digits-only input. Saves the operator
+             two keystrokes per override during high-volume sessions.
+             Pasting "MV57" / "mv 57" / "57" all still works — the JS
+             handler strips non-digits before validating. -->
+        <div class="prefixed-input">
+          <span class="prefix">MV</span>
+          <input
+            type="text"
+            id="forwardCert"
+            placeholder="___"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+            maxlength="6"
+          />
+        </div>
       </label>
       <p class="hint">Affects only the displayed "Next cert". Server still allocates via /api/admin/next-cert-id when you scan.</p>
       <div class="modal-actions">
