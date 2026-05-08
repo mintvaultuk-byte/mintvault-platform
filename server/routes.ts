@@ -8508,6 +8508,247 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // POST /api/admin/certificates/:id/identify
+  // Standalone Identify (Haiku + GPT consensus + TCG API). Populates ONLY
+  // card metadata (card_name, set_name, card_number_display, rarity,
+  // year_text, card_game). Does not touch any grade columns. Gated on
+  // AI_IDENTIFY_ENABLED — returns 403 with a clear message when OFF so the
+  // UI can render the disabled-state tooltip.
+  app.post("/api/admin/certificates/:id/identify", requireAdmin, async (req, res) => {
+    try {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_IDENTIFY_ENABLED"))) {
+        return res.status(403).json({ error: "AI Identify is disabled — enable it in /admin → AI Learning" });
+      }
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image — upload images first" });
+
+      let frontBuf: Buffer;
+      try {
+        const url = await getR2SignedUrl(frontKey, 300);
+        const resp = await fetch(url);
+        frontBuf = Buffer.from(await resp.arrayBuffer());
+      } catch { return res.status(400).json({ error: "Could not fetch front image" }); }
+
+      // Haiku identify + GPT consensus
+      const rawId = await identifyCardFromBuffer(frontBuf, "image/jpeg", id);
+
+      // Lookup-table verify, then Pokémon TCG API on top (same logic as
+      // /identify-only — kept inline rather than extracted because the two
+      // routes have slightly different response shapes).
+      let enrichedId = await verifyAndEnrichCardData(rawId);
+      const game = rawId.detected_game?.toLowerCase();
+      let tcgResult: any = { verified: false };
+      if (game === "pokemon") {
+        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
+        if (tcgResult.verified) {
+          const enrichedAlreadyVerified = enrichedId.verified === true;
+          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+            normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
+          if (!enrichedAlreadyVerified || namesAgree) {
+            enrichedId = {
+              ...enrichedId, verified: true,
+              officialName:   tcgResult.officialCardName || enrichedId.officialName,
+              officialSet:    tcgResult.officialSetName  || enrichedId.officialSet,
+              officialNumber: rawId.detected_number,
+              referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
+              dbSource:       "pokemon-tcg-api",
+              detected_set:   tcgResult.officialSetName || enrichedId.detected_set,
+              detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
+              detected_year:  tcgResult.officialYear   || enrichedId.detected_year,
+            };
+          }
+        }
+      }
+
+      const aiConfidence = rawId.confidence || "low";
+      const verified = enrichedId.verified === true || tcgResult.verified === true;
+      const trustAi = tcgResult.trustAi === true;
+      const shouldWrite = verified || aiConfidence === "high" || trustAi;
+
+      const cardName   = shouldWrite ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
+      const setName    = verified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
+      const cardNumber = shouldWrite ? (enrichedId.detected_number || null) : null;
+      const cardGame   = shouldWrite ? (enrichedId.detected_game || null) : null;
+      const rarity     = shouldWrite ? (enrichedId.detected_rarity || null) : null;
+      const rawYear    = rawId.copyright_year || enrichedId.detected_year || null;
+      const yearMatch  = rawYear ? String(rawYear).match(/\d{4}/) : null;
+      const yearText   = yearMatch ? yearMatch[0] : null;
+      const language   = (enrichedId as any).detected_language || null;
+      const overwrite  = verified || aiConfidence === "high";
+
+      let updatedFields: string[] = [];
+      if (shouldWrite) {
+        if (overwrite) {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name           = COALESCE(${cardName},   card_name),
+              set_name            = COALESCE(${setName},    set_name),
+              card_number_display = COALESCE(${cardNumber}, card_number_display),
+              year_text           = COALESCE(${yearText},   year_text),
+              card_game           = COALESCE(${cardGame},   card_game),
+              rarity              = COALESCE(${rarity},     rarity),
+              language            = COALESCE(${language},   language),
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        } else {
+          await db.execute(sql`
+            UPDATE certificates SET
+              card_name           = CASE WHEN card_name IS NULL OR card_name = '' OR card_name = '(untitled)' OR card_name = '(pending)' THEN ${cardName} ELSE card_name END,
+              set_name            = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
+              card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
+              year_text           = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
+              card_game           = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
+              rarity              = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+              language            = CASE WHEN language IS NULL OR language = '' THEN ${language} ELSE language END,
+              updated_at = NOW()
+            WHERE id = ${id}
+          `);
+        }
+        updatedFields = ["card_name","set_name","card_number_display","year_text","card_game","rarity","language"].filter(f => {
+          const v: Record<string,unknown> = { card_name: cardName, set_name: setName, card_number_display: cardNumber, year_text: yearText, card_game: cardGame, rarity, language };
+          return v[f] != null && v[f] !== "";
+        });
+      }
+
+      // Audit
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, details)
+          VALUES ('certificate', ${String(id)}, 'ai_identify',
+            ${JSON.stringify({ fields_updated: updatedFields, source: "manual_button", confidence: aiConfidence, tcgVerified: verified })}::jsonb)
+        `);
+      } catch (e: any) { console.warn("[ai/identify] audit failed:", e.message); }
+
+      console.log(`[ai/identify] cert=${id} confidence=${aiConfidence} tcgVerified=${verified} fields=${updatedFields.join(",")}`);
+      res.json({
+        card_name:   cardName,
+        set_name:    setName,
+        card_number: cardNumber,
+        year:        yearText,
+        rarity,
+        set_id:      (enrichedId as any).set_code || rawId.set_code || null,
+        language,
+        confidence:  aiConfidence,
+        verified,
+        detailsWritten: shouldWrite,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || "");
+      if (msg.includes("AI_IDENTIFY_ENABLED=false")) {
+        return res.status(403).json({ error: "AI Identify is disabled — enable it in /admin → AI Learning" });
+      }
+      console.error("[ai/identify] error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // POST /api/admin/certificates/:id/grade
+  // Standalone Full Grade (Opus 4.7 via analyzeCardFromBuffers). Populates
+  // ONLY grade columns (centering_score, corners_score, edges_score,
+  // surface_score, grade, ai_draft_grade). Does not touch card metadata.
+  // Gated on AI_FULL_GRADE_ENABLED.
+  app.post("/api/admin/certificates/:id/grade", requireAdmin, async (req, res) => {
+    try {
+      const { getFeatureFlag } = await import("./config/feature-flags");
+      if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
+        return res.status(403).json({ error: "AI Full Grade is disabled — enable it in /admin → AI Learning" });
+      }
+
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const c = cert as any;
+      const frontKey = c.gradingFrontOriginal || c.frontImagePath;
+      const backKey  = c.gradingBackOriginal  || c.backImagePath;
+      if (!frontKey) return res.status(400).json({ error: "No front image — upload images first" });
+
+      const fetchR2 = async (key: string | null): Promise<Buffer | null> => {
+        if (!key) return null;
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const resp = await fetch(url);
+          return Buffer.from(await resp.arrayBuffer());
+        } catch { return null; }
+      };
+      const frontRaw = await fetchR2(frontKey);
+      if (!frontRaw) return res.status(400).json({ error: "Could not fetch front image from storage" });
+      const backRaw = await fetchR2(backKey);
+
+      // Generate variants (cropped buffer is what analyzeCardFromBuffers wants).
+      // Use the same Buffer-allowlist pattern fixed in 5c1ca8c — never iterate
+      // generateImageVariants's full return shape (it includes non-Buffer
+      // diagnostic fields cropGeometry/matRgb).
+      const frontVariants = await generateImageVariants(frontRaw, id);
+      const backVariants = backRaw ? await generateImageVariants(backRaw, id) : null;
+
+      const cardGame = (c.cardGame || "").toLowerCase() || undefined;
+      const analysis = await analyzeCardFromBuffers(
+        frontVariants.cropped,
+        backVariants?.cropped || null,
+        cardGame,
+        id,
+      );
+
+      const cents   = typeof analysis.centering?.subgrade === "number" ? analysis.centering.subgrade : null;
+      const corners = typeof analysis.corners?.subgrade   === "number" ? analysis.corners.subgrade   : null;
+      const edges   = typeof analysis.edges?.subgrade     === "number" ? analysis.edges.subgrade     : null;
+      const surface = typeof analysis.surface?.subgrade   === "number" ? analysis.surface.subgrade   : null;
+      const overall = typeof analysis.overall_grade       === "number" ? analysis.overall_grade     : null;
+      const strength = typeof (analysis as any).grade_strength_score === "number"
+        ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
+        : null;
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          ai_analysis           = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{grading}', ${JSON.stringify(analysis)}::jsonb),
+          ai_draft_grade        = ${overall},
+          centering_score       = ${cents},
+          corners_score         = ${corners},
+          edges_score           = ${edges},
+          surface_score         = ${surface},
+          grade_strength_score  = ${strength},
+          updated_at            = NOW()
+        WHERE id = ${id}
+      `);
+
+      // Audit
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, details)
+          VALUES ('certificate', ${String(id)}, 'ai_grade',
+            ${JSON.stringify({ subgrades: { centering: cents, corners, edges, surface }, overall, model_used: "claude-opus-4-7", source: "manual_button" })}::jsonb)
+        `);
+      } catch (e: any) { console.warn("[ai/grade] audit failed:", e.message); }
+
+      console.log(`[ai/grade] cert=${id} centering=${cents} corners=${corners} edges=${edges} surface=${surface} overall=${overall} strength=${strength}`);
+      res.json({
+        centering: cents,
+        corners,
+        edges,
+        surface,
+        overall,
+        grade_label: analysis.grade_label || null,
+        grade_strength_score: strength,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || "");
+      if (msg.includes("AI_FULL_GRADE_ENABLED=false")) {
+        return res.status(403).json({ error: "AI Full Grade is disabled — enable it in /admin → AI Learning" });
+      }
+      console.error("[ai/grade] error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  });
+
   // POST /api/admin/certificates/:id/identify-and-analyze
   // Full pipeline: auto-crop → generate 5 views → save to R2 → identify → verify → grade → save
   app.post("/api/admin/certificates/:id/identify-and-analyze", requireAdmin, async (req, res) => {

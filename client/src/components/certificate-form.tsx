@@ -182,10 +182,28 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   const [autofillLoading, setAutofillLoading] = useState(false);
   const [autofillRan, setAutofillRan] = useState(false);
 
-  // AI Identify & Grade state
+  // AI Identify & Grade state — split into two independent operations
   const [identifyLoading, setIdentifyLoading] = useState(false);
+  const [gradeLoading, setGradeLoading] = useState(false);
   const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
   const [identifyVerified, setIdentifyVerified] = useState(false);
+
+  // AI feature flags (for gating the Identify / Grade buttons)
+  const { data: aiFlags } = useQuery<{ flags: Array<{ name: string; enabled: boolean }> }>({
+    queryKey: ["/api/admin/ai-feature-flags"],
+    queryFn: async () => {
+      const r = await fetch("/api/admin/ai-feature-flags", { credentials: "include" });
+      if (!r.ok) return { flags: [] };
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const flagsByName = (aiFlags?.flags || []).reduce<Record<string, boolean>>((acc, f) => {
+    acc[f.name] = f.enabled;
+    return acc;
+  }, {});
+  const identifyEnabled = flagsByName["AI_IDENTIFY_ENABLED"] !== false; // default ON
+  const fullGradeEnabled = flagsByName["AI_FULL_GRADE_ENABLED"] === true; // default OFF
 
   // TCG manual search state
   const [tcgSearchOpen, setTcgSearchOpen] = useState(false);
@@ -278,68 +296,73 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     onIdentifyAndGrade?.({ analysis: null, identification: manualId });
   }
 
-  async function runIdentifyAndGrade() {
+  // AI Identify — populates ONLY card metadata (name/set/number/year/rarity/lang).
+  // Hits the new /identify endpoint (split out from /identify-and-analyze so the
+  // operator can run identify without burning Opus tokens on a full grade).
+  async function runIdentify() {
     if (!isEdit || !certificate?.id) return;
     setIdentifyLoading(true);
     setIdentifyConfidence(null);
     try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify-and-analyze`, {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify`, {
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Identify & Grade failed");
+      if (!res.ok) throw new Error(data.error || "Identify failed");
 
-      setIdentifyConfidence(data.identificationConfidence);
-      setIdentifyVerified(data.identificationVerified);
+      setIdentifyConfidence(data.confidence ?? null);
+      setIdentifyVerified(!!data.verified);
 
-      if (data.detailsWritten) {
-        const id = data.identification;
-        const c = data.cert;
+      if (data.detailsWritten !== false) {
         const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
-
-        // Use identification object (source of truth) with cert as fallback
-        const newName = id?.officialName || id?.detected_name || c?.cardName || null;
-        const newSet = id?.officialSet || id?.detected_set || c?.setName || null;
-        const newNumber = id?.officialNumber || id?.detected_number || c?.cardNumber || null;
-        const rawYear = id?.detected_year || id?.copyright_year || c?.year || null;
-        const newYear = String(rawYear || "").match(/\d{4}/)?.[0] || null;
-        const newGame = slugifyCardGame(id?.detected_game || c?.cardGame || null) || null;
-        const newRarity = id?.detected_rarity || c?.rarity || null;
-        const newLanguage = id?.detected_language || c?.language || null;
-
-        // Overwrite unconditionally when verified or high-confidence;
-        // only fill empty fields for uncertain results
-        const overwrite = data.identificationVerified || data.identificationConfidence === "high";
-
+        const overwrite = data.verified || data.confidence === "high";
         setForm(prev => ({
           ...prev,
-          cardName:   overwrite ? (newName || prev.cardName)     : (isEmpty(prev.cardName)   ? (newName || prev.cardName)     : prev.cardName),
-          setName:    overwrite ? (newSet || prev.setName)        : (isEmpty(prev.setName)    ? (newSet || prev.setName)        : prev.setName),
-          cardNumber: overwrite ? (newNumber || prev.cardNumber)  : (isEmpty(prev.cardNumber) ? (newNumber || prev.cardNumber)  : prev.cardNumber),
-          year:       overwrite ? (newYear || prev.year)          : (isEmpty(prev.year)       ? (newYear || prev.year)          : prev.year),
-          cardGame:   overwrite ? (newGame || prev.cardGame)      : (isEmpty(prev.cardGame)   ? (newGame || prev.cardGame)      : prev.cardGame),
-          rarity:     overwrite ? (newRarity || prev.rarity)      : (isEmpty(prev.rarity)     ? (newRarity || prev.rarity)      : prev.rarity),
-          language:   overwrite ? (newLanguage || prev.language)  : (isEmpty(prev.language)   ? (newLanguage || prev.language)  : prev.language),
+          cardName:   overwrite ? (data.card_name || prev.cardName)     : (isEmpty(prev.cardName)   ? (data.card_name || prev.cardName)     : prev.cardName),
+          setName:    overwrite ? (data.set_name || prev.setName)        : (isEmpty(prev.setName)    ? (data.set_name || prev.setName)        : prev.setName),
+          cardNumber: overwrite ? (data.card_number || prev.cardNumber)  : (isEmpty(prev.cardNumber) ? (data.card_number || prev.cardNumber)  : prev.cardNumber),
+          year:       overwrite ? (data.year || prev.year)               : (isEmpty(prev.year)       ? (data.year || prev.year)               : prev.year),
+          rarity:     overwrite ? (data.rarity || prev.rarity)           : (isEmpty(prev.rarity)     ? (data.rarity || prev.rarity)           : prev.rarity),
+          language:   overwrite ? (data.language || prev.language)       : (isEmpty(prev.language)   ? (data.language || prev.language)       : prev.language),
         }));
-
-        const grade = data.analysis?.overall_grade;
-        const gradeLabel = data.analysis?.grade_label;
-        toast({
-          title: "Card identified & graded",
-          description: `${newName || "Card"} — ${newSet || "Unknown set"}${grade ? ` · Grade ${grade} ${gradeLabel || ""}` : ""}`,
-        });
+        toast({ title: "Card identified", description: `${data.card_name || "Card"} — ${data.set_name || "Unknown set"}` });
       } else {
         toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
       }
-
-      // Pass analysis + identification to parent so GradingPanel can populate
-      if (data.analysis && data.identification) {
-        onIdentifyAndGrade?.({ analysis: data.analysis, identification: data.identification });
-      }
     } catch (e: any) {
-      toast({ title: "Identify & Grade failed", description: e.message, variant: "destructive" });
+      toast({ title: "Identify failed", description: e.message, variant: "destructive" });
     } finally {
       setIdentifyLoading(false);
+    }
+  }
+
+  // AI Full Grade — Opus 4.7 across all images, populates ONLY grade columns.
+  // Gated server-side on AI_FULL_GRADE_ENABLED; UI gates on the same flag.
+  async function runGrade() {
+    if (!isEdit || !certificate?.id) return;
+    setGradeLoading(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}/grade`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Grade failed");
+
+      toast({
+        title: "Card graded",
+        description: `Grade ${data.overall ?? "?"} ${data.grade_label || ""} · C${data.centering ?? "?"}/Co${data.corners ?? "?"}/E${data.edges ?? "?"}/S${data.surface ?? "?"}`,
+      });
+
+      // Refresh cert in parent so the grading panel reads the new subgrades.
+      // pendingAnalysis path expects an AiAnalysisResult shape — we don't have
+      // the per-corner breakdown here, only aggregates, so reuse the existing
+      // identification-only callback to refetch the cert without overwriting
+      // the AI panel's grading state with empty per-corner data.
+      onIdentifyAndGrade?.({ analysis: null, identification: null });
+    } catch (e: any) {
+      toast({ title: "Grade failed", description: e.message, variant: "destructive" });
+    } finally {
+      setGradeLoading(false);
     }
   }
   const [manuallyEdited, setManuallyEdited] = useState<Set<ProtectedField>>(new Set());
@@ -782,32 +805,59 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             }));
           }}
         />}
-        {/* AI Identify & Grade — single button for full pipeline */}
+        {/* AI actions — Identify and Grade are independent and gated separately */}
         {isEdit && certificate?.id && (
-          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Identify & Grade</p>
-                <p className="text-[#888888] text-[10px] mt-0.5">Identify the card and run full AI grading in one step</p>
-              </div>
+          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Identify */}
               <button
                 type="button"
-                onClick={runIdentifyAndGrade}
-                disabled={identifyLoading}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shrink-0"
+                onClick={runIdentify}
+                disabled={!identifyEnabled || identifyLoading}
+                title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
               >
-                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                {identifyLoading ? "Identifying & Grading…" : "Identify & Grade"}
+                <span className="flex items-center gap-2">
+                  {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                  <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
+                </span>
+                <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
+              </button>
+
+              {/* Grade */}
+              <button
+                type="button"
+                onClick={runGrade}
+                disabled={!fullGradeEnabled || gradeLoading}
+                title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-[#1A1A1A] text-[#D4AF37] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2A2A2A] transition-all"
+              >
+                <span className="flex items-center gap-2">
+                  {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
+                  <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
+                </span>
+                <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
               </button>
             </div>
+
+            {(!identifyEnabled || !fullGradeEnabled) && (
+              <p className="text-[10px] text-[#888888]">
+                {!identifyEnabled && !fullGradeEnabled
+                  ? "Both AI actions disabled — toggle in /admin → AI Learning."
+                  : !identifyEnabled
+                    ? "AI Identify disabled — toggle in /admin → AI Learning."
+                    : "AI Grade disabled — toggle in /admin → AI Learning."}
+              </p>
+            )}
+
             {identifyConfidence && (
               <div className="flex items-center gap-2 text-xs">
                 <span className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
                 <span className={identifyConfidence === "high" ? "text-emerald-600" : identifyConfidence === "medium" ? "text-yellow-600" : "text-red-600"}>
                   {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
                 </span>
-                {identifyConfidence !== "high" && !identifyVerified && (
-                  <button type="button" onClick={runIdentifyAndGrade} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
+                {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
+                  <button type="button" onClick={runIdentify} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
                     Retry
                   </button>
                 )}
