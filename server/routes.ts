@@ -9546,6 +9546,181 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── One-time-use metadata backfill ────────────────────────────────────────
+  // Re-runs AI Identify on certs that were approved before identification
+  // happened (per docs/corpus-capture-audit.md — MV20/21/41/44). Only fills
+  // NULLs; never overwrites populated fields. Each successful update is
+  // mirrored to audit_log inside the same transaction.
+  //
+  // The endpoint stays in place after the one-off use — useful for any
+  // future cert discovered with missing metadata. dryRun: true is the
+  // intended default flow; live writes only after the dry-run is reviewed.
+  app.post("/api/admin/backfill-cert-metadata", requireAdmin, async (req, res) => {
+    try {
+      const { certIds, dryRun } = req.body || {};
+      if (!Array.isArray(certIds) || certIds.length === 0) {
+        return res.status(400).json({ error: "certIds must be a non-empty array of strings" });
+      }
+      if (certIds.length > 20) {
+        return res.status(400).json({ error: "max 20 certIds per call (budget guard)" });
+      }
+      if (typeof dryRun !== "boolean") {
+        return res.status(400).json({ error: "dryRun must be boolean" });
+      }
+
+      const { identifyCardFromBuffer, verifyAndEnrichCardData } = await import("./ai-grading-service");
+      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getR2Client } = await import("./r2");
+      const r2bucket = process.env.R2_BUCKET_NAME;
+      if (!r2bucket) return res.status(500).json({ error: "R2_BUCKET_NAME not set" });
+      const r2client = getR2Client();
+      const adminEmail = req.session.adminEmail || "admin";
+
+      // Only fill NULL/empty. Never overwrite. Re-run safety: a re-run
+      // after a partial success won't clobber any field already populated.
+      const pickValue = <T>(existing: T | null | undefined, suggested: T | null | undefined): T | null => {
+        if (existing != null && existing !== "") return existing as T;
+        if (suggested == null || suggested === "") return null;
+        return suggested as T;
+      };
+
+      const FIELDS = ["card_name", "set_name", "card_number_display", "rarity", "year_text"] as const;
+      type ResultRow = {
+        certId: string;
+        status: "would-update" | "updated" | "skipped" | "failed";
+        reason?: string;
+        before: Record<string, string | null>;
+        after?: Record<string, string | null>;
+        identification?: Record<string, unknown>;
+      };
+      const results: ResultRow[] = [];
+
+      for (const raw of certIds) {
+        const certIdStr = String(raw);
+        const before: Record<string, string | null> = { card_name: null, set_name: null, card_number_display: null, rarity: null, year_text: null };
+
+        const cert = await storage.getCertificateByCertId(certIdStr) as any;
+        if (!cert) { results.push({ certId: certIdStr, status: "failed", reason: "cert not found", before }); continue; }
+
+        before.card_name           = cert.cardName   ?? null;
+        before.set_name            = cert.setName    ?? null;
+        before.card_number_display = cert.cardNumber ?? null;
+        before.rarity              = cert.rarity     ?? null;
+        before.year_text           = cert.year       ?? null;
+
+        const imageKey = cert.gradingFrontOriginal || cert.frontImagePath;
+        if (!imageKey) { results.push({ certId: certIdStr, status: "failed", reason: "no front image key on cert", before }); continue; }
+
+        // Fetch front image from R2.
+        let buffer: Buffer;
+        try {
+          const r2 = await r2client.send(new GetObjectCommand({ Bucket: r2bucket, Key: imageKey }));
+          if (!r2.Body) throw new Error("empty R2 body");
+          const chunks: Buffer[] = [];
+          for await (const chunk of r2.Body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+          buffer = Buffer.concat(chunks);
+        } catch (err: any) {
+          results.push({ certId: certIdStr, status: "failed", reason: `R2 fetch failed (${imageKey}): ${err.message}`, before }); continue;
+        }
+
+        // Run Haiku identify (+ optional GPT reconciliation inside the helper).
+        let identified: any;
+        try {
+          identified = await identifyCardFromBuffer(buffer, "image/jpeg", certIdStr);
+        } catch (err: any) {
+          results.push({ certId: certIdStr, status: "failed", reason: `identify failed: ${err.message}`, before }); continue;
+        }
+
+        // Brief asks for ">0.6" confidence; underlying enum is high|medium|low.
+        // Accept high+medium, skip low. Never write a guess.
+        const idPayload = (verifiedFlag: boolean, dbSrc: string | null) => ({
+          confidence:      identified.confidence,
+          detected_name:   identified.detected_name,
+          detected_set:    identified.detected_set,
+          detected_number: identified.detected_number,
+          detected_year:   identified.copyright_year || identified.detected_year,
+          detected_rarity: identified.detected_rarity,
+          verified:        verifiedFlag,
+          dbSource:        dbSrc,
+        });
+
+        if (identified.confidence === "low") {
+          results.push({
+            certId: certIdStr,
+            status: "skipped",
+            reason: `confidence=low (${(identified.reasoning || "").slice(0, 120)})`,
+            before,
+            identification: idPayload(false, null),
+          });
+          continue;
+        }
+
+        // TCG cross-check (verifyAndEnrichCardData internally falls back to
+        // unverified on lookup errors; defensive try/catch is belt-and-braces).
+        let enriched: any;
+        try {
+          enriched = await verifyAndEnrichCardData(identified);
+        } catch {
+          enriched = { ...identified, verified: false, officialName: identified.detected_name, officialSet: identified.detected_set, officialNumber: identified.detected_number, dbSource: null };
+        }
+
+        const proposed: Record<string, string | null> = {
+          card_name:           pickValue(cert.cardName,    enriched.officialName),
+          set_name:            pickValue(cert.setName,     enriched.officialSet),
+          card_number_display: pickValue(cert.cardNumber,  enriched.officialNumber),
+          rarity:              pickValue(cert.rarity,      identified.detected_rarity),
+          year_text:           pickValue(cert.year,        identified.copyright_year || identified.detected_year),
+        };
+
+        const changed = FIELDS.filter(f => proposed[f] !== before[f]);
+        if (changed.length === 0) {
+          results.push({ certId: certIdStr, status: "skipped", reason: "no field needs filling", before, identification: idPayload(enriched.verified, enriched.dbSource) });
+          continue;
+        }
+
+        if (dryRun) {
+          results.push({ certId: certIdStr, status: "would-update", before, after: proposed, identification: idPayload(enriched.verified, enriched.dbSource) });
+          continue;
+        }
+
+        // Live write — UPDATE + audit_log INSERT inside one transaction.
+        // COALESCE in the UPDATE means the column-level "never overwrite"
+        // guard is enforced at the DB layer too, defending against a race
+        // between the SELECT we just did and the UPDATE.
+        try {
+          await db.transaction(async (tx) => {
+            await tx.execute(sql`
+              UPDATE certificates SET
+                card_name           = COALESCE(card_name,           ${proposed.card_name}),
+                set_name            = COALESCE(set_name,            ${proposed.set_name}),
+                card_number_display = COALESCE(card_number_display, ${proposed.card_number_display}),
+                rarity              = COALESCE(rarity,              ${proposed.rarity}),
+                year_text           = COALESCE(year_text,           ${proposed.year_text}),
+                updated_at = NOW()
+              WHERE certificate_number = ${certIdStr}
+            `);
+            await tx.execute(sql`
+              INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+              VALUES ('certificate', ${certIdStr}, 'metadata_backfill', ${adminEmail}, ${JSON.stringify({
+                before, after: proposed, identification: { ...idPayload(enriched.verified, enriched.dbSource), reasoning: identified.reasoning }, fields_changed: changed,
+              })}::jsonb)
+            `);
+          });
+          results.push({ certId: certIdStr, status: "updated", before, after: proposed, identification: idPayload(enriched.verified, enriched.dbSource) });
+        } catch (err: any) {
+          results.push({ certId: certIdStr, status: "failed", reason: `DB write failed: ${err.message}`, before });
+        }
+      }
+
+      const summary = { "would-update": 0, updated: 0, skipped: 0, failed: 0 };
+      for (const r of results) summary[r.status]++;
+      res.json({ dryRun, results, summary });
+    } catch (err: any) {
+      console.error("[backfill-cert-metadata] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── RAG Phase 0 corpus status ────────────────────────────────────────────
   // Surfaces the embed-corpus job's progress so the dashboard can show
   // "X/Y cards embedded for future retrieval system." Fail-softs to
