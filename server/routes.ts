@@ -9546,6 +9546,210 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── AI Capture Health dashboard ──────────────────────────────────────────
+  // Read-only snapshot of how well the capture pipeline is doing on every
+  // approved cert across 8 fields. Used by /admin (capture-health tab) to
+  // catch regressions immediately instead of weeks later via ad-hoc audits.
+  //
+  // Shape: 3 SQL queries total — one for the cert rows, one for
+  // ai_predictions counts, one for audit_log action sets. Per-row field
+  // checks are pure column reads on the cert; no per-cert query loop.
+  app.get("/api/admin/ai-capture-health", requireAdmin, async (req, res) => {
+    try {
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "25"), 10) || 25));
+      const onlyFailing = String(req.query.onlyFailing ?? "false") === "true";
+      const sinceDaysRaw = req.query.sinceDays;
+      const sinceDays = sinceDaysRaw == null || sinceDaysRaw === ""
+        ? null
+        : Math.max(1, parseInt(String(sinceDaysRaw), 10) || 0);
+
+      const sinceClause = sinceDays
+        ? sql` AND grade_approved_at >= NOW() - (${sinceDays} || ' days')::interval`
+        : sql``;
+
+      // ── Q1: certs (one row per approved cert, ordered most-recent first) ──
+      const certRows = await db.execute(sql`
+        SELECT
+          certificate_number AS cert_id,
+          grade_approved_at,
+          card_name, set_name, card_number_display, rarity, year_text,
+          grade::numeric AS grade_overall,
+          centering_score, corners_score, edges_score, surface_score,
+          defects, label_type,
+          grading_front_original, grading_back_original,
+          grading_time_seconds,
+          embedded_at,
+          (embedding IS NOT NULL) AS has_embedding
+        FROM certificates
+        WHERE grade_approved_at IS NOT NULL
+          AND deleted_at IS NULL
+          ${sinceClause}
+        ORDER BY grade_approved_at DESC
+        LIMIT ${limit}
+      `);
+      const certs = certRows.rows as any[];
+
+      if (certs.length === 0) {
+        return res.json({
+          generated_at: new Date().toISOString(),
+          summary: { total_checked: 0, fully_green: 0, any_red: 0, any_amber: 0, by_field: {} },
+          certs: [],
+        });
+      }
+
+      const certIds = certs.map(c => String(c.cert_id));
+
+      // ── Q2: ai_predictions count by cert_id ───────────────────────────────
+      const predRows = await db.execute(sql`
+        SELECT cert_id, COUNT(*)::int AS cnt
+        FROM ai_predictions
+        WHERE cert_id IN (${sql.join(certIds.map(id => sql`${id}`), sql`, `)})
+        GROUP BY cert_id
+      `);
+      const predCounts = new Map<string, number>();
+      for (const r of predRows.rows as any[]) predCounts.set(String(r.cert_id), Number(r.cnt));
+
+      // ── Q3: audit_log actions seen per entity_id ──────────────────────────
+      const auditRows = await db.execute(sql`
+        SELECT entity_id, ARRAY_AGG(DISTINCT action) AS actions
+        FROM audit_log
+        WHERE entity_type = 'certificate'
+          AND entity_id IN (${sql.join(certIds.map(id => sql`${id}`), sql`, `)})
+          AND action IN ('grade_approved','approved','metadata_backfill','CERT_ID_ALLOCATED','OWNER_ASSIGNED','approve_grade','approve_and_publish')
+        GROUP BY entity_id
+      `);
+      const auditActions = new Map<string, string[]>();
+      for (const r of auditRows.rows as any[]) auditActions.set(String(r.entity_id), r.actions || []);
+
+      // ── Per-cert checks ───────────────────────────────────────────────────
+      type CheckStatus = "green" | "amber" | "red";
+      const FIELD_KEYS = ["card_metadata", "grade_fields", "defects", "images", "grading_time", "embedding", "ai_predictions", "audit_log"] as const;
+      type FieldKey = typeof FIELD_KEYS[number];
+
+      const byField: Record<FieldKey, { green: number; amber: number; red: number }> =
+        Object.fromEntries(FIELD_KEYS.map(k => [k, { green: 0, amber: 0, red: 0 }])) as any;
+
+      const isEmpty = (v: unknown): boolean => v == null || (typeof v === "string" && v.trim() === "");
+      const now = Date.now();
+
+      const out = certs.map(cert => {
+        const certId = String(cert.cert_id);
+
+        // 1) card_metadata — 5 fields all non-null/non-empty
+        const metaMissing: string[] = [];
+        for (const f of ["card_name", "set_name", "card_number_display", "rarity", "year_text"]) {
+          if (isEmpty(cert[f])) metaMissing.push(f);
+        }
+        const cardMetadata = { status: (metaMissing.length === 0 ? "green" : "red") as CheckStatus, missing: metaMissing.length ? metaMissing : null };
+
+        // 2) grade_fields — overall + 4 subgrades all non-null
+        const gradeMissing: string[] = [];
+        if (cert.grade_overall == null)    gradeMissing.push("grade_overall");
+        if (cert.centering_score == null)  gradeMissing.push("grade_centering");
+        if (cert.corners_score   == null)  gradeMissing.push("grade_corners");
+        if (cert.edges_score     == null)  gradeMissing.push("grade_edges");
+        if (cert.surface_score   == null)  gradeMissing.push("grade_surface");
+        const gradeFields = { status: (gradeMissing.length === 0 ? "green" : "red") as CheckStatus, missing: gradeMissing.length ? gradeMissing : null };
+
+        // 3) defects — non-empty array OR (grade=10 / label=black) → intentional zero
+        const defectsArr = Array.isArray(cert.defects) ? cert.defects : [];
+        const isPerfect = Number(cert.grade_overall) === 10 || cert.label_type === "black";
+        let defects: { status: CheckStatus; note: string | null };
+        if (defectsArr.length > 0) {
+          defects = { status: "green", note: null };
+        } else if (isPerfect) {
+          defects = { status: "green", note: `intentional zero (grade=${cert.grade_overall ?? "10"}${cert.label_type === "black" ? "/black" : ""})` };
+        } else {
+          defects = { status: "red", note: null };
+        }
+
+        // 4) images — both keys present + front prefix sanity
+        const imgMissing: string[] = [];
+        if (isEmpty(cert.grading_front_original)) imgMissing.push("grading_front_original");
+        else if (typeof cert.grading_front_original === "string" && !cert.grading_front_original.startsWith("images/")) {
+          imgMissing.push(`grading_front_original looks like a URL not an R2 key (${String(cert.grading_front_original).slice(0, 32)}…)`);
+        }
+        if (isEmpty(cert.grading_back_original)) imgMissing.push("grading_back_original");
+        const images = { status: (imgMissing.length === 0 ? "green" : "red") as CheckStatus, missing: imgMissing.length ? imgMissing : null };
+
+        // 5) grading_time
+        const gt = Number(cert.grading_time_seconds);
+        const grading_time = Number.isFinite(gt) && gt > 0
+          ? { status: "green" as CheckStatus, value_seconds: gt }
+          : { status: "red"   as CheckStatus, value_seconds: null };
+
+        // 6) embedding — green if both set; amber if < 2hr post-approval; else red
+        const minsSinceApproved = cert.grade_approved_at
+          ? Math.floor((now - new Date(cert.grade_approved_at).getTime()) / 60_000)
+          : null;
+        let embedding: { status: CheckStatus; embedded_at: string | null; minutes_since_approved: number | null };
+        if (cert.embedded_at && cert.has_embedding) {
+          embedding = { status: "green", embedded_at: new Date(cert.embedded_at).toISOString(), minutes_since_approved: minsSinceApproved };
+        } else if (minsSinceApproved != null && minsSinceApproved < 120) {
+          embedding = { status: "amber", embedded_at: null, minutes_since_approved: minsSinceApproved };
+        } else {
+          embedding = { status: "red", embedded_at: null, minutes_since_approved: minsSinceApproved };
+        }
+
+        // 7) ai_predictions — at least one row
+        const predCount = predCounts.get(certId) || 0;
+        const ai_predictions = predCount > 0
+          ? { status: "green" as CheckStatus, count: predCount }
+          : { status: "red"   as CheckStatus, count: 0 };
+
+        // 8) audit_log — at least one of the canonical actions seen
+        const actions = auditActions.get(certId) || [];
+        const audit_log = actions.length > 0
+          ? { status: "green" as CheckStatus, actions_seen: actions }
+          : { status: "red"   as CheckStatus, actions_seen: [] };
+
+        const checks = {
+          card_metadata:  cardMetadata,
+          grade_fields:   gradeFields,
+          defects,
+          images,
+          grading_time,
+          embedding,
+          ai_predictions,
+          audit_log,
+        };
+
+        let any_red = false, any_amber = false;
+        for (const k of FIELD_KEYS) {
+          const s = (checks as any)[k].status as CheckStatus;
+          byField[k][s]++;
+          if (s === "red")   any_red = true;
+          if (s === "amber") any_amber = true;
+        }
+
+        return {
+          cert_id: certId,
+          grade_approved_at: cert.grade_approved_at ? new Date(cert.grade_approved_at).toISOString() : null,
+          card_name: cert.card_name ?? null,
+          grade_overall: cert.grade_overall != null ? String(cert.grade_overall) : null,
+          checks,
+          any_red,
+          any_amber,
+        };
+      });
+
+      const filtered = onlyFailing ? out.filter(c => c.any_red) : out;
+
+      const summary = {
+        total_checked: out.length,
+        fully_green:   out.filter(c => !c.any_red && !c.any_amber).length,
+        any_red:       out.filter(c => c.any_red).length,
+        any_amber:     out.filter(c => c.any_amber).length,
+        by_field:      byField,
+      };
+
+      res.json({ generated_at: new Date().toISOString(), summary, certs: filtered });
+    } catch (err: any) {
+      console.error("[ai-capture-health] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── One-time-use metadata backfill ────────────────────────────────────────
   // Re-runs AI Identify on certs that were approved before identification
   // happened (per docs/corpus-capture-audit.md — MV20/21/41/44). Only fills
