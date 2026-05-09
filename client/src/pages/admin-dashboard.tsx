@@ -19,6 +19,34 @@ type CertsFilter = {
   gradeType?: "numeric" | "authentic" | "altered";
   grade?: number;
 };
+
+type GradingStatus = "graded" | "in_progress" | "awaiting_grade" | "awaiting_images";
+
+// Derived from existing columns — no schema changes. Order matters:
+// gradeOverall is written on draft save (server/routes.ts:7530), so a cert
+// with grade but no gradeApprovedAt is in_progress, NOT graded. Check
+// gradeApprovedAt first.
+function gradingStatus(cert: CertificateRecord): GradingStatus {
+  if ((cert as any).gradeApprovedAt) return "graded";
+  if (cert.gradeOverall) return "in_progress";
+  if (cert.frontImagePath) return "awaiting_grade";
+  return "awaiting_images";
+}
+
+const GRADING_STATUS_LABEL: Record<GradingStatus, string> = {
+  graded:           "Graded",
+  in_progress:      "In progress",
+  awaiting_grade:   "Awaiting grade",
+  awaiting_images:  "Awaiting images",
+};
+
+// Match the existing badge palette in CertRow (bg-green-50 / bg-[#D4AF37]/20 / etc).
+const GRADING_STATUS_BADGE_CLASS: Record<GradingStatus, string> = {
+  graded:           "bg-green-50 text-green-600",
+  in_progress:      "bg-yellow-50 text-yellow-700",
+  awaiting_grade:   "bg-[#D4AF37]/20 text-[#D4AF37]",
+  awaiting_images:  "bg-[#E8E4DC] text-[#999999]",
+};
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
 import AdminPrinting from "@/pages/admin-printing";
@@ -1174,6 +1202,7 @@ function CertsView({
   const [dateFrom, setDateFrom] = useState(() => getInitialDateFrom(initialFilter.range));
   const [dateTo, setDateTo] = useState("");
   const [ownershipFilter, setOwnershipFilter] = useState<"all" | "claimed" | "unclaimed">("all");
+  const [gradingStatusFilter, setGradingStatusFilter] = useState<"all" | GradingStatus>("all");
 
   const filtered = certs.filter((c) => {
     if (statusFilter === "voided" && c.status !== "voided") return false;
@@ -1202,12 +1231,13 @@ function CertsView({
       if (ownershipFilter === "claimed" && os !== "claimed") return false;
       if (ownershipFilter === "unclaimed" && os === "claimed") return false;
     }
+    if (gradingStatusFilter !== "all" && gradingStatus(c) !== gradingStatusFilter) return false;
     return true;
   });
 
   const voidedCount = certs.filter((c) => c.status === "voided").length;
   const claimedCount = certs.filter((c) => (c as any).ownershipStatus === "claimed").length;
-  const hasActiveFilters = statusFilter !== "all" || gradeTypeFilter !== "all" || gradeFilter || dateFrom || dateTo || searchQuery || ownershipFilter !== "all";
+  const hasActiveFilters = statusFilter !== "all" || gradeTypeFilter !== "all" || gradeFilter || dateFrom || dateTo || searchQuery || ownershipFilter !== "all" || gradingStatusFilter !== "all";
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
@@ -1293,6 +1323,26 @@ function CertsView({
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <label className="text-[#999999] text-xs">Grading:</label>
+        <div className="flex gap-1 flex-wrap">
+          {(["all", "awaiting_images", "awaiting_grade", "in_progress", "graded"] as const).map((g) => (
+            <button
+              key={g}
+              onClick={() => setGradingStatusFilter(g)}
+              className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                gradingStatusFilter === g
+                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
+                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
+              }`}
+              data-testid={`filter-grading-${g}`}
+            >
+              {g === "all" ? "All" : GRADING_STATUS_LABEL[g]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
           <label className="text-[#999999] text-xs">Grade:</label>
@@ -1330,7 +1380,7 @@ function CertsView({
         </div>
         {hasActiveFilters && (
           <button
-            onClick={() => { setStatusFilter("all"); setGradeTypeFilter("all"); setGradeFilter(""); setDateFrom(""); setDateTo(""); setSearchQuery(""); setOwnershipFilter("all"); }}
+            onClick={() => { setStatusFilter("all"); setGradeTypeFilter("all"); setGradeFilter(""); setDateFrom(""); setDateTo(""); setSearchQuery(""); setOwnershipFilter("all"); setGradingStatusFilter("all"); }}
             className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
             data-testid="button-clear-filters-certs"
           >
@@ -1427,6 +1477,17 @@ function CertRow({
                   unclaimed
                 </span>
               )}
+              {(() => {
+                const gs = gradingStatus(cert);
+                return (
+                  <span
+                    className={`text-xs px-1.5 py-0.5 rounded ${GRADING_STATUS_BADGE_CLASS[gs]}`}
+                    data-testid={`badge-grading-status-${cert.id}`}
+                  >
+                    {GRADING_STATUS_LABEL[gs]}
+                  </span>
+                );
+              })()}
               <span className="text-[#1A1A1A] font-bold text-sm">{isNonNum ? label : `${grade} ${label}`}</span>
             </div>
             <p className="text-[#1A1A1A] text-sm font-medium truncate" data-testid={`text-cert-name-${cert.id}`}>
