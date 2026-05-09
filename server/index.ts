@@ -54,6 +54,9 @@ app.use((req, res, next) => {
   if (req.path === "/health") return next();
   if (req.path.startsWith("/api/")) return next();
   const host = (req.headers.host || "").toLowerCase();
+  // Skip redirect on staging — APP_URL identifies which fly app is canonical for itself.
+  const appUrlHost = (() => { try { return new URL(process.env.APP_URL || "").host.toLowerCase(); } catch { return ""; } })();
+  if (appUrlHost && host === appUrlHost) return next();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
     console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
     return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
