@@ -304,7 +304,20 @@ export const certificates = pgTable("certificates", {
     pipeline_version?: string;
     recorded_at?: string;
   } | null>(),
-  defects: jsonb("defects").$type<Array<{type: string; location: string; position?: {x_percent: number; y_percent: number}; severity: string; description: string}>>().default([]),
+  // Defect type matches the actual flat storage shape. Earlier declaration
+  // had `position?: {x_percent, y_percent}` (nested) but every writer (admin
+  // image-viewer, AI grader, scan-ingest) stores x_percent/y_percent as
+  // direct properties. Type-only fix; data already flat in DB, no migration.
+  defects: jsonb("defects").$type<Array<{
+    id?: number;
+    type: string;
+    severity: "minor" | "moderate" | "significant" | string;
+    description: string;
+    location: string;
+    image_side?: "front" | "back";
+    x_percent?: number;
+    y_percent?: number;
+  }>>().default([]),
   aiDefects: jsonb("ai_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
   verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
   gradeApprovedBy: text("grade_approved_by"),

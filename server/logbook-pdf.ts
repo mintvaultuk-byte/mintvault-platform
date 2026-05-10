@@ -200,12 +200,57 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
       if ((fBuf || bBuf) && fits(165, "Card Images")) {
         hr(); hd("Card Images");
         const imgBoxH = 150; const imgBoxW = (CW - 10) / 2;
+        const frontImgX = M;
+        const backImgX  = M + imgBoxW + 10;
+
         if (fBuf && bBuf) {
-          try { doc.image(fBuf, M, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
-          try { doc.image(bBuf, M + imgBoxW + 10, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+          try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+          try { doc.image(bBuf, backImgX,  y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+
+          // Defect circles — overlay on each side at stored x/y%. Outline-only
+          // (no fill) so card detail underneath stays visible. Severity
+          // colour-codes the stroke; numbered label sits next to the circle.
+          for (const d of defects) {
+            const xp = (d as any).x_percent;
+            const yp = (d as any).y_percent;
+            if (typeof xp !== "number" || typeof yp !== "number") continue;
+            const onFront = (d as any).image_side !== "back";
+            const imgX = onFront ? frontImgX : backImgX;
+            const cx = imgX + (xp / 100) * imgBoxW;
+            const cy = y + (yp / 100) * imgBoxH;
+            const r = 6;
+            const colour = d.severity === "significant" ? "#DC2626"
+                         : d.severity === "moderate"    ? "#EA580C"
+                         :                                "#D97706";
+            doc.save().lineWidth(1.5).strokeColor(colour).circle(cx, cy, r).stroke().restore();
+            doc.save().fontSize(7).fillColor(colour).text(String((d as any).id ?? "?"), cx - 2, cy - 3).restore();
+          }
         } else {
           const buf = fBuf || bBuf;
           if (buf) try { doc.image(buf, M + CW * 0.2, y, { fit: [CW * 0.6, imgBoxH], align: "center", valign: "center" }); } catch {}
+
+          // Single-image variant: only one side present. Filter defects to
+          // whichever side we rendered (assume front if fBuf present).
+          if (buf) {
+            const renderedSide = fBuf ? "front" : "back";
+            const singleX = M + CW * 0.2;
+            const singleW = CW * 0.6;
+            for (const d of defects) {
+              const xp = (d as any).x_percent;
+              const yp = (d as any).y_percent;
+              if (typeof xp !== "number" || typeof yp !== "number") continue;
+              const ds = (d as any).image_side === "back" ? "back" : "front";
+              if (ds !== renderedSide) continue;
+              const cx = singleX + (xp / 100) * singleW;
+              const cy = y + (yp / 100) * imgBoxH;
+              const r = 6;
+              const colour = d.severity === "significant" ? "#DC2626"
+                           : d.severity === "moderate"    ? "#EA580C"
+                           :                                "#D97706";
+              doc.save().lineWidth(1.5).strokeColor(colour).circle(cx, cy, r).stroke().restore();
+              doc.save().fontSize(7).fillColor(colour).text(String((d as any).id ?? "?"), cx - 2, cy - 3).restore();
+            }
+          }
         }
         y += imgBoxH + 5;
       }
