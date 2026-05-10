@@ -4774,6 +4774,11 @@ export async function registerRoutes(
         console.warn(`[claim] Failed attempt — cert not found: ${normalizedId} from IP ${req.ip}`);
         return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
+      if ((cert as any).stolenStatus === "reported_stolen") {
+        return res.status(403).json({
+          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+        });
+      }
       if (cert.ownershipStatus === "claimed") {
         // v435 — surface a machine-readable code so the client can offer
         // the buyer-init transfer path when TRANSFER_FLOW_LIVE is true.
@@ -5749,16 +5754,31 @@ export async function registerRoutes(
 
   app.post("/api/admin/certificates/:certId/assign-owner", requireAdmin, async (req, res) => {
     try {
-      const { email, notes } = req.body;
+      const { email, notes, overrideStolen, overrideReason } = req.body;
       if (!email) return res.status(400).json({ error: "Email is required" });
 
       const certId = String(req.params.certId);
       const cert = await storage.getCertificateByCertId(certId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      await storage.assignOwnerManual(certId, email, "admin", notes);
+      const adminUser = (req.session as any)?.adminEmail || "admin";
+
+      // Admin-override audit. The override flag bypasses the stolen-status
+      // guard inside assignOwnerManual; we record the override here at the
+      // route layer where admin identity + reason are available.
+      if (overrideStolen === true && (cert as any).stolenStatus === "reported_stolen") {
+        await storage.writeAuditLog("certificate", certId, "admin_override_stolen_assign", adminUser, {
+          email, reason: typeof overrideReason === "string" ? overrideReason.trim().slice(0, 2000) : null,
+        });
+      }
+
+      await storage.assignOwnerManual(certId, email, adminUser, notes, { overrideStolen: overrideStolen === true });
       return res.json({ success: true });
     } catch (err: any) {
+      const { StolenCertError } = await import("./storage");
+      if (err instanceof StolenCertError) {
+        return res.status(403).json({ error: err.message });
+      }
       console.error("[admin] Error assigning owner:", err);
       return res.status(500).json({ error: "Server error" });
     }
