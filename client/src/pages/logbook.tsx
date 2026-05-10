@@ -8,11 +8,24 @@ interface LogbookData {
   certId: string;
   currentOwnerUserId?: string | null;
   ownerEmail?: string | null;
+  // Optional public display name — present only when PUBLIC_NAME_TOGGLE_LIVE
+  // is on AND owner has opted in AND owner.display_name is non-empty.
+  // Field omitted otherwise (anonymous = no row rendered).
+  ownerDisplayName?: string;
   card: { name: string | null; set: string | null; number: string | null; year: string | null; game: string | null; variant: string | null; language: string; rarity: string | null; collection: string | null; designations: string[] };
   grades: { overall: number | string; gradeLabel: string; centering: number | null; corners: number | null; edges: number | null; surface: number | null; isBlackLabel: boolean; isNonNumeric: boolean; gradeType: string; labelType: string };
   centering: { frontLR: string | null; frontTB: string | null; backLR: string | null; backTB: string | null };
   authentication: { status: string; notes: string | null };
-  defects: Array<{ id: number; type: string; location: string; severity: string; description: string }>;
+  defects: Array<{
+    id: number;
+    type: string;
+    location: string;
+    severity: string;
+    description: string;
+    x_percent?: number | null;
+    y_percent?: number | null;
+    image_side?: "front" | "back";
+  }>;
   gradingReport: { centering: string | null; corners: string | null; edges: string | null; surface: string | null; overall: string | null };
   images: { front: string | null; back: string | null };
   population: any;
@@ -68,10 +81,86 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ── Defect circles overlay (Q2) ────────────────────────────────────────────
+// Renders the cert's front + back images with numbered circles at each
+// defect's stored x_percent / y_percent. ONLY for the Condition Report
+// section — never the hero card images at the top of the page. Sides
+// with no positioned defects render nothing for that side.
+type OverlayDefect = {
+  id: number; type: string; severity: string;
+  x_percent?: number | null; y_percent?: number | null;
+  image_side?: "front" | "back";
+};
+function DefectOverlayPair({
+  defects, images, highlightId, onHighlight,
+}: {
+  defects: OverlayDefect[];
+  images: { front: string | null; back: string | null };
+  highlightId: number | null;
+  onHighlight: (id: number | null) => void;
+}) {
+  const positioned = defects.filter(d => typeof d.x_percent === "number" && typeof d.y_percent === "number");
+  const frontDefects = positioned.filter(d => d.image_side !== "back");
+  const backDefects  = positioned.filter(d => d.image_side === "back");
+  const showFront = images.front && frontDefects.length > 0;
+  const showBack  = images.back  && backDefects.length  > 0;
+  if (!showFront && !showBack) return null;
+
+  const sevBorder = (s: string) =>
+    s === "significant" ? "border-red-600 text-red-600 bg-red-50" :
+    s === "moderate"    ? "border-orange-600 text-orange-600 bg-orange-50" :
+                          "border-amber-600 text-amber-600 bg-amber-50";
+
+  function SidePanel({ url, label, defects }: { url: string; label: string; defects: OverlayDefect[] }) {
+    return (
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-[#888888] mb-2">{label}</p>
+        <div className="relative inline-block w-full">
+          <img src={url} alt={label} className="w-full rounded-lg border border-[#E8E4DC]" draggable={false} />
+          {defects.map(d => {
+            const isHi = highlightId === d.id;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onHighlight(isHi ? null : d.id); }}
+                title={`#${d.id} ${d.type} (${d.severity})`}
+                aria-label={`Defect ${d.id} ${d.type} ${d.severity}`}
+                data-testid={`defect-circle-${d.id}`}
+                className={`absolute flex items-center justify-center font-bold text-[10px] rounded-full border-2 transition-transform ${
+                  sevBorder(d.severity)
+                } ${isHi ? "scale-125 ring-2 ring-[#D4AF37]" : "hover:scale-110"}`}
+                style={{
+                  left: `${d.x_percent}%`,
+                  top: `${d.y_percent}%`,
+                  width: 28, height: 28,
+                  transform: `translate(-50%, -50%)${isHi ? " scale(1.25)" : ""}`,
+                  backgroundColor: "rgba(255,255,255,0.85)",
+                  cursor: "pointer",
+                }}
+              >
+                {d.id}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex flex-col sm:flex-row gap-4">
+      {showFront && <SidePanel url={images.front!} label="Front" defects={frontDefects} />}
+      {showBack  && <SidePanel url={images.back!}  label="Back"  defects={backDefects} />}
+    </div>
+  );
+}
+
 export default function LogbookPage() {
   const params = useParams<{ certId?: string; id?: string }>();
   const certId = params.certId || params.id || "";
   const [showDefects, setShowDefects] = useState(false);
+  const [highlightDefectId, setHighlightDefectId] = useState<number | null>(null);
 
   const { data, isLoading, error } = useQuery<LogbookData>({
     queryKey: ["/api/logbook", certId],
@@ -258,21 +347,43 @@ export default function LogbookPage() {
                 {showDefects ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               {showDefects && (
-                <div className="mt-4 space-y-2">
-                  {defects.map(d => (
-                    <div key={d.id} className="flex items-start gap-3 py-2 border-b border-[#E8E4DC]">
-                      <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border ${
-                        d.severity === "minor" ? "text-amber-600 border-amber-200 bg-amber-50" :
-                        d.severity === "moderate" ? "text-orange-600 border-orange-200 bg-orange-50" :
-                        "text-red-600 border-red-200 bg-red-50"
-                      }`}>{d.severity}</span>
-                      <div>
-                        <p className="text-sm text-[#1A1A1A]">{d.type}</p>
-                        <p className="text-xs text-[#888888]">{d.location}{d.description ? ` — ${d.description}` : ""}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  {/* Overlay images — Condition Report only. Hero card images
+                      at the top of the page stay clean. Each side renders
+                      only if at least one defect on that side has coordinates;
+                      sides with no positioned defects are skipped entirely. */}
+                  <DefectOverlayPair
+                    defects={defects}
+                    images={images}
+                    highlightId={highlightDefectId}
+                    onHighlight={setHighlightDefectId}
+                  />
+                  <div className="mt-4 space-y-2">
+                    {defects.map(d => {
+                      const isHighlighted = highlightDefectId === d.id;
+                      return (
+                        <div
+                          key={d.id}
+                          className={`flex items-start gap-3 py-2 border-b transition-colors cursor-pointer ${
+                            isHighlighted ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC]"
+                          }`}
+                          onClick={() => setHighlightDefectId(isHighlighted ? null : d.id)}
+                          data-testid={`defect-row-${d.id}`}
+                        >
+                          <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border ${
+                            d.severity === "minor" ? "text-amber-600 border-amber-200 bg-amber-50" :
+                            d.severity === "moderate" ? "text-orange-600 border-orange-200 bg-orange-50" :
+                            "text-red-600 border-red-200 bg-red-50"
+                          }`}>{d.severity}</span>
+                          <div>
+                            <p className="text-sm text-[#1A1A1A]">#{d.id} · {d.type}</p>
+                            <p className="text-xs text-[#888888]">{d.location}{d.description ? ` — ${d.description}` : ""}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </Section>
           )}
@@ -289,10 +400,17 @@ export default function LogbookPage() {
                 </a>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                <Check className="w-4 h-4 text-[#16A34A]" />
-                <span className="text-[#16A34A] text-sm font-bold">Verified Ownership</span>
-              </div>
+              <>
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-[#16A34A]" />
+                  <span className="text-[#16A34A] text-sm font-bold">Verified Ownership</span>
+                </div>
+                {data.ownerDisplayName && (
+                  <p className="text-xs text-[#888888] mt-2" data-testid="logbook-owner-display-name">
+                    Owned by {data.ownerDisplayName}
+                  </p>
+                )}
+              </>
             )}
           </Section>
 

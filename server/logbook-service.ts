@@ -8,6 +8,8 @@ import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { getOwnerChain } from "./ownership-service";
 import { APP_BASE_URL } from "./app-url";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 function normalizeCertId(raw: string): string {
   const m = raw.match(/^MV-?0*(\d+)$/i);
@@ -68,12 +70,37 @@ export async function buildLogbookData(certIdInput: string) {
   // Grading report
   const report = c.gradingReport && typeof c.gradingReport === "object" ? c.gradingReport : {};
 
+  // Public-name surfacing (Q1) — same three-gate logic as /api/v1/verify
+  // (server/routes.ts:1184): flag on, cert has owner, owner has opted in,
+  // owner has a non-empty display_name. Field omitted entirely otherwise.
+  // NEVER includes email, real name, or user ID.
+  const { FEATURE_FLAGS } = await import("./config/feature-flags");
+  let ownerDisplayName: string | undefined;
+  const ownerUserId = c.currentOwnerUserId || c.current_owner_user_id;
+  if (FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE && ownerUserId) {
+    try {
+      const row = await db.execute(sql`
+        SELECT display_name, public_name FROM users
+        WHERE id = ${ownerUserId} AND deleted_at IS NULL
+        LIMIT 1
+      `);
+      const owner = row.rows[0] as any;
+      if (owner?.public_name === true) {
+        const dn = typeof owner.display_name === "string" ? owner.display_name.trim() : "";
+        if (dn.length > 0) ownerDisplayName = dn;
+      }
+    } catch (e: any) {
+      console.warn(`[logbook] owner display_name lookup skipped: ${e.message}`);
+    }
+  }
+
   return {
     certId,
     rawCertId: cert.certId,
     referenceNumber: c.referenceNumber || c.reference_number || null,
     currentOwnerUserId: c.currentOwnerUserId || c.current_owner_user_id || null,
     ownerEmail: c.ownerEmail || c.owner_email || null,
+    ownerDisplayName,
     logbookVersion: c.logbookVersion || c.logbook_version || 1,
     logbookLastIssuedAt: c.logbookLastIssuedAt || c.logbook_last_issued_at || null,
 
@@ -121,6 +148,12 @@ export async function buildLogbookData(certIdInput: string) {
       location: d.location || d.image_side || "front",
       severity: d.severity || "minor",
       description: d.description || "",
+      // Coordinates for the Condition Report overlay (Q2). Non-sensitive,
+      // no flag gate. Flat fields match actual storage; the schema type
+      // declaration is fixed in the same PR.
+      x_percent: typeof d.x_percent === "number" ? d.x_percent : null,
+      y_percent: typeof d.y_percent === "number" ? d.y_percent : null,
+      image_side: d.image_side === "back" ? "back" : "front",
     })),
 
     gradingReport: {
@@ -165,7 +198,11 @@ export async function buildLogbookData(certIdInput: string) {
   };
 }
 
-/** Strip owner-sensitive fields for the public JSON endpoint */
+/** Strip owner-sensitive fields for the public JSON endpoint.
+ *  ownerDisplayName is INTENTIONALLY KEPT — it's the only owner-identity field
+ *  surfaced publicly, gated three ways inside buildLogbookData (flag + opt-in
+ *  + non-empty value). All other identity fields (email, user id, ref number,
+ *  internal version metadata) are stripped here. */
 export function toPublicPayload(data: any) {
   if (!data) return data;
   const { referenceNumber, currentOwnerUserId, ownerEmail, logbookVersion, logbookLastIssuedAt, ...pub } = data;
