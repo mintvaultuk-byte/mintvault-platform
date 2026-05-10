@@ -102,9 +102,11 @@ function DefectOverlayPair({
   const positioned = defects.filter(d => typeof d.x_percent === "number" && typeof d.y_percent === "number");
   const frontDefects = positioned.filter(d => d.image_side !== "back");
   const backDefects  = positioned.filter(d => d.image_side === "back");
-  const showFront = images.front && frontDefects.length > 0;
-  const showBack  = images.back  && backDefects.length  > 0;
-  if (!showFront && !showBack) return null;
+  // Always render both sides if their image URL exists, regardless of defect
+  // presence on that side. Sides with no positioned defects render the image
+  // bare. Defensive: if neither URL exists we render nothing — caller
+  // already gates the section on defects.length > 0.
+  if (!images.front && !images.back) return null;
 
   const sevBorder = (s: string) =>
     s === "significant" ? "border-red-600 text-red-600 bg-red-50" :
@@ -113,10 +115,10 @@ function DefectOverlayPair({
 
   function SidePanel({ url, label, defects }: { url: string; label: string; defects: OverlayDefect[] }) {
     return (
-      <div className="flex-1 min-w-0">
+      <div className="flex flex-col items-center">
         <p className="text-[10px] uppercase tracking-[0.2em] text-[#888888] mb-2">{label}</p>
-        <div className="relative inline-block w-full">
-          <img src={url} alt={label} className="w-full rounded-lg border border-[#E8E4DC]" draggable={false} />
+        <div className="relative inline-block">
+          <img src={url} alt={label} className="h-64 rounded-lg shadow-lg" draggable={false} />
           {defects.map(d => {
             const isHi = highlightId === d.id;
             return (
@@ -149,9 +151,9 @@ function DefectOverlayPair({
   }
 
   return (
-    <div className="mt-4 flex flex-col sm:flex-row gap-4">
-      {showFront && <SidePanel url={images.front!} label="Front" defects={frontDefects} />}
-      {showBack  && <SidePanel url={images.back!}  label="Back"  defects={backDefects} />}
+    <div className="mt-4 flex justify-center gap-4">
+      {images.front && <SidePanel url={images.front} label="Front" defects={frontDefects} />}
+      {images.back  && <SidePanel url={images.back}  label="Back"  defects={backDefects} />}
     </div>
   );
 }
