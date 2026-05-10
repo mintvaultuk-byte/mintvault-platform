@@ -27,6 +27,14 @@ export const FEATURE_FLAGS = {
   // solicitor sign-off on dispute policy + transfer T&Cs (see PR #v435).
   TRANSFER_FLOW_LIVE: process.env.TRANSFER_FLOW_LIVE === "true",
 
+  // Per-user public-name toggle. When true, /api/v1/verify/:certId may
+  // surface owner displayName (only if the owner has opted in via the
+  // toggle in account settings AND has a non-empty displayName). When
+  // false, the feature is invisible end-to-end: settings row hidden,
+  // /api/auth/me omits public_name, verify endpoint never includes
+  // ownerDisplayName regardless of column value. Default false.
+  PUBLIC_NAME_TOGGLE_LIVE: process.env.PUBLIC_NAME_TOGGLE_LIVE === "true",
+
   // ── AI feature toggles (per docs/ai-audit.md, 2026-05-07) ─────────────────
   // Per-feature kill-switches so we can disable individual AI calls without
   // unsetting ANTHROPIC_API_KEY (which would 503 every AI route at once).

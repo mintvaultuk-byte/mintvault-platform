@@ -66,6 +66,14 @@ export const users = pgTable("users", {
   pinSetAt: timestamp("pin_set_at"),
   pinFailedCount: integer("pin_failed_count").notNull().default(0),
   pinLockedUntil: timestamp("pin_locked_until"),
+  // Public-name toggle (per-user). When true AND PUBLIC_NAME_TOGGLE_LIVE=true
+  // AND displayName is non-empty, surfaces displayName on /api/v1/verify/:certId
+  // for certs this user owns. Default false (anonymous).
+  //
+  // NOTE: distinct from `ownership_history.public_name` (per-event toggle)
+  // which is dormant in v1 — the gated render path at routes.ts:2950 stays
+  // anonymous regardless of either column. Per-event consent UX deferred.
+  publicName: boolean("public_name").notNull().default(false),
 });
 
 export type User = typeof users.$inferSelect;

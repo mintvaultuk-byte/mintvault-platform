@@ -15,6 +15,9 @@ interface AuthMe {
   display_name: string | null;
   email_verified: boolean;
   created_at: string;
+  // Only present when PUBLIC_NAME_TOGGLE_LIVE flag is on. Field absent ⇒
+  // dark ship; client hides the toggle row entirely.
+  public_name?: boolean;
 }
 
 function passwordStrength(pw: string): { level: "weak" | "medium" | "strong"; label: string; color: string } {
@@ -78,8 +81,14 @@ function ErrorBanner({ msg }: { msg: string }) {
 function ProfileTab({ me }: { me: AuthMe }) {
   const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState(me.display_name ?? "");
+  const [publicName, setPublicName] = useState<boolean>(me.public_name ?? false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [toggleError, setToggleError] = useState("");
+
+  // Flag-gated: server only includes public_name on /api/auth/me when the
+  // feature flag is on. With flag off, the toggle row stays hidden.
+  const flagOn = Object.prototype.hasOwnProperty.call(me, "public_name");
 
   const mutation = useMutation({
     mutationFn: () => apiRequest("PUT", "/api/auth/profile", { display_name: displayName.trim() || null }),
@@ -90,6 +99,28 @@ function ProfileTab({ me }: { me: AuthMe }) {
     },
     onError: (err: Error) => { setError(err.message); setSuccess(""); },
   });
+
+  // Optimistic UI with rollback on error — toggling shouldn't churn the
+  // form's display_name state, so we send only public_name on this PATCH.
+  const toggleMutation = useMutation({
+    mutationFn: (next: boolean) => apiRequest("PUT", "/api/auth/profile", { public_name: next }),
+    onMutate: (next: boolean) => {
+      const prev = publicName;
+      setPublicName(next);
+      setToggleError("");
+      return { prev };
+    },
+    onError: (err: Error, _next, ctx) => {
+      if (ctx) setPublicName(ctx.prev);
+      setToggleError(err.message || "Couldn't save preference. Try again.");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+    },
+  });
+
+  const displayNameTrimmed = displayName.trim();
+  const canToggleOn = displayNameTrimmed.length > 0;
 
   return (
     <form
@@ -116,6 +147,37 @@ function ProfileTab({ me }: { me: AuthMe }) {
           />
         </div>
       </Field>
+
+      {flagOn && (
+        <div className="rounded-xl border border-[#E8E4DC] bg-[#FAFAF8] px-4 py-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={publicName}
+              disabled={toggleMutation.isPending || (!publicName && !canToggleOn)}
+              onChange={(e) => toggleMutation.mutate(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-[#CCCCCC] text-[#D4AF37] focus:ring-[#D4AF37]"
+              data-testid="toggle-public-name"
+            />
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-[#1A1A1A]">
+                Show my display name on public cert verification
+              </div>
+              <p className="text-xs text-[#888888] mt-0.5">
+                When on, anyone who verifies a card you own will see your display name. Off by default. Email and real name are never shown.
+              </p>
+              {!publicName && !canToggleOn && (
+                <p className="text-xs text-[#B8960C] mt-1.5">
+                  Set a display name above first.
+                </p>
+              )}
+              {toggleError && (
+                <p className="text-xs text-red-600 mt-1.5">{toggleError}</p>
+              )}
+            </div>
+          </label>
+        </div>
+      )}
 
       {success && <SuccessBanner msg={success} />}
       {error && <ErrorBanner msg={error} />}
