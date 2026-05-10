@@ -23,6 +23,10 @@ interface VerifyResult {
   gradedDate: string | null;
   ownershipStatus: "claimed" | "unclaimed" | string;
   verifyUrl: string;
+  // Optional owner display name — present only when the feature flag is on,
+  // the cert is claimed, and the owner has opted in via account settings.
+  // Field omitted otherwise (anonymous = no owner row).
+  ownerDisplayName?: string;
 }
 
 type VerifyStatus =
@@ -155,6 +159,15 @@ function ResultCard({ result }: { result: VerifyResult }) {
               {claimed && <Check size={10} />}
               {claimed ? "Claimed" : "Unclaimed"}
             </span>
+            {result.ownerDisplayName && (
+              <span
+                className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                style={{ color: "var(--v2-ink-mute)" }}
+                data-testid="verify-owner-display-name"
+              >
+                Owned by {result.ownerDisplayName}
+              </span>
+            )}
             {result.gradedDate && (
               <span className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
                 Graded {result.gradedDate}

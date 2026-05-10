@@ -432,6 +432,33 @@ async function migrateServiceTiersV213() {
     console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
   } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
 
+  // ── Public-name toggle (per-user). Idempotent additive nullable→default false.
+  // Distinct from ownership_history.public_name (per-event, dormant). Audit-log
+  // the first run only — schema-presence check before insert keeps re-runs clean.
+  try {
+    const before = await db.execute(sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'users' AND column_name = 'public_name' LIMIT 1
+    `);
+    const wasPresent = before.rows.length > 0;
+    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS public_name BOOLEAN NOT NULL DEFAULT false`);
+    if (!wasPresent) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('schema', 'users', 'add_column_public_name', 'startup_migration',
+          ${JSON.stringify({
+            column: "public_name",
+            type: "boolean",
+            nullable: false,
+            default: false,
+            scope: "per-user",
+            note: "Distinct from ownership_history.public_name (per-event); v1 ships per-user toggle.",
+          })}::jsonb)
+      `);
+      console.log("[public-name-migrate] users.public_name added + audit logged");
+    }
+  } catch (e: any) { console.error("[public-name-migrate] failed:", e.message); }
+
   // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
@@ -742,6 +769,7 @@ export async function registerRoutes(
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
+      publicNameToggleLive: FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE,
     });
   });
 
@@ -1154,7 +1182,34 @@ export async function registerRoutes(
       const isNonNum = isNonNumericGrade(gradeType);
       const gradeNumeric = isNonNum ? null : parseFloat(dbCert.gradeOverall || "0");
 
-      return res.json({
+      // Public-name surfacing — gated three ways:
+      //   1. PUBLIC_NAME_TOGGLE_LIVE flag must be true
+      //   2. cert must have a current owner
+      //   3. owner.public_name must be true AND owner.display_name non-empty
+      // Any failure → field omitted entirely (NOT null) so client renders
+      // the existing anonymous path. NEVER returns email, real name, or user ID.
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      let ownerDisplayName: string | undefined;
+      if (FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE && (dbCert as any).currentOwnerUserId) {
+        try {
+          const ownerRow = await db.execute(sql`
+            SELECT display_name, public_name FROM users
+            WHERE id = ${(dbCert as any).currentOwnerUserId}
+              AND deleted_at IS NULL
+            LIMIT 1
+          `);
+          const owner = ownerRow.rows[0] as any;
+          if (owner?.public_name === true) {
+            const dn = typeof owner.display_name === "string" ? owner.display_name.trim() : "";
+            if (dn.length > 0) ownerDisplayName = dn;
+          }
+        } catch (e: any) {
+          // Graceful fallback if column missing or query fails — never block verify.
+          console.warn(`[verify] owner display_name lookup skipped: ${e.message}`);
+        }
+      }
+
+      const payload: Record<string, unknown> = {
         verified: true,
         certId: normalizeCertId(dbCert.certId),
         status: dbCert.status || "active",
@@ -1169,7 +1224,9 @@ export async function registerRoutes(
         gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
         ownershipStatus: dbCert.ownershipStatus || "unclaimed",
         verifyUrl: `${APP_BASE_URL}/cert/${normalizeCertId(dbCert.certId)}`,
-      });
+      };
+      if (ownerDisplayName) payload.ownerDisplayName = ownerDisplayName;
+      return res.json(payload);
     } catch (err: any) {
       console.error("[verify] error:", err.message);
       return res.status(500).json({ verified: false, error: "Internal error" });
@@ -11116,13 +11173,20 @@ Defects (admin-confirmed): ${defectLines}`;
         req.session.destroy(() => {});
         return res.status(401).json({ error: "auth_required" });
       }
-      return res.json({
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+      const base: Record<string, unknown> = {
         id: user.id,
         email: user.email,
         display_name: user.display_name,
         email_verified: user.email_verified,
         created_at: user.created_at,
-      });
+      };
+      // Dark-ship: only surface public_name when the flag is live. With flag
+      // off, clients can't see (and shouldn't render UI for) the toggle.
+      if (FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE) {
+        base.public_name = (user as any).public_name === true;
+      }
+      return res.json(base);
     } catch (err: any) {
       return res.status(500).json({ error: "Failed to get user" });
     }
@@ -11185,10 +11249,56 @@ Defects (admin-confirmed): ${defectLines}`;
   app.put("/api/auth/profile", requireAuth, async (req, res) => {
     try {
       const userId = (req.session as any).userId as string;
-      const { display_name } = req.body;
-      await db.execute(sql`UPDATE users SET display_name = ${display_name?.trim() || null}, updated_at = NOW() WHERE id = ${userId}`);
+      const { display_name, public_name } = req.body as { display_name?: string | null; public_name?: unknown };
+      const { FEATURE_FLAGS } = await import("./config/feature-flags");
+
+      // Dark-ship gate: with the flag off, public_name in the body is rejected
+      // so the feature is invisible end-to-end.
+      if (public_name !== undefined && !FEATURE_FLAGS.PUBLIC_NAME_TOGGLE_LIVE) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      if (public_name !== undefined && typeof public_name !== "boolean") {
+        return res.status(400).json({ error: "public_name must be a boolean" });
+      }
+
+      // Touch display_name only if it was explicitly provided in the payload —
+      // otherwise toggling public_name shouldn't blank an existing display_name.
+      const touchDisplayName = Object.prototype.hasOwnProperty.call(req.body || {}, "display_name");
+
+      // Capture before-state for the public_name audit row.
+      let priorPublicName: boolean | null = null;
+      if (public_name !== undefined) {
+        const row = await db.execute(sql`SELECT public_name FROM users WHERE id = ${userId} LIMIT 1`);
+        priorPublicName = (row.rows[0] as any)?.public_name === true;
+      }
+
+      if (touchDisplayName && public_name !== undefined) {
+        await db.execute(sql`
+          UPDATE users SET display_name = ${display_name?.trim() || null},
+                          public_name = ${public_name},
+                          updated_at = NOW()
+          WHERE id = ${userId}
+        `);
+      } else if (touchDisplayName) {
+        await db.execute(sql`UPDATE users SET display_name = ${display_name?.trim() || null}, updated_at = NOW() WHERE id = ${userId}`);
+      } else if (public_name !== undefined) {
+        await db.execute(sql`UPDATE users SET public_name = ${public_name}, updated_at = NOW() WHERE id = ${userId}`);
+      }
+
+      // Audit only the public_name change — display_name is already covered
+      // by writeAuthAudit elsewhere if/when wired.
+      if (public_name !== undefined && priorPublicName !== public_name) {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES ('user', ${userId}, 'toggle_public_name', ${userId},
+            ${JSON.stringify({ from: priorPublicName, to: public_name })}::jsonb)
+        `);
+        console.log(`[profile] user=${userId} toggled public_name ${priorPublicName} -> ${public_name}`);
+      }
+
       return res.json({ ok: true });
     } catch (err: any) {
+      console.error("[profile] update error:", err.message);
       return res.status(500).json({ error: "Failed to update profile" });
     }
   });
