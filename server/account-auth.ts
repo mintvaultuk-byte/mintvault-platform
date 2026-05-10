@@ -75,7 +75,7 @@ export async function findUserByEmail(email: string): Promise<Record<string, unk
   const rows = await db.execute(sql`
     SELECT id, email, password_hash, display_name, email_verified,
            email_verified_at, failed_login_count, locked_until, deleted_at,
-           last_login_at, last_login_ip, role, created_at
+           last_login_at, last_login_ip, role, created_at, public_name
     FROM users
     WHERE LOWER(email) = LOWER(${email.trim()})
     LIMIT 1
@@ -87,7 +87,7 @@ export async function findUserById(id: string): Promise<Record<string, unknown> 
   const rows = await db.execute(sql`
     SELECT id, email, password_hash, display_name, email_verified,
            email_verified_at, failed_login_count, locked_until, deleted_at,
-           last_login_at, last_login_ip, role, created_at
+           last_login_at, last_login_ip, role, created_at, public_name
     FROM users
     WHERE id = ${id}
     LIMIT 1
