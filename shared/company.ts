@@ -13,7 +13,7 @@ export const COMPANY = {
   legalName: "Mint Vault UK Ltd",
   tradingName: "MintVault",
   companyNumber: "17170013",
-  icoRegistrationNumber: "[PENDING — ICO registration]",
+  icoRegistrationNumber: "ZC140242",
   tradingAddress: {
     city: "Kent",
     country: "United Kingdom",
