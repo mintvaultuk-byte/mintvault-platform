@@ -3,6 +3,20 @@ import { eq, sql, desc, or, ilike, like, and, isNull, isNotNull, ne, inArray } f
 import { db } from "./db";
 import crypto from "crypto";
 
+/**
+ * Thrown by ownership-mutating storage methods when the cert has been reported
+ * stolen and the caller did not supply an explicit override. Routes catch this
+ * and surface 403 + the verbatim PR #75 error message. Mirrors the dispute /
+ * cancel exemption pattern: support staff can override with an audit-logged
+ * reason; default-secure for everyone else.
+ */
+export class StolenCertError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StolenCertError";
+  }
+}
+
 export interface DashboardStats {
   totalCerts: number;
   thisWeek: number;
@@ -116,7 +130,7 @@ export interface IStorage {
   createClaimVerification(certId: string, email: string, ownerName?: string, declaredNew?: boolean): Promise<string>;
   completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }>;
   getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]>;
-  assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string): Promise<void>;
+  assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string, opts?: { overrideStolen?: boolean }): Promise<void>;
   batchGenerateClaimCodes(): Promise<{ certId: string; claimCode: string }[]>;
   createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string>;
   confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
@@ -1315,6 +1329,12 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    if ((cert as any).stolenStatus === "reported_stolen") {
+      return {
+        success: false,
+        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+      };
+    }
     if (cert.ownershipStatus === "claimed") return { success: false, error: "This certificate has already been claimed." };
     if (cert.claimCodeUsedAt) return { success: false, error: "This claim code has already been used." };
     if (cert.claimCodeCreatedAt && verification.createdAt < cert.claimCodeCreatedAt) {
@@ -1384,14 +1404,25 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(ownershipHistory.createdAt));
   }
 
-  async assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string): Promise<void> {
+  async assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string, opts?: { overrideStolen?: boolean }): Promise<void> {
     const normalEmail = email.toLowerCase().trim();
+
+    const cert = await this.getCertificateByCertId(certId);
+    // Stolen-status guard with admin override. Mirrors PR #75 dispute/cancel
+    // exemption: support staff must still be able to reconcile flagged certs,
+    // but only with explicit overrideStolen=true. Routes catch StolenCertError
+    // and return 403 + verbatim error.
+    if ((cert as any)?.stolenStatus === "reported_stolen" && !opts?.overrideStolen) {
+      throw new StolenCertError(
+        "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+      );
+    }
+
     let user = await this.getUserByEmail(normalEmail);
     if (!user) {
       user = await this.createUser({ email: normalEmail });
     }
 
-    const cert = await this.getCertificateByCertId(certId);
     const previousOwnerId = cert?.currentOwnerUserId || null;
 
     const ownershipToken = await this._generateOwnershipToken();
