@@ -14,7 +14,7 @@ Implementation tracking for the solicitor-approved legal pack. Update as items c
 ## Stage B — Go-live (only when external inputs landed)
 Requires all of:
 - [ ] Companies House number received
-- [ ] ICO registration number received
+- [x] ICO registration number received — ZC140242 (issued 2026-05-05, Tier 1, expires 2027-05-04)
 - [ ] Solicitor-approved content for all 9 MD files
 - [ ] Final lastUpdated / effectiveFrom dates from solicitor
 - [ ] TERMS_VERSION bumped from `v1.0-draft-pre-solicitor` to final value
