@@ -2742,7 +2742,7 @@ export async function registerRoutes(
       // Footer
       doc.moveTo(50, doc.page.height - 70).lineTo(545, doc.page.height - 70).strokeColor(GOLD).lineWidth(0.5).stroke();
       doc.fontSize(7).fillColor(isBlack ? "#666666" : "#999999")
-        .text(`Graded by MintVault UK · Rochester, Kent · mintvaultuk.com`, 50, doc.page.height - 60, { align: "center" })
+        .text(`Graded by MintVault UK · Kent · mintvaultuk.com`, 50, doc.page.height - 60, { align: "center" })
         .text(`Verify at mintvaultuk.com/cert/${certId}/report`, 50, doc.page.height - 50, { align: "center" })
         .text(`© 2026 MintVault UK — This report is permanent and cannot be altered.`, 50, doc.page.height - 40, { align: "center" });
 

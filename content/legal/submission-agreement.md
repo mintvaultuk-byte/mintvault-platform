@@ -7,6 +7,15 @@ lastUpdated: "[DATE TO BE INSERTED BY SOLICITOR]"
 effectiveFrom: "[DATE TO BE INSERTED BY SOLICITOR]"
 ---
 
+<!--
+TODO (Stage B deploy bundle, 2026-05-11): Registered office address is
+2 Temple Gardens, Strood, Kent, ME2 2NG, United Kingdom. Fill the
+[REGISTERED OFFICE] placeholders in this file when bundling the Stage B
+legal-pack deploy (solicitor-signed content + TERMS_VERSION bump +
+LEGAL_PAGES_LIVE=true flip in one go). DO NOT fill independently — it
+fragments the bundled deploy.
+-->
+
 # Mint Vault UK Ltd — Submission Agreement
 
 **Version 1.2 — Final draft for solicitor review**

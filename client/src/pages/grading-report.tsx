@@ -547,7 +547,7 @@ export default function GradingReportPage() {
 
         {/* ── Footer ── */}
         <div className={`text-center pt-6 border-t ${isBlack ? "border-[#222222]" : "border-[#E8E4DC]"} reveal-on-scroll`}>
-          <p className={`text-xs mb-1 ${t.textMut}`}>Graded by MintVault UK · Rochester, Kent · mintvaultuk.com</p>
+          <p className={`text-xs mb-1 ${t.textMut}`}>Graded by MintVault UK · Kent · mintvaultuk.com</p>
           <p className={`text-[10px] mb-2 ${isBlack ? "text-[#444444]" : "text-[#CCCCCC]"}`}>
             This report is permanent and cannot be altered. Certificate {cert.certId}.
           </p>
