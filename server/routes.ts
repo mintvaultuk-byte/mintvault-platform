@@ -6879,9 +6879,19 @@ export async function registerRoutes(
 
         async function processAngle(angle: "front" | "back" | "angled" | "closeup", buffer: Buffer) {
           const ext = "jpg";
-          // 1. Save original
+          // 1. Save original — re-encode via sharp to strip EXIF/ICC/thumbnail
+          // metadata that came through multer (sharp default omits metadata
+          // unless .withMetadata() is called). Standardises q85 mozjpeg
+          // progressive regardless of input format (browser may have sent
+          // PNG/TIFF/WebP/JPEG; ContentType was previously forced to
+          // image/jpeg without re-encoding, which lied to clients on non-JPEG
+          // inputs). Same encode settings as every other JPEG output.
+          const sharp = (await import("sharp")).default;
+          const reencodedOriginal = await sharp(buffer)
+            .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+            .toBuffer();
           const origKey = `grading/${certId}/${angle}_original.${ext}`;
-          await uploadToR2(origKey, buffer, "image/jpeg");
+          await uploadToR2(origKey, reencodedOriginal, "image/jpeg");
           updates[`grading_${angle}_original`] = origKey;
 
           // 2. Deskew (straighten slight rotation before cropping)
