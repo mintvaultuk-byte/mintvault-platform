@@ -21,7 +21,10 @@ const PDF_H = CARD_H_MM * MM_TO_PT;
 // physical constraint by anchoring all readable text to #111111 / #222222 /
 // #555555. Yellow is the brand signal but never sits behind body text.
 const WHITE = "#FFFFFF";
-const GOLD  = "#FFCB05";   // Pikachu Yellow — footer band only
+// PR #91 — print-yellow palette. Slightly darker than the site brand
+// (#FFCB05) for legibility on inkjet-printed paper. Used by the outer
+// border AND the inner footer band; both reference this single constant.
+const GOLD  = "#E6B505";
 
 const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
 
