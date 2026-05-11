@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "wouter";
 import {
-  Upload, Loader2, ArrowRight, AlertTriangle, CheckCircle,
+  Upload, Loader2, ArrowRight, AlertTriangle,
 } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
@@ -298,8 +298,8 @@ export default function ToolsEstimateV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
           <div
-            className="relative rounded-xl p-6 md:p-10"
-            style={{
+            className={stateKey === "idle-empty" ? "relative" : "relative rounded-xl p-6 md:p-10"}
+            style={stateKey === "idle-empty" ? undefined : {
               backgroundColor: "var(--v2-paper-raised)",
               border: "1px solid var(--v2-line)",
               boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
@@ -314,7 +314,7 @@ export default function ToolsEstimateV2() {
               </span>
             )}
 
-            {/* ── B.1 IDLE-EMPTY ── */}
+            {/* ── B.1 IDLE-EMPTY ── slab + scanner hybrid on dark vault bg */}
             {stateKey === "idle-empty" && (
               <div>
                 <label
@@ -322,11 +322,7 @@ export default function ToolsEstimateV2() {
                   onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                   onDragLeave={() => setDragging(false)}
                   onDrop={handleDrop}
-                  className="block cursor-pointer rounded-lg py-16 px-6 text-center transition-colors"
-                  style={{
-                    border: `2px dashed ${dragging ? "var(--v2-gold)" : "var(--v2-line)"}`,
-                    backgroundColor: dragging ? "rgba(212,175,55,0.03)" : "transparent",
-                  }}
+                  className={`slab-scanner${dragging ? " scanner-beam--dragover" : ""}`}
                 >
                   <input
                     ref={fileInputRef}
@@ -337,29 +333,51 @@ export default function ToolsEstimateV2() {
                     aria-label="Upload card photo"
                     onChange={(e) => handleFileChoose(e.target.files?.[0] ?? null)}
                   />
-                  <Upload size={48} strokeWidth={1.5} style={{ color: "var(--v2-ink-mute)" }} className="mx-auto" />
-                  <p
-                    className="font-display italic font-medium text-2xl mt-5"
-                    style={{ color: "var(--v2-ink)" }}
-                  >
-                    Upload a card photo
-                  </p>
-                  <p
-                    className="font-mono-v2 text-xs uppercase tracking-wider mt-2"
-                    style={{ color: "var(--v2-ink-mute)" }}
-                  >
-                    Drag and drop, or click to browse
-                  </p>
+
+                  {/* Header bar */}
+                  <header className="slab-scanner__header">
+                    <span className="slab-scanner__brand">
+                      <span className="slab-scanner__brand-mint">Mint</span>
+                      <span className="slab-scanner__brand-sep">&middot;</span>
+                      <span className="slab-scanner__brand-vault">Vault</span>
+                    </span>
+                    <span className="slab-scanner__status" aria-hidden="true">
+                      <span className="slab-scanner__status-dot" />
+                      PRE-AI GRADING
+                    </span>
+                  </header>
+
+                  {/* Card-shaped scan bed */}
+                  <div className="slab-scanner__window">
+                    <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
+                    <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
+                    <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 600DPI</span>
+                    <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">Z &middot; 1.0&times;</span>
+                    <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
+                    <div className="slab-scanner__content">
+                      <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
+                      <p className="slab-scanner__title">Slot your card</p>
+                      <p className="slab-scanner__subtitle">Drag &amp; drop &middot; or browse</p>
+                    </div>
+                  </div>
+
+                  {/* Footer bar */}
+                  <footer className="slab-scanner__footer">
+                    <span className="slab-scanner__footer-left">CERT &middot; PENDING</span>
+                    <span className="slab-scanner__footer-center">Awaiting</span>
+                    <span className="slab-scanner__qr" aria-hidden="true">
+                      {Array.from({ length: 25 }).map((_, i) => <span key={i} />)}
+                    </span>
+                  </footer>
                 </label>
 
-                <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {TIPS.map((t) => (
-                    <div key={t.label} className="flex items-start gap-2.5">
-                      <CheckCircle size={16} style={{ color: "var(--v2-gold)" }} className="mt-0.5 shrink-0" />
-                      <div>
-                        <p className="font-body text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>{t.label}</p>
-                        <p className="font-body text-xs mt-0.5" style={{ color: "var(--v2-ink-soft)" }}>{t.body}</p>
-                      </div>
+                {/* Photo tips — three dark cards below the slab */}
+                <div className="slab-scanner-tips">
+                  {TIPS.map((t, i) => (
+                    <div key={t.label} className="slab-scanner-tip">
+                      <p className="slab-scanner-tip__num">{String(i + 1).padStart(2, "0")}</p>
+                      <p className="slab-scanner-tip__title">{t.label}</p>
+                      <p className="slab-scanner-tip__body">{t.body}</p>
                     </div>
                   ))}
                 </div>
