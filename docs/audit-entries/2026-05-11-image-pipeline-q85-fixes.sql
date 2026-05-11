@@ -18,4 +18,7 @@ VALUES
    NOW()),
   ('image_format', 'scan-ingest-service.ts:resizeBuf', 'pipeline_change', 'cornelius',
    '{"file":"server/scan-ingest-service.ts","line":66,"before":{"quality":90,"progressive":false,"mozjpeg":false},"after":{"quality":85,"progressive":true,"mozjpeg":true},"reason":"audit_2026-05-11_red_tier_fix_2","commit":"COMMIT_SHA_PLACEHOLDER_1"}'::jsonb,
+   NOW()),
+  ('image_format', 'routes.ts:upload-images-mirror:resize', 'pipeline_change', 'cornelius',
+   '{"file":"server/routes.ts","line":10076,"before":{"quality":90,"progressive":false,"mozjpeg":false},"after":{"quality":85,"progressive":true,"mozjpeg":true},"reason":"mirror_site_of_scan-ingest_resizeBuf_per_inline_comment","commit":"COMMIT_SHA_PLACEHOLDER_1"}'::jsonb,
    NOW());

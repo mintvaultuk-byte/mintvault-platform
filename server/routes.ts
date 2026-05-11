@@ -10073,7 +10073,7 @@ Defects (admin-confirmed): ${defectLines}`;
           jpegBuf = await sharp(file.buffer)
             .rotate()
             .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 90 })
+            .jpeg({ quality: 85, progressive: true, mozjpeg: true })
             .toBuffer();
         } catch (err: any) {
           return res.status(400).json({ error: `image decode failed: ${err.message}` });
