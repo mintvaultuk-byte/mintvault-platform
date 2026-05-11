@@ -218,7 +218,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
           {gradedCards.map((g) => (
             <div key={g.certId} className="flex items-center justify-between text-xs text-[#333333] py-0.5">
               <span className="truncate">{g.cardName}</span>
-              <span className={`font-bold ml-2 ${g.isBlackLabel ? "text-[#D4AF37]" : "text-[#1A1A1A]"}`}>{g.grade}{g.isBlackLabel ? " ★" : ""}</span>
+              <span className={`font-bold ml-2 ${g.isBlackLabel ? "text-[#FFCB05]" : "text-[#1A1A1A]"}`}>{g.grade}{g.isBlackLabel ? " ★" : ""}</span>
             </div>
           ))}
         </div>

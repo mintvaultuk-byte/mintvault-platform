@@ -233,16 +233,16 @@ export default function LogbookPage() {
             {/* Grade badge */}
             <div className="inline-block mb-4">
               <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#FFCB05]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(255,203,5,0.12)" }}>
-                {/* Black Label text colour preserved at #D4AF37 — deferred to PR #88. */}
-                <span className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-500" : "text-[#1A1A1A]"}`}>
+                {/* PR #88 — Black Label text colour swapped to Pikachu Yellow. */}
+                <span className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#FFCB05]" : grades.isNonNumeric ? "text-amber-500" : "text-[#1A1A1A]"}`}>
                   {safe(grades.overall)}
                 </span>
               </div>
-              <div className={`text-sm uppercase tracking-[0.2em] font-bold mt-1 ${grades.isBlackLabel ? "text-[#D4AF37]" : "text-[#888888]"}`}>
+              <div className={`text-sm uppercase tracking-[0.2em] font-bold mt-1 ${grades.isBlackLabel ? "text-[#FFCB05]" : "text-[#888888]"}`}>
                 {grades.gradeLabel}
               </div>
               {grades.isBlackLabel && (
-                <div className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mt-2 animate-pulse">Black Label</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-[#FFCB05] mt-2 animate-pulse">Black Label</div>
               )}
             </div>
 

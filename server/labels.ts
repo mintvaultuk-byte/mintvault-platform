@@ -567,7 +567,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.shadowBlur    = 1;
     ctx.shadowColor   = "rgba(0,0,0,0.25)";
     ctx.font         = `bold ${gradeFontSize}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle    = "#1A1A1A";
+    // PR #88: grade number anchored to explicit #111111. Reads identically
+    // to the prior #1A1A1A on white; on Black Label, the digit sits on the
+    // yellow grade panel so contrast is bright-yellow → near-black.
+    ctx.fillStyle    = "#111111";
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(gradeStr, panelCX, gradeNumCY);
@@ -672,22 +675,29 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const BOX_Y    = MV_HDR_Y - BOX_PY;
   const BOX_CY   = BOX_Y + BOX_H / 2;                       // vertical centre of box
 
-  // Step 3 — draw gold border box
+  // Step 3 — PR #88: Black Label gets a solid yellow fill BEHIND the wordmark
+  // so the box reads as a yellow bar with black text. White label keeps the
+  // yellow border only (no fill) so the label background shows through.
+  const isBlack = labelBg === BLACK;
+  if (isBlack) {
+    ctx.fillStyle = GOLD_LIGHT;
+    ctx.fillRect(BOX_X, BOX_Y, BOX_W, BOX_H);
+  }
   ctx.strokeStyle = GOLD_LIGHT;
   ctx.lineWidth   = BOX_LW;
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
   ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
 
-  // Step 4 — v424 — solid GOLD_LIGHT fill replaces the 5-stop gradient and
-  // glow shadow. The gradient was washing out the centre of each letter on
-  // physical labels; flat gold reads cleanly at the new 70mm width.
+  // Step 4 — PR #88: wordmark text is solid black on yellow. Was yellow text
+  // on a yellow border which produced an outlined / transparent look against
+  // the yellow label frame.
   try { (ctx as any).letterSpacing = `${MV_LS}px`; } catch {}
   ctx.textAlign    = "left";
   ctx.textBaseline = "middle";
   const mvTextX    = BOX_X + BOX_PX;
 
-  ctx.fillStyle   = GOLD_LIGHT;
+  ctx.fillStyle   = "#111111";
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
   ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
@@ -855,14 +865,54 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   const logoRightX   = LOGO_LX + LOGO_DRAW_W;
   const NFC_ICON_CX  = Math.round((logoRightX + gfLeft) / 2);
 
-  // ── LEFT: MintVault logo — primary visual anchor ──────────────────────────
-  if (logo) {
-    const ly = I_TOP + Math.round((I_H - LOGO_DRAW) / 2); // vertically centred within inner area
-    ctx.drawImage(logo, LOGO_LX, ly, LOGO_DRAW_W, LOGO_DRAW);
+  // ── LEFT: MintVault wordmark — PR #88 replaces the muddy raster shield ────
+  // The previous mintvault-logo.png rendered as brown/dark-gold which fought
+  // the new Pikachu Yellow brand. Replaced with native text rendering so the
+  // wordmark is exactly #FFCB05 (matches the URL + tap-text colour on this
+  // label) and prints cleanly at any DPI.
+  //
+  // Two-line lockup: "MINTVAULT" in Bodoni Moda 900 (matches the front-label
+  // wordmark family) over "TRADING CARD GRADING" in bold sans-serif. Both
+  // lines occupy the same width band the raster logo did (LOGO_LX → +LOGO_DRAW_W).
+  {
+    const wordmarkX  = LOGO_LX;
+    const wordmarkW  = LOGO_DRAW_W;
+    const wordmarkCX = wordmarkX + wordmarkW / 2;
+    const wordmarkCY = I_TOP + Math.round(I_H / 2);
 
-    // Redraw gold frame on top so logo never bleeds into the border.
+    // Main wordmark — Bodoni Moda 900, sized to fit the available width.
+    const MAIN_SIZE   = 56;
+    const MAIN_LS     = 2;
+    const SUBTITLE_SZ = 13;
+    const STACK_GAP   = 12;
+
+    try { (ctx as any).letterSpacing = `${MAIN_LS}px`; } catch {}
+    ctx.font         = `900 ${MAIN_SIZE}px "Bodoni Moda", "Times New Roman", serif`;
+    ctx.fillStyle    = GOLD_LIGHT;
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.shadowBlur   = 0;
+    ctx.shadowColor  = "transparent";
+
+    // Stack: main baseline above centre, subtitle baseline below centre.
+    const mainY     = wordmarkCY - STACK_GAP / 2;
+    const subtitleY = wordmarkCY + STACK_GAP / 2 + SUBTITLE_SZ;
+    ctx.fillText("MINTVAULT", wordmarkCX, mainY);
+    try { (ctx as any).letterSpacing = "0px"; } catch {}
+
+    try { (ctx as any).letterSpacing = "1.4px"; } catch {}
+    ctx.font      = `bold ${SUBTITLE_SZ}px Arial, Helvetica, sans-serif`;
+    ctx.fillStyle = GOLD_LIGHT;
+    ctx.fillText("TRADING CARD GRADING", wordmarkCX, subtitleY);
+    try { (ctx as any).letterSpacing = "0px"; } catch {}
+
+    ctx.textAlign    = "left";
+    ctx.textBaseline = "alphabetic";
+
+    // Redraw gold frame on top so the wordmark never bleeds into the border.
     drawGoldFrame(ctx);
   }
+  void logo; // raster logo no longer used on the back label (PR #88).
 
   // ── CENTRE TOP: website URL — v425 flat GOLD_LIGHT (v424 used GOLD_DARK
   // which printed as muddy brown; matches the front MINTVAULT wordmark). ──
@@ -921,7 +971,9 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
     const imgData = offCtx.getImageData(0, 0, iconSz, iconSz);
     const d = imgData.data;
-    const goldHex = GOLD_DARK.replace("#", "");
+    // PR #88: tint with GOLD_LIGHT (#FFCB05) instead of GOLD_DARK (#D9A300)
+    // so the NFC icon matches the URL + tap-text colour on the back label.
+    const goldHex = GOLD_LIGHT.replace("#", "");
     const gR = parseInt(goldHex.substring(0, 2), 16);
     const gG = parseInt(goldHex.substring(2, 4), 16);
     const gB = parseInt(goldHex.substring(4, 6), 16);
@@ -938,7 +990,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     // Fallback: draw programmatic signal arcs if icon fails to load
     console.error(`[label-back-debug] cert=${cert.certId} NFC icon failed, falling back to arcs:`, err);
     const iconSz = 100;
-    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_DARK);
+    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_LIGHT);
   }
 
   ctx.textAlign    = "left";
