@@ -18,7 +18,10 @@ import {
 } from "lucide-react";
 import AdminCertBrowser from "./admin-cert-browser";
 
-const CERTS_PER_SHEET = 10;
+// v525 — single sheet path. 4 certs per sheet, front + claim insert per row.
+// PRINT_BATCH_MAX is defined inside SheetPrintingPanel (kept close to its
+// only consumer); we expose the same number here for "select first N" UI.
+const MAX_CERTS_PER_BATCH = 4;
 
 type CertForPrinting = CertificateRecord & { lastPrintedAt: string | null };
 type FilterMode = "all" | "unprinted" | "printed";
@@ -565,7 +568,6 @@ function SheetPrintingPanel() {
   const [filterMode, setFilterMode]     = useState<FilterMode>("all");
   const [search, setSearch]             = useState("");
   const [reprintingId, setReprintingId] = useState<string | null>(null);
-  const [generating, setGenerating]     = useState(false);
   const [editTarget, setEditTarget]     = useState<{ certId: string; cert: CertificateRecord } | null>(null);
 
   const { data: allCerts = [], isLoading: certsLoading, refetch: refetchCerts } =
@@ -614,8 +616,8 @@ function SheetPrintingPanel() {
     }
   }, [visibleCerts, selected]);
 
-  const selectFirst13  = useCallback(
-    () => setSelected(new Set(visibleCerts.slice(0, CERTS_PER_SHEET).map((c) => c.certId))),
+  const selectFirstBatch = useCallback(
+    () => setSelected(new Set(visibleCerts.slice(0, MAX_CERTS_PER_BATCH).map((c) => c.certId))),
     [visibleCerts],
   );
   const clearSelection = useCallback(() => setSelected(new Set()), []);
@@ -626,82 +628,28 @@ function SheetPrintingPanel() {
     qc.invalidateQueries({ queryKey: ["/api/admin/printing/sheets"] });
   }, [refetchCerts, qc]);
 
-  // Retry-aware sheet POST — silent retry for transient 429s
-  const sheetRequest = useCallback(async (certIds: string[], maxRetries = 3): Promise<Response> => {
-    let lastErr: Error | null = null;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      if (attempt > 0) {
-        await new Promise(r => setTimeout(r, 400 * attempt));
-      }
-      try {
-        const res = await apiRequest("POST", "/api/admin/printing/generate-sheet", { certIds });
-        if (res.status === 429) {
-          lastErr = new Error("Rate limit — retrying…");
-          continue;
-        }
-        return res;
-      } catch (e: any) {
-        lastErr = e;
-      }
-    }
-    throw lastErr ?? new Error("Failed after retries");
-  }, []);
-
-  // Generate / reprint sheet
-  const generateSheet = useCallback(async (certIds: string[]) => {
-    setGenerating(true);
-    try {
-      const res = await sheetRequest(certIds);
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(error);
-      }
-      const sheetRef = res.headers.get("X-Sheet-Ref") || `SHEET-${Date.now()}`;
-      setPending(sheetRef);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `mintvault-labels-${sheetRef}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({
-        title:       "Label sheet generated",
-        description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — ${sheetRef}`,
-      });
-      setSelected(new Set());
-      invalidate();
-    } catch (err: any) {
-      toast({ title: "Sheet generation failed", description: err.message, variant: "destructive" });
-    } finally {
-      setGenerating(false);
-    }
-  }, [toast, invalidate, sheetRequest]);
-
-  // Reprint single
+  // v525 — single-cert reprint routes through the same /api/admin/print-batch
+  // endpoint as multi-cert batches. Produces a 1-row sheet (front + claim
+  // insert) with cut SVG + Cricut PNG. Eliminates the third parallel reprint
+  // path that produced a legacy 72×22mm PDF with no insert and no cut SVG.
   const handleReprint = useCallback(async (certId: string) => {
     setReprintingId(certId);
     try {
-      const res = await sheetRequest([certId]);
+      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
         throw new Error(error);
       }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `mintvault-single-${certId}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: "Single label generated", description: certId });
+      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
+      saveBatchFiles(data);
+      toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
       invalidate();
     } catch (err: any) {
       toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
     } finally {
       setReprintingId(null);
     }
-  }, [toast, invalidate, sheetRequest]);
+  }, [toast, invalidate]);
 
   // Download claim insert sheet
   const [downloadingInserts, setDownloadingInserts] = useState(false);
@@ -728,35 +676,53 @@ function SheetPrintingPanel() {
     }
   }, [toast]);
 
-  // Download SVG cut guide — matches print sheet positions exactly
-  const [downloadingCut, setDownloadingCut] = useState(false);
-  const downloadCutGuide = useCallback(async (certIds: string[]) => {
-    setDownloadingCut(true);
+  // v525 — shared helper for saving the 3-file batch output. Used by
+  // single-cert reprint AND multi-cert batch print. All three filenames
+  // share the batchId so the operator can pair them at the printer.
+  const saveBatchFiles = useCallback((data: { pdf: string; svg: string; png: string; batchId: string }) => {
+    const decode = (b64: string, mime: string) => {
+      const bin = atob(b64);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      return new Blob([buf], { type: mime });
+    };
+    const saveBlob = (blob: Blob, filename: string) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
+    saveBlob(decode(data.png, "image/png"), `mintvault-batch-${data.batchId}.png`);
+    saveBlob(decode(data.pdf, "application/pdf"), `mintvault-batch-${data.batchId}.pdf`);
+  }, []);
+
+  // LatestSheetSection's "reprint sheet" button hits this. Runs the same
+  // print-batch flow and surfaces success/failure as a toast. No state
+  // tracking here — the per-row spinner is local to that section.
+  const reprintFromHistory = useCallback(async (certIds: string[]) => {
     try {
-      const res = await apiRequest("POST", "/api/admin/printing/generate-cut-sheet", { certIds });
+      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
         throw new Error(error);
       }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `mintvault-cut-guide-${certIds.length}row.svg`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: "Cut guide downloaded", description: `${certIds.length} row(s) — import SVG into CM300, use Direct Cut` });
+      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
+      saveBatchFiles(data);
+      toast({ title: "Sheet reprinted", description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}` });
+      invalidate();
     } catch (err: any) {
-      toast({ title: "Cut guide failed", description: err.message, variant: "destructive" });
-    } finally {
-      setDownloadingCut(false);
+      toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
     }
-  }, [toast]);
+  }, [toast, invalidate, saveBatchFiles]);
 
-  // v419 — single-sheet print-and-cut batch (front + back + insert per row,
-  // up to 5 cards per sheet). Returns a JSON envelope with PDF and SVG as
-  // base64 blobs; we save both files in one click.
-  const PRINT_BATCH_MAX = 5;
+  // v525 — single-sheet print-and-cut batch (front + claim insert per row,
+  // up to 4 cards per sheet). Returns a JSON envelope with PDF / SVG / PNG
+  // as base64 blobs; saveBatchFiles drops all three to Downloads with a
+  // shared batchId in the filename.
+  const PRINT_BATCH_MAX = 4;
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   const downloadPrintBatch = useCallback(async (certIds: string[]) => {
     // CRITICAL: open the print window IMMEDIATELY, synchronously, while
@@ -791,36 +757,27 @@ function SheetPrintingPanel() {
         const { error } = await res.json().catch(() => ({ error: "Failed" }));
         throw new Error(error);
       }
-      const data = await res.json() as { pdf: string; svg: string; batchId: string; certIds: string[]; mintedFor?: string[] };
+      const data = await res.json() as {
+        pdf: string; svg: string; png: string;
+        batchId: string; certIds: string[]; mintedFor?: string[];
+        isRecentDuplicate?: boolean;
+      };
 
-      const decode = (b64: string, mime: string) => {
-        const bin = atob(b64);
+      // Always drop all three files to Downloads (shared batchId in name).
+      // The pre-opened print window is then navigated to the PDF blob URL
+      // so Chrome's print dialog opens against the same artwork.
+      saveBatchFiles(data);
+
+      const pdfBlob = (() => {
+        const bin = atob(data.pdf);
         const buf = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        return new Blob([buf], { type: mime });
-      };
-
-      const saveBlob = (blob: Blob, filename: string) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      };
-
-      // SVG always downloads — it goes to the ScanNCut over USB.
-      const svgBlob = decode(data.svg, "image/svg+xml");
-      saveBlob(svgBlob, `mintvault-batch-${data.batchId}.svg`);
-
-      const pdfBlob = decode(data.pdf, "application/pdf");
+        return new Blob([buf], { type: "application/pdf" });
+      })();
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
       if (printWindow && !printWindow.closed) {
-        // Navigate the pre-opened window to the PDF and arm print().
-        // replace() avoids polluting back-history with the placeholder.
         printWindow.location.replace(pdfUrl);
-
         let printed = false;
         const tryPrint = () => {
           if (printed || printWindow.closed) return;
@@ -830,40 +787,33 @@ function SheetPrintingPanel() {
             printWindow.print();
           } catch (err) {
             console.warn("[print-batch] print() threw, falling back to download:", err);
-            saveBlob(pdfBlob, `mintvault-batch-${data.batchId}.pdf`);
           }
         };
-        // Two-stage arming: Chrome's PDF viewer doesn't always fire
-        // onload reliably for blob URLs, so we also force after 1.5s.
         printWindow.onload = tryPrint;
         setTimeout(tryPrint, 1500);
-
-        // Long delay before revoking — print dialog may sit open for a
-        // while before the bytes are fully consumed.
         setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
       } else {
-        // No print window (popup blocked or user closed it during the
-        // API call) — same UX as v420: drop the PDF in Downloads.
-        saveBlob(pdfBlob, `mintvault-batch-${data.batchId}.pdf`);
         URL.revokeObjectURL(pdfUrl);
       }
 
       const mintedCount = data.mintedFor?.length ?? 0;
+      const idempotentNote = data.isRecentDuplicate ? " (idempotent re-run)" : "";
       const description = printWindow && !printWindow.closed
         ? (mintedCount > 0
-            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick Epson in print dialog`
-            : "Pick Epson in print dialog. SVG downloaded for ScanNCut.")
+            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}`
+            : `Pick printer in dialog. SVG + PNG downloaded${idempotentNote}.`)
         : (mintedCount > 0
-            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG downloaded`
-            : "PDF + SVG downloaded.");
+            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG + PNG downloaded${idempotentNote}`
+            : `PDF + SVG + PNG downloaded${idempotentNote}.`);
       toast({ title: "Print batch ready", description });
+      invalidate();
     } catch (err: any) {
       printWindow?.close();
       toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
     } finally {
       setDownloadingBatch(false);
     }
-  }, [toast]);
+  }, [toast, invalidate, saveBatchFiles]);
 
   // Mark printed
   const markPrintedMutation = useMutation({
@@ -889,7 +839,7 @@ function SheetPrintingPanel() {
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
           <p className="text-xs text-[#999999] mt-0.5">
-            A4 · 9 certs per sheet · 72 × 22 mm labels · Brother ScanNCut CM300
+            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 20 mm slab label + 85.6 × 54 mm claim insert · Cricut / ScanNCut compatible
           </p>
         </div>
         <Button
@@ -974,13 +924,13 @@ function SheetPrintingPanel() {
               {allVisible ? "Deselect all" : "Select all"}
             </button>
           )}
-          {visibleCerts.length > CERTS_PER_SHEET && (
+          {visibleCerts.length > MAX_CERTS_PER_BATCH && (
             <button
-              onClick={selectFirst13}
+              onClick={selectFirstBatch}
               className="text-[11px] text-yellow-500/70 hover:text-yellow-400 transition-colors"
-              data-testid="btn-select-13"
+              data-testid="btn-select-first-batch"
             >
-              First 13
+              First {MAX_CERTS_PER_BATCH}
             </button>
           )}
         </div>
@@ -1013,29 +963,8 @@ function SheetPrintingPanel() {
         </div>
       )}
 
-      {/* Generate buttons */}
+      {/* Generate buttons — v525 consolidates onto Print Batch (PDF+SVG+PNG). */}
       <div className="flex flex-wrap items-center gap-3 pt-1">
-        <Button
-          onClick={() => generateSheet(Array.from(selected))}
-          disabled={selected.size === 0 || generating}
-          data-testid="btn-generate-sheet"
-          className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold"
-        >
-          {generating
-            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-            : <><FileDown className="h-4 w-4 mr-2" /> Print Sheet ({selected.size} / {CERTS_PER_SHEET})</>}
-        </Button>
-        <Button
-          onClick={() => downloadCutGuide(Array.from(selected))}
-          disabled={selected.size === 0 || downloadingCut}
-          data-testid="btn-cut-guide"
-          variant="outline"
-          className="border-red-700/60 text-red-400 hover:bg-red-900/20 hover:text-red-300 font-medium"
-        >
-          {downloadingCut
-            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-            : <><FileDown className="h-4 w-4 mr-2" /> Cut Guide SVG ({selected.size})</>}
-        </Button>
         <Button
           onClick={() => downloadClaimInserts(Array.from(selected))}
           disabled={selected.size === 0 || downloadingInserts}
@@ -1047,8 +976,6 @@ function SheetPrintingPanel() {
             ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
             : <><FileDown className="h-4 w-4 mr-2" /> Claim Inserts ({selected.size})</>}
         </Button>
-        {/* v419 — combined batch: 1-5 cards/sheet with front + back + insert
-            laid out + matching cut SVG. One ScanNCut pass cuts everything. */}
         <Button
           onClick={() => downloadPrintBatch(Array.from(selected))}
           disabled={selected.size === 0 || selected.size > PRINT_BATCH_MAX || downloadingBatch}
@@ -1058,17 +985,17 @@ function SheetPrintingPanel() {
               ? `Select up to ${PRINT_BATCH_MAX} unclaimed certs`
               : selected.size > PRINT_BATCH_MAX
                 ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
-                : "Print PDF to your printer + download SVG cut guide for ScanNCut CM300"
+                : "Drops PDF + SVG cut guide + Cricut Print Then Cut PNG to Downloads, opens print dialog for PDF"
           }
           className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
         >
           {downloadingBatch
             ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-            : <><FileDown className="h-4 w-4 mr-2" /> Print Batch CM300 ({selected.size} / {PRINT_BATCH_MAX})</>}
+            : <><FileDown className="h-4 w-4 mr-2" /> Print Batch ({selected.size} / {PRINT_BATCH_MAX})</>}
         </Button>
-        {selected.size > CERTS_PER_SHEET && (
+        {selected.size > PRINT_BATCH_MAX && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">
-            Max {CERTS_PER_SHEET} — deselect {selected.size - CERTS_PER_SHEET}
+            Max {PRINT_BATCH_MAX} — deselect {selected.size - PRINT_BATCH_MAX}
           </span>
         )}
       </div>
@@ -1093,10 +1020,10 @@ function SheetPrintingPanel() {
         </div>
       )}
 
-      {/* Latest Sheet */}
+      {/* Latest Sheet — reprint flows through /api/admin/print-batch. */}
       <LatestSheetSection
-        onReprintSheet={generateSheet}
-        generating={generating}
+        onReprintSheet={reprintFromHistory}
+        generating={downloadingBatch}
       />
 
       {/* Edit label modal */}

@@ -8,7 +8,6 @@ import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { verifyAdminPassword, requireAdmin, isLoginRateLimited, isPinRateLimited, recordFailedLogin, recordFailedPin, clearLoginAttempts, clearPinAttempts, isPendingAdminValid, clearPendingAdmin, ADMIN_EMAIL, FAILED_LOGIN_DELAY_MS } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
-import { CERTS_PER_SHEET, LABELS_PER_SHEET } from "./label-sheet";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -538,6 +537,34 @@ async function migrateServiceTiersV213() {
       console.log("[contact-inquiries-migrate] contact_inquiries table + index added + audit logged");
     }
   } catch (e: any) { console.error("[contact-inquiries-migrate] failed:", e.message); }
+
+  // ── v525 — audit_log lookup index for print-batch idempotency checks +
+  // operational reprint history queries. Additive, idempotent, safe on cold
+  // start. The 5-minute idempotency window in /api/admin/print-batch scans
+  // by entity_id + action; without this index the scan was a seq scan over
+  // the full audit_log table.
+  try {
+    const before = await db.execute(sql`
+      SELECT 1 FROM pg_indexes WHERE indexname = 'idx_audit_log_entity_action' LIMIT 1
+    `);
+    const wasPresent = before.rows.length > 0;
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_audit_log_entity_action
+        ON audit_log (entity_id, action, created_at DESC)
+    `);
+    if (!wasPresent) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('schema', 'audit_log', 'create_index_entity_action', 'startup_migration',
+          ${JSON.stringify({
+            index: "idx_audit_log_entity_action",
+            columns: ["entity_id", "action", "created_at DESC"],
+            purpose: "print_batch idempotency lookup + reprint history queries",
+          })}::jsonb)
+      `);
+      console.log("[audit-log-index-migrate] idx_audit_log_entity_action created + audit logged");
+    }
+  } catch (e: any) { console.error("[audit-log-index-migrate] failed:", e.message); }
 
   // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
   try {
@@ -4565,77 +4592,57 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/printing/generate-sheet", requireAdmin, async (req, res) => {
-    try {
-      const { certIds } = req.body as { certIds: string[] };
-      if (!certIds?.length) return res.status(400).json({ error: "No certificates selected" });
-      if (certIds.length > CERTS_PER_SHEET) return res.status(400).json({ error: `Maximum ${CERTS_PER_SHEET} certificates per sheet (${LABELS_PER_SHEET} labels)` });
+  // v525 — legacy /generate-sheet and /generate-cut-sheet routes removed.
+  // The two-column "front + NFC back" layout they produced was wrong (the
+  // NFC back was redundant with the QR on the front and the QR on the
+  // claim insert). All sheet-printing now flows through /api/admin/print-batch
+  // which emits PDF + SVG + PNG in one call with the correct
+  // front + claim-insert layout. label-sheet.ts is deleted.
 
-      // Fetch full cert records
-      const { generateLabelSheet } = await import("./label-sheet");
-      const allCerts = await storage.listCertificates();
-      const selected = certIds
-        .map((id) => allCerts.find((c) => c.certId === id))
-        .filter(Boolean) as any[];
-
-      if (!selected.length) return res.status(404).json({ error: "No matching certificates found" });
-
-      // Queue for tracking
-      const sheetRef = `SHEET-${Date.now()}`;
-      await storage.queueForPrinting(selected.map((c: any) => c.certId), sheetRef);
-
-      // Generate PDF
-      const pdfBuf = await generateLabelSheet(selected);
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="mintvault-labels-${sheetRef}.pdf"`);
-      res.setHeader("X-Sheet-Ref", sheetRef);
-      res.send(pdfBuf);
-    } catch (err: any) {
-      console.error("Sheet generation error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ── SVG CUT GUIDE — matches print sheet positions exactly ──────────────────
-  app.post("/api/admin/printing/generate-cut-sheet", requireAdmin, async (req, res) => {
-    try {
-      const { certIds } = req.body as { certIds: string[] };
-      if (!certIds?.length) return res.status(400).json({ error: "No certificates selected" });
-      if (certIds.length > CERTS_PER_SHEET) return res.status(400).json({ error: `Maximum ${CERTS_PER_SHEET} per sheet` });
-
-      const { generateCutSheetSVG } = await import("./label-sheet");
-      const svg = generateCutSheetSVG(certIds.length);
-
-      res.setHeader("Content-Type", "image/svg+xml");
-      res.setHeader("Content-Disposition", `attachment; filename="mintvault-cut-guide-${certIds.length}row.svg"`);
-      res.send(svg);
-    } catch (err: any) {
-      console.error("Cut sheet error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // v419 — single-sheet print-and-cut batch (up to 5 cards: front + back +
-  // claim insert per row, all cuts in one ScanNCut CM300 pass). Returns
-  // both the printable PDF and the cut-path SVG as base64-encoded blobs
-  // so the client can save two files in one click.
+  // v525 — single-sheet print-and-cut batch. Up to 4 cards per A4 sheet,
+  // front label + claim insert per row. Returns THREE files in one call:
+  //
+  //   - PDF (A4 210×297mm)             home-printer fallback / archive
+  //   - SVG cut paths (#FF00FF on <g id="cut">)   ScanNCut Direct Cut / Cricut
+  //   - PNG composite (210×279.4mm @ 300DPI, 2480×3300px)   Cricut Print Then Cut
+  //
+  // Three filenames share a deterministic batchId so the operator can
+  // pair the files at the printer.
+  //
+  // Idempotency: batchId is derived from sha256(sortedCertIds + admin + UTC date).
+  // If audit_log already has a print_batch_generated entry with the same
+  // batch_id within the last 5 minutes, the audit_log + labelPrints inserts
+  // are SKIPPED but the artifacts are regenerated (same input → same bytes).
+  // Saves prod surprise on fat-fingered double-clicks.
+  //
+  // Dual-write: every batch also writes one row per cert to labelPrints
+  // (sheetRef = batchId). This keeps the existing sheet-history UI in
+  // admin-printing.tsx working without code changes there. labelPrints is
+  // for operational "have I printed this yet" checks; audit_log is the
+  // compliance source of truth. Both writes are best-effort: failure here
+  // must not stop the operator from getting the artifacts.
   app.post("/api/admin/print-batch", requireAdmin, async (req, res) => {
     try {
       const { certIds } = req.body as { certIds: unknown };
       if (!Array.isArray(certIds) || certIds.length === 0) {
         return res.status(400).json({ error: "Provide certIds array with at least 1 entry" });
       }
-      const { MAX_CERTS_PER_BATCH } = await import("./print-batch");
+      const {
+        MAX_CERTS_PER_BATCH,
+        SHEET_LAYOUT_VERSION,
+        generatePrintBatchPDF,
+        generatePrintBatchCutSVG,
+        generatePrintBatchPNG,
+        deriveBatchId,
+      } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
       }
       const ids = certIds.map(String);
 
-      // Resolve each cert. Reject if any not found or already claimed.
-      // For unclaimed certs that lack a claim_code, mint one on the fly so
-      // the operator can print in a single click without a separate
-      // "generate codes" step.
+      // Resolve each cert. Reject claimed certs at this endpoint (security
+      // boundary kept intact — admins can still reprint claimed certs via
+      // /api/admin/print-batch/reprint with a recorded reason).
       const allCerts = await storage.listCertificates();
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
@@ -4653,75 +4660,105 @@ export async function registerRoutes(
         items.push({ cert, claimCode: String(code) });
       }
       if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
-      if (claimed.length) return res.status(409).json({ error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")})` });
+      if (claimed.length) return res.status(409).json({ error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")}). Use /api/admin/print-batch/reprint for claimed certs.` });
 
-      const { generatePrintBatchPDF, generatePrintBatchCutSVG } = await import("./print-batch");
-      const [pdfBuf, svgStr] = await Promise.all([
-        generatePrintBatchPDF(items),
-        Promise.resolve(generatePrintBatchCutSVG(items.length)),
-      ]);
-
-      const { randomUUID } = await import("crypto");
-      const batchId = randomUUID();
-      const generatedAt = new Date().toISOString();
       const adminUser = (req.session as any)?.adminEmail || "admin";
+      const batchId = deriveBatchId(ids, adminUser);
+      const generatedAt = new Date().toISOString();
 
-      // Audit row — one per batch generated.
+      // Idempotency check — same batchId from same admin within 5 minutes?
+      let isRecentDuplicate = false;
       try {
-        await db.execute(sql`
-          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-          VALUES (
-            'system',
-            ${`print_batch_${batchId}`},
-            'print_batch_generated',
-            ${adminUser},
-            ${JSON.stringify({
-              batch_id: batchId,
-              cert_ids: ids,
-              cert_count: items.length,
-              pdf_size_bytes: pdfBuf.length,
-              svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
-              auto_generated_codes_for: mintedFor,
-            })}::jsonb,
-            NOW()
-          )
+        const recent = await db.execute(sql`
+          SELECT 1 FROM audit_log
+          WHERE entity_id = ${`print_batch_${batchId}`}
+            AND action = 'print_batch_generated'
+            AND created_at > NOW() - INTERVAL '5 minutes'
+          LIMIT 1
         `);
-      } catch (auditErr: any) {
-        console.warn("[print-batch] audit_log insert failed:", auditErr.message);
+        isRecentDuplicate = recent.rows.length > 0;
+      } catch (e: any) {
+        console.warn("[print-batch] idempotency check failed (continuing):", e.message);
       }
 
-      // Separate audit row when codes were minted on the fly, so the
-      // claim_codes_auto_generated event is independently queryable.
-      if (mintedFor.length > 0) {
+      const [pdfBuf, svgStr, pngBuf] = await Promise.all([
+        generatePrintBatchPDF(items),
+        Promise.resolve(generatePrintBatchCutSVG(items.length)),
+        generatePrintBatchPNG(items),
+      ]);
+
+      if (!isRecentDuplicate) {
+        // Audit row — one per batch generated.
         try {
           await db.execute(sql`
             INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
             VALUES (
               'system',
-              ${`print_batch_autocode_${batchId}`},
-              'claim_codes_auto_generated',
+              ${`print_batch_${batchId}`},
+              'print_batch_generated',
               ${adminUser},
               ${JSON.stringify({
                 batch_id: batchId,
-                cert_ids: mintedFor,
-                count: mintedFor.length,
-                reason: "missing_at_print_batch_request",
+                cert_ids: ids,
+                cert_count: items.length,
+                pdf_size_bytes: pdfBuf.length,
+                svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
+                png_size_bytes: pngBuf.length,
+                auto_generated_codes_for: mintedFor,
+                sheet_layout_version: SHEET_LAYOUT_VERSION,
+                layout: "front_plus_insert",
               })}::jsonb,
               NOW()
             )
           `);
         } catch (auditErr: any) {
-          console.warn("[print-batch] auto-code audit_log insert failed:", auditErr.message);
+          console.warn("[print-batch] audit_log insert failed:", auditErr.message);
         }
+
+        // Dual-write: labelPrints row per cert. Keeps the operational sheet
+        // history UI working without it having to query audit_log.
+        try {
+          await storage.queueForPrinting(ids, `print_batch_${batchId}`);
+        } catch (qErr: any) {
+          console.warn("[print-batch] queueForPrinting failed:", qErr.message);
+        }
+
+        if (mintedFor.length > 0) {
+          try {
+            await db.execute(sql`
+              INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+              VALUES (
+                'system',
+                ${`print_batch_autocode_${batchId}`},
+                'claim_codes_auto_generated',
+                ${adminUser},
+                ${JSON.stringify({
+                  batch_id: batchId,
+                  cert_ids: mintedFor,
+                  count: mintedFor.length,
+                  reason: "missing_at_print_batch_request",
+                })}::jsonb,
+                NOW()
+              )
+            `);
+          } catch (auditErr: any) {
+            console.warn("[print-batch] auto-code audit_log insert failed:", auditErr.message);
+          }
+        }
+      } else {
+        console.log(`[print-batch] idempotent return for batch ${batchId} (recent duplicate within 5min)`);
       }
 
       res.json({
         pdf: pdfBuf.toString("base64"),
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
+        png: pngBuf.toString("base64"),
         batchId,
         certIds: ids,
         mintedFor,
         generatedAt,
+        isRecentDuplicate,
+        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
       });
     } catch (err: any) {
       console.error("[print-batch] error:", err.message);
@@ -4817,29 +4854,11 @@ export async function registerRoutes(
     }
   });
 
-  // ── REPRINT SINGLE LABEL ───────────────────────────────────────────────────
-  // Generates a 72×22mm PDF, logs the reprint. Does NOT affect the printed flag.
-  app.post("/api/admin/printing/reprint/:certId", requireAdmin, async (req, res) => {
-    try {
-      const certId = String(req.params.certId);
-      const side   = (req.query.side as "front" | "back" | "both") || "both";
-
-      const rawCert = await storage.getCertificateByCertId(certId);
-      if (!rawCert) return res.status(404).json({ error: "Certificate not found" });
-
-      const override = await storage.getLabelOverride(certId);
-      const cert = applyLabelOverrides({ ...rawCert, certId: normalizeCertId(rawCert.certId) }, override);
-
-      const pdf = await generateLabelPDF(cert, side);
-      await storage.logReprint(certId);
-
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${cert.certId}-reprint.pdf"`);
-      res.send(pdf);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // v525 — /api/admin/printing/reprint/:certId removed. Single-cert reprint
+  // now flows through /api/admin/print-batch with a 1-element certIds array,
+  // producing the same PDF+SVG+PNG as a multi-cert batch but with a 1-row
+  // layout. For claimed certs, the operator routes through
+  // /api/admin/print-batch/reprint with a reason (recorded to audit_log).
 
   // ── NFC ADMIN ROUTES ─────────────────────────────────────────────────────
   app.post("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
