@@ -334,6 +334,12 @@ export const certificates = pgTable("certificates", {
   // Logbook version — increments on each owner PDF generation for V5C-style reissue tracking
   logbookVersion: integer("logbook_version").notNull().default(1),
   logbookLastIssuedAt: timestamp("logbook_last_issued_at"),
+  // Cold-archive timestamp: set once the cert's R2 image artefacts have
+  // been copied to B2 (Backblaze, Compliance-locked 90 days). NULL until
+  // archival completes successfully. R2 originals are NOT deleted in
+  // phase 1; tier-down or eviction is a separate phase. See
+  // server/workers/r2-to-b2-archival.ts.
+  archivedToB2At: timestamp("archived_to_b2_at"),
   // DVLA-parity: first keeper declaration — set at initial claim time only
   declaredNew: boolean("declared_new").notNull().default(false),
   // Grading pipeline R2 keys — per-side, per-variant. These are populated by

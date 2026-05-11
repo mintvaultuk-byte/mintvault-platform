@@ -414,6 +414,29 @@ async function runTransferV2Sweep() {
     }
   }, 60_000);
 
+  // R2 → B2 cold-archive sweep. First run after 60s (let migrations finish
+  // + B2 client lazy-init on first use), then daily. Idempotent at the
+  // object level via existsInB2 — safe across both Fly machines without
+  // a distributed lock. dryRun=false here; admin endpoint allows manual
+  // dry-runs separately. Defaults: ageDays=90 (Compliance retention),
+  // batchSize=50 (~~5 minutes per tick at realistic per-cert bytes).
+  async function runArchivalSweep() {
+    try {
+      const { archiveStaleImages } = await import("./workers/r2-to-b2-archival");
+      const summary = await archiveStaleImages({ dryRun: false, batchSize: 50, ageDays: 90 });
+      log(
+        `summary: certs=${summary.certsProcessed} copied=${summary.objectsCopied} ` +
+        `skipped=${summary.objectsSkipped} bytes=${(summary.bytesCopied / 1024 / 1024).toFixed(2)}MB ` +
+        `errors=${summary.errors}`,
+        "archival-b2",
+      );
+    } catch (err: any) {
+      log(`sweep error: ${err?.message || err}`, "archival-b2");
+    }
+  }
+  setTimeout(runArchivalSweep, 60_000);
+  setInterval(runArchivalSweep, 24 * 60 * 60 * 1000);
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
