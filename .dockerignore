@@ -1,9 +1,40 @@
+# ─── Dependencies (rebuilt inside the container via `npm ci`) ────────
 node_modules
+**/node_modules
+
+# ─── Build output (Dockerfile runs `npm run build` inside) ────────────
 dist
+
+# ─── Secrets / env (Fly injects via fly secrets at runtime) ───────────
 .env
 .env.*
+
+# ─── VCS / OS / editor noise ──────────────────────────────────────────
 .git
+.gitignore
 .DS_Store
+.vscode
+.idea
+
+# ─── Logs / coverage / test caches ────────────────────────────────────
+*.log
+coverage
+.nyc_output
+
+# ─── Standalone local tooling NOT part of the web build ───────────────
+# scripts/scanner-app + scripts/scanner-watcher are macOS native scanner
+# integrations (LaunchAgents + Electron-style guide window). They talk
+# to the server over HTTPS with SCANNER_API_TOKEN — they are not imported
+# by the Vite/esbuild build. Excluding the whole scripts/ tree saves
+# ~513 MB of context per deploy (caught a Fly-builder timeout 2026-05-11).
+scripts
+
+# ─── Project meta / documentation (not needed by build or runtime) ────
+docs
+.claude
 attached_assets
 uploads
-*.log
+
+# ─── Markdown — keep README, drop everything else at the repo root ────
+*.md
+!README.md
