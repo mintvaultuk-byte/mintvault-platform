@@ -80,7 +80,7 @@ export default function GradingGlossaryPage() {
       />
 
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}>
           <BookOpen size={18} className="text-[#1A1400]" />
         </div>
         <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide" data-testid="text-h1-grading-glossary">
@@ -97,13 +97,13 @@ export default function GradingGlossaryPage() {
           {terms.map((item, i) => (
             <div
               key={i}
-              className="border border-[#D4AF37]/20 rounded-xl px-5 py-4 bg-white"
+              className="border border-[#FFCB05]/20 rounded-xl px-5 py-4 bg-white"
               data-testid={`glossary-term-${item.term.toLowerCase().replace(/\s+/g, "-")}`}
             >
               <h2 className="text-[#1A1A1A] font-bold text-sm mb-1.5 flex items-center gap-2">
                 <span
                   className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0"
-                  style={{ background: "#D4AF37" }}
+                  style={{ background: "#FFCB05" }}
                 />
                 {item.term}
               </h2>
@@ -115,12 +115,12 @@ export default function GradingGlossaryPage() {
 
       {/* Cross-link to grading scale */}
       <section className="mb-12 reveal-on-scroll">
-        <div className="border-l-4 border-[#D4AF37] pl-5 py-2">
+        <div className="border-l-4 border-[#FFCB05] pl-5 py-2">
           <p className="text-white text-sm leading-relaxed">
             <span className="font-semibold text-white">Want to see how these factors affect grades?</span>{" "}
             Visit the{" "}
             <Link href="/grading-scale">
-              <span className="text-[#B8960C] font-semibold underline underline-offset-2 cursor-pointer">
+              <span className="text-[#FFCB05] font-semibold underline underline-offset-2 cursor-pointer">
                 MintVault Grading Scale
               </span>
             </Link>{" "}
@@ -130,7 +130,7 @@ export default function GradingGlossaryPage() {
       </section>
 
       {/* CTA */}
-      <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
+      <div className="border border-[#FFCB05]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to submit your cards?</h3>
         <p className="text-[#1a1a1a] text-sm mb-4">
           Now you know the terminology — let's grade your collection.

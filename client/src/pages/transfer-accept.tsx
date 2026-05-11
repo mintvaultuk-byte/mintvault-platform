@@ -65,7 +65,7 @@ export default function TransferAcceptPage() {
     <div className="min-h-screen py-12 px-4">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
-          <ShieldCheck className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
+          <ShieldCheck className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
           <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight">
             Accept Keepership Transfer
           </h1>
@@ -97,7 +97,7 @@ export default function TransferAcceptPage() {
                 <p className="text-sm text-red-700">{pageState.message}</p>
                 {!pageState.retryable && (
                   <p className="text-xs text-[#999999] mt-2">
-                    If you believe this is an error, contact <a href="mailto:support@mintvaultuk.com" className="text-[#D4AF37] hover:underline">support@mintvaultuk.com</a>.
+                    If you believe this is an error, contact <a href="mailto:support@mintvaultuk.com" className="text-[#FFCB05] hover:underline">support@mintvaultuk.com</a>.
                   </p>
                 )}
               </div>
@@ -106,9 +106,9 @@ export default function TransferAcceptPage() {
         )}
 
         {(pageState.type === "form" || (pageState.type === "error" && pageState.retryable)) && (
-          <Card className="relative z-[3] border-[#D4AF37]/30 bg-white">
+          <Card className="relative z-[3] border-[#FFCB05]/30 bg-white">
             <CardHeader>
-              <CardTitle className="text-[#D4AF37] text-lg">Enter Document Reference Number</CardTitle>
+              <CardTitle className="text-[#FFCB05] text-lg">Enter Document Reference Number</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-5">
@@ -119,7 +119,7 @@ export default function TransferAcceptPage() {
                     placeholder="e.g. A7K3-B9M2-C4P8"
                     value={referenceNumber}
                     onChange={(e) => setReferenceNumber(e.target.value.toUpperCase())}
-                    className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono text-lg tracking-wider"
+                    className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono text-lg tracking-wider"
                     maxLength={14}
                     autoComplete="off"
                   />

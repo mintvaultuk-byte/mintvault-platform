@@ -8,17 +8,17 @@ export default function MintVaultLogo({ size = "md" }: { size?: "sm" | "md" | "l
   return (
     <div style={{
       display: "inline-block",
-      border: `${s.borderWidth} solid #D4AF37`,
+      border: `${s.borderWidth} solid #FFCB05`,
       padding: s.padding,
     }}>
       <div style={{
                 fontWeight: 900,
         fontSize: s.fontSize,
-        color: "#D4AF37",
+        color: "#FFCB05",
         letterSpacing: "0.04em",
         lineHeight: 0.9,
-        WebkitTextStroke: `${s.stroke} #D4AF37`,
-        textShadow: "0 0 1px #D4AF37",
+        WebkitTextStroke: `${s.stroke} #FFCB05`,
+        textShadow: "0 0 1px #FFCB05",
       }}>MINTVAULT</div>
     </div>
   );

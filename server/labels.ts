@@ -41,9 +41,12 @@ const PDF_H = 20 * MM_TO_PT;
 const FRAME_W = 18;   // px — gold border fill width (outer edge = canvas edge)
 
 // ── Colour palette ──────────────────────────────────────────────────────────
-const GOLD       = "#C9A227";   // separators, accents
-const GOLD_DARK  = "#A07820";
-const GOLD_LIGHT = "#D4AF37";
+// Pikachu Yellow palette (PR #87). GOLD = primary brand yellow; GOLD_DARK
+// retained as border/contrast partner; GOLD_LIGHT folded into the primary
+// since they served the same visual role.
+const GOLD       = "#FFCB05";   // separators, accents
+const GOLD_DARK  = "#D9A300";
+const GOLD_LIGHT = "#FFCB05";
 const BLACK      = "#000000";
 const WHITE      = "#FFFFFF";
 
@@ -498,7 +501,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
     // Bottom edge — crisp 3px darker line for depth (kept; not a gradient).
-    ctx.fillStyle = "#9A7F1F";
+    ctx.fillStyle = "#9C7600";
     ctx.fillRect(panelX, panelY + panelH - 3, PANEL_W, 3);
 
     // Subtle vertical separator on the left edge of the panel

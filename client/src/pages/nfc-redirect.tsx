@@ -38,23 +38,23 @@ export default function NfcRedirectPage() {
 
         {/* Brand mark */}
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5"
-          style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)" }}>
+          style={{ background: "linear-gradient(135deg,#FFCB05 0%,#FFCB05 100%)" }}>
           <ShieldCheck className="h-8 w-8 text-[#1A1400]" />
         </div>
-        <h1 className="text-lg font-black text-[#D4AF37] tracking-widest uppercase mb-1">MintVault</h1>
+        <h1 className="text-lg font-black text-[#FFCB05] tracking-widest uppercase mb-1">MintVault</h1>
         <p className="text-[#999999] text-xs uppercase tracking-widest mb-8 font-mono">Scan Result</p>
 
         {status === "verifying" && (
           <div className="space-y-3">
-            <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
+            <Loader2 className="h-7 w-7 animate-spin text-[#FFCB05] mx-auto" />
             <p className="text-[#666666] text-sm">Opening certificate…</p>
-            <p className="text-[#D4AF37]/30 text-xs font-mono">{certId?.toUpperCase()}</p>
+            <p className="text-[#FFCB05]/30 text-xs font-mono">{certId?.toUpperCase()}</p>
           </div>
         )}
 
         {status === "redirecting" && (
           <div className="space-y-3">
-            <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
+            <Loader2 className="h-7 w-7 animate-spin text-[#FFCB05] mx-auto" />
             <p className="text-[#666666] text-sm">Opening certificate…</p>
           </div>
         )}
@@ -65,7 +65,7 @@ export default function NfcRedirectPage() {
             <p className="text-red-300 text-sm">{error || "This tag could not be verified."}</p>
             <a
               href="/verify"
-              className="inline-block text-[#D4AF37] text-sm border border-[#D4AF37]/30 rounded-lg px-4 py-2 hover:bg-[#D4AF37]/10 transition-colors"
+              className="inline-block text-[#FFCB05] text-sm border border-[#FFCB05]/30 rounded-lg px-4 py-2 hover:bg-[#FFCB05]/10 transition-colors"
             >
               Search certificates manually
             </a>

@@ -346,7 +346,7 @@ function BrowserRow({
 }) {
   return (
     <div
-      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-[#E8E4DC] hover:border-[#D4AF37]/30 transition-colors text-sm"
+      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-[#E8E4DC] hover:border-[#FFCB05]/30 transition-colors text-sm"
       data-testid={`browser-row-${cert.certId}`}
     >
       {/* Printed status */}
@@ -371,7 +371,7 @@ function BrowserRow({
             </Badge>
           )}
           {(cert as any).ownershipStatus === "claimed" ? (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 border-[#D4AF37]/40 text-[#D4AF37] flex items-center gap-0.5" data-testid={`badge-ownership-browser-${cert.certId}`}>
+            <Badge variant="outline" className="text-[10px] px-1 py-0 border-[#FFCB05]/40 text-[#FFCB05] flex items-center gap-0.5" data-testid={`badge-ownership-browser-${cert.certId}`}>
               <Shield className="h-2.5 w-2.5" /> claimed
             </Badge>
           ) : (
@@ -390,7 +390,7 @@ function BrowserRow({
       {/* Actions */}
       <button
         onClick={onPreview}
-        className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
+        className="text-[#999999] hover:text-[#FFCB05] transition-colors p-1 rounded"
         title="Preview label"
         data-testid={`btn-preview-${cert.certId}`}
       >
@@ -409,7 +409,7 @@ function BrowserRow({
       </button>
       <button
         onClick={onEdit}
-        className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
+        className="text-[#999999] hover:text-[#FFCB05] transition-colors p-1 rounded"
         title="Edit label display data"
         data-testid={`btn-edit-${cert.certId}`}
       >
@@ -503,7 +503,7 @@ export default function AdminCertBrowser() {
           </Badge>
           <button
             onClick={() => refetch()}
-            className="text-[#999999] hover:text-[#D4AF37] transition-colors p-1 rounded"
+            className="text-[#999999] hover:text-[#FFCB05] transition-colors p-1 rounded"
             data-testid="btn-browser-refresh"
           >
             <RefreshCw className="h-4 w-4" />

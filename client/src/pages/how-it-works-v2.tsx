@@ -15,9 +15,9 @@ const V = {
   paperSunk: "#F4F0E6",
   line: "#E8E1D0",
   lineSoft: "#EFE9DA",
-  gold: "#B8960C",
-  goldSoft: "#D4AF37",
-  goldDark: "#8A6F08",
+  gold: "#FFCB05",
+  goldSoft: "#FFCB05",
+  goldDark: "#D9A300",
   panelDark: "#1A1612",
   panelDarkSoft: "#2A241C",
   slabNavy: "hsl(220, 45%, 15%)",
@@ -91,12 +91,12 @@ function Portal({ children, height = "75vh" }) {
       background: `radial-gradient(ellipse at center, ${V.panelDarkSoft} 0%, ${V.panelDark} 80%)`,
       borderRadius: 16,
       overflow: "hidden",
-      boxShadow: `inset 0 0 80px rgba(0,0,0,0.6), inset 0 2px 0 rgba(212,175,55,0.18), 0 40px 80px -30px rgba(15,14,11,0.4)`,
+      boxShadow: `inset 0 0 80px rgba(0,0,0,0.6), inset 0 2px 0 rgba(255,203,5,0.18), 0 40px 80px -30px rgba(15,14,11,0.4)`,
       border: `1px solid ${V.line}`,
     }}>
       <div style={{
         position: "absolute", inset: 8, borderRadius: 12,
-        border: `1px solid rgba(212, 175, 55, 0.18)`,
+        border: `1px solid rgba(255,203,5, 0.18)`,
         pointerEvents: "none", zIndex: 2,
       }} />
       <div style={{
@@ -104,7 +104,7 @@ function Portal({ children, height = "75vh" }) {
         top: "50%", left: "50%",
         width: "60%", height: "60%",
         transform: "translate(-50%, -50%)",
-        background: `radial-gradient(ellipse, rgba(212,175,55,0.12) 0%, transparent 70%)`,
+        background: `radial-gradient(ellipse, rgba(255,203,5,0.12) 0%, transparent 70%)`,
         filter: "blur(40px)",
         pointerEvents: "none",
       }} />
@@ -136,7 +136,7 @@ function RawCard({ width = 200, rotateY = 0, rotateX = 0, translateX = 0, transl
         borderRadius: 12,
         background: `radial-gradient(ellipse at top left, ${V.slabNavy} 0%, ${V.slabPetrol} 35%, ${V.slabTeal} 70%, ${V.slabBronze} 100%)`,
         backfaceVisibility: "hidden",
-        boxShadow: `0 30px 60px -20px rgba(15,14,11,0.5), 0 ${glow * 40}px ${glow * 80}px rgba(212, 175, 55, ${glow * 0.4})`,
+        boxShadow: `0 30px 60px -20px rgba(15,14,11,0.5), 0 ${glow * 40}px ${glow * 80}px rgba(255,203,5, ${glow * 0.4})`,
         overflow: "hidden",
       }}>
         {/* Noise */}
@@ -164,7 +164,7 @@ function RawCard({ width = 200, rotateY = 0, rotateX = 0, translateX = 0, transl
           position: "absolute",
           top: 36, left: 14, right: 14, bottom: 60,
           borderRadius: 4,
-          border: "2px solid rgba(212, 175, 55, 0.55)",
+          border: "2px solid rgba(255,203,5, 0.55)",
           background: "linear-gradient(160deg, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.15) 100%)",
         }}>
           {/* Holo shimmer */}
@@ -348,7 +348,7 @@ function ActSubmission() {
             position: "absolute",
             bottom: 24, right: 24,
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 10, color: "rgba(212,175,55,0.55)",
+            fontSize: 10, color: "rgba(255,203,5,0.55)",
             letterSpacing: "0.3em",
           }}>
             STATUS · INTAKE
@@ -430,7 +430,7 @@ function ActReceipt() {
               <div style={{
                 backgroundColor: V.paperRaised,
                 borderRadius: 6,
-                border: "1px solid rgba(212, 175, 55, 0.6)",
+                border: "1px solid rgba(255,203,5, 0.6)",
                 padding: "12px 16px",
                 boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
               }}>
@@ -514,7 +514,7 @@ function ActReceipt() {
             position: "absolute",
             bottom: 24, right: 24,
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 10, color: "rgba(212,175,55,0.55)",
+            fontSize: 10, color: "rgba(255,203,5,0.55)",
             letterSpacing: "0.3em",
           }}>
             STATUS · LOGGED
@@ -689,7 +689,7 @@ function ActGrading() {
                     color: "#FFFFFF",
                     fontWeight: 400,
                     lineHeight: 1,
-                    textShadow: "0 0 24px rgba(212, 175, 55, 0.3)",
+                    textShadow: "0 0 24px rgba(255,203,5, 0.3)",
                   }}>
                     {(m.value * m.progress).toFixed(1)}
                   </div>
@@ -697,7 +697,7 @@ function ActGrading() {
                   <div style={{
                     marginTop: 10,
                     height: 1,
-                    backgroundColor: "rgba(212,175,55,0.2)",
+                    backgroundColor: "rgba(255,203,5,0.2)",
                     position: "relative",
                   }}>
                     <div style={{
@@ -721,7 +721,7 @@ function ActGrading() {
             bottom: 24, left: "50%",
             transform: "translateX(-50%)",
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 10, color: "rgba(212,175,55,0.65)",
+            fontSize: 10, color: "rgba(255,203,5,0.65)",
             letterSpacing: "0.3em",
             textTransform: "uppercase",
           }}>
@@ -855,7 +855,7 @@ function ActSlabbing() {
                 inset: 0,
                 borderRadius: 12,
                 backgroundColor: V.paperRaised,
-                border: "1px solid rgba(212, 175, 55, 0.4)",
+                border: "1px solid rgba(255,203,5, 0.4)",
                 transform: `translate3d(0, ${(1 - frameSlideUp) * 200}px, -8px)`,
                 opacity: frameSlideUp,
                 boxShadow: "0 30px 60px -20px rgba(15,14,11,0.5)",
@@ -886,7 +886,7 @@ function ActSlabbing() {
                 backgroundColor: V.paperRaised,
                 borderTopLeftRadius: 12,
                 borderTopRightRadius: 12,
-                borderBottom: "1px solid rgba(212, 175, 55, 0.4)",
+                borderBottom: "1px solid rgba(255,203,5, 0.4)",
                 transform: `translate3d(0, ${(1 - frameSlideDown) * -120}px, 8px)`,
                 opacity: frameSlideDown,
                 display: "flex",
@@ -900,7 +900,7 @@ function ActSlabbing() {
                   color: V.goldSoft,
                   letterSpacing: "0.1em",
                   padding: "1px 6px",
-                  border: "1px solid rgba(212, 175, 55, 0.4)",
+                  border: "1px solid rgba(255,203,5, 0.4)",
                   borderRadius: 999,
                   opacity: labelEngrave,
                 }}>
@@ -916,7 +916,7 @@ function ActSlabbing() {
                 backgroundColor: V.paperRaised,
                 borderBottomLeftRadius: 12,
                 borderBottomRightRadius: 12,
-                borderTop: "1px solid rgba(212, 175, 55, 0.4)",
+                borderTop: "1px solid rgba(255,203,5, 0.4)",
                 transform: `translate3d(0, ${(1 - frameSlideDown) * 200}px, 8px)`,
                 opacity: frameSlideDown,
                 padding: "6px 10px",
@@ -974,8 +974,8 @@ function ActSlabbing() {
                 position: "absolute",
                 inset: -4,
                 borderRadius: 14,
-                border: `1px solid rgba(212, 175, 55, ${0.3 + sealLight * 0.6})`,
-                boxShadow: `0 0 ${sealLight * 60}px rgba(212, 175, 55, ${sealLight * 0.5})`,
+                border: `1px solid rgba(255,203,5, ${0.3 + sealLight * 0.6})`,
+                boxShadow: `0 0 ${sealLight * 60}px rgba(255,203,5, ${sealLight * 0.5})`,
                 opacity: edgesIn,
                 pointerEvents: "none",
               }} />
@@ -996,7 +996,7 @@ function ActSlabbing() {
             position: "absolute",
             bottom: 24, right: 24,
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-            fontSize: 10, color: "rgba(212,175,55,0.55)",
+            fontSize: 10, color: "rgba(255,203,5,0.55)",
             letterSpacing: "0.3em",
           }}>
             STATUS · {finalReveal > 0.5 ? "SEALED" : edgesIn > 0.5 ? "BONDING" : "ASSEMBLY"}
@@ -1193,7 +1193,7 @@ function MiniSlab({ grade }) {
       borderRadius: 5,
       padding: 3,
       boxShadow: "0 4px 10px rgba(0,0,0,0.45)",
-      border: "1px solid rgba(212,175,55,0.3)",
+      border: "1px solid rgba(255,203,5,0.3)",
     }}>
       <div style={{
         position: "relative",

@@ -65,15 +65,15 @@ function baseHtml(title: string, body: string): string {
 <body style="margin:0;padding:0;background:#0a0a0a;font-family:Arial,Helvetica,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:20px 0;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#111;border:1px solid #D4AF37;border-radius:8px;overflow:hidden;">
-<tr><td style="background:#111;padding:24px 32px;text-align:center;border-bottom:1px solid rgba(212,175,55,0.3);">
-<h1 style="margin:0;color:#D4AF37;font-size:24px;letter-spacing:4px;font-weight:bold;">MINTVAULT UK</h1>
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#111;border:1px solid #FFCB05;border-radius:8px;overflow:hidden;">
+<tr><td style="background:#111;padding:24px 32px;text-align:center;border-bottom:1px solid rgba(255,203,5,0.3);">
+<h1 style="margin:0;color:#FFCB05;font-size:24px;letter-spacing:4px;font-weight:bold;">MINTVAULT UK</h1>
 </td></tr>
 <tr><td style="padding:32px;color:#ccc;font-size:14px;line-height:1.6;">
-<h2 style="color:#D4AF37;font-size:18px;margin:0 0 16px 0;letter-spacing:1px;">${title}</h2>
+<h2 style="color:#FFCB05;font-size:18px;margin:0 0 16px 0;letter-spacing:1px;">${title}</h2>
 ${body}
 </td></tr>
-<tr><td style="padding:16px 32px;text-align:center;border-top:1px solid rgba(212,175,55,0.15);color:#666;font-size:11px;">
+<tr><td style="padding:16px 32px;text-align:center;border-top:1px solid rgba(255,203,5,0.15);color:#666;font-size:11px;">
 <p style="margin:0;">MintVault UK Ltd &bull; Professional Card Grading</p>
 <p style="margin:4px 0 0 0;">mintvaultuk@gmail.com</p>
 </td></tr>
@@ -144,11 +144,11 @@ export async function sendContactInquiry(data: {
 <p style="color:#ccc;font-size:13px;margin:0 0 16px 0;">New contact-form submission via mintvaultuk.com/help/contact.</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
 <tr><td style="padding:8px 0;color:#999;width:120px;">From</td><td style="padding:8px 0;color:#fff;">${safeName} &lt;${safeEmail}&gt;</td></tr>
-<tr><td style="padding:8px 0;color:#999;">Topic</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${topicLabel}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Topic</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${topicLabel}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Submitted</td><td style="padding:8px 0;color:#fff;font-family:Menlo,monospace;font-size:12px;">${submittedAtFmt}</td></tr>
 ${data.inquiryId != null ? `<tr><td style="padding:8px 0;color:#999;">Inquiry ID</td><td style="padding:8px 0;color:#fff;font-family:Menlo,monospace;font-size:12px;">#${data.inquiryId}</td></tr>` : ""}
 </table>
-<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">MESSAGE</h3>
+<h3 style="color:#FFCB05;font-size:14px;margin:24px 0 8px 0;">MESSAGE</h3>
 <div style="padding:16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-size:13px;line-height:1.6;">
 ${safeMessage}
 </div>
@@ -198,17 +198,17 @@ ${data.crossoverCertNumber ? `<tr><td style="padding:8px 0;color:#999;">Cert Num
 <p>Hi ${data.firstName},</p>
 <p>Thank you for your submission. Your order has been confirmed and payment received.</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Service Type</td><td style="padding:8px 0;color:#fff;">${serviceLabel}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Number of Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Service Tier</td><td style="padding:8px 0;color:#fff;">${data.tier.toUpperCase()}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Total Paid</td><td style="padding:8px 0;color:#fff;">&pound;${(data.total / 100).toFixed(2)}</td></tr>
 ${crossoverRows}
 </table>
-<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
+<h3 style="color:#FFCB05;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
 <ol style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders inside a padded envelope or box.</li>
-<li style="margin-bottom:8px;">Include a note with your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
+<li style="margin-bottom:8px;">Include a note with your Submission ID: <strong style="color:#FFCB05;">${data.submissionId}</strong></li>
 <li style="margin-bottom:8px;">Post via tracked and insured delivery to:</li>
 </ol>
 <div style="margin:8px 0 16px 24px;padding:12px 16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-family:Menlo,monospace;font-size:13px;line-height:1.6;">
@@ -220,11 +220,11 @@ ${POSTAL_ADDRESS_HTML}
 </ol>
 ${data.labelToken ? `
 <p style="margin-top:24px;">
-<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
-<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.05);border:1px solid rgba(255,203,5,0.4);color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
 </p>` : ""}
 <p style="margin-top:24px;">
-<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
+<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
 </p>`;
 
   try {
@@ -256,28 +256,28 @@ export async function sendSubmissionConfirmationV2(data: {
 <p>Hi ${data.firstName},</p>
 <p>Thank you for your submission. Your order has been confirmed and payment received.</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Service</td><td style="padding:8px 0;color:#fff;">${serviceLabel}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Tier</td><td style="padding:8px 0;color:#fff;">${data.tier.toUpperCase()}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Total Paid</td><td style="padding:8px 0;color:#fff;">&pound;${(data.total / 100).toFixed(2)}</td></tr>
 </table>
 
-<div style="border:1px solid rgba(212,175,55,0.3);border-radius:8px;padding:16px;margin:20px 0;background:rgba(212,175,55,0.05);">
-<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">14-Day Inspection Window</h4>
+<div style="border:1px solid rgba(255,203,5,0.3);border-radius:8px;padding:16px;margin:20px 0;background:rgba(255,203,5,0.05);">
+<h4 style="color:#FFCB05;margin:0 0 8px 0;font-size:13px;">14-Day Inspection Window</h4>
 <p style="color:#ccc;font-size:12px;margin:0;">Please inspect your returned Card on arrival and report any issues to support@mintvaultuk.com within 14 days of delivery.</p>
 </div>
 
 <div style="border:1px solid #333;border-radius:8px;padding:16px;margin:20px 0;">
-<h4 style="color:#D4AF37;margin:0 0 8px 0;font-size:13px;">About Grading</h4>
+<h4 style="color:#FFCB05;margin:0 0 8px 0;font-size:13px;">About Grading</h4>
 <p style="color:#999;font-size:12px;margin:0 0 8px 0;">Grading is a professional opinion, not a guaranteed outcome. Grades may change on re-examination or differ from other grading companies.</p>
 <p style="color:#999;font-size:12px;margin:0;">Your Declared Value and selected Value Protection tier determine the liability cap for loss or damage. Under-declaring limits cover.</p>
 </div>
 
-<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
+<h3 style="color:#FFCB05;font-size:14px;margin:24px 0 8px 0;">NEXT STEPS</h3>
 <ol style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders.</li>
-<li style="margin-bottom:8px;">Include your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
+<li style="margin-bottom:8px;">Include your Submission ID: <strong style="color:#FFCB05;">${data.submissionId}</strong></li>
 <li style="margin-bottom:8px;">Post via tracked and insured delivery to:</li>
 </ol>
 <div style="margin:8px 0 16px 24px;padding:12px 16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-family:Menlo,monospace;font-size:13px;line-height:1.6;">
@@ -286,18 +286,18 @@ ${POSTAL_ADDRESS_HTML}
 <p style="color:#999;font-size:12px;margin:0 0 16px 24px;">Also printed on your packing slip — please include the slip inside the parcel.</p>
 ${data.labelToken ? `
 <p style="margin-top:24px;">
-<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
-<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
+<a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.05);border:1px solid rgba(255,203,5,0.4);color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
 </p>` : ""}
 
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #333;">
 <p style="color:#666;font-size:11px;margin:0 0 4px 0;">Legal Documents:</p>
 <p style="color:#999;font-size:11px;margin:0;">
-<a href="${APP_BASE_URL}/legal/website-terms" style="color:#D4AF37;">Website Terms</a> ·
-<a href="${APP_BASE_URL}/legal/submission-agreement" style="color:#D4AF37;">Submission Agreement</a> ·
-<a href="${APP_BASE_URL}/legal/guarantee" style="color:#D4AF37;">Guarantee Policy</a> ·
-<a href="${APP_BASE_URL}/legal/privacy-policy" style="color:#D4AF37;">Privacy Policy</a> ·
-<a href="${APP_BASE_URL}/legal/shipping-requirements" style="color:#D4AF37;">Shipping Requirements</a>
+<a href="${APP_BASE_URL}/legal/website-terms" style="color:#FFCB05;">Website Terms</a> ·
+<a href="${APP_BASE_URL}/legal/submission-agreement" style="color:#FFCB05;">Submission Agreement</a> ·
+<a href="${APP_BASE_URL}/legal/guarantee" style="color:#FFCB05;">Guarantee Policy</a> ·
+<a href="${APP_BASE_URL}/legal/privacy-policy" style="color:#FFCB05;">Privacy Policy</a> ·
+<a href="${APP_BASE_URL}/legal/shipping-requirements" style="color:#FFCB05;">Shipping Requirements</a>
 </p>
 ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">You accepted the Submission Agreement (version ${data.termsVersion}) on ${data.termsAcceptedAt || "submission"} UTC.</p>` : ""}
 </div>`;
@@ -338,13 +338,13 @@ ${data.photoUrls.map(url => `<img src="${url}" alt="Receipt photo" style="width:
 <p>Hi ${data.firstName},</p>
 <p>Great news — we have received your cards and they have been logged into our system.</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Cards Received</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 </table>
 ${photosHtml}
 <p>Your cards will now enter our grading queue. We will notify you when grading is complete.</p>
 <p style="margin-top:24px;">
-<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
+<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
 </p>`;
 
   try {
@@ -375,12 +375,12 @@ export async function sendGradingComplete(data: {
 <p>Hi ${data.firstName},</p>
 <p>Your cards have been graded and are now being prepared for return shipping.</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Cards Graded</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 </table>
 <p>Once your cards have been dispatched, you will receive a shipping confirmation with tracking details.</p>
 <p style="margin-top:24px;">
-<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
+<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
 </p>`;
 
   try {
@@ -413,11 +413,11 @@ export async function sendShipped(data: {
     ? `<tr><td style="padding:8px 0;color:#999;">Carrier</td><td style="padding:8px 0;color:#fff;">${data.carrier}</td></tr>`
     : "";
   const trackingRow = data.trackingNumber
-    ? `<tr><td style="padding:8px 0;color:#999;">Tracking Number</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.trackingNumber}</td></tr>`
+    ? `<tr><td style="padding:8px 0;color:#999;">Tracking Number</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.trackingNumber}</td></tr>`
     : "";
   const rmTrackingBtn = (data.trackingNumber && (!data.carrier || data.carrier === "Royal Mail"))
     ? `<p style="margin-top:16px;">
-<a href="https://www.royalmail.com/track-your-item#/tracking-results/${data.trackingNumber}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK WITH ROYAL MAIL →</a>
+<a href="https://www.royalmail.com/track-your-item#/tracking-results/${data.trackingNumber}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK WITH ROYAL MAIL →</a>
 </p>`
     : "";
 
@@ -425,7 +425,7 @@ export async function sendShipped(data: {
 <p>Hi ${data.firstName},</p>
 <p>Your graded slab has been handed to Royal Mail and is on its way to you!</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 ${carrierRow}
 ${trackingRow}
@@ -433,7 +433,7 @@ ${trackingRow}
 ${rmTrackingBtn}
 <p>Please ensure someone is available to sign for the delivery.</p>
 <p style="margin-top:24px;">
-<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW IN DASHBOARD</a>
+<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW IN DASHBOARD</a>
 </p>`;
 
   try {
@@ -465,12 +465,12 @@ export async function sendSubmissionDelivered(data: {
 <p>Hi ${data.firstName},</p>
 <p>Royal Mail has confirmed delivery of your MintVault slab. We hope it arrived safely!</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#FFCB05;font-weight:bold;">${data.submissionId}</td></tr>
 </table>
 <p>If you haven't claimed ownership yet, you can do that in your dashboard. Once claimed, your card will appear in the Vault report with your verified ownership badge.</p>
 <p>Tag us <strong>@mintvaultuk</strong> if you share it on socials — we'd love to see it!</p>
 <p style="margin-top:24px;">
-<a href="${vaultLink}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW VAULT REPORT</a>
+<a href="${vaultLink}" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW VAULT REPORT</a>
 </p>`;
   try {
     await sendViaResend(resend, {
@@ -502,22 +502,22 @@ function ownershipBaseHtml(title: string, body: string): string {
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
   <!-- Top gold bar -->
-  <tr><td style="height:3px;background:linear-gradient(90deg,transparent 0%,#A07820 10%,#D4AF37 40%,#F0CC50 50%,#D4AF37 60%,#A07820 90%,transparent 100%);border-radius:3px 3px 0 0;"></td></tr>
+  <tr><td style="height:3px;background:linear-gradient(90deg,transparent 0%,#D9A300 10%,#FFCB05 40%,#F0CC50 50%,#FFCB05 60%,#D9A300 90%,transparent 100%);border-radius:3px 3px 0 0;"></td></tr>
 
   <!-- Main panel -->
-  <tr><td style="background:#0f0f0f;border:1px solid rgba(201,162,39,0.22);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;">
+  <tr><td style="background:#0f0f0f;border:1px solid rgba(255,203,5,0.22);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;">
 
     <!-- Header -->
     <table width="100%" cellpadding="0" cellspacing="0">
-    <tr><td style="padding:28px 36px 22px;border-bottom:1px solid rgba(201,162,39,0.10);background:linear-gradient(180deg,#141414 0%,#0f0f0f 100%);">
+    <tr><td style="padding:28px 36px 22px;border-bottom:1px solid rgba(255,203,5,0.10);background:linear-gradient(180deg,#141414 0%,#0f0f0f 100%);">
       <table width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td valign="middle">
-          <span style="color:#D4AF37;font-size:17px;font-weight:900;letter-spacing:3px;text-transform:uppercase;">MINTVAULT</span>
-          <span style="display:block;color:rgba(201,162,39,0.45);font-size:7.5px;font-weight:700;letter-spacing:4px;text-transform:uppercase;margin-top:3px;font-family:'Courier New',Courier,monospace;">OFFICIAL REGISTRY &nbsp;&bull;&nbsp; UNITED KINGDOM</span>
+          <span style="color:#FFCB05;font-size:17px;font-weight:900;letter-spacing:3px;text-transform:uppercase;">MINTVAULT</span>
+          <span style="display:block;color:rgba(255,203,5,0.45);font-size:7.5px;font-weight:700;letter-spacing:4px;text-transform:uppercase;margin-top:3px;font-family:'Courier New',Courier,monospace;">OFFICIAL REGISTRY &nbsp;&bull;&nbsp; UNITED KINGDOM</span>
         </td>
         <td align="right" valign="middle">
-          <span style="color:rgba(201,162,39,0.30);font-size:7px;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-family:'Courier New',Courier,monospace;">AUTHENTICATED<br>COMMUNICATION</span>
+          <span style="color:rgba(255,203,5,0.30);font-size:7px;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-family:'Courier New',Courier,monospace;">AUTHENTICATED<br>COMMUNICATION</span>
         </td>
       </tr>
       </table>
@@ -534,16 +534,16 @@ function ownershipBaseHtml(title: string, body: string): string {
     </td></tr>
 
     <!-- Footer -->
-    <tr><td style="padding:18px 36px 22px;border-top:1px solid rgba(201,162,39,0.08);background:#0a0a0a;">
+    <tr><td style="padding:18px 36px 22px;border-top:1px solid rgba(255,203,5,0.08);background:#0a0a0a;">
       <table width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td style="color:rgba(255,255,255,0.20);font-size:10px;line-height:1.7;font-family:'Courier New',Courier,monospace;">
-          <span style="color:rgba(201,162,39,0.45);font-weight:700;letter-spacing:1px;">MINTVAULT UK LTD</span><br>
+          <span style="color:rgba(255,203,5,0.45);font-weight:700;letter-spacing:1px;">MINTVAULT UK LTD</span><br>
           Professional Card Grading &amp; Certification<br>
-          <a href="${APP_BASE_URL}" style="color:rgba(201,162,39,0.35);text-decoration:none;">mintvaultuk.com</a>
+          <a href="${APP_BASE_URL}" style="color:rgba(255,203,5,0.35);text-decoration:none;">mintvaultuk.com</a>
         </td>
         <td align="right" valign="bottom">
-          <span style="color:rgba(201,162,39,0.20);font-size:8px;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-family:'Courier New',Courier,monospace;line-height:1.8;">VAULT<br>SECURED</span>
+          <span style="color:rgba(255,203,5,0.20);font-size:8px;font-weight:700;letter-spacing:2px;text-transform:uppercase;font-family:'Courier New',Courier,monospace;line-height:1.8;">VAULT<br>SECURED</span>
         </td>
       </tr>
       </table>
@@ -567,9 +567,9 @@ function ownershipBaseHtml(title: string, body: string): string {
 function certBlock(certId: string, extraRows: string = ""): string {
   return `
 <table width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0;">
-<tr><td style="background:#070707;border:1px solid rgba(201,162,39,0.18);border-left:3px solid #C9A227;border-radius:0 6px 6px 0;padding:14px 18px;">
-  <span style="display:block;color:rgba(201,162,39,0.45);font-size:8px;font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-bottom:7px;font-family:'Courier New',Courier,monospace;">CERTIFICATE ON RECORD</span>
-  <span style="display:block;color:#D4AF37;font-size:24px;font-weight:700;letter-spacing:2px;font-family:'Courier New',Courier,monospace;">${certId}</span>
+<tr><td style="background:#070707;border:1px solid rgba(255,203,5,0.18);border-left:3px solid #FFCB05;border-radius:0 6px 6px 0;padding:14px 18px;">
+  <span style="display:block;color:rgba(255,203,5,0.45);font-size:8px;font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-bottom:7px;font-family:'Courier New',Courier,monospace;">CERTIFICATE ON RECORD</span>
+  <span style="display:block;color:#FFCB05;font-size:24px;font-weight:700;letter-spacing:2px;font-family:'Courier New',Courier,monospace;">${certId}</span>
   ${extraRows}
 </td></tr>
 </table>`;
@@ -580,7 +580,7 @@ function ctaButton(href: string, label: string): string {
   return `
 <table width="100%" cellpadding="0" cellspacing="0" style="margin:28px 0 20px;">
 <tr><td align="center">
-  <a href="${href}" style="display:inline-block;background:linear-gradient(135deg,#D4AF37 0%,#A07820 100%);color:#1A1400;padding:15px 44px;text-decoration:none;font-weight:900;border-radius:6px;font-size:12px;letter-spacing:2.5px;text-transform:uppercase;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">${label}</a>
+  <a href="${href}" style="display:inline-block;background:linear-gradient(135deg,#FFCB05 0%,#D9A300 100%);color:#1A1400;padding:15px 44px;text-decoration:none;font-weight:900;border-radius:6px;font-size:12px;letter-spacing:2.5px;text-transform:uppercase;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">${label}</a>
 </td></tr>
 </table>`;
 }
@@ -1144,7 +1144,7 @@ export async function sendCertificatePdf(data: {
   You can also verify this certificate at any time by visiting:
 </p>
 <p style="margin:0 0 24px 0;">
-  <a href="${APP_BASE_URL}/cert/${data.certId}" style="color:#D4AF37;">
+  <a href="${APP_BASE_URL}/cert/${data.certId}" style="color:#FFCB05;">
     mintvaultuk.com/cert/${data.certId}
   </a>
 </p>
@@ -1186,7 +1186,7 @@ export async function sendStolenVerificationEmail(
   const body = `
 <p style="margin:0 0 16px 0;">Hi ${name},</p>
 <p style="margin:0 0 16px 0;">
-  You've submitted a stolen card report for certificate <strong style="color:#D4AF37;">${certId}</strong>
+  You've submitted a stolen card report for certificate <strong style="color:#FFCB05;">${certId}</strong>
   (<em>${cardName}</em>).
 </p>
 <p style="margin:0 0 24px 0;">
@@ -1195,7 +1195,7 @@ export async function sendStolenVerificationEmail(
 </p>
 <p style="margin:0 0 32px 0;text-align:center;">
   <a href="${verifyUrl}"
-     style="display:inline-block;background:#D4AF37;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
+     style="display:inline-block;background:#FFCB05;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
     Confirm Stolen Report
   </a>
 </p>
@@ -1236,7 +1236,7 @@ export async function sendWelcomeVerificationEmail(
 <p style="margin:0 0 16px 0;">Welcome to MintVault UK — the professional grading service for trading cards.</p>
 <p style="margin:0 0 24px 0;">Please verify your email address to activate your account:</p>
 <p style="margin:0 0 32px 0;text-align:center;">
-  <a href="${verifyUrl}" style="display:inline-block;background:#D4AF37;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
+  <a href="${verifyUrl}" style="display:inline-block;background:#FFCB05;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
     Verify My Email
   </a>
 </p>
@@ -1256,7 +1256,7 @@ export async function sendAccountMagicLinkEmail(
 <p style="margin:0 0 16px 0;">You requested a magic login link for your MintVault account.</p>
 <p style="margin:0 0 24px 0;">Click the button below to sign in instantly. This link expires in <strong>15 minutes</strong> and can only be used once.</p>
 <p style="margin:0 0 32px 0;text-align:center;">
-  <a href="${loginUrl}" style="display:inline-block;background:#D4AF37;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
+  <a href="${loginUrl}" style="display:inline-block;background:#FFCB05;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
     Sign In to MintVault
   </a>
 </p>
@@ -1276,7 +1276,7 @@ export async function sendPasswordResetEmail(
 <p style="margin:0 0 16px 0;">We received a request to reset the password for your MintVault account.</p>
 <p style="margin:0 0 24px 0;">Click the button below to choose a new password. This link expires in <strong>1 hour</strong>.</p>
 <p style="margin:0 0 32px 0;text-align:center;">
-  <a href="${resetUrl}" style="display:inline-block;background:#D4AF37;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
+  <a href="${resetUrl}" style="display:inline-block;background:#FFCB05;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
     Reset My Password
   </a>
 </p>
@@ -1340,13 +1340,13 @@ export async function sendVaultClubWelcomeEmail(data: {
   const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
   const body = `
 <p>Hi ${name},</p>
-<p>Welcome to <strong style="color:#D4AF37;">Vault Club ${tierLabel}</strong> — your exclusive membership is now active.</p>
+<p>Welcome to <strong style="color:#FFCB05;">Vault Club ${tierLabel}</strong> — your exclusive membership is now active.</p>
 <p>Here's what's unlocked for you:</p>
 <ul style="color:#ccc;line-height:1.8;">
   ${data.tier === "silver" ? "<li>10% off all grading submissions</li><li>50 AI Pre-Grade credits every month</li><li>Your own public Showroom at mintvaultuk.com/showroom/[your-name]</li><li>Silver Vault badge on every cert</li>" : ""}
 </ul>
 <p style="margin-top:24px;">
-<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW YOUR MEMBERSHIP</a>
+<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW YOUR MEMBERSHIP</a>
 </p>
 <p style="color:#888;font-size:12px;margin-top:16px;">Questions? Reply to this email or contact us at mintvaultuk@gmail.com.</p>`;
   try {
@@ -1372,7 +1372,7 @@ export async function sendVaultClubCancelledEmail(data: {
 <p>Your Showroom has been set to reserved until you rejoin. Your username and all your certificates remain safe.</p>
 <p>If this was a mistake, you can rejoin anytime:</p>
 <p style="margin-top:16px;">
-<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
+<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
 </p>`;
   try {
     await sendViaResend(resend, {
@@ -1396,7 +1396,7 @@ export async function sendVaultClubPaymentFailedEmail(data: {
 <p>We were unable to process your Vault Club subscription payment. This can happen if your card has expired or your bank declined the charge.</p>
 <p>Please update your payment method to keep your membership active:</p>
 <p style="margin-top:16px;">
-<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">UPDATE PAYMENT METHOD</a>
+<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">UPDATE PAYMENT METHOD</a>
 </p>
 <p style="color:#888;font-size:12px;">Your membership will remain active for 7 days while we retry the payment. After that your Showroom will be deactivated until you update your details.</p>`;
   try {
@@ -1421,7 +1421,7 @@ export async function sendVaultClubGraceExpiredEmail(data: {
 <p>Your Vault Club membership has ended after repeated payment failures. Your Showroom has been set back to reserved.</p>
 <p>We'd love to have you back. Rejoin anytime to reactivate all your perks immediately:</p>
 <p style="margin-top:16px;">
-<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
+<a href="${appUrl}/club" style="display:inline-block;padding:10px 24px;background:rgba(255,203,5,0.15);border:1px solid #FFCB05;color:#FFCB05;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">REJOIN VAULT CLUB</a>
 </p>`;
   try {
     await sendViaResend(resend, {

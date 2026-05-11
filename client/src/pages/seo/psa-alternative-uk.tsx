@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     question: "Are MintVault grades recognised by buyers and sellers?",
-    answer: "Yes. Every MintVault graded card carries a unique certificate number that can be instantly verified by anyone through our <a href='/cert' class='text-[#D4AF37] hover:underline'>certificate lookup tool</a>. This gives buyers full confidence in the grade and authenticity. Collectors across the UK actively buy, sell, and trade MintVault-graded cards on secondary marketplaces.",
+    answer: "Yes. Every MintVault graded card carries a unique certificate number that can be instantly verified by anyone through our <a href='/cert' class='text-[#FFCB05] hover:underline'>certificate lookup tool</a>. This gives buyers full confidence in the grade and authenticity. Collectors across the UK actively buy, sell, and trade MintVault-graded cards on secondary marketplaces.",
   },
   {
     question: "How much do I save by grading in the UK instead of sending to PSA?",
@@ -25,7 +25,7 @@ const faqs = [
   },
   {
     question: "Can I grade non-Pokemon cards with MintVault?",
-    answer: "Yes. MintVault grades cards from all major trading card games including Pokemon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, Dragon Ball Super, Lorcana, and many more. See our <a href='/trading-card-grading-uk' class='text-[#D4AF37] hover:underline'>trading card grading page</a> for the full list.",
+    answer: "Yes. MintVault grades cards from all major trading card games including Pokemon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, Dragon Ball Super, Lorcana, and many more. See our <a href='/trading-card-grading-uk' class='text-[#FFCB05] hover:underline'>trading card grading page</a> for the full list.",
   },
   {
     question: "What turnaround times does MintVault offer compared to PSA?",
@@ -79,33 +79,33 @@ export default function PsaAlternativeUk() {
         </p>
 
         <section className="mb-10" data-testid="section-comparison">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">UK vs US Grading: A Practical Comparison</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">UK vs US Grading: A Practical Comparison</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Grading with a US-based company from the UK introduces several layers of cost, risk, and delay that simply do not exist when you grade domestically. MintVault eliminates these friction points while delivering the same core outcome: a professionally assessed, encapsulated, and verifiable graded card.
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Shipping and Transit</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-6 mb-2">Shipping and Transit</h3>
             <p>
               International tracked and insured shipping to the US typically costs £15 to £30 or more, depending on the weight and declared value of your parcel. The same applies for the return journey. Transit time each way is usually 7 to 14 days, and packages can occasionally be delayed or held by customs. With MintVault, you ship domestically within the UK using Royal Mail or a courier, with shorter transit times, lower costs, and significantly less risk of loss during transit.
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Customs and Import Fees</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-6 mb-2">Customs and Import Fees</h3>
             <p>
               When graded cards are returned to the UK from the US, they may be subject to customs duty, import VAT (currently 20%), and courier handling fees. These charges can add up quickly, especially for high-value submissions. Because MintVault is based in the UK, there are no customs declarations, no import duties, and no VAT surprises on the return of your cards.
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Turnaround Time</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-6 mb-2">Turnaround Time</h3>
             <p>
               The total time from posting your cards to receiving them back includes the grading service's processing time plus shipping time in both directions. For US services, this can mean adding 2 to 4 weeks of transit time on top of the stated turnaround. MintVault's turnaround times range from 5 to 40 working days, and because shipping is domestic, the total elapsed time is much more predictable.
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">Brand Recognition and Verification</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-6 mb-2">Brand Recognition and Verification</h3>
             <p>
-              PSA, BGS, and CGC have long histories in the global grading market, and their labels are widely recognised on international marketplaces. MintVault brings the same fundamentals — expert assessment, numerical grading on a 1–10 scale, tamper-evident encapsulation, and unique certificate numbers — with the added advantage that every grade is instantly <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">verifiable online</Link> by any buyer, anywhere in the world. As the UK grading market matures and collectors increasingly value convenience, transparency, and domestic service quality, UK-graded cards are gaining strong traction across secondary marketplaces.
+              PSA, BGS, and CGC have long histories in the global grading market, and their labels are widely recognised on international marketplaces. MintVault brings the same fundamentals — expert assessment, numerical grading on a 1–10 scale, tamper-evident encapsulation, and unique certificate numbers — with the added advantage that every grade is instantly <Link href="/verify" className="text-[#FFCB05] hover:underline" data-testid="link-cert">verifiable online</Link> by any buyer, anywhere in the world. As the UK grading market matures and collectors increasingly value convenience, transparency, and domestic service quality, UK-graded cards are gaining strong traction across secondary marketplaces.
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-6 mb-2">UK-Based Customer Support</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-6 mb-2">UK-Based Customer Support</h3>
             <p>
               When you grade with MintVault, you deal with a UK team in your time zone. Questions about your submission, grading queries, or return scheduling are handled directly — no navigating overseas call centres, email delays across time zones, or support tickets that take days to receive a response.
             </p>
@@ -113,7 +113,7 @@ export default function PsaAlternativeUk() {
         </section>
 
         <section className="mb-10" data-testid="section-benefits-summary">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Benefits of Grading in the UK</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Benefits of Grading in the UK</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Shield size={20} />, title: "Cards Stay in the UK", desc: "No international transit risk. Your cards are handled domestically from start to finish." },
@@ -123,8 +123,8 @@ export default function PsaAlternativeUk() {
               { icon: <CheckCircle size={20} />, title: "Online Verification", desc: "Every MintVault certificate can be verified online, providing proof of grade and authenticity." },
               { icon: <Globe size={20} />, title: "UK Customer Support", desc: "Reach our team directly without time zone complications. Get answers about your submission quickly." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
-                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#FFCB05]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
+                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -135,7 +135,7 @@ export default function PsaAlternativeUk() {
         </section>
 
         <section className="mb-10" data-testid="section-when-to-choose">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why UK Collectors Choose MintVault</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Why UK Collectors Choose MintVault</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               For UK-based collectors, MintVault is the practical choice for professional card grading. Here is why:
@@ -155,22 +155,22 @@ export default function PsaAlternativeUk() {
         </section>
 
         <section className="mb-10" data-testid="section-how-it-works">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How MintVault Works</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">How MintVault Works</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
-              Getting your cards graded with MintVault is simple. <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">Create a submission</Link> online, choose your service tier, and post your cards to us. Our graders assess each card on a 1 to 10 scale, encapsulate them in tamper-evident slabs, and return them via fully insured shipping.
+              Getting your cards graded with MintVault is simple. <Link href="/submit" className="text-[#FFCB05] hover:underline" data-testid="link-submit">Create a submission</Link> online, choose your service tier, and post your cards to us. Our graders assess each card on a 1 to 10 scale, encapsulate them in tamper-evident slabs, and return them via fully insured shipping.
             </p>
             <p>
-              Every card receives a unique certificate number that can be verified at any time through our website. Read our <Link href="/how-to-grade-pokemon-cards" className="text-[#D4AF37] hover:underline" data-testid="link-guide">step-by-step grading guide</Link> for detailed instructions on preparing and submitting your cards.
+              Every card receives a unique certificate number that can be verified at any time through our website. Read our <Link href="/how-to-grade-pokemon-cards" className="text-[#FFCB05] hover:underline" data-testid="link-guide">step-by-step grading guide</Link> for detailed instructions on preparing and submitting your cards.
             </p>
             <p>
-              Learn more about <Link href="/why-mintvault" className="text-[#D4AF37] hover:underline" data-testid="link-why-mv">why collectors choose MintVault</Link>.
+              Learn more about <Link href="/why-mintvault" className="text-[#FFCB05] hover:underline" data-testid="link-why-mv">why collectors choose MintVault</Link>.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-explore">
-          <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-4">Related Pages</h2>
+          <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-4">Related Pages</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { href: "/pokemon-card-grading-uk", label: "Pokemon Card Grading UK" },
@@ -183,7 +183,7 @@ export default function PsaAlternativeUk() {
               { href: "/why-mintvault", label: "Why MintVault" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
+                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

@@ -12,8 +12,8 @@ const MARGIN = 40;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
 // ── Colour palette ────────────────────────────────────────────────────────────
-const GOLD       = "#D4AF37";
-const GOLD_DARK  = "#B8960C";
+const GOLD       = "#FFCB05";
+const GOLD_DARK  = "#FFCB05";
 const BLACK      = "#000000";
 const GRAY_DARK  = "#1a1a1a";
 const GRAY_MID   = "#555555";

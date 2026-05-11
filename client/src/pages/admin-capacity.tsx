@@ -170,12 +170,12 @@ export default function AdminCapacity() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest">CAPACITY MANAGEMENT</h1>
+          <h1 className="text-2xl font-bold text-[#FFCB05] tracking-widest">CAPACITY MANAGEMENT</h1>
           <p className="text-[#999999] text-sm">Control submission capacity, pause tiers, and manage queue limits</p>
         </div>
         <button
           onClick={() => refetch()}
-          className="text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors flex items-center gap-1.5 text-xs"
+          className="text-[#FFCB05]/50 hover:text-[#FFCB05] transition-colors flex items-center gap-1.5 text-xs"
         >
           <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} /> Refresh
         </button>
@@ -282,7 +282,7 @@ export default function AdminCapacity() {
                             type="number"
                             value={editMax}
                             onChange={e => setEditMax(e.target.value)}
-                            className="w-16 border border-[#D4AF37]/40 rounded px-2 py-1 text-sm text-center bg-white focus:outline-none focus:border-[#D4AF37]"
+                            className="w-16 border border-[#FFCB05]/40 rounded px-2 py-1 text-sm text-center bg-white focus:outline-none focus:border-[#FFCB05]"
                             min={0}
                             autoFocus
                           />
@@ -303,7 +303,7 @@ export default function AdminCapacity() {
                       ) : (
                         <button
                           onClick={() => startEdit(row)}
-                          className="text-[#1A1A1A] font-semibold hover:text-[#D4AF37] transition-colors cursor-pointer"
+                          className="text-[#1A1A1A] font-semibold hover:text-[#FFCB05] transition-colors cursor-pointer"
                           title="Click to edit"
                         >
                           {row.max_concurrent}
@@ -323,11 +323,11 @@ export default function AdminCapacity() {
                             data: { status: row.status },
                           });
                         }}
-                        className="text-[#999999] hover:text-[#D4AF37] transition-colors inline-flex items-center gap-1"
+                        className="text-[#999999] hover:text-[#FFCB05] transition-colors inline-flex items-center gap-1"
                         title={row.force_open ? "Force open is ON — click to disable" : "Force open is OFF — click to enable"}
                       >
                         {row.force_open ? (
-                          <ToggleRight size={20} className="text-[#D4AF37]" />
+                          <ToggleRight size={20} className="text-[#FFCB05]" />
                         ) : (
                           <ToggleLeft size={20} />
                         )}
@@ -388,7 +388,7 @@ export default function AdminCapacity() {
                   type="datetime-local"
                   value={pauseUntil}
                   onChange={e => setPauseUntil(e.target.value)}
-                  className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#D4AF37]"
+                  className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#FFCB05]"
                 />
               </div>
 
@@ -398,7 +398,7 @@ export default function AdminCapacity() {
                   value={pauseMessage}
                   onChange={e => setPauseMessage(e.target.value)}
                   rows={3}
-                  className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#D4AF37] resize-none"
+                  className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#FFCB05] resize-none"
                   placeholder="e.g. Temporarily paused for capacity management. Resumes Monday."
                 />
               </div>

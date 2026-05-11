@@ -36,7 +36,7 @@ function DropZone({ side, file, uploading, processed, onFile }: {
         h-56 rounded-xl border-2 border-dashed cursor-pointer
         flex flex-col items-center justify-center gap-2
         transition-all
-        ${isDragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : "border-[#D4D0C8] hover:border-[#D4AF37]/50"}
+        ${isDragging ? "border-[#FFCB05] bg-[#FFCB05]/5" : "border-[#D4D0C8] hover:border-[#FFCB05]/50"}
         ${processed ? "border-emerald-600/50 bg-emerald-50" : ""}
         ${uploading ? "cursor-wait opacity-80" : ""}
       `}
@@ -54,7 +54,7 @@ function DropZone({ side, file, uploading, processed, onFile }: {
 
       {uploading ? (
         <>
-          <Loader2 className="text-[#D4AF37] animate-spin" size={28} />
+          <Loader2 className="text-[#FFCB05] animate-spin" size={28} />
           <p className="text-[#1A1A1A] text-sm">Uploading & processing…</p>
           <p className="text-[#555555] text-[10px]">Auto-cropping and generating analysis views</p>
         </>
@@ -127,10 +127,10 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
   }
 
   return (
-    <div className="bg-white border border-[#D4AF37]/20 rounded-xl p-5">
+    <div className="bg-white border border-[#FFCB05]/20 rounded-xl p-5">
       <div className="flex items-center gap-2 mb-2">
-        <Camera size={16} className="text-[#D4AF37]" />
-        <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Image Capture</p>
+        <Camera size={16} className="text-[#FFCB05]" />
+        <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Image Capture</p>
       </div>
       <p className="text-[#333333] text-xs mb-5">
         Drag front and back scans here, or click to browse. Images are auto-cropped and processed for AI analysis.
@@ -138,7 +138,7 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-[#D4AF37]/70 mb-2 font-bold">Front of Card</p>
+          <p className="text-[10px] uppercase tracking-widest text-[#FFCB05]/70 mb-2 font-bold">Front of Card</p>
           <DropZone
             side="front"
             file={files.front}
@@ -148,7 +148,7 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
           />
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-[#D4AF37]/70 mb-2 font-bold">Back of Card</p>
+          <p className="text-[10px] uppercase tracking-widest text-[#FFCB05]/70 mb-2 font-bold">Back of Card</p>
           <DropZone
             side="back"
             file={files.back}

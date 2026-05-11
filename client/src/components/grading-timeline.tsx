@@ -25,7 +25,7 @@ export default function GradingTimeline({ currentStatus, trackingNumber, statusU
     const stage = STAGES[currentIdx] ?? STAGES[0];
     return (
       <div className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse flex-shrink-0" />
+        <span className="w-2 h-2 rounded-full bg-[#FFCB05] animate-pulse flex-shrink-0" />
         <span className="text-[#1A1A1A] text-sm font-medium">{stage.label}</span>
         {statusUpdatedAt && (
           <span className="text-[#888888] text-xs">· {new Date(statusUpdatedAt).toLocaleDateString("en-GB")}</span>
@@ -51,7 +51,7 @@ export default function GradingTimeline({ currentStatus, trackingNumber, statusU
                 {/* Dot */}
                 <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center z-10 border-2 ${
                   isComplete ? "bg-emerald-500 border-emerald-500" :
-                  isCurrent  ? "bg-[#D4AF37] border-[#D4AF37]" :
+                  isCurrent  ? "bg-[#FFCB05] border-[#FFCB05]" :
                                "bg-white border-[#E8E4DC]"
                 }`}>
                   {isComplete ? (
@@ -71,19 +71,19 @@ export default function GradingTimeline({ currentStatus, trackingNumber, statusU
                                  "text-[#AAAAAA]"
                   }`}>
                     {stage.label}
-                    {isCurrent && <span className="ml-2 text-[9px] font-bold uppercase text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">Current</span>}
+                    {isCurrent && <span className="ml-2 text-[9px] font-bold uppercase text-[#FFCB05] bg-[#FFCB05]/10 px-1.5 py-0.5 rounded">Current</span>}
                   </p>
                   {!isFuture && (
                     <p className="text-xs text-[#888888] mt-0.5">{stage.desc}</p>
                   )}
                   {isCurrent && stage.key === "shipping" && trackingNumber && (
                     <div className="flex items-center gap-1.5 mt-1">
-                      <Truck size={12} className="text-[#D4AF37]" />
+                      <Truck size={12} className="text-[#FFCB05]" />
                       <a
                         href={`https://www.royalmail.com/track-your-item#/tracking-results/${trackingNumber}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[#D4AF37] text-xs hover:underline font-mono"
+                        className="text-[#FFCB05] text-xs hover:underline font-mono"
                       >
                         {trackingNumber}
                       </a>

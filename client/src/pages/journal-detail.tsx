@@ -174,7 +174,7 @@ export default function JournalDetailV2() {
         <div className="mx-auto max-w-3xl px-6 pt-6 md:pt-8 pb-10">
           <p
             className="font-mono-v2 text-[10px] uppercase tracking-[0.25em] no-text-shadow"
-            style={{ color: "#D4AF37" }}
+            style={{ color: "#FFCB05" }}
           >
             Journal &middot; {formatDate(guide.publishedDate)}
           </p>

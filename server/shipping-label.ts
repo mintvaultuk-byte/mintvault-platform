@@ -2,7 +2,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import { COMPANY, formatPostalAddress } from "@shared/company";
 
-const GOLD     = "#D4AF37";
+const GOLD     = "#FFCB05";
 const BLACK    = "#111111";
 const GREY     = "#555555";
 const GREY_LT  = "#888888";

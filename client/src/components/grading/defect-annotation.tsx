@@ -72,7 +72,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               key={d.id}
               className={`flex items-start gap-2 rounded-lg px-3 py-2 border cursor-pointer transition-all ${
                 highlightId === d.id
-                  ? "border-[#D4AF37]/60 bg-[#D4AF37]/5"
+                  ? "border-[#FFCB05]/60 bg-[#FFCB05]/5"
                   : "border-[#E8E4DC] bg-white hover:border-[#D4D0C8]"
               }`}
               onClick={() => onHighlight(highlightId === d.id ? null : d.id)}
@@ -110,14 +110,14 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
           their own defects via image clicks; AI suggestions are not promoted
           automatically and have no confirm/reject UI here. */}
       {candidates && candidates.length > 0 && (
-        <div className="space-y-1.5 border-t border-dashed border-[#D4AF37]/30 pt-2">
-          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length}) — info only</p>
+        <div className="space-y-1.5 border-t border-dashed border-[#FFCB05]/30 pt-2">
+          <p className="text-[#FFCB05]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length}) — info only</p>
           {candidates.map((c, i) => (
             <div
               key={`cand-${i}`}
-              className="flex items-start gap-2 rounded-lg px-3 py-2 border border-dashed border-[#D4AF37]/40 bg-[#FBF8EE]"
+              className="flex items-start gap-2 rounded-lg px-3 py-2 border border-dashed border-[#FFCB05]/40 bg-[#FBF8EE]"
             >
-              <span className="flex-shrink-0 w-5 h-5 rounded-full border border-dashed border-[#D4AF37] bg-white flex items-center justify-center text-[#D4AF37] text-[9px] font-bold mt-0.5">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full border border-dashed border-[#FFCB05] bg-white flex items-center justify-center text-[#FFCB05] text-[9px] font-bold mt-0.5">
                 ?
               </span>
               <div className="flex-1 min-w-0">

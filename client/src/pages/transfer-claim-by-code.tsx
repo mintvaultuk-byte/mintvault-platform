@@ -56,7 +56,7 @@ export default function TransferClaimByCodePage() {
     <div className="min-h-screen py-12 px-4">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
-          <Shield className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
+          <Shield className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
           <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight" data-testid="text-transfer-claim-title">
             Request Transfer
           </h1>
@@ -82,8 +82,8 @@ export default function TransferClaimByCodePage() {
           </div>
         )}
 
-        <div className="relative z-[3] border border-[#D4AF37]/30 bg-white rounded-2xl p-6">
-          <h2 className="text-[#D4AF37] text-lg font-semibold mb-2">Buyer-Initiated Transfer</h2>
+        <div className="relative z-[3] border border-[#FFCB05]/30 bg-white rounded-2xl p-6">
+          <h2 className="text-[#FFCB05] text-lg font-semibold mb-2">Buyer-Initiated Transfer</h2>
           <p className="text-xs text-[#999999] mb-6">
             The current registered keeper will be emailed and must explicitly confirm or dispute within 14 days. If they do not respond, the transfer expires and ownership stays with them.
           </p>
@@ -104,7 +104,7 @@ export default function TransferClaimByCodePage() {
 
             <div className="space-y-2">
               <Label htmlFor="claimCode" className="text-[#444444] flex items-center gap-1.5">
-                <Key size={13} className="text-[#D4AF37]" />
+                <Key size={13} className="text-[#FFCB05]" />
                 Claim Code
               </Label>
               <Input
@@ -113,7 +113,7 @@ export default function TransferClaimByCodePage() {
                 placeholder="e.g. A3K9-X2M7-PQ4R"
                 value={claimCode}
                 onChange={(e) => setClaimCode(e.target.value.toUpperCase())}
-                className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono tracking-widest"
+                className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono tracking-widest"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
@@ -132,7 +132,7 @@ export default function TransferClaimByCodePage() {
                 placeholder="e.g. James Smith"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                 autoComplete="name"
               />
             </div>
@@ -146,7 +146,7 @@ export default function TransferClaimByCodePage() {
                 placeholder="your@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
               />
               <p className="text-xs text-[#999999]">
                 We&apos;ll email you when the current keeper responds, or after the 14-day deadline.
@@ -160,7 +160,7 @@ export default function TransferClaimByCodePage() {
                 type="checkbox"
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
-                className="mt-1 w-4 h-4 accent-[#D4AF37] cursor-pointer"
+                className="mt-1 w-4 h-4 accent-[#FFCB05] cursor-pointer"
               />
               <span className="text-sm text-[#444444] leading-snug">
                 I confirm I am the rightful new owner of this certificate, having purchased or received it legitimately, and have the printed claim insert.
@@ -190,7 +190,7 @@ export default function TransferClaimByCodePage() {
             </Button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-[#D4AF37]/10">
+          <div className="mt-6 pt-5 border-t border-[#FFCB05]/10">
             <h3 className="text-sm font-semibold text-[#666666] mb-3">How it works</h3>
             <ol className="text-xs text-[#999999] space-y-2 list-decimal list-inside">
               <li>Enter the cert ID + claim code from your insert.</li>
@@ -201,7 +201,7 @@ export default function TransferClaimByCodePage() {
             </ol>
             <p className="text-xs text-[#999999] mt-4">
               First-time owner registering ownership instead?{" "}
-              <a href="/claim" className="text-[#D4AF37] hover:underline">Register Ownership →</a>
+              <a href="/claim" className="text-[#FFCB05] hover:underline">Register Ownership →</a>
             </p>
           </div>
         </div>

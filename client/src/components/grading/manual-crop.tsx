@@ -251,7 +251,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       {/* Top bar */}
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[#D4D0C8]">
         <div>
-          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Perspective Crop \u2014 {side}
           </p>
           <p className="text-[#555555] text-[10px]">Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.</p>
@@ -278,7 +278,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                   </mask>
                 </defs>
                 <rect width="100" height="100" fill="#1A1A1A" fillOpacity="0.18" mask="url(#quadMask)" />
-                <polygon points={polyPoints(quad)} fill="none" stroke="#D4AF37" strokeWidth="0.4" opacity="0.9" />
+                <polygon points={polyPoints(quad)} fill="none" stroke="#FFCB05" strokeWidth="0.4" opacity="0.9" />
               </svg>
             </div>
 
@@ -307,10 +307,10 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                     onTouchStart={(e) => startCornerTouch(k, e)}
                   >
                     {/* Visible 20px handle centered inside */}
-                    <div className="absolute bg-[#D4AF37] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
+                    <div className="absolute bg-[#FFCB05] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
                       style={{ inset: 12, pointerEvents: "none" }} />
                     {/* Label */}
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none select-none">
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#FFCB05] font-bold pointer-events-none select-none">
                       {CORNER_LABELS[k]}
                     </span>
                   </div>
@@ -326,7 +326,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         {/* Row 1: Quick actions */}
         <div className="flex items-center gap-2">
           <button type="button" onClick={handleAutoDetect} disabled={detecting}
-            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
+            className="flex items-center gap-1.5 text-[#FFCB05] text-xs border border-[#FFCB05]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#FFCB05]/10 disabled:opacity-50 transition-colors">
             {detecting ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
             {detecting ? "Detecting..." : "Auto-Detect"} <span className="text-[#555555] text-[9px]">A</span>
           </button>
@@ -336,7 +336,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
           </button>
           <div className="flex-1" />
           <span className="text-[#555555] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
-          {Math.abs(derivedAngle) > 0.3 && <span className="text-[#D4AF37]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>}
+          {Math.abs(derivedAngle) > 0.3 && <span className="text-[#FFCB05]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>}
         </div>
 
         {/* Row 2: Rotation slider */}
@@ -344,10 +344,10 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
           <span className="text-[#555555]">Rotate</span>
           <input type="range" min="-15" max="15" step="0.5" value={rotation}
             onChange={(e) => setRotation(Number(e.target.value))}
-            className="flex-1 max-w-[200px] accent-[#D4AF37]" />
-          <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
+            className="flex-1 max-w-[200px] accent-[#FFCB05]" />
+          <span className="text-[#FFCB05] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
           {Math.abs(rotation) > 0.1 && (
-            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline">Zero <span className="text-[#555555]">0</span></button>
+            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#555555] hover:text-[#FFCB05] underline">Zero <span className="text-[#555555]">0</span></button>
           )}
         </div>
 
@@ -357,7 +357,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
             Cancel <span className="text-[#555555] text-[9px]">Esc</span>
           </button>
           <button type="button" onClick={handleApply} disabled={saving}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
+            className="flex items-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Crop size={13} />}
             {saving ? "Cropping..." : "Apply Crop"} <span className="text-[#1A1400]/50 text-[9px] normal-case">\u21B5</span>
           </button>

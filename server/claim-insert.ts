@@ -20,9 +20,12 @@ const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 // ── Colour palette (white background, matches certificate style) ──────────────
 const WHITE   = "#FFFFFF";
 const DARK    = "#1A1A1A";   // replaces BLACK text on white bg
-const GOLD    = "#D4AF37";
-const GOLD_DK = "#B8960C";
-const GOLD_LT = "#FFD700";   // claim code highlight
+// Pikachu Yellow palette (PR #87). GOLD = primary; GOLD_DK = the dark
+// shade for borders/contrast; GOLD_LT (claim-code highlight) intentionally
+// stays #FFD700 — it's a distinct semantic role from the brand colour.
+const GOLD    = "#FFCB05";
+const GOLD_DK = "#D9A300";
+const GOLD_LT = "#FFD700";   // claim code highlight (unchanged)
 const GRAY    = "#555555";   // body text on white
 const GRAY_LT = "#888888";   // labels/captions on white
 const GRAY_BG = "#F5F0E8";   // alternating row bg (matches certificate)

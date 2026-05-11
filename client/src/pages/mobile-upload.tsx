@@ -64,7 +64,7 @@ export default function MobileUploadPage() {
   return (
     <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center px-6 pt-12 pb-8 gap-6">
       {/* Logo */}
-      <p className="text-[#D4AF37] text-sm font-bold uppercase tracking-widest">MintVault UK</p>
+      <p className="text-[#FFCB05] text-sm font-bold uppercase tracking-widest">MintVault UK</p>
 
       <div className="text-center">
         <h1 className="text-white text-xl font-bold mb-2">Take {label}</h1>
@@ -88,7 +88,7 @@ export default function MobileUploadPage() {
                 type="button"
                 onClick={upload}
                 disabled={uploading}
-                className="flex-[2] flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90"
+                className="flex-[2] flex items-center justify-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-sm font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90"
               >
                 {uploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
                 {uploading ? "Uploading…" : "Upload"}
@@ -101,7 +101,7 @@ export default function MobileUploadPage() {
             <button
               type="button"
               onClick={() => { const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.capture = "environment"; i.onchange = (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) handleFile(f); }; i.click(); }}
-              className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold py-5 rounded-2xl hover:opacity-90 active:scale-95 transition-all"
+              className="w-full flex items-center justify-center gap-3 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-sm font-bold py-5 rounded-2xl hover:opacity-90 active:scale-95 transition-all"
             >
               <Camera size={22} />
               Take Photo

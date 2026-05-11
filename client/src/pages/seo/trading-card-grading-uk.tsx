@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How does MintVault certify graded trading cards?",
-    answer: "Each graded card receives a unique MintVault certificate number that is printed on the slab label. This certificate can be verified online at any time using our <a href='/cert' class='text-[#D4AF37] hover:underline'>certificate lookup tool</a>, which displays the card details, grade, and submission information.",
+    answer: "Each graded card receives a unique MintVault certificate number that is printed on the slab label. This certificate can be verified online at any time using our <a href='/cert' class='text-[#FFCB05] hover:underline'>certificate lookup tool</a>, which displays the card details, grade, and submission information.",
   },
   {
     question: "Can I submit cards from multiple TCGs in one order?",
@@ -29,7 +29,7 @@ const faqs = [
   },
   {
     question: "How much does trading card grading cost in the UK?",
-    answer: "Grading starts from £19 per card (Vault Queue tier, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts of up to 15% apply to larger submissions. Visit our <a href='/' class='text-[#D4AF37] hover:underline'>pricing page</a> for full details.",
+    answer: "Grading starts from £19 per card (Vault Queue tier, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts of up to 15% apply to larger submissions. Visit our <a href='/' class='text-[#FFCB05] hover:underline'>pricing page</a> for full details.",
   },
   {
     question: "Do graded trading cards sell for more than raw cards?",
@@ -83,24 +83,24 @@ export default function TradingCardGradingUk() {
         </p>
 
         <section className="mb-10" data-testid="section-supported-games">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Trading Card Games We Grade</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Trading Card Games We Grade</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
             MintVault accepts submissions from all major trading card games. Our grading standards are consistent and rigorous across every TCG we support:
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             {["Pokemon", "Yu-Gi-Oh!", "Magic: The Gathering", "One Piece", "Dragon Ball Super", "Lorcana", "Flesh and Blood", "Digimon", "Star Wars: Unlimited", "Weiss Schwarz", "Cardfight!! Vanguard", "MetaZoo"].map((game) => (
-              <div key={game} className="border border-[#D4AF37]/15 rounded px-3 py-2 text-[#D4AF37]/80 text-xs text-center" data-testid={`badge-game-${game.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+              <div key={game} className="border border-[#FFCB05]/15 rounded px-3 py-2 text-[#FFCB05]/80 text-xs text-center" data-testid={`badge-game-${game.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
                 {game}
               </div>
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm">
-            See our <Link href="/tcg" className="text-[#D4AF37] hover:underline" data-testid="link-tcg-list">full list of supported TCGs</Link> for more information on each game.
+            See our <Link href="/tcg" className="text-[#FFCB05] hover:underline" data-testid="link-tcg-list">full list of supported TCGs</Link> for more information on each game.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-grading-process">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Our Grading Process</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Our Grading Process</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Every trading card submitted to MintVault undergoes the same thorough grading process, regardless of the game it comes from. Our graders work in controlled conditions using proper lighting and magnification tools to assess each card fairly and consistently.
@@ -124,10 +124,10 @@ export default function TradingCardGradingUk() {
         </section>
 
         <section className="mb-10" data-testid="section-certification">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Certification and Verification</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Certification and Verification</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
-              Every card graded by MintVault receives a unique certificate number. This number is printed directly on the slab label and recorded in our database. Anyone can verify a MintVault certificate using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert-verify">online certificate lookup tool</Link>.
+              Every card graded by MintVault receives a unique certificate number. This number is printed directly on the slab label and recorded in our database. Anyone can verify a MintVault certificate using our <Link href="/verify" className="text-[#FFCB05] hover:underline" data-testid="link-cert-verify">online certificate lookup tool</Link>.
             </p>
             <p>
               Certificate verification displays the card name, set, grade, and submission details. This provides buyers with confidence that the card and grade are authentic, which is particularly valuable when selling cards on secondary markets like eBay or trading card forums.
@@ -139,7 +139,7 @@ export default function TradingCardGradingUk() {
         </section>
 
         <section className="mb-10" data-testid="section-why-grade">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Your Trading Cards?</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Why Grade Your Trading Cards?</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Award size={20} />, title: "Increase Resale Value", desc: "Graded cards in high condition typically sell for significantly more than their raw equivalents. A trusted grade gives buyers confidence." },
@@ -147,8 +147,8 @@ export default function TradingCardGradingUk() {
               { icon: <CheckCircle size={20} />, title: "Prove Authenticity", desc: "Grading includes authentication. Counterfeit and altered cards are identified and rejected, so a graded card carries trust." },
               { icon: <Layers size={20} />, title: "Standardised Condition", desc: "A numerical grade removes subjectivity. Sellers and buyers share a common language for card condition across all trading platforms." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
-                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#FFCB05]/15 rounded-lg p-4" data-testid={`card-benefit-${i}`}>
+                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -159,7 +159,7 @@ export default function TradingCardGradingUk() {
         </section>
 
         <section className="mb-10" data-testid="section-uk-advantage">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">The UK Grading Advantage</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">The UK Grading Advantage</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Choosing a UK-based grading service means your cards never leave the country. There is no risk of loss during international transit, no customs paperwork, no import duties or VAT surprises, and no weeks of additional waiting for overseas shipping.
@@ -168,13 +168,13 @@ export default function TradingCardGradingUk() {
               MintVault offers turnaround from 40 working days down to 5 working days, with all return shipping fully insured. Our UK-based customer support team is available to answer questions about your submission without time zone complications.
             </p>
             <p>
-              For a detailed comparison of UK versus international grading options, see our <Link href="/psa-alternative-uk" className="text-[#D4AF37] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
+              For a detailed comparison of UK versus international grading options, see our <Link href="/psa-alternative-uk" className="text-[#FFCB05] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-explore">
-          <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-4">Related Pages</h2>
+          <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-4">Related Pages</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { href: "/pokemon-card-grading-uk", label: "Pokemon Card Grading UK" },
@@ -187,7 +187,7 @@ export default function TradingCardGradingUk() {
               { href: "/why-mintvault", label: "Why MintVault" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
+                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

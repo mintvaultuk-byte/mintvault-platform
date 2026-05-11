@@ -104,7 +104,7 @@ export default function HowToGradePokemonCards() {
         </p>
 
         <section className="mb-10" data-testid="section-step-1">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 1: Assess Your Cards</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Step 1: Assess Your Cards</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Before submitting cards for grading, take time to examine them carefully. Use good overhead lighting and handle cards by their edges or while wearing clean cotton gloves to avoid adding fingerprints or oils to the surface.
@@ -122,16 +122,16 @@ export default function HowToGradePokemonCards() {
               <strong className="text-white">Surface</strong> — angle the card under light to check for scratches, print lines, ink spots, haze, or other surface blemishes. Holofoil and textured cards may require tilting at multiple angles to spot surface issues. Print lines are factory defects that run across the holofoil pattern and will affect the grade.
             </p>
             <p>
-              After your assessment, decide which cards are worth submitting. Cards in near-mint or better condition with a raw value significantly above the grading cost are the best candidates. Our guide on <Link href="/guides/what-pokemon-cards-are-worth-grading" className="text-[#D4AF37] hover:underline" data-testid="link-worth-grading">which Pokemon cards are worth grading</Link> provides more detail.
+              After your assessment, decide which cards are worth submitting. Cards in near-mint or better condition with a raw value significantly above the grading cost are the best candidates. Our guide on <Link href="/guides/what-pokemon-cards-are-worth-grading" className="text-[#FFCB05] hover:underline" data-testid="link-worth-grading">which Pokemon cards are worth grading</Link> provides more detail.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-step-2">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 2: Create Your Submission Online</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Step 2: Create Your Submission Online</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
-              Visit the MintVault <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> to start your order. You will need to:
+              Visit the MintVault <Link href="/submit" className="text-[#FFCB05] hover:underline" data-testid="link-submit">submission page</Link> to start your order. You will need to:
             </p>
             <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
               <li>Choose your service tier (Vault Queue, Standard, or Express)</li>
@@ -143,33 +143,33 @@ export default function HowToGradePokemonCards() {
               After completing your submission, you will receive a confirmation with your submission reference number and our shipping address. Print or save this confirmation as you will need to include it with your cards.
             </p>
             <p>
-              Not sure which tier to choose? View our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for a comparison of all service tiers, turnaround times, and features.
+              Not sure which tier to choose? View our <Link href="/" className="text-[#FFCB05] hover:underline" data-testid="link-pricing">pricing page</Link> for a comparison of all service tiers, turnaround times, and features.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-step-3">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 3: Prepare and Package Your Cards</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Step 3: Prepare and Package Your Cards</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Proper packaging is essential to ensure your cards arrive in the same condition they left. Follow these steps for each card:
             </p>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Individual Card Protection</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-4 mb-2">Individual Card Protection</h3>
             <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
               <li>Place each card in a clean, new penny sleeve (also called soft sleeves). Insert the card top-edge first so the opening faces down when stored upright.</li>
               <li>Slide the penny-sleeved card into a top loader (rigid plastic holder). The top loader should be the correct size for standard trading cards.</li>
               <li>If you have semi-rigid card savers, these are also acceptable and are preferred by some grading services.</li>
             </ul>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Bundling Multiple Cards</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-4 mb-2">Bundling Multiple Cards</h3>
             <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
               <li>Stack your loaded top loaders together with all cards facing the same direction.</li>
               <li>Secure the stack with a rubber band or painter's tape wrapped around the outside of the top loaders. Never apply tape directly to the cards or the openings of the top loaders.</li>
               <li>If you have a large submission, group cards into smaller stacks of 10-15 cards each.</li>
             </ul>
 
-            <h3 className="text-lg font-semibold text-[#D4AF37]/90 mt-4 mb-2">Outer Packaging</h3>
+            <h3 className="text-lg font-semibold text-[#FFCB05]/90 mt-4 mb-2">Outer Packaging</h3>
             <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
               <li>Place the card stack(s) in a small box or rigid mailer. Cards should not be able to move around inside the packaging.</li>
               <li>Fill any empty space with bubble wrap, packing paper, or similar padding material.</li>
@@ -178,13 +178,13 @@ export default function HowToGradePokemonCards() {
             </ul>
 
             <p>
-              For detailed packaging instructions with photos, see our guide on <Link href="/guides/how-to-send-cards-for-grading-safely" className="text-[#D4AF37] hover:underline" data-testid="link-shipping-guide">how to send cards for grading safely</Link>.
+              For detailed packaging instructions with photos, see our guide on <Link href="/guides/how-to-send-cards-for-grading-safely" className="text-[#FFCB05] hover:underline" data-testid="link-shipping-guide">how to send cards for grading safely</Link>.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-step-4">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 4: Ship Your Cards</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Step 4: Ship Your Cards</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Send your packaged cards to MintVault using a tracked and insured shipping service. We strongly recommend:
@@ -201,7 +201,7 @@ export default function HowToGradePokemonCards() {
         </section>
 
         <section className="mb-10" data-testid="section-step-5">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Step 5: Grading and Return</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Step 5: Grading and Return</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Once we receive your cards, the grading process begins according to your chosen service tier's turnaround time. You can track the status of your submission online at any time.
@@ -210,13 +210,13 @@ export default function HowToGradePokemonCards() {
               Each card is assessed individually by our trained graders, who evaluate centering, corners, edges, and surface quality on a 1 to 10 scale. After grading, cards are encapsulated in tamper-evident MintVault slabs with a printed label showing the card name, set, grade, and unique certificate number.
             </p>
             <p>
-              Your graded cards are returned via fully insured tracked shipping based on the total declared value of your submission. Once you receive them, you can verify each certificate using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">online certificate lookup tool</Link>.
+              Your graded cards are returned via fully insured tracked shipping based on the total declared value of your submission. Once you receive them, you can verify each certificate using our <Link href="/verify" className="text-[#FFCB05] hover:underline" data-testid="link-cert">online certificate lookup tool</Link>.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-grading-factors">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">What Graders Look For</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">What Graders Look For</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Eye size={20} />, title: "Centering", desc: "The alignment of the printed image within the card borders. Both front and back are assessed. Tighter tolerances are required for grades 9 and above." },
@@ -224,8 +224,8 @@ export default function HowToGradePokemonCards() {
               { icon: <Package size={20} />, title: "Edges", desc: "Condition along all four edges. Whitening, chipping, nicks, and roughness are all assessed under magnification." },
               { icon: <CheckCircle size={20} />, title: "Surface", desc: "Scratches, print lines, ink defects, haze, and foil clouding on both the front and back of the card." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-factor-${i}`}>
-                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#FFCB05]/15 rounded-lg p-4" data-testid={`card-factor-${i}`}>
+                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -239,7 +239,7 @@ export default function HowToGradePokemonCards() {
         </section>
 
         <section className="mb-10" data-testid="section-explore">
-          <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-4">More Resources</h2>
+          <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-4">More Resources</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { href: "/pokemon-card-grading-uk", label: "Pokemon Card Grading UK" },
@@ -252,7 +252,7 @@ export default function HowToGradePokemonCards() {
               { href: "/why-mintvault", label: "Why MintVault" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
+                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

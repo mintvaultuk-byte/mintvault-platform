@@ -41,11 +41,11 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-      <div className="bg-[#111111] border border-[#D4AF37]/30 rounded-2xl p-6 max-w-md w-full space-y-5">
+      <div className="bg-[#111111] border border-[#FFCB05]/30 rounded-2xl p-6 max-w-md w-full space-y-5">
 
         <div className="text-center">
-          <Trophy size={32} className="text-[#D4AF37] mx-auto mb-2" />
-          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Session Complete</p>
+          <Trophy size={32} className="text-[#FFCB05] mx-auto mb-2" />
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Session Complete</p>
           <p className="text-white text-2xl font-black mt-1">{cards.length} Cards Graded</p>
         </div>
 
@@ -57,7 +57,7 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
           ].map(({ label, value }) => (
             <div key={label} className="bg-[#0A0A0A] rounded-lg p-3 text-center">
               <p className="text-[#555555] text-[9px] uppercase tracking-widest mb-1">{label}</p>
-              <p className="text-[#D4AF37] text-lg font-black">{value}</p>
+              <p className="text-[#FFCB05] text-lg font-black">{value}</p>
             </div>
           ))}
         </div>
@@ -69,7 +69,7 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
             <div className="flex items-end gap-1 h-12">
               {Object.entries(gradeBuckets).sort((a, b) => parseFloat(b[0]) - parseFloat(a[0])).map(([grade, count]) => (
                 <div key={grade} className="flex-1 flex flex-col items-center gap-0.5">
-                  <div className="w-full bg-[#D4AF37] rounded-t" style={{ height: `${(count / cards.length) * 40}px`, minHeight: 4 }} />
+                  <div className="w-full bg-[#FFCB05] rounded-t" style={{ height: `${(count / cards.length) * 40}px`, minHeight: 4 }} />
                   <span className="text-[#555555] text-[8px]">{grade}</span>
                 </div>
               ))}
@@ -85,10 +85,10 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
 
         {/* Black Labels */}
         {blackLabels.length > 0 && (
-          <div className="border border-[#D4AF37]/30 rounded-lg px-4 py-3 bg-[#D4AF37]/5">
+          <div className="border border-[#FFCB05]/30 rounded-lg px-4 py-3 bg-[#FFCB05]/5">
             <div className="flex items-center gap-2">
-              <Star size={14} className="text-[#D4AF37] fill-[#D4AF37]" />
-              <p className="text-[#D4AF37] text-xs font-bold">{blackLabels.length} Black Label{blackLabels.length > 1 ? "s" : ""} awarded!</p>
+              <Star size={14} className="text-[#FFCB05] fill-[#FFCB05]" />
+              <p className="text-[#FFCB05] text-xs font-bold">{blackLabels.length} Black Label{blackLabels.length > 1 ? "s" : ""} awarded!</p>
             </div>
             {blackLabels.map(c => <p key={c.certId} className="text-[#CCCCCC] text-xs mt-1 ml-6">{c.certId} — {c.cardName}</p>)}
           </div>
@@ -96,7 +96,7 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
 
         <button
           type="button" onClick={onClose}
-          className="w-full bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase py-3 rounded-lg hover:opacity-90"
+          className="w-full bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase py-3 rounded-lg hover:opacity-90"
         >
           Close
         </button>

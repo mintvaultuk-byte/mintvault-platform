@@ -2736,7 +2736,7 @@ export async function registerRoutes(
       res.setHeader("Content-Disposition", `attachment; filename="MintVault-DGR-${certId}.pdf"`);
       doc.pipe(res);
 
-      const GOLD = "#D4AF37";
+      const GOLD = "#FFCB05";
       const DARK = isBlack ? "#FFFFFF" : "#1A1A1A";
       const BG   = isBlack ? "#0A0A0A" : "#FFFFFF";
 
@@ -2837,7 +2837,7 @@ export async function registerRoutes(
       const by = doc.y;
       for (const s of subs) {
         const val = s.val != null ? parseFloat(s.val) : null;
-        const bColor = val === null ? "#555555" : val >= 9.5 ? "#D4AF37" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
+        const bColor = val === null ? "#555555" : val >= 9.5 ? "#FFCB05" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
         doc.rect(bx, by, boxW, boxH).fillColor(bColor).fill();
         doc.fontSize(7).fillColor("#FFFFFF").text(s.label.toUpperCase(), bx, by + 6, { width: boxW, align: "center" });
         doc.fontSize(22).fillColor("#FFFFFF").text(val !== null ? String(val) : "—", bx, by + 16, { width: boxW, align: "center" });
@@ -6517,14 +6517,14 @@ export async function registerRoutes(
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 16px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(255,203,5,0.25); border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #FFCB05; margin: 0 0 16px; }
   h1 { color: #FAF7F1; font-size: 24px; font-weight: 600; margin: 0 0 16px; }
   p { color: rgba(250,247,241,0.78); font-size: 15px; line-height: 1.55; margin: 0 0 16px; }
-  strong.email { color: #D4AF37; font-weight: 600; word-break: break-all; }
+  strong.email { color: #FFCB05; font-weight: 600; word-break: break-all; }
   .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
   button { font: inherit; font-size: 15px; padding: 12px 18px; border-radius: 10px; border: 0; cursor: pointer; width: 100%; }
-  button.primary { background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; }
+  button.primary { background: linear-gradient(135deg,#FFCB05,#FFCB05); color: #1A1400; font-weight: 700; }
   button.secondary { background: transparent; color: #FAF7F1; border: 1px solid rgba(250,247,241,0.25); }
   button:hover { filter: brightness(1.08); }
   form { margin: 0; }
@@ -6634,11 +6634,11 @@ export async function registerRoutes(
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 14px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(255,203,5,0.25); border-radius: 16px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #FFCB05; margin: 0 0 14px; }
   h1 { color: #FAF7F1; font-size: 22px; font-weight: 600; margin: 0 0 14px; line-height: 1.25; }
   p { color: rgba(250,247,241,0.78); font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
-  .cta { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; font-size: 15px; text-align: center; text-decoration: none; margin: 18px 0 12px; }
+  .cta { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; background: linear-gradient(135deg,#FFCB05,#FFCB05); color: #1A1400; font-weight: 700; font-size: 15px; text-align: center; text-decoration: none; margin: 18px 0 12px; }
   .copy-block { background: #15110D; border: 1px solid rgba(250,247,241,0.08); border-radius: 8px; padding: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; color: rgba(250,247,241,0.55); }
   .meta { color: rgba(250,247,241,0.45); font-size: 12px; margin-top: 16px; }
   .steps { color: rgba(250,247,241,0.55); font-size: 12px; line-height: 1.6; margin: 14px 0 0; padding-left: 18px; }

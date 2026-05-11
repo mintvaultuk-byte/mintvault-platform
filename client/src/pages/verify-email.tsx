@@ -53,8 +53,8 @@ export default function VerifyEmailPage() {
 
           {status === "pending" && (
             <>
-              <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
-                <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
+              <div className="w-14 h-14 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mx-auto mb-5">
+                <Loader2 size={24} className="text-[#FFCB05] animate-spin" />
               </div>
               <h1 className="text-xl font-black text-[#1A1A1A] mb-2">
                 Verifying…
@@ -65,8 +65,8 @@ export default function VerifyEmailPage() {
 
           {status === "success" && (
             <>
-              <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
-                <CheckCircle size={24} className="text-[#D4AF37]" />
+              <div className="w-14 h-14 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mx-auto mb-5">
+                <CheckCircle size={24} className="text-[#FFCB05]" />
               </div>
               <h1 className="text-xl font-black text-[#1A1A1A] mb-3">
                 Email Verified
@@ -77,7 +77,7 @@ export default function VerifyEmailPage() {
               <Link href="/dashboard">
                 <button
                   className="px-8 py-3 rounded-xl font-bold text-sm text-[#1A1400] transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                  style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
                 >
                   Go to Dashboard
                 </button>
@@ -112,7 +112,7 @@ export default function VerifyEmailPage() {
                     onClick={() => resendMutation.mutate()}
                     disabled={resendMutation.isPending}
                     className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-[#1A1400] disabled:opacity-60 transition-all mb-4"
-                    style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                    style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
                   >
                     {resendMutation.isPending ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -125,7 +125,7 @@ export default function VerifyEmailPage() {
               )}
 
               <p className="text-xs text-[#888888] mt-2">
-                <Link href="/dashboard" className="text-[#B8960C] font-semibold hover:text-[#D4AF37]">
+                <Link href="/dashboard" className="text-[#FFCB05] font-semibold hover:text-[#FFCB05]">
                   Go to Dashboard
                 </Link>
               </p>

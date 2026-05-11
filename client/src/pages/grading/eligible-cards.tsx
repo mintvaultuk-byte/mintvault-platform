@@ -32,7 +32,7 @@ export default function EligibleCardsPage() {
       {/* Hero */}
       <section className="border-b border-[#E8E4DC] bg-[#FAFAF8]">
         <div className="max-w-3xl mx-auto px-6 py-16 md:py-20 text-center">
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.25em] mb-4">Grading</p>
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.25em] mb-4">Grading</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] mb-4 leading-tight tracking-tight">
             Eligible Cards
           </h1>
@@ -44,12 +44,12 @@ export default function EligibleCardsPage() {
 
         {/* Currently grading */}
         <section>
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-6">Currently Grading</p>
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-6">Currently Grading</p>
           <div className="space-y-3">
             {ELIGIBLE.map(({ game, desc }) => (
               <div key={game} className="flex gap-4 p-5 rounded-2xl bg-white border border-[#E8E4DC]">
-                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#FFF9E6] border border-[#D4AF37]/30 flex items-center justify-center mt-0.5">
-                  <Check size={12} className="text-[#B8960C]" />
+                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#FFF9E6] border border-[#FFCB05]/30 flex items-center justify-center mt-0.5">
+                  <Check size={12} className="text-[#FFCB05]" />
                 </div>
                 <div>
                   <p className="font-bold text-[#1A1A1A] mb-1">{game}</p>
@@ -62,7 +62,7 @@ export default function EligibleCardsPage() {
 
         {/* What we don't grade */}
         <section>
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-6">What We Don't Grade</p>
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-6">What We Don't Grade</p>
           <div className="rounded-2xl overflow-hidden border border-[#E8E4DC] no-text-shadow">
             {INELIGIBLE.map((item, i) => (
               <div
@@ -78,8 +78,8 @@ export default function EligibleCardsPage() {
         </section>
 
         {/* Conditions accepted */}
-        <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/20 no-text-shadow">
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-3">Card Conditions Accepted</p>
+        <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#FFCB05]/20 no-text-shadow">
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-3">Card Conditions Accepted</p>
           <p className="text-[#1a1a1a] text-base leading-relaxed">
             We grade cards in any condition from grade 1 to grade 10 Black Label. Even heavily played cards can be graded for population reports and authentication purposes.
           </p>

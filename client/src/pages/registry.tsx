@@ -85,7 +85,7 @@ export default function RegistryV2() {
         <div className="mx-auto max-w-4xl px-6 pt-12 md:pt-20 pb-14 md:pb-16 text-center">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-            style={{ color: "#D4AF37" }}
+            style={{ color: "#FFCB05" }}
           >
             Est. Kent &middot; Registry
           </p>
@@ -105,7 +105,7 @@ export default function RegistryV2() {
           </p>
           <p
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider no-text-shadow"
-            style={{ color: "#D4AF37" }}
+            style={{ color: "#FFCB05" }}
           >
             Public &middot; Permanent &middot; Searchable
           </p>
