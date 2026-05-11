@@ -459,6 +459,42 @@ async function migrateServiceTiersV213() {
     }
   } catch (e: any) { console.error("[public-name-migrate] failed:", e.message); }
 
+  // ── Cold-archive timestamp + candidate index. Idempotent additive nullable.
+  // Audit-log the first run only — information_schema gate prevents duplicate
+  // audit rows on re-runs.
+  try {
+    const before = await db.execute(sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'certificates' AND column_name = 'archived_to_b2_at' LIMIT 1
+    `);
+    const wasPresent = before.rows.length > 0;
+    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS archived_to_b2_at TIMESTAMP`);
+    // Partial index — only rows still pending archival. Keeps the index small
+    // (most prod certs will eventually have archived_to_b2_at IS NOT NULL).
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_certificates_archive_candidates
+        ON certificates(grade_approved_at)
+        WHERE archived_to_b2_at IS NULL AND deleted_at IS NULL
+    `);
+    if (!wasPresent) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('schema', 'certificates', 'add_column_archived_to_b2_at', 'startup_migration',
+          ${JSON.stringify({
+            column: "archived_to_b2_at",
+            type: "timestamp",
+            nullable: true,
+            default: null,
+            index: "idx_certificates_archive_candidates",
+            index_predicate: "archived_to_b2_at IS NULL AND deleted_at IS NULL",
+            age_signal: "grade_approved_at",
+            note: "Phase 1 cold-archive marker; see server/workers/r2-to-b2-archival.ts.",
+          })}::jsonb)
+      `);
+      console.log("[archival-b2-migrate] certificates.archived_to_b2_at + idx_certificates_archive_candidates added + audit logged");
+    }
+  } catch (e: any) { console.error("[archival-b2-migrate] failed:", e.message); }
+
   // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
