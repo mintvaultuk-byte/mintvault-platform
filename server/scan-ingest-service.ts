@@ -63,7 +63,7 @@ export async function uploadImagesToCert(
 
   // Resize raw scans (scanner output can be very large)
   const resizeBuf = async (buf: Buffer) =>
-    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
   const frontResized = await resizeBuf(frontBuffer);
   const backResized = backBuffer ? await resizeBuf(backBuffer) : null;
