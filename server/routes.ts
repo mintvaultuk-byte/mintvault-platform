@@ -10776,6 +10776,73 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── B2 cold-archive endpoints ───────────────────────────────────────────
+  // Manual trigger + status surface for the R2 → B2 archival worker.
+  // Worker runs daily via setInterval (server/index.ts); these endpoints
+  // give the operator a way to dry-run, force a sweep, or check progress.
+
+  // POST /api/admin/archival/run — body: { dryRun?, batchSize?, ageDays? }
+  app.post("/api/admin/archival/run", requireAdmin, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const dryRun = body.dryRun === true;
+      const batchSizeRaw = Number(body.batchSize);
+      const ageDaysRaw = Number(body.ageDays);
+      const batchSize = Number.isFinite(batchSizeRaw) && batchSizeRaw > 0 ? Math.min(500, Math.floor(batchSizeRaw)) : 50;
+      const ageDays = Number.isFinite(ageDaysRaw) && ageDaysRaw >= 0 ? Math.floor(ageDaysRaw) : 90;
+      const { archiveStaleImages } = await import("./workers/r2-to-b2-archival");
+      const summary = await archiveStaleImages({ dryRun, batchSize, ageDays });
+      res.json(summary);
+    } catch (err: any) {
+      console.error("[archival-b2] manual run error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "archival run failed" });
+    }
+  });
+
+  // GET /api/admin/archival/status — pending / archived / recent failures
+  app.get("/api/admin/archival/status", requireAdmin, async (_req, res) => {
+    try {
+      const ageDaysParam = 90; // matches the cron's default
+      const counts = await db.execute(sql`
+        SELECT
+          COUNT(*) FILTER (
+            WHERE grade_approved_at < NOW() - (${ageDaysParam}::int * INTERVAL '1 day')
+              AND deleted_at IS NULL AND archived_to_b2_at IS NULL
+          )::int AS pending,
+          COUNT(*) FILTER (WHERE archived_to_b2_at IS NOT NULL)::int AS archived,
+          COUNT(*) FILTER (
+            WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL
+          )::int AS total_eligible
+        FROM certificates
+      `);
+      const row = counts.rows[0] as { pending: number; archived: number; total_eligible: number };
+
+      // Last 20 failures from audit_log (action='archive_failed')
+      const failuresRows = await db.execute(sql`
+        SELECT entity_id AS cert_id, details, created_at
+        FROM audit_log
+        WHERE entity_type = 'certificate' AND action = 'archive_failed'
+        ORDER BY created_at DESC
+        LIMIT 20
+      `);
+
+      res.json({
+        age_days_threshold: ageDaysParam,
+        pending: row?.pending ?? 0,
+        archived: row?.archived ?? 0,
+        total_eligible: row?.total_eligible ?? 0,
+        recent_failures: failuresRows.rows.map((r: any) => ({
+          cert_id: r.cert_id,
+          created_at: r.created_at,
+          details: r.details,
+        })),
+      });
+    } catch (err: any) {
+      console.error("[archival-b2] status error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "archival status query failed" });
+    }
+  });
+
   // PUT /api/admin/certificates/:id/status
   app.put("/api/admin/certificates/:id/status", requireAdmin, async (req, res) => {
     try {
