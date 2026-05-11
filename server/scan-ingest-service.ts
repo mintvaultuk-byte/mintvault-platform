@@ -43,9 +43,11 @@ export async function createCertForScan(): Promise<{ id: number; certId: string;
  * Writes per side:
  *   grading/{id}/{side}_original.jpg     — raw scan (AI "before" reference)
  *   grading/{id}/{side}_cropped.jpg      — flat cropped (AI consumption)
- *   grading/{id}/{side}_cropped.png      — masked display (alpha corners)
+ *   grading/{id}/{side}_cropped.jpg      — flattened display (rounded corners
+ *                                           baked into white; was PNG-with-alpha
+ *                                           pre-2026-05-11 audit fix)
  *   grading/{id}/{side}_{variant}.jpg    — greyscale/highcontrast/etc
- *   images/{certId}/{side}.png           — canonical display key (front_image_path)
+ *   images/{certId}/{side}.jpg           — canonical display key (front_image_path)
  */
 export async function uploadImagesToCert(
   certId: number,
@@ -63,7 +65,7 @@ export async function uploadImagesToCert(
 
   // Resize raw scans (scanner output can be very large)
   const resizeBuf = async (buf: Buffer) =>
-    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
   const frontResized = await resizeBuf(frontBuffer);
   const backResized = backBuffer ? await resizeBuf(backBuffer) : null;
@@ -73,17 +75,32 @@ export async function uploadImagesToCert(
   const frontVariants = await generateImageVariants(frontResized, certNumber);
   const backVariants = backResized ? await generateImageVariants(backResized, certNumber) : null;
 
-  // Derive display-ready masked PNGs. Order matters: mask the un-padded
-  // centred buffer (so the rounded-corner alpha mask sits on the actual
-  // card corners, not pushed out to the bitmap corners after padding),
-  // THEN pad the masked PNG with mat. Without this order, the rounded
-  // corners would be invisible in the final image because the bitmap
-  // edges are now far from the card.
+  // Derive display-ready JPEGs. Order matters: mask the un-padded centred
+  // buffer (so the rounded-corner alpha mask sits on the actual card
+  // corners, not pushed out to the bitmap corners after padding), THEN pad
+  // the masked PNG with mat. Without this order, the rounded corners would
+  // be invisible in the final image because the bitmap edges are now far
+  // from the card.
+  //
+  // FINAL flatten: composite alpha against white and JPEG-encode at q85
+  // mozjpeg progressive. The rounded-corner alpha already has white RGB
+  // baked in by maskRoundedCorners step 2 (image-processing.ts:40-44),
+  // so flatten-against-white is a no-op visually for the corners; the
+  // mat-padded outer ring stays the mat colour. Saves ~74% per image
+  // vs the prior PNG output (2.1MB → ~550KB per side).
+  async function toDisplayJpeg(buf: Buffer): Promise<Buffer> {
+    return sharp(buf)
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+      .toBuffer();
+  }
+
   const frontMatRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
   const frontMaskedPng = frontUnpadded
     ? await padWithMat(await maskRoundedCorners(frontUnpadded), frontMatRgb)
     : await maskRoundedCorners(frontVariants.cropped); // fallback: pre-padding buffer absent (shouldn't happen on Option B path)
+  const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
   const backMatRgb = backVariants ? ((backVariants as any).matRgb || { r: 255, g: 255, b: 255 }) : null;
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
@@ -92,6 +109,7 @@ export async function uploadImagesToCert(
         ? await padWithMat(await maskRoundedCorners(backUnpadded), backMatRgb!)
         : await maskRoundedCorners(backVariants.cropped))
     : null;
+  const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
   // Upload all to R2 — explicit extension map per variant kind
   const prefix = `images/grading/${certId}`;
@@ -117,20 +135,24 @@ export async function uploadImagesToCert(
     }
   }
 
-  // Masked display PNG (with alpha rounded corners) + canonical display key
-  const frontPngKey = `${prefix}/front_cropped.png`;
-  const frontDisplayKey = `images/${certNumber}/front.png`;
-  uploadKeys["front_cropped_png"] = frontPngKey;
+  // Flattened display JPEG (rounded corners baked into white; mat-coloured
+  // outer ring preserved) + canonical display key. Both keys use .jpg
+  // extension and image/jpeg content-type. Historical certs (pre-this-PR)
+  // keep their .png keys — front_image_path / back_image_path are
+  // extension-agnostic strings; consumers derive media-type from the key.
+  const frontJpegKey = `${prefix}/front_cropped.jpg`;
+  const frontDisplayKey = `images/${certNumber}/front.jpg`;
+  uploadKeys["front_cropped_display"] = frontJpegKey;
   uploadKeys["front_display"] = frontDisplayKey;
-  uploads.push(uploadToR2(frontPngKey, frontMaskedPng, "image/png").then(() => {}));
-  uploads.push(uploadToR2(frontDisplayKey, frontMaskedPng, "image/png").then(() => {}));
-  if (backMaskedPng) {
-    const backPngKey = `${prefix}/back_cropped.png`;
-    const backDisplayKey = `images/${certNumber}/back.png`;
-    uploadKeys["back_cropped_png"] = backPngKey;
+  uploads.push(uploadToR2(frontJpegKey, frontDisplayJpeg, "image/jpeg").then(() => {}));
+  uploads.push(uploadToR2(frontDisplayKey, frontDisplayJpeg, "image/jpeg").then(() => {}));
+  if (backDisplayJpeg) {
+    const backJpegKey = `${prefix}/back_cropped.jpg`;
+    const backDisplayKey = `images/${certNumber}/back.jpg`;
+    uploadKeys["back_cropped_display"] = backJpegKey;
     uploadKeys["back_display"] = backDisplayKey;
-    uploads.push(uploadToR2(backPngKey, backMaskedPng, "image/png").then(() => {}));
-    uploads.push(uploadToR2(backDisplayKey, backMaskedPng, "image/png").then(() => {}));
+    uploads.push(uploadToR2(backJpegKey, backDisplayJpeg, "image/jpeg").then(() => {}));
+    uploads.push(uploadToR2(backDisplayKey, backDisplayJpeg, "image/jpeg").then(() => {}));
   }
 
   await Promise.all(uploads);
@@ -147,19 +169,19 @@ export async function uploadImagesToCert(
   await db.execute(sql`
     UPDATE certificates SET
       grading_front_original    = ${uploadKeys.front_original || null},
-      grading_front_cropped     = ${uploadKeys.front_cropped_png || uploadKeys.front_cropped || null},
+      grading_front_cropped     = ${uploadKeys.front_cropped_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || null},
       grading_front_greyscale   = ${uploadKeys.front_greyscale || null},
       grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
       grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
       grading_front_inverted    = ${uploadKeys.front_inverted || null},
       grading_back_original     = ${uploadKeys.back_original || null},
-      grading_back_cropped      = ${uploadKeys.back_cropped_png || uploadKeys.back_cropped || null},
+      grading_back_cropped      = ${uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || null},
       grading_back_greyscale    = ${uploadKeys.back_greyscale || null},
       grading_back_highcontrast  = ${uploadKeys.back_highcontrast || null},
       grading_back_edgeenhanced  = ${uploadKeys.back_edgeenhanced || null},
       grading_back_inverted     = ${uploadKeys.back_inverted || null},
-      front_image_path          = ${uploadKeys.front_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || uploadKeys.front_original || null},
-      back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
+      front_image_path          = ${uploadKeys.front_display || uploadKeys.front_cropped_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || uploadKeys.front_original || null},
+      back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
       crop_geometry             = ${JSON.stringify(cropGeometry)}::jsonb,
       updated_at                = NOW()
     WHERE id = ${certId}

@@ -226,7 +226,7 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
   // `centredUnpadded` so the caller can mask rounded corners on the actual
   // card (not on the bitmap corners after padding).
-  const centredUnpadded = await sharp(centred).jpeg({ quality: 95 }).toBuffer();
+  const centredUnpadded = await sharp(centred).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
   // Step 5: extend with mat-coloured padding so the final cropped output has
   // a passport-style frame around the card (CARD_MAT_PADDING_PCT). The AI

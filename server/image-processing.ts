@@ -811,7 +811,7 @@ export async function reCentreBitmap(
   if (padLeft || padRight || padTop || padBottom) {
     pipeline = pipeline.extend({ top: padTop, bottom: padBottom, left: padLeft, right: padRight, background: { r: matR, g: matG, b: matB, alpha: 1 } });
   }
-  const out = await pipeline.jpeg({ quality: 95 }).toBuffer();
+  const out = await pipeline.jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
   const dxSign = dx > 0 ? `+${dx}` : `${dx}`;
   const dySign = dy > 0 ? `+${dy}` : `${dy}`;
