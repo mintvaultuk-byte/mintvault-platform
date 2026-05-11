@@ -41,14 +41,24 @@ const PDF_H = 20 * MM_TO_PT;
 const FRAME_W = 18;   // px — gold border fill width (outer edge = canvas edge)
 
 // ── Colour palette ──────────────────────────────────────────────────────────
-// Pikachu Yellow palette (PR #87). GOLD = primary brand yellow; GOLD_DARK
-// retained as border/contrast partner; GOLD_LIGHT folded into the primary
-// since they served the same visual role.
-const GOLD       = "#FFCB05";   // separators, accents
-const GOLD_DARK  = "#D9A300";
-const GOLD_LIGHT = "#FFCB05";
+// PR #91 — print-specific yellow palette. The website stays at #FFCB05
+// (Pikachu Yellow, PR #87). Physical labels use a slightly darker shade
+// (#E6B505) for legibility on white paper after a physical print review.
+// These constants are PRINT-ONLY — never reference --v2-gold or the site
+// brand yellow from this file.
+const PRINT_YELLOW      = "#E6B505";   // primary print yellow (borders, panels)
+const PRINT_YELLOW_DARK = "#B8900A";   // inner accents, depth hairlines
+const PRINT_BLACK       = "#111111";   // body text, grade number
+const PRINT_WHITE       = "#FFFFFF";   // white label background
+
+// Legacy aliases — kept so untouched helper code that still references
+// `GOLD` / `GOLD_DARK` / `GOLD_LIGHT` / `BLACK` / `WHITE` continues to
+// compile. New code should use the PRINT_* constants above.
+const GOLD       = PRINT_YELLOW;
+const GOLD_DARK  = PRINT_YELLOW_DARK;
+const GOLD_LIGHT = PRINT_YELLOW;
 const BLACK      = "#000000";
-const WHITE      = "#FFFFFF";
+const WHITE      = PRINT_WHITE;
 
 // v424 — frame gradient removed in favour of a flat GOLD fill. The diagonal
 // 5-stop gradient looked rich on screen but printed muddy on label stock and
@@ -436,565 +446,307 @@ function drawSimpleBarcode(
 }
 
 /**
- * Front label — ACE-style premium layout.
+ * PR #91 — print-yellow redesign: PSA-style boxed wordmark + framed grade
+ * panel + flat-yellow shield on back. Replaces the v416 artwork-background
+ * layout entirely. White label uses PRINT_WHITE inner bg + PRINT_BLACK
+ * text; Black Label uses PRINT_BLACK inner bg + PRINT_YELLOW text. The
+ * grade panel is always PRINT_YELLOW filled with PRINT_BLACK contents
+ * (black-on-yellow is the rule, regardless of label variant).
  *
- * Left 68%: artwork background + dark overlay + card text hierarchy
- *   Line 1  Year + Set   18px normal white
- *   Line 2  Card Name    38→28px bold white (hero)
- *   Line 3  Variant      22px normal white 85%  (if present)
- *   Line 4  #Num LANG    22px normal white 85%
- * Right 32%: gold grade panel (grade abbr + number, vertically centred)
- * Bottom strip ~38px: barcode | MintVault logo | cert number
+ * Dimensions (70 × 20 mm slab @ 300 DPI = 826 × 236 px):
+ *   2mm yellow border on all four sides
+ *   Inner content: 66 × 16 mm (= 779 × 189 px)
+ *   Wordmark box: 22 × 4 mm, top-centre, 0.5mm below top border
+ *   Grade panel: 14mm wide × full inner height − 0.5mm bottom margin
+ *   Card-detail text column: left of the grade panel, 2mm left margin
  */
-async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#000000") {
-  const gradeType = cert.gradeType || "numeric";
-  const isNonNum  = isNonNumericGrade(gradeType);
-  const grade     = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
 
-  // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
-  const PANEL_W = 148;                        // right grade panel (≈ 18%, -5.7%)
-  const STRIP_H = 44;                         // v432: 28→44 — taller strip hosts rarity (left) + cert ID (right) at matched main-line size.
-  const panelX  = I_RIGHT - PANEL_W;          // 651
-  const stripY  = I_BOTTOM - STRIP_H;         // 179
+// ── px helpers (300 DPI canvas, top-left origin) ─────────────────────────
+const PX_PER_MM = PX_W / 70;   // 826 / 70 = 11.8 (matches global MM scale)
+const mmPx      = (mm: number) => mm * PX_PER_MM;
+const ptPx      = (pt: number) => pt * (300 / 72);   // 4.167 px per pt
 
-  // Left text insets
-  const TXT_PAD  = 28;
-  const textLeft = I_LEFT + TXT_PAD;          // 47
-  const textMaxW = panelX - textLeft - 6;     // 495
+const BORDER_MM = 2;
 
-  // Vertical content zone (inner area above bottom strip)
-  const contentT = I_TOP;
-  const contentB = stripY;
-
-  // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
-  // If artwork is available, draw it then add a white wash overlay so dark
-  // text remains legible on any card image. No dark overlays — white bg design.
-  const artworkUrl = (cert as any).frontImageUrl;
-  if (artworkUrl) {
-    try {
-      const artImg = await loadImage(artworkUrl);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(I_LEFT, I_TOP, I_W, I_H);
-      ctx.clip();
-      const sc = Math.max(I_W / artImg.width, I_H / artImg.height);
-      const dw = artImg.width * sc, dh = artImg.height * sc;
-      ctx.drawImage(artImg, I_LEFT + (I_W - dw) / 2, I_TOP + (I_H - dh) / 2, dw, dh);
-      ctx.restore();
-      // Wash overlay — lightens (white label) or darkens (black label) artwork so text is legible
-      ctx.fillStyle = labelBg === WHITE ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.60)";
-      ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
-    } catch {}
-  }
-
-  // ── 2. GRADE PANEL (right, above bottom strip) ────────────────────────────
-  const panelY  = I_TOP;
-  const panelH  = stripY - panelY;            // 160px
-  const panelCX = panelX + PANEL_W / 2;
-  const DARK    = "#1A1000";
-
-  if (!isNonNum) {
-    // v424 — flat GOLD_LIGHT fill (was 5-stop metallic gradient + shine
-    // overlay). Solid gold prints reliably and the grade digit sits on a
-    // uniform background instead of competing with a fade.
-    ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillRect(panelX, panelY, PANEL_W, panelH);
-
-    // Bottom edge — crisp 3px darker line for depth (kept; not a gradient).
-    ctx.fillStyle = "#9C7600";
-    ctx.fillRect(panelX, panelY + panelH - 3, PANEL_W, 3);
-
-    // Subtle vertical separator on the left edge of the panel
-    ctx.strokeStyle = "rgba(255,215,0,0.25)";
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.moveTo(panelX, panelY);
-    ctx.lineTo(panelX, stripY);
-    ctx.stroke();
-
-    const gradeStr  = String(grade);
-    const gradeAbbr = gradeLabel(grade);
-
-    // ── Row 1: Card number (#112) ─────────────────────────────────────
-    const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
-    const CN_TOP_PAD  = 4;
-    const cnFontSize  = 29;   // +16% — bold, prominent top-right anchor
-    let   cardNumBot  = panelY + CN_TOP_PAD;
-    if (cardNumPanelText) {
-      ctx.font         = `bold ${cnFontSize}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle    = "#1A1A1A";
-      ctx.textAlign    = "center";
-      ctx.textBaseline = "top";
-      try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-      ctx.fillText(cardNumPanelText, panelCX, panelY + CN_TOP_PAD);
-      try { (ctx as any).letterSpacing = "0px"; } catch {}
-      cardNumBot = panelY + CN_TOP_PAD + cnFontSize;
-    }
-
-    // ── Row 2: Grade abbreviation (GEM MT) ───────────────────────────
-    const ABBR_TOP_PAD = cardNumPanelText ? 7 : 4;   // breathing room below card#
-    const abbrFontSize = fitFontSize(ctx, gradeAbbr, PANEL_W - 10, 35, 12);
-    try { (ctx as any).letterSpacing = "5px"; } catch {}
-    ctx.font         = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle    = "#1A1A1A";
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(gradeAbbr, panelCX, cardNumBot + ABBR_TOP_PAD);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    // Grade number — dark, large, subtle drop shadow.
-    // Sizing zone keeps small safety margins so the digit doesn't kiss the
-    // abbr line above or the panel bottom edge during fitFontSize. Centring
-    // however ignores those margins and uses descBot ↔ stripY directly so
-    // the digit sits visually centred in the full lower panel zone.
-    const descBot      = cardNumBot + ABBR_TOP_PAD + abbrFontSize;
-    const ABBR_NUM_GAP = 6;
-    const NUM_BOT_PAD  = 10;
-    const numZoneTop   = descBot + ABBR_NUM_GAP;
-    const numZoneBot   = stripY - NUM_BOT_PAD;
-    const numZoneH     = numZoneBot - numZoneTop;
-    const maxByH       = Math.floor(numZoneH / 0.754);
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, Math.min(133, maxByH), 48);
-    // Optical-centre adjustment: textBaseline="middle" places the em-box
-    // middle at Y, but a numeral's visual centre sits ~15% of em ABOVE the
-    // em-box middle (digits have no descender; visual mass is top-heavy).
-    // 0.08*em pushes the digit down so it reads visually centred rather
-    // than mathematically centred.
-    const gradeNumCY   = (descBot + stripY) / 2 + gradeFontSize * 0.08;
-
-    ctx.shadowOffsetX = 1;
-    ctx.shadowOffsetY = 1;
-    ctx.shadowBlur    = 1;
-    ctx.shadowColor   = "rgba(0,0,0,0.25)";
-    ctx.font         = `bold ${gradeFontSize}px Arial, Helvetica, sans-serif`;
-    // PR #88: grade number anchored to explicit #111111. Reads identically
-    // to the prior #1A1A1A on white; on Black Label, the digit sits on the
-    // yellow grade panel so contrast is bright-yellow → near-black.
-    ctx.fillStyle    = "#111111";
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(gradeStr, panelCX, gradeNumCY);
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.shadowBlur    = 0;
-    ctx.shadowColor   = "transparent";
-
-  } else {
-    // Non-numeric (AUTHENTIC / AUTHENTIC ALTERED)
-    ctx.textAlign = "center";
-    if (gradeType === "AA") {
-      ctx.textBaseline = "middle";
-      ctx.font      = `bold 28px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#1A1A1A";
-      ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2 - 20);
-      ctx.font      = `bold 22px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = GOLD_DARK;
-      ctx.fillText("ALTERED", panelCX, panelY + panelH / 2 + 14);
-    } else {
-      const authSize = fitFontSize(ctx, "AUTHENTIC", PANEL_W - 8, 30, 18);
-      ctx.textBaseline = "middle";
-      ctx.font      = `bold ${authSize}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#1A1A1A";
-      ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2);
-    }
-  }
-
-  // ── 3. BOTTOM STRIP ───────────────────────────────────────────────────────
-  ctx.fillStyle = labelBg;
-  ctx.fillRect(I_LEFT, stripY, I_W, STRIP_H);
-
-  // ── GRADE PANEL cert ID — centred in the grade panel's strip zone ──────────
-  {
-    const certStripSz  = 28;
-    const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 14);
-    ctx.font         = `bold ${certStripFit}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle    = labelFg;
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "middle";
-    ctx.shadowBlur    = 0;
-    ctx.shadowColor   = "transparent";
-    // +3 optical down-shift: caps-only text (MV2) has visual mass in upper
-    // half, so em-box-middle centring reads high. Pattern matches grade-digit
-    // optical adjustment (PR #26).
-    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2) + 3);
-  }
-
-  // v433 — rarity left-aligned at the same X as the main text block above
-  // (textLeft), and sized smaller than the main lines so the visual
-  // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
-  // left-to-right and top-to-bottom.
-  {
-    const rarityVariantStrip = [buildVariantLine(cert), cert.rarity ? buildRarityText(cert) : ""]
-      .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
-    if (rarityVariantStrip.trim().length > 0) {
-      const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
-      const rarityFamily = '"Arial Black", Arial, Helvetica, sans-serif';
-      const rarityFit    = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 28, 16, "700", rarityFamily);
-      ctx.font           = `700 ${rarityFit}px ${rarityFamily}`;
-      ctx.fillStyle      = labelFg;
-      ctx.textAlign      = "left";
-      ctx.textBaseline   = "middle";
-      ctx.fillText(rarityVariantStrip, textLeft, stripY + Math.round(STRIP_H / 2) + 3);
-    }
-  }
-
-  // ── 3b. MINTVAULT wordmark lockup — Bodoni Moda 900, gold border box ────────
-  // Perfectly centred in the left text panel (I_LEFT → panelX).
-  //
-  // node-canvas does NOT include CSS letterSpacing in measureText(), so we:
-  //   1. Measure at letterSpacing=0 to get the baseline advance width
-  //   2. Add the letter-spacing contribution manually (n-1 gaps × LS px)
-  //   3. Use textAlign="left" with an explicit x so the text lands exactly
-  //      in the centre of the correctly-sized border box.
-  const MV_HDR_SZ    = 32;                           // v429: 42→32 (~24% smaller) — wordmark is no longer the dominant element; the 3-line text block below is.
-  const MV_HDR_PAD   = 8;                            // v429: 21→8 — wordmark hugs the gold frame more closely; frees 13px for text zone.
-  const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
-  const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
-  const MV_BELOW_GAP = 2;                            // v429: 4→2 — every pixel matters for the expanded text zone.
-  const MV_LS        = 2;                            // letter-spacing px
-  const MV_TEXT      = "MINTVAULT";
-
-  const mvFont = `900 ${MV_HDR_SZ}px "Bodoni Moda", "Times New Roman", serif`;
-
-  // Step 1 — measure without letter-spacing so measureText is accurate
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-  ctx.font         = mvFont;
-  ctx.textBaseline = "middle";                               // measure in same mode as draw
-  const mvBaseW  = ctx.measureText(MV_TEXT).width;
-  // Add letter-spacing contribution: (numChars - 1) gaps × MV_LS px
-  const mvTextW  = mvBaseW + MV_LS * (MV_TEXT.length - 1);  // 9 chars → 8 gaps × 2px = +16px
-
-  // Step 2 — derive box geometry centred in left panel
-  const BOX_PX   = 12;   // horizontal padding inside box (each side)
-  const BOX_PY   = 5;    // vertical padding inside box (each side)
-  const BOX_LW   = 3;    // border line width
-  const BOX_W    = mvTextW + BOX_PX * 2;
-  const BOX_H    = MV_HDR_SZ + BOX_PY * 2;
-  const leftPanelCX = (I_LEFT + panelX) / 2;                // exact centre of left panel
-  const BOX_X    = Math.round(leftPanelCX - BOX_W / 2);
-  const BOX_Y    = MV_HDR_Y - BOX_PY;
-  const BOX_CY   = BOX_Y + BOX_H / 2;                       // vertical centre of box
-
-  // Step 3 — PR #88: Black Label gets a solid yellow fill BEHIND the wordmark
-  // so the box reads as a yellow bar with black text. White label keeps the
-  // yellow border only (no fill) so the label background shows through.
-  const isBlack = labelBg === BLACK;
-  if (isBlack) {
-    ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillRect(BOX_X, BOX_Y, BOX_W, BOX_H);
-  }
-  ctx.strokeStyle = GOLD_LIGHT;
-  ctx.lineWidth   = BOX_LW;
-  ctx.shadowBlur  = 0;
-  ctx.shadowColor = "transparent";
-  ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
-
-  // Step 4 — PR #88: wordmark text is solid black on yellow. Was yellow text
-  // on a yellow border which produced an outlined / transparent look against
-  // the yellow label frame.
-  try { (ctx as any).letterSpacing = `${MV_LS}px`; } catch {}
-  ctx.textAlign    = "left";
-  ctx.textBaseline = "middle";
-  const mvTextX    = BOX_X + BOX_PX;
-
-  ctx.fillStyle   = "#111111";
-  ctx.shadowBlur  = 0;
-  ctx.shadowColor = "transparent";
-  ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-  // ── 4. LEFT PANEL TEXT — v427 uniform 3-line block ───────────────────────
-  // Cornelius's review of v426 PSA-hierarchy: he prefers the opposite — all
-  // three lines identical in size, weight, colour, spacing. Reference cert
-  // is GEODUDE / 1999 FOSSIL / COMMON; "GEODUDE"-comfortable size is the
-  // target. Longer-named carts shrink the whole 3-line block proportionally
-  // so within a single label every line still matches.
-  const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
-  const textZoneH = contentB - textZoneT;
-
-  const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
-  const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 40;   // v433: 32→40 — main lines bump back up so they're clearly bigger than rarity below
-  const MIN_SIZE        = 24;   // v433: 22→24 — raised floor preserves hierarchy on long-name shrinks
-  const MIN_GAP_FACTOR  = 0.1;
-
-  // v432 — rarity moves OUT of the white panel and into the bottom strip,
-  // so the main block uses the full textZoneH (no RARITY_ZONE_H reservation).
-  const mainBlockZoneH = textZoneH;
-
-  // v432 — main block has TWO lines (card name + year+set). Rarity moved
-  // into the bottom strip alongside the cert ID (rendered earlier).
-  const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
-  const yearSetText  = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
-    .filter(Boolean).join(" ");
-
-  const lines = [cardNameText, yearSetText]
-    .filter(s => s.trim().length > 0);
-
-  // Horizontal fit: pick the smallest size that satisfies the widest line.
-  let fitSize = TARGET_SIZE;
-  for (const line of lines) {
-    const sz = fitFontSize(ctx, line, textMaxW, fitSize, MIN_SIZE, TXT_WEIGHT, TXT_FAMILY);
-    if (sz < fitSize) fitSize = sz;
-  }
-
-  // Vertical fit operates on the rarity-reduced main-block zone so
-  // descenders never extend into the rarity line below.
-  const requiredHeight = (lines.length * fitSize) + ((lines.length + 1) * fitSize * MIN_GAP_FACTOR);
-  if (requiredHeight > mainBlockZoneH) {
-    const vScale = mainBlockZoneH / requiredHeight;
-    fitSize = Math.max(MIN_SIZE, Math.floor(fitSize * vScale));
-  }
-
-  // Even distribution: gaps above first line, between lines, and below
-  // last line are all equal — within the rarity-reduced zone.
-  ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
-  ctx.fillStyle     = labelFg;
-  ctx.textAlign     = "left";
-  ctx.textBaseline  = "alphabetic";
-
-  const totalLineHeight = lines.length * fitSize;
-  const totalGapSpace   = mainBlockZoneH - totalLineHeight;
-  const gapSize         = totalGapSpace / (lines.length + 1);
-
-  for (let i = 0; i < lines.length; i++) {
-    const baseline = textZoneT + gapSize * (i + 1) + fitSize * (i + 1);
-    ctx.fillText(lines[i], textLeft, baseline);
-  }
-
-  // v432 — rarity moved into the bottom strip (rendered earlier alongside
-  // the cert ID). Nothing more to draw in the white panel.
+function drawSlabBorder(ctx: any, innerBg: string): { x: number; y: number; w: number; h: number } {
+  ctx.fillStyle = PRINT_YELLOW;
+  ctx.fillRect(0, 0, PX_W, PX_H);
+  const ix = mmPx(BORDER_MM);
+  const iy = mmPx(BORDER_MM);
+  const iw = PX_W - 2 * mmPx(BORDER_MM);
+  const ih = PX_H - 2 * mmPx(BORDER_MM);
+  ctx.fillStyle = innerBg;
+  ctx.fillRect(ix, iy, iw, ih);
+  return { x: ix, y: iy, w: iw, h: ih };
 }
 
 /**
- * Draws the standard contactless/NFC symbol — three arcs opening rightward
- * plus a center dot. cx/cy is the geometric centre of the bounding box.
- * size is the half-width of the bounding box (= largest arc radius).
+ * Draws a flat-yellow shield silhouette (rounded top, pointed bottom) with
+ * "MINTVAULT" + "TRADING CARD GRADING" centred inside. PR #88 replaced the
+ * legacy raster mintvault-logo.png; PR #91 keeps the text-only approach
+ * but draws an enclosing shield outline so the back label reads as a
+ * premium grading mark rather than free-floating text.
  */
-function drawContactlessIcon(
+function drawShield(ctx: any, x: number, y: number, w: number, h: number): void {
+  const r = w * 0.18;
+  const pointDepth = h * 0.18;
+  const sideCurveAmount = w * 0.05;
+  const cx = x + w / 2;
+  const topY = y;
+  const bottomY = y + h;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + r, topY);
+  ctx.lineTo(x + w - r, topY);
+  ctx.quadraticCurveTo(x + w, topY, x + w, topY + r);
+  ctx.quadraticCurveTo(x + w + sideCurveAmount, y + h * 0.55, cx, bottomY + pointDepth * 0.1);
+  ctx.quadraticCurveTo(x - sideCurveAmount, y + h * 0.55, x, topY + r);
+  ctx.quadraticCurveTo(x, topY, x + r, topY);
+  ctx.closePath();
+  ctx.fillStyle   = PRINT_YELLOW;
+  ctx.fill();
+  ctx.strokeStyle = PRINT_YELLOW_DARK;
+  ctx.lineWidth   = mmPx(0.14);
+  ctx.stroke();
+
+  const inset = mmPx(0.42);
+  ctx.beginPath();
+  ctx.moveTo(x + r + inset, topY + inset);
+  ctx.lineTo(x + w - r - inset, topY + inset);
+  ctx.quadraticCurveTo(x + w - inset, topY + inset, x + w - inset, topY + r + inset);
+  ctx.quadraticCurveTo(x + w + sideCurveAmount - inset, y + h * 0.55, cx, bottomY + pointDepth * 0.1 - inset);
+  ctx.quadraticCurveTo(x - sideCurveAmount + inset, y + h * 0.55, x + inset, topY + r + inset);
+  ctx.quadraticCurveTo(x + inset, topY + inset, x + r + inset, topY + inset);
+  ctx.closePath();
+  ctx.strokeStyle = PRINT_YELLOW_DARK;
+  ctx.lineWidth   = mmPx(0.11);
+  ctx.stroke();
+
+  ctx.fillStyle    = PRINT_BLACK;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "alphabetic";
+
+  const mainSize     = ptPx(5.5);
+  const subtitleSize = ptPx(2.6);
+  const stackGap     = mmPx(0.6);
+  const visualCY     = y + h * 0.48;
+
+  ctx.font = `bold ${mainSize}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText("MINTVAULT", cx, visualCY);
+  ctx.font = `bold ${subtitleSize}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText("TRADING CARD GRADING", cx, visualCY + stackGap + subtitleSize);
+
+  ctx.textAlign    = "left";
+  ctx.restore();
+}
+
+/**
+ * Three concentric arcs (radii 25/40/55% of size) opening rightward, plus
+ * a small filled finger oval below. PRINT_YELLOW @ 0.8pt stroke.
+ */
+function drawNfcSwoosh(ctx: any, cx: number, cy: number, sizePx: number): void {
+  ctx.save();
+  ctx.strokeStyle = PRINT_YELLOW;
+  ctx.lineWidth   = ptPx(0.8);
+  ctx.lineCap     = "round";
+  for (const r of [sizePx * 0.25, sizePx * 0.40, sizePx * 0.55]) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI / 3, Math.PI / 3);
+    ctx.stroke();
+  }
+  ctx.fillStyle = PRINT_YELLOW;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + sizePx * 0.72, sizePx * 0.16, sizePx * 0.10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── FRONT LABEL ─────────────────────────────────────────────────────────────
+async function drawFront(
   ctx: any,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string,
-) {
+  cert: CertificateRecord,
+  _logo: any,
+  _loadImage: any,
+  labelBg: string = WHITE,
+  _labelFg: string = "#000000",
+): Promise<void> {
+  const isBlack = labelBg !== WHITE;
+  const innerBg = isBlack ? PRINT_BLACK : PRINT_WHITE;
+  const textFg  = isBlack ? PRINT_YELLOW : PRINT_BLACK;
+  const subdued = isBlack ? PRINT_YELLOW_DARK : "#333333";
+
+  drawSlabBorder(ctx, innerBg);
+
+  // BOXED MINTVAULT WORDMARK — top-centre, 22×4mm, 0.5mm below top border
+  const wmBoxW = mmPx(22);
+  const wmBoxH = mmPx(4);
+  const wmBoxX = (PX_W - wmBoxW) / 2;
+  const wmBoxY = mmPx(BORDER_MM + 0.5);
+  ctx.fillStyle = innerBg;
+  ctx.fillRect(wmBoxX, wmBoxY, wmBoxW, wmBoxH);
+  ctx.strokeStyle = PRINT_YELLOW;
+  ctx.lineWidth   = mmPx(0.4);
+  ctx.strokeRect(wmBoxX, wmBoxY, wmBoxW, wmBoxH);
+  ctx.fillStyle    = textFg;
+  ctx.font         = `bold ${ptPx(8)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("MINTVAULT", PX_W / 2, wmBoxY + wmBoxH / 2);
+
+  // GRADE PANEL — right column, 14mm wide
+  const panelW = mmPx(14);
+  const panelX = PX_W - mmPx(BORDER_MM) - panelW;
+  const panelY = mmPx(BORDER_MM);
+  const panelH = PX_H - 2 * mmPx(BORDER_MM) - mmPx(0.5);
+
+  ctx.fillStyle = PRINT_YELLOW;
+  ctx.fillRect(panelX, panelY, panelW, panelH);
+  const piInset = mmPx(0.3);
+  ctx.strokeStyle = PRINT_YELLOW_DARK;
+  ctx.lineWidth   = mmPx(0.11);
+  ctx.strokeRect(panelX + piInset, panelY + piInset, panelW - 2 * piInset, panelH - 2 * piInset);
+
+  const panelCX    = panelX + panelW / 2;
+  const gradeType  = cert.gradeType || "numeric";
+  const isNonNum   = isNonNumericGrade(gradeType);
+  const grade      = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
+  const gradeStr   = isNonNum ? "" : String(grade);
+  const gradeAbbr  = isNonNum ? (gradeType === "AA" ? "AUTH ALT" : "AUTH") : gradeLabel(grade);
+  const certNumTxt = cert.cardNumber ? `#${cert.cardNumber}` : "";
+  const certIdTxt  = cert.certId || "";
+
+  ctx.fillStyle    = PRINT_BLACK;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "alphabetic";
+
+  if (certNumTxt) {
+    ctx.font = `bold ${ptPx(5.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    ctx.fillText(certNumTxt, panelCX, panelY + mmPx(2.5));
+  }
+  ctx.font = `bold ${ptPx(4.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const abbrFit = fitFontSize(ctx, gradeAbbr, panelW - mmPx(1), ptPx(4.5), ptPx(3));
+  ctx.font = `bold ${abbrFit}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText(gradeAbbr, panelCX, panelY + mmPx(4.5));
+
+  if (!isNonNum) {
+    ctx.font = `bold ${ptPx(18)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    ctx.fillText(gradeStr, panelCX, panelY + panelH * 0.62);
+  }
+
+  ctx.font = `bold ${ptPx(4.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText(certIdTxt, panelCX, panelY + panelH - mmPx(0.8));
+
+  // CARD DETAILS LEFT COLUMN
+  const textLeftX = mmPx(BORDER_MM + 2);
+  const textRight = panelX - mmPx(1);
+  const textMaxW  = textRight - textLeftX;
+  ctx.fillStyle    = textFg;
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "alphabetic";
+
+  const cardName = (cert.cardName || "").toUpperCase();
+  const setName  = [cert.year, (cert.setName || "").toUpperCase()].filter(Boolean).join(" ");
+  const rarity   = (cert.rarity || cert.variant || "").toString().toUpperCase();
+
+  ctx.font = `bold ${ptPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const nameFit = fitFontSize(ctx, cardName, textMaxW, ptPx(7), ptPx(4.5));
+  ctx.font = `bold ${nameFit}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText(truncateText(ctx, cardName, textMaxW), textLeftX, mmPx(9));
+
+  ctx.font = `bold ${ptPx(6.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const setFit = fitFontSize(ctx, setName, textMaxW, ptPx(6.5), ptPx(4.5));
+  ctx.font = `bold ${setFit}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText(truncateText(ctx, setName, textMaxW), textLeftX, mmPx(12));
+
+  if (rarity) {
+    ctx.fillStyle = subdued;
+    ctx.font = `bold ${ptPx(5.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    const rFit = fitFontSize(ctx, rarity, textMaxW, ptPx(5.5), ptPx(4));
+    ctx.font = `bold ${rFit}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+    ctx.fillText(truncateText(ctx, rarity, textMaxW), textLeftX, mmPx(15));
+  }
+
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
+// ── BACK LABEL ──────────────────────────────────────────────────────────────
+async function drawBack(
+  ctx: any,
+  cert: CertificateRecord,
+  _logo: any,
+  loadImage: any,
+  labelBg: string = WHITE,
+  _labelFg: string = "#1A1A1A",
+): Promise<void> {
+  const isBlack = labelBg !== WHITE;
+  const innerBg = isBlack ? PRINT_BLACK : PRINT_WHITE;
+  const textFg  = isBlack ? PRINT_YELLOW : PRINT_BLACK;
+
+  drawSlabBorder(ctx, innerBg);
+
+  // LEFT: shield (16×11mm @ 4mm canvas-x, vertically centred-ish)
+  const shieldW = mmPx(16);
+  const shieldH = mmPx(11);
+  const shieldX = mmPx(4);
+  const shieldY = mmPx(BORDER_MM + 1);
+  drawShield(ctx, shieldX, shieldY, shieldW, shieldH);
+
+  // CENTRE: URL + NFC swoosh + caption
+  const centreCX = mmPx(36);
+  ctx.fillStyle    = textFg;
+  ctx.font         = `bold ${ptPx(6.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("mintvaultuk.com", centreCX, mmPx(5));
+
+  drawNfcSwoosh(ctx, centreCX, mmPx(11), mmPx(3.5));
+
+  ctx.fillStyle = PRINT_YELLOW;
+  ctx.font      = `bold ${ptPx(4.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.fillText("Tap NFC to verify", centreCX, mmPx(17));
+
+  // RIGHT: QR + cert ID
+  const qrSizePx = mmPx(13);
+  const qrX      = PX_W - mmPx(BORDER_MM) - qrSizePx - mmPx(1);
+  const qrY      = mmPx(BORDER_MM) + mmPx(0.5);
+
+  const certUrl = getCertUrl(cert.certId);
+  const qrBuf   = await generateQRBuffer(certUrl, Math.round(qrSizePx));
+  const qrImg   = await loadImage(qrBuf);
+  ctx.fillStyle = PRINT_WHITE;
+  ctx.fillRect(qrX, qrY, qrSizePx, qrSizePx);
+  ctx.drawImage(qrImg, qrX, qrY, qrSizePx, qrSizePx);
+
+  ctx.fillStyle = textFg;
+  ctx.font      = `bold ${ptPx(4.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText(cert.certId || "", qrX + qrSizePx / 2, qrY + qrSizePx + mmPx(2));
+
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "alphabetic";
+
+  // Compatibility — drawContactlessIcon kept for legacy callers; not used here.
+  void drawContactlessIcon;
+}
+
+/** Three-arcs-plus-dot NFC mark kept for any callers outside the back label. */
+function drawContactlessIcon(ctx: any, cx: number, cy: number, size: number, color: string): void {
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth   = Math.max(2.5, size * 0.13);
   ctx.lineCap     = "round";
-  // Three arcs, 30 % / 60 % / 90 % of size, opening rightward (−60° → +60°)
   for (const r of [size * 0.30, size * 0.60, size * 0.90]) {
     ctx.beginPath();
     ctx.arc(cx, cy, r, -Math.PI / 3, Math.PI / 3);
     ctx.stroke();
   }
-  // Centre dot
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(cx, cy, Math.max(2, size * 0.13), 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-}
-
-async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
-  // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
-  // Clean white background, no border, no framing — high contrast for scanning.
-  // v425 — QR shrunk 187→160 and cert font max 28→24. Post-v424 the inner
-  // height (I_H=200) couldn't fit a 187px QR + 28px cert ID line below it,
-  // so the cert text was bleeding into the bottom of the QR. New geometry:
-  // QR ends y=178, cert ID centred at y=198 (text spans 186-210), 8px
-  // breathing room above and below.
-  const qrSize = 160;
-  const qrPad  = 0;                          // QR's internal margin:1 (~6px) provides quiet zone — no external pad needed
-  const qrY    = I_TOP;                      // flush to top inner border
-  const qrX    = I_RIGHT - qrSize;           // flush to right inner border
-  const qrCenterX = qrX + qrSize / 2;
-
-  // White box matches QR dimensions exactly (no external pad).
-  const wbLeft   = qrX - qrPad;
-  const wbTop    = I_TOP;
-  const wbW      = qrSize + qrPad;
-  const wbH      = qrSize + qrPad;
-  const wbBottom = wbTop + wbH;
-
-  // Cert ID: visually centred between the QR image bottom and the inner
-  // gold border. With qrPad=0, wbBottom == qrY+qrSize.
-  const certFontH  = 24;
-  const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);
-
-  // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
-  const gfLeft = wbLeft;                    // 645 — alias kept for layout calc
-
-  const certUrl = getCertUrl(cert.certId);
-  const qrBuf   = await generateQRBuffer(certUrl, qrSize);
-  const qrImg   = await loadImage(qrBuf);
-
-  // White box
-  ctx.fillStyle = WHITE;
-  ctx.fillRect(wbLeft, wbTop, wbW, wbH);
-
-  // QR image on white background
-  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-
-  // Cert ID — readable below the QR box, centred under it.
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "middle";
-  const certBackFit = fitFontSize(ctx, cert.certId, wbW - 8, certFontH, 14);
-  ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
-  ctx.fillStyle     = labelFg;
-  ctx.shadowBlur    = 0;
-  ctx.shadowColor   = "transparent";
-  ctx.fillText(cert.certId, qrCenterX, certMidY);
-
-  // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
-  //
-  //   LEFT   — Logo        : fits within inner content area (~24% of label width)
-  //   CENTRE — NFC + txt   : horizontally centred between logo's right edge and QR's left edge
-  //   RIGHT  — QR code     : flush top-right (qrSize set above)
-  //
-  const LOGO_DRAW    = I_H - 10;                  // logo target HEIGHT (px)
-  const LOGO_LX      = I_LEFT + 4;                // logo left X — tight to left gold border
-
-  // v429 — derive the logo's actual rendered WIDTH from its aspect ratio
-  // so NFC_ICON_CX correctly centres in the gap between logo-right and
-  // qr-left. The pre-v429 calc used LOGO_DRAW (height) as a proxy for
-  // width, which only worked for square logos and pushed the icon /
-  // URL / NFC text noticeably leftward when the logo was wider than tall.
-  const logoAspect   = logo ? (logo.width / logo.height) : 1;
-  const LOGO_DRAW_W  = Math.round(LOGO_DRAW * logoAspect);
-  const logoRightX   = LOGO_LX + LOGO_DRAW_W;
-  const NFC_ICON_CX  = Math.round((logoRightX + gfLeft) / 2);
-
-  // ── LEFT: MintVault wordmark — PR #88 replaces the muddy raster shield ────
-  // The previous mintvault-logo.png rendered as brown/dark-gold which fought
-  // the new Pikachu Yellow brand. Replaced with native text rendering so the
-  // wordmark is exactly #FFCB05 (matches the URL + tap-text colour on this
-  // label) and prints cleanly at any DPI.
-  //
-  // Two-line lockup: "MINTVAULT" in Bodoni Moda 900 (matches the front-label
-  // wordmark family) over "TRADING CARD GRADING" in bold sans-serif. Both
-  // lines occupy the same width band the raster logo did (LOGO_LX → +LOGO_DRAW_W).
-  {
-    const wordmarkX  = LOGO_LX;
-    const wordmarkW  = LOGO_DRAW_W;
-    const wordmarkCX = wordmarkX + wordmarkW / 2;
-    const wordmarkCY = I_TOP + Math.round(I_H / 2);
-
-    // Main wordmark — Bodoni Moda 900, sized to fit the available width.
-    const MAIN_SIZE   = 56;
-    const MAIN_LS     = 2;
-    const SUBTITLE_SZ = 13;
-    const STACK_GAP   = 12;
-
-    try { (ctx as any).letterSpacing = `${MAIN_LS}px`; } catch {}
-    ctx.font         = `900 ${MAIN_SIZE}px "Bodoni Moda", "Times New Roman", serif`;
-    ctx.fillStyle    = GOLD_LIGHT;
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.shadowBlur   = 0;
-    ctx.shadowColor  = "transparent";
-
-    // Stack: main baseline above centre, subtitle baseline below centre.
-    const mainY     = wordmarkCY - STACK_GAP / 2;
-    const subtitleY = wordmarkCY + STACK_GAP / 2 + SUBTITLE_SZ;
-    ctx.fillText("MINTVAULT", wordmarkCX, mainY);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    try { (ctx as any).letterSpacing = "1.4px"; } catch {}
-    ctx.font      = `bold ${SUBTITLE_SZ}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillText("TRADING CARD GRADING", wordmarkCX, subtitleY);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    ctx.textAlign    = "left";
-    ctx.textBaseline = "alphabetic";
-
-    // Redraw gold frame on top so the wordmark never bleeds into the border.
-    drawGoldFrame(ctx);
-  }
-  void logo; // raster logo no longer used on the back label (PR #88).
-
-  // ── CENTRE TOP: website URL — v425 flat GOLD_LIGHT (v424 used GOLD_DARK
-  // which printed as muddy brown; matches the front MINTVAULT wordmark). ──
-  {
-    const urlY    = I_TOP + 24;
-    const urlSz   = 38;
-    (ctx as any).letterSpacing = "1.5px";
-    ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_LIGHT;
-    ctx.textAlign        = "center";
-    ctx.textBaseline     = "middle";
-    ctx.shadowBlur       = 0;
-    ctx.shadowColor      = "transparent";
-    ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
-  }
-
-  // ── CENTRE BOTTOM: tap instruction — v425 flat GOLD_LIGHT (was GOLD_DARK) ──
-  {
-    const nfcY    = I_BOTTOM - 31;
-    const nfcSz   = 34;
-    (ctx as any).letterSpacing = "1.5px";
-    ctx.font             = `bold ${nfcSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_LIGHT;
-    ctx.textAlign        = "center";
-    ctx.textBaseline     = "middle";
-    ctx.shadowBlur       = 0;
-    ctx.shadowColor      = "transparent";
-    ctx.fillText("Tap NFC to verify", NFC_ICON_CX, nfcY);
-  }
-
-  // ── CENTRE MIDDLE: NFC hand-tap icon — tinted gold ─────────────────────────
-  try {
-    const { createCanvas } = await import("canvas");
-    const nfcImg  = await loadImage(NFC_ICON_PATH);
-    const iconSz  = 165;                                  // rendered square size (px)
-    const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
-    // v436 — vertically centre between the URL baseline (above) and the
-    // tap-text baseline (below) instead of the canvas midpoint. The two
-    // text rows aren't symmetric about PX_H/2, so canvas-midpoint
-    // centring read visibly low. Mirrors the URL/tap-text Y constants
-    // defined in the blocks above.
-    const urlY    = I_TOP + 24;
-    const nfcY    = I_BOTTOM - 31;
-    const visualMidY = (urlY + nfcY) / 2;
-    const iconY   = Math.round(visualMidY - iconSz / 2);
-    console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
-
-    // PNG is opaque RGB (black icon on white background), no alpha channel —
-    // confirmed via `sips`: samplesPerPixel: 3, hasAlpha: no. The previous
-    // destination-out/destination-in compositing assumed alpha and produced
-    // invisible output. Extract alpha via inverse luminance instead: dark
-    // pixels become opaque gold, light pixels become transparent. Continuous
-    // luminance values handle antialiased edges cleanly.
-    const off    = createCanvas(iconSz, iconSz);
-    const offCtx = off.getContext("2d");
-    offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
-    const imgData = offCtx.getImageData(0, 0, iconSz, iconSz);
-    const d = imgData.data;
-    // PR #88: tint with GOLD_LIGHT (#FFCB05) instead of GOLD_DARK (#D9A300)
-    // so the NFC icon matches the URL + tap-text colour on the back label.
-    const goldHex = GOLD_LIGHT.replace("#", "");
-    const gR = parseInt(goldHex.substring(0, 2), 16);
-    const gG = parseInt(goldHex.substring(2, 4), 16);
-    const gB = parseInt(goldHex.substring(4, 6), 16);
-    for (let i = 0; i < d.length; i += 4) {
-      const lum = (d[i] + d[i+1] + d[i+2]) / 3;
-      d[i]   = gR;
-      d[i+1] = gG;
-      d[i+2] = gB;
-      d[i+3] = 255 - lum;  // alpha: black input → 255 (opaque), white → 0 (clear)
-    }
-    offCtx.putImageData(imgData, 0, 0);
-    ctx.drawImage(off, iconX, iconY);
-  } catch (err) {
-    // Fallback: draw programmatic signal arcs if icon fails to load
-    console.error(`[label-back-debug] cert=${cert.certId} NFC icon failed, falling back to arcs:`, err);
-    const iconSz = 100;
-    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_LIGHT);
-  }
-
-  ctx.textAlign    = "left";
-  ctx.textBaseline = "alphabetic";
 }
 
 export async function generateLabelPDF(
