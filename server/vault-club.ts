@@ -157,6 +157,17 @@ export function registerVaultClubRoutes(app: Express): void {
   });
 
   // ── POST /api/vault-club/portal ────────────────────────────────────────────
+  // Opens the Stripe Customer Portal for self-service subscription management
+  // (cancel, change tier, update payment). DMCC 2024 requires that cancellation
+  // is reachable by the same method as signup — i.e. fully online, no phone
+  // or email gating. The Stripe Portal must therefore be configured (live mode)
+  // to allow cancel immediately + cancel at period end, with no contact-only
+  // overrides. return_url is /dashboard (not /club) to avoid a dark-pattern
+  // "we hope you stay" upsell page on return from the portal.
+  //
+  // Every portal session is written to audit_log as a full access trail —
+  // not just on cancel events. Compliance reviewers can reconstruct who
+  // accessed billing controls and when.
   app.post("/api/vault-club/portal", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -165,19 +176,38 @@ export function registerVaultClubRoutes(app: Express): void {
 
       const customerId = user.stripe_customer_id as string | null;
       if (!customerId) {
-        return res.status(400).json({ error: "No Stripe subscription found. Join Vault Club first." });
+        return res.status(400).json({ error: "No active subscription found. Please contact support." });
       }
 
       const stripe = await getStripe();
       const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
+      const returnUrl = `${appUrl}/dashboard`;
       const session = await stripe.billingPortal.sessions.create({
         customer: customerId,
-        return_url: `${appUrl}/club`,
+        return_url: returnUrl,
       });
+
+      // Audit-log the session opening. Failure here must not block the user
+      // from reaching the portal (cancellation must remain frictionless per
+      // DMCC 2024), so the insert is best-effort.
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES ('user', ${userId}, 'vault_club_portal_session', NULL,
+            ${JSON.stringify({
+              stripe_customer_id: customerId,
+              return_url: returnUrl,
+              session_id: session.id,
+            })}::jsonb)
+        `);
+      } catch (auditErr: any) {
+        console.warn("[vault-club] portal audit_log insert failed:", auditErr.message);
+      }
+
       return res.json({ url: session.url });
     } catch (err: any) {
       console.error("[vault-club] portal error:", err.message);
-      return res.status(500).json({ error: "Failed to open billing portal." });
+      return res.status(500).json({ error: "Couldn't open billing portal. Please try again or contact support." });
     }
   });
 

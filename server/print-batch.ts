@@ -1,282 +1,149 @@
 /**
  * print-batch.ts
- * v419 — single-sheet print-and-cut batch generator for Brother ScanNCut CM300.
+ * v525 — single-sheet print-and-cut batch generator.
  *
- * Produces TWO files for one A4 sheet of up to 5 cards. Each card row
- * contains a front label + back label + claim insert, all cut in one pass.
+ * Produces THREE files for one A4 sheet of up to 4 cards. Each row contains
+ * a front slab label + a claim insert. NFC back labels are not part of the
+ * sheet — verification is encoded in the front-label QR + the claim insert
+ * QR; a separate "back" print was redundant and wasted label stock.
  *
- * LAYOUT (mm, top-left origin, A4 portrait 210×297):
- *   Page margins: 10 on all sides.
- *   Universal cut gap: 4 mm between every cut line (between front/back
- *   labels, between label-block and insert, between rows).
- *   Cards per sheet: up to 5.
+ * LAYOUT (mm, top-left origin):
+ *   Page margins: 10mm top, 10mm left, no enforced bottom margin.
+ *   Universal cut gap: 4mm between cells.
+ *   Cards per sheet: up to 4 (MAX_CERTS_PER_BATCH).
  *
  *   Per row (left to right):
- *     - Label block 72×48 mm (left)
- *         · Front label 72×22 (top)
- *         · 4 mm gap
- *         · Back label  72×22 (bottom)
- *     - 4 mm gap
- *     - Claim insert 114×48 mm (right, vertically aligned with label block)
+ *     - Front label 70×20mm (left, vertically centred in the row)
+ *     - 4mm gap
+ *     - Claim insert 85.6×54mm (right; row height = insert height)
  *
- *   Row pitch: 52 mm (48 mm row + 4 mm inter-row gap).
- *   First row top edge: Y = 10. Subsequent rows: Y = 10 + N×52.
+ *   Row pitch: 58mm (54mm row + 4mm inter-row gap).
+ *   4 rows × 58mm + 10mm top = 242mm content height — fits both A4 PDF
+ *   (297mm) and the 279.4mm PNG used for Cricut Print Then Cut.
  *
- *   5 rows × 52 + 10 top margin = 270 mm. Bottom margin: 27 mm.
+ * THREE OUTPUT FILES (all share batchId in filename):
+ *   A) generatePrintBatchPDF()    → A4 (210×297mm) PDF with artwork only.
+ *      Home-printer fallback. No cut lines on the PDF — those live in the SVG.
+ *   B) generatePrintBatchCutSVG() → A4 SVG with cut rectangles only.
+ *      Magenta hairline (#FF00FF) on a <g id="cut"> layer. ScanNCut Direct
+ *      Cut and Cricut SVG cut path both consume this.
+ *   C) generatePrintBatchPNG()    → 210×279.4mm (8.27"×11") @ 300 DPI
+ *      = 2480×3300px PNG composite. Cricut Design Space Print Then Cut max
+ *      printable area is 215×285mm, so we size slightly under that so the
+ *      registration marks Cricut adds during print fit on the page.
  *
- * TWO OUTPUT FILES:
- *   A) generatePrintBatchPDF()    → A4 PDF with all artwork, no cut lines
- *   B) generatePrintBatchCutSVG() → A4 SVG with red hairline cut paths only
- *      (15 rectangles for a full 5-row sheet — 5 fronts + 5 backs + 5 inserts)
+ * Single source of truth: buildLayout() returns the cell array consumed by
+ * all three renderers — PDF, SVG and PNG cannot drift from each other.
  *
- * ScanNCut workflow: print PDF → load printed sheet on cutting mat →
- * import SVG via USB → run Direct Cut (NOT Scan to Cut). The SVG cut paths
- * match the PDF coordinate system so the CM300's print-and-cut alignment
- * works out of the box.
- *
- * Cut-path bleed inset: 0.25 mm per side, matching the proven inset from
- * label-sheet.ts. This pushes the cut INSIDE the printed border so any
- * sub-mm cutter drift slices through the gold border rather than the
- * white paper outside it.
+ * Cut-path bleed inset: 0.25mm per side. Pushes the cut INSIDE the printed
+ * gold border so any sub-mm cutter drift slices through the gold rather than
+ * the white paper outside it.
  */
 
 import PDFDocument from "pdfkit";
-import QRCode from "qrcode";
-import path from "path";
 import { generateLabelPNG } from "./labels";
-import { APP_BASE_URL } from "./app-url";
+import { generateClaimInsertPNG } from "./claim-insert";
 import type { CertificateRecord } from "@shared/schema";
 
 // ── Unit conversion ──────────────────────────────────────────────────────────
 const MM_TO_PT = 2.83464567;
 const mm = (v: number) => v * MM_TO_PT;
+const DPI = 300;
+const MM_TO_PX = DPI / 25.4;
+const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
 // ── Page dimensions ──────────────────────────────────────────────────────────
-const PAGE_W_MM = 210;
-const PAGE_H_MM = 297;
+const PAGE_W_MM       = 210;
+const PDF_PAGE_H_MM   = 297;
+const PNG_PAGE_H_MM   = 279.4;
 
 // ── Layout (mm) ──────────────────────────────────────────────────────────────
-// v424 — slab cutout 70×20mm (was 72×22mm). Insert reflows to fill the row:
-// width 116mm (190 - 70 - 4), height 44mm (= 20 + 4 + 20). 5 rows × 48mm
-// pitch = 240mm easily fits inside the 297-2×10 = 277mm available height,
-// so MAX_CERTS_PER_BATCH stays at 5.
 const MARGIN_MM    = 10;
-const GAP_MM       = 4;          // universal cut gap
+const GAP_MM       = 4;
 const LABEL_W_MM   = 70;
 const LABEL_H_MM   = 20;
-const INSERT_W_MM  = 116;
-const INSERT_H_MM  = 44;          // = label_H × 2 + gap = 20+4+20
-const ROW_H_MM     = 44;          // label-block height = insert height
-const ROW_PITCH_MM = ROW_H_MM + GAP_MM;  // 48
+const INSERT_W_MM  = 85.6;
+const INSERT_H_MM  = 54;
+const ROW_H_MM     = INSERT_H_MM;
+const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 
-export const MAX_CERTS_PER_BATCH = 5;
+export const MAX_CERTS_PER_BATCH = 4;
+export const SHEET_LAYOUT_VERSION = "v2";
 
 // Per-side cut bleed inset — slices through the printed border, not the
-// paper outside. Same pattern as label-sheet.ts.
-const CUT_INSET_MM = 0.25;
-const CUT_STROKE_MM = (0.5 * (1 / MM_TO_PT)).toFixed(4); // 0.5pt → mm
+// paper outside.
+const CUT_INSET_MM    = 0.25;
+const CUT_STROKE_MM   = (0.5 * (1 / MM_TO_PT)).toFixed(4); // 0.5pt → mm
+const CUT_STROKE_HEX  = "#FF00FF";
 
-// ── Brand colours (hex strings for PDFKit) ───────────────────────────────────
-const GOLD     = "#D4AF37";
-const GOLD_DK  = "#B8960C";
-const DARK     = "#1A1A1A";
-const GRAY     = "#555555";
-const GRAY_LT  = "#888888";
-const GRAY_BG  = "#F5F0E8";
-const CREAM    = "#FAF6ED"; // light tint behind the v423 cert+code data block
-
-const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
-const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Position helper: given a row index (0-based), return the row's top Y in mm. */
-function rowTopMm(rowIndex: number): number {
-  return MARGIN_MM + rowIndex * ROW_PITCH_MM;
-}
-
-/** Format claim code "ABCD12345EFG" → "ABCD-1234-5EFG" (12 chars expected). */
-function formatClaimCode(code: string): string {
-  const c = code.toUpperCase();
-  return c.length === 12 ? `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}` : c;
-}
-
-/** "MV-0000000003" → "MV3" (defensive — most callers pass already-normalised). */
-function normaliseCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  return m ? `MV${m[1]}` : raw;
-}
-
-async function qrPng(url: string, sizePx: number): Promise<Buffer> {
-  return await QRCode.toBuffer(url, {
-    width: sizePx,
-    margin: 1,
-    color: { dark: "#000000", light: "#FFFFFF" },
-    errorCorrectionLevel: "M",
-  });
-}
-
-// ── Insert renderer (vector + embedded QR PNG) ───────────────────────────────
-//
-// Renders the 114×48 mm claim insert at the given (x, y) in mm onto an
-// already-open PDFKit document. Uses PDFKit's vector primitives + a single
-// embedded QR PNG, so output stays sharp at print resolution and the
-// rendering is fast enough to run 5×/sheet without canvas overhead.
-
-async function drawInsert(
-  doc: any,
-  xMm: number,
-  yMm: number,
-  certId: string,
-  claimCode: string,
-): Promise<void> {
-  const x = mm(xMm);
-  const y = mm(yMm);
-  const w = mm(INSERT_W_MM);
-  const h = mm(INSERT_H_MM);
-  const pad = mm(2.5); // v423: tightened from 3mm to buy 1mm extra usable width
-
-  const nCertId = normaliseCertId(certId);
-  const formattedCode = formatClaimCode(claimCode);
-  const claimUrl = `${CLAIM_BASE_URL}?cert=${encodeURIComponent(nCertId)}&code=${encodeURIComponent(claimCode)}`;
-
-  // White background
-  doc.save();
-  doc.rect(x, y, w, h).fill("#FFFFFF");
-
-  // Subtle gold outer border (just inside the cut path so it gets sliced
-  // cleanly rather than left as a thin frame on the paper).
-  doc.lineWidth(0.6);
-  doc.strokeColor(GOLD);
-  doc.rect(x + 1, y + 1, w - 2, h - 2).stroke();
-
-  // ── Right-side QR block ────────────────────────────────────────────────────
-  // v424: QR sized 38mm. Insert is 44mm tall; with QR at 38mm and caption
-  // (5pt ≈ 1.76mm) below, the caption bottom sits at y+43.76mm — safely
-  // inside the 44mm cut path. A 40mm QR would push the caption beyond.
-  const qrSizeMm = 38;
-  const qrX = x + w - mm(qrSizeMm) - pad;
-  const qrY = y + (h - mm(qrSizeMm)) / 2;
-
-  // Cream tile behind the QR for visual separation
-  doc.fillColor(GRAY_BG);
-  doc.rect(qrX - 2, qrY - 2, mm(qrSizeMm) + 4, mm(qrSizeMm) + 4).fill();
-
-  const qrBuf = await qrPng(claimUrl, 600);
-  doc.image(qrBuf, qrX, qrY, { width: mm(qrSizeMm), height: mm(qrSizeMm) });
-
-  // "Scan to claim" caption under the QR
-  doc.fillColor(GRAY_LT);
-  doc.font("Helvetica");
-  doc.fontSize(5);
-  doc.text("Scan to claim", qrX, qrY + mm(qrSizeMm) + 1, {
-    width: mm(qrSizeMm),
-    align: "center",
-  });
-
-  // ── Left-side text column ──────────────────────────────────────────────────
-  // v423: explicit-Y zoned layout (title / data block / instructions) instead
-  // of cumulative ty increments. Hardcoded offsets in mm so the visual
-  // rhythm is predictable regardless of font metric drift.
-  const tx = x + pad;
-  const tw = qrX - tx - mm(2); // 2mm gutter between text col and QR tile
-
-  // v424 — zone offsets shifted up to fit the new 44mm insert height (was 48mm).
-  // Zone 1 — Title at top (y + 3.5mm)
-  const titleY = y + mm(3.5);
-  doc.fillColor(GOLD);
-  doc.font("Helvetica-Bold");
-  doc.fontSize(11);
-  doc.text("CLAIM YOUR CARD", tx, titleY, { width: tw });
-
-  // Thin gold divider directly under title (y + 8mm). 50mm wide, 0.4pt.
-  const dividerY1 = y + mm(8);
-  doc.lineWidth(0.4);
-  doc.strokeColor(GOLD);
-  doc.moveTo(tx, dividerY1).lineTo(tx + mm(50), dividerY1).stroke();
-
-  // Zone 2 — Data block (cert + claim code, side-by-side) at y + 12mm.
-  // Cream-tinted background behind the data block to make it the focal
-  // point. 13mm tall (was 14mm in v423), spans the full text column.
-  const dataY = y + mm(12);
-  const dataH = mm(13);
-  doc.fillColor(CREAM);
-  doc.rect(tx - mm(0.5), dataY - mm(0.5), tw + mm(1), dataH).fill();
-
-  // Two columns inside the data block:
-  //   Cert No. on the left (~22mm wide), Claim Code on the right (~46mm wide)
-  const certColX = tx + mm(1);
-  const certColW = mm(22);
-  const codeColX = certColX + certColW + mm(2);
-  const codeColW = tw - (codeColX - tx) - mm(1);
-
-  // Labels (5.5pt grey)
-  doc.fillColor(GRAY_LT);
-  doc.font("Helvetica-Bold");
-  doc.fontSize(5.5);
-  doc.text("CERT NO.", certColX, dataY + mm(1), { width: certColW });
-  doc.text("CLAIM CODE", codeColX, dataY + mm(1), { width: codeColW });
-
-  // Cert No. value (14pt bold Courier dark)
-  doc.fillColor(DARK);
-  doc.font("Courier-Bold");
-  doc.fontSize(14);
-  doc.text(nCertId, certColX, dataY + mm(4.5), { width: certColW });
-
-  // Claim Code value (10pt bold Courier gold-dark)
-  doc.fillColor(GOLD_DK);
-  doc.font("Courier-Bold");
-  doc.fontSize(10);
-  doc.text(formattedCode, codeColX, dataY + mm(5.5), { width: codeColW });
-
-  // v424 — Zone 3 shifted up for 44mm insert. Grey divider at y+27mm,
-  // instructions begin y+30mm. Step pitch tightened 3.8mm → 3.5mm so
-  // three lines end at y+30 + 2*3.5 = y+37mm baseline (last step bottom
-  // ≈ y+39mm), well within the 44mm bottom edge.
-  const dividerY2 = y + mm(27);
-  doc.lineWidth(0.3);
-  doc.strokeColor(GRAY_LT);
-  doc.moveTo(tx, dividerY2).lineTo(tx + mm(50), dividerY2).stroke();
-
-  doc.fillColor(GRAY);
-  doc.font("Helvetica");
-  doc.fontSize(6);
-  const steps = [
-    "1. Visit mintvaultuk.com/claim",
-    "2. Enter cert no. & claim code",
-    "3. Verify email • Code is single-use",
-  ];
-  let stepY = y + mm(30);
-  for (const step of steps) {
-    doc.text(step, tx, stepY, { width: tw });
-    stepY += mm(3.5);
-  }
-
-  doc.restore();
-}
-
-// ── PDF generator ────────────────────────────────────────────────────────────
+// ── Layout spec — single source of truth ─────────────────────────────────────
 
 export interface PrintBatchItem {
   cert: CertificateRecord;
   claimCode: string;
 }
 
-export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
-  const slice = items.slice(0, MAX_CERTS_PER_BATCH);
+interface CellSpec {
+  kind: "label" | "insert";
+  itemIndex: number;
+  xMm: number;
+  yMm: number;
+  wMm: number;
+  hMm: number;
+}
 
-  // Render front + back label PNGs in parallel
-  const [frontBuffers, backBuffers] = await Promise.all([
+function buildLayout(itemCount: number): CellSpec[] {
+  const n = Math.max(1, Math.min(MAX_CERTS_PER_BATCH, itemCount | 0));
+  const cells: CellSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    const rowTopY = MARGIN_MM + i * ROW_PITCH_MM;
+    // Front label — left column, vertically centred in row (insert is taller).
+    cells.push({
+      kind: "label",
+      itemIndex: i,
+      xMm: MARGIN_MM,
+      yMm: rowTopY + (ROW_H_MM - LABEL_H_MM) / 2,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
+    });
+    // Claim insert — right column, top-aligned.
+    cells.push({
+      kind: "insert",
+      itemIndex: i,
+      xMm: MARGIN_MM + LABEL_W_MM + GAP_MM,
+      yMm: rowTopY,
+      wMm: INSERT_W_MM,
+      hMm: INSERT_H_MM,
+    });
+  }
+  return cells;
+}
+
+// Render the per-item PNGs in parallel. Used by both the PDF and PNG paths.
+async function renderItemBuffers(items: PrintBatchItem[]): Promise<{
+  fronts: Buffer[];
+  inserts: Buffer[];
+}> {
+  const slice = items.slice(0, MAX_CERTS_PER_BATCH);
+  const [fronts, inserts] = await Promise.all([
     Promise.all(slice.map(it => generateLabelPNG(it.cert, "front"))),
-    Promise.all(slice.map(it => generateLabelPNG(it.cert, "back"))),
+    Promise.all(slice.map(it => generateClaimInsertPNG((it.cert as any).certId || "", it.claimCode))),
   ]);
+  return { fronts, inserts };
+}
+
+// ── PDF generator (A4 full page) ─────────────────────────────────────────────
+
+export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
+  const layout = buildLayout(items.length);
+  const { fronts, inserts } = await renderItemBuffers(items);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
-      size: [mm(PAGE_W_MM), mm(PAGE_H_MM)],
+      size: [mm(PAGE_W_MM), mm(PDF_PAGE_H_MM)],
       margin: 0,
       info: {
-        Title: "MintVault Print Batch (v419)",
+        Title: `MintVault Print Batch (${SHEET_LAYOUT_VERSION})`,
         Author: "MintVault Trading Card Grading",
       },
     });
@@ -286,80 +153,96 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    (async () => {
-      try {
-        // Background — clean white. No detection marks; cut paths live in SVG.
-        doc.rect(0, 0, mm(PAGE_W_MM), mm(PAGE_H_MM)).fill("#FFFFFF");
-
-        for (let i = 0; i < slice.length; i++) {
-          const it = slice[i];
-          const rowTop = rowTopMm(i);
-
-          // Front label — top of label block (X=10, W=72, H=22)
-          doc.image(frontBuffers[i], mm(MARGIN_MM), mm(rowTop), {
-            width: mm(LABEL_W_MM),
-            height: mm(LABEL_H_MM),
-          });
-
-          // Back label — bottom of label block (X=10, Y+=22+4, W=72, H=22)
-          doc.image(backBuffers[i], mm(MARGIN_MM), mm(rowTop + LABEL_H_MM + GAP_MM), {
-            width: mm(LABEL_W_MM),
-            height: mm(LABEL_H_MM),
-          });
-
-          // Insert — right of label block, vertically aligned (X=10+72+4=86)
-          await drawInsert(
-            doc,
-            MARGIN_MM + LABEL_W_MM + GAP_MM,
-            rowTop,
-            (it.cert as any).certId || "",
-            it.claimCode,
-          );
-        }
-
-        doc.end();
-      } catch (err) {
-        reject(err);
+    try {
+      doc.rect(0, 0, mm(PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
+      for (const cell of layout) {
+        const buf = cell.kind === "label" ? fronts[cell.itemIndex] : inserts[cell.itemIndex];
+        doc.image(buf, mm(cell.xMm), mm(cell.yMm), {
+          width: mm(cell.wMm),
+          height: mm(cell.hMm),
+        });
       }
-    })();
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
 // ── SVG cut-path generator ───────────────────────────────────────────────────
 //
-// 15 rectangles (5 fronts + 5 backs + 5 inserts), each inset by 0.25 mm on
-// every side. Same coord system as the PDF (mm, top-left origin).
+// Magenta (#FF00FF) hairline cut rects on a <g id="cut"> layer. Same coord
+// system as the PDF (mm, top-left origin). 8 rectangles for a full 4-row
+// sheet — 4 fronts + 4 inserts.
 
 export function generatePrintBatchCutSVG(itemCount: number): string {
-  const n = Math.max(1, Math.min(MAX_CERTS_PER_BATCH, itemCount | 0));
-  const rects: string[] = [];
-
-  const insetRect = (xMm: number, yMm: number, wMm: number, hMm: number) =>
-    `  <rect x="${(xMm + CUT_INSET_MM).toFixed(4)}" y="${(yMm + CUT_INSET_MM).toFixed(4)}" ` +
-    `width="${(wMm - 2 * CUT_INSET_MM).toFixed(4)}" height="${(hMm - 2 * CUT_INSET_MM).toFixed(4)}" ` +
-    `fill="none" stroke="#FF0000" stroke-width="${CUT_STROKE_MM}"/>`;
-
-  for (let i = 0; i < n; i++) {
-    const rowTop = rowTopMm(i);
-
-    // Front label: X=10, Y=rowTop, 72×22
-    rects.push(insetRect(MARGIN_MM, rowTop, LABEL_W_MM, LABEL_H_MM));
-
-    // Back label: X=10, Y=rowTop+22+4, 72×22
-    rects.push(insetRect(MARGIN_MM, rowTop + LABEL_H_MM + GAP_MM, LABEL_W_MM, LABEL_H_MM));
-
-    // Insert: X=10+72+4=86, Y=rowTop, 114×48
-    rects.push(insetRect(MARGIN_MM + LABEL_W_MM + GAP_MM, rowTop, INSERT_W_MM, INSERT_H_MM));
-  }
+  const layout = buildLayout(itemCount);
+  const insetRect = (cell: CellSpec) =>
+    `    <rect x="${(cell.xMm + CUT_INSET_MM).toFixed(4)}" y="${(cell.yMm + CUT_INSET_MM).toFixed(4)}" ` +
+    `width="${(cell.wMm - 2 * CUT_INSET_MM).toFixed(4)}" height="${(cell.hMm - 2 * CUT_INSET_MM).toFixed(4)}" ` +
+    `fill="none" stroke="${CUT_STROKE_HEX}" stroke-width="${CUT_STROKE_MM}"/>`;
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<!-- MintVault Print Batch Cut Guide (v419) — ${n} row(s) × 3 = ${n * 3} cut paths -->`,
-    `<!-- A4 210×297mm | 0.25mm bleed inset | ScanNCut CM300 → Direct Cut -->`,
+    `<!-- MintVault Print Batch Cut Guide (${SHEET_LAYOUT_VERSION}) — ${layout.length} cut paths -->`,
+    `<!-- A4 ${PAGE_W_MM}×${PDF_PAGE_H_MM}mm | ${CUT_INSET_MM}mm bleed inset per side | stroke ${CUT_STROKE_HEX} -->`,
     `<svg xmlns="http://www.w3.org/2000/svg"`,
-    `     width="210mm" height="297mm"`,
-    `     viewBox="0 0 210 297">`,
-    ...rects,
+    `     width="${PAGE_W_MM}mm" height="${PDF_PAGE_H_MM}mm"`,
+    `     viewBox="0 0 ${PAGE_W_MM} ${PDF_PAGE_H_MM}">`,
+    `  <g id="cut">`,
+    ...layout.map(insetRect),
+    `  </g>`,
     `</svg>`,
   ].join("\n");
+}
+
+// ── PNG composite — Cricut Print Then Cut ────────────────────────────────────
+//
+// 210×279.4mm @ 300 DPI = 2480×3300px. 4-row layout (242mm content height)
+// fits inside the canvas with ~37mm of bottom whitespace — leaves room for
+// Cricut's registration marks (which it adds during print, outside the
+// content area).
+
+export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
+  const { createCanvas, loadImage } = await import("canvas");
+  const layout = buildLayout(items.length);
+  const { fronts, inserts } = await renderItemBuffers(items);
+
+  const widthPx  = mmPx(PAGE_W_MM);
+  const heightPx = mmPx(PNG_PAGE_H_MM);
+
+  const canvas = createCanvas(widthPx, heightPx);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  for (const cell of layout) {
+    const buf = cell.kind === "label" ? fronts[cell.itemIndex] : inserts[cell.itemIndex];
+    const img = await loadImage(buf);
+    ctx.drawImage(
+      img,
+      mmPx(cell.xMm),
+      mmPx(cell.yMm),
+      mmPx(cell.wMm),
+      mmPx(cell.hMm),
+    );
+  }
+
+  return canvas.toBuffer("image/png");
+}
+
+// ── Deterministic batch ID for idempotency ───────────────────────────────────
+//
+// Hash sorted certIds + admin user + UTC day. Two clicks within the same
+// UTC day from the same admin on the same set of certs yield the same
+// batchId. Combined with a 5-minute window check in the route handler,
+// this prevents duplicate audit_log / labelPrints writes from fat-fingered
+// double-clicks. Format keeps `print_batch_${batchId}` searchable.
+
+export function deriveBatchId(certIds: string[], adminUser: string): string {
+  const { createHash } = require("crypto") as typeof import("crypto");
+  const sorted = [...certIds].sort();
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+  const input = `${adminUser}|${today}|${sorted.join(",")}`;
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
 }

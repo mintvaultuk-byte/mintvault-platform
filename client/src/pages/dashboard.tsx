@@ -12,6 +12,7 @@ import VaultClubBadge from "@/components/vault-club-badge";
 import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 import SeoHead from "@/components/seo-head";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -483,6 +484,7 @@ interface VaultClubMe {
 
 function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; email: string; display_name: string | null; email_verified: boolean }; vcMe?: VaultClubMe | null }) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   // Falls back to its own fetch if the parent didn't provide vcMe.
   // Both queries share the same TanStack key so they read from the same cache.
   const { data: vcMeFetched, isLoading: vcMeLoading } = useQuery<VaultClubMe | null>({
@@ -500,9 +502,33 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
   const vcMe = vcMeProp !== undefined ? vcMeProp : vcMeFetched;
   const isLoading = vcMeProp !== undefined ? false : vcMeLoading;
 
+  // apiRequest returns a Response — we must parse the JSON body to read
+  // session.url. Previously the handler read `data.url` directly on the
+  // Response, which resolves to the Response's own URL (/api/vault-club/portal)
+  // and navigated the browser there as a GET, surfacing as a 404 page.
   const portalMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/vault-club/portal", {}),
-    onSuccess: (data: any) => { if (data?.url) window.location.href = data.url; },
+    mutationFn: async (): Promise<{ url: string }> => {
+      const res = await apiRequest("POST", "/api/vault-club/portal", {});
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        toast({
+          title: "Couldn't open billing portal",
+          description: "No portal URL returned. Please contact support.",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't open billing portal",
+        description: err?.message || "Please try again or contact support at hello@mintvaultuk.com.",
+        variant: "destructive",
+      });
+    },
   });
 
   if (isLoading) {
