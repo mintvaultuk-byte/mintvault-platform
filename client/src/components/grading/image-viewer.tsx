@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2, Crop } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
-import DefectHeatmap from "./defect-heatmap";
 import { DEFECT_TYPES } from "./defect-annotation";
 import type { Defect } from "./defect-annotation";
 
@@ -403,11 +402,6 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                 </svg>
               );
             })()}
-
-            {/* Heatmap */}
-            {showDefects && sideDefects.length > 0 && (
-              <DefectHeatmap defects={sideDefects} width={containerRef.current?.clientWidth || 300} height={containerRef.current?.clientHeight || 420} />
-            )}
 
             {/* Defect ring markers */}
             {showDefects && (() => {
