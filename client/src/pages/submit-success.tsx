@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { CheckCircle, Package, FileText, Download, Mail } from "lucide-react";
 import { pricingTiers, submissionTypes, SUBMISSION_STATUS_LABELS } from "@shared/schema";
+import { COMPANY, formatPostalAddress } from "@shared/company";
 
 export default function SubmitSuccessPage() {
   const params = new URLSearchParams(window.location.search);
@@ -135,12 +136,14 @@ export default function SubmitSuccessPage() {
           </div>
           <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider mt-3">Send to:</p>
           <div className="border border-[#E8E4DC] rounded p-3 bg-[#FAFAF8] font-mono text-xs leading-relaxed" data-testid="text-shipping-address">
-            MintVault Grading<br />
-            2 Temple Gardens<br />
-            Strood<br />
-            Kent<br />
-            ME2 2NG<br />
-            United Kingdom
+            {formatPostalAddress(COMPANY.postalAddress, { multiline: true, includeDisplayName: true })
+              .split("\n")
+              .map((line, i, arr) => (
+                <span key={i}>
+                  {line}
+                  {i < arr.length - 1 && <br />}
+                </span>
+              ))}
           </div>
         </div>
       </div>

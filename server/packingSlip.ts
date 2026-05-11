@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import path from "path";
 import fs from "fs";
 import { APP_BASE_URL } from "./app-url";
+import { COMPANY, formatPostalAddress } from "@shared/company";
 
 const GOLD = "#D4AF37";
 const DARK = "#111111";
@@ -243,14 +244,19 @@ export async function generatePackingSlipPDF(data: PackingSlipData): Promise<Buf
       by += 16;
 
       doc.font("Helvetica-Bold").fontSize(10).fillColor(GREY_DARK)
-        .text("MintVault Grading", bx, by);
+        .text(COMPANY.postalAddress.displayName, bx, by);
       by += 14;
       doc.font("Helvetica").fontSize(9).fillColor(GREY_DARK);
-      doc.text("2 Temple Gardens", bx, by); by += 12;
-      doc.text("Strood", bx, by); by += 12;
-      doc.text("Kent", bx, by); by += 12;
-      doc.text("ME2 2NG", bx, by); by += 12;
-      doc.text("United Kingdom", bx, by);
+      // Body lines from the canonical record (no displayName — that's
+      // already rendered in the bold style above).
+      const addressLines = formatPostalAddress(COMPANY.postalAddress, {
+        multiline: true,
+        includeDisplayName: false,
+      }).split("\n");
+      for (let i = 0; i < addressLines.length; i++) {
+        doc.text(addressLines[i], bx, by);
+        if (i < addressLines.length - 1) by += 12;
+      }
 
       doc.end();
     } catch (err) {

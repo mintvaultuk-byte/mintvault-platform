@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import path from "path";
+import { COMPANY, formatPostalAddress } from "@shared/company";
 
 const GOLD     = "#D4AF37";
 const BLACK    = "#111111";
@@ -25,14 +26,12 @@ export interface ShippingLabelData {
   cardCount: number;
 }
 
-const RECEIVING_ADDRESS = [
-  "MintVault Grading",
-  "2 Temple Gardens",
-  "Strood",
-  "Kent",
-  "ME2 2NG",
-  "United Kingdom",
-];
+// Receiving address — derived from the single canonical record on
+// shared/company.ts. Update postalAddress there to update everywhere.
+const RECEIVING_ADDRESS = formatPostalAddress(COMPANY.postalAddress, {
+  multiline: true,
+  includeDisplayName: true,
+}).split("\n");
 
 export async function generateShippingLabelPDF(data: ShippingLabelData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
