@@ -282,3 +282,338 @@
     opacity: 0.65;
   }
 }
+
+/* ── Slab + Scanner hybrid (extends Scanner Beam) ──────────────────
+   Card-shaped slab silhouette: header bar + card-window scan bed +
+   footer bar. Sits directly on the dark vault background (no white
+   wrapper). Reuses scanGlow / scanSweep / scanPulse keyframes from
+   the Scanner Beam section above. Drag-over visuals are toggled by
+   the existing React `dragging` state via the same
+   .scanner-beam--dragover modifier class. */
+.slab-scanner {
+  display: block;
+  position: relative;
+  width: 380px;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  cursor: pointer;
+  background: linear-gradient(180deg,
+              rgba(20,16,11,0.62) 0%,
+              rgba(10,8,7,0.82) 100%);
+  -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(8px);
+  border: 1px solid rgba(201,169,110,0.3);
+  border-radius: 6px;
+  animation: scanGlow 4s ease-in-out infinite;
+  transition: transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 320ms ease-out,
+              border-color 200ms ease-out;
+}
+.slab-scanner:hover {
+  transform: translateY(-4px) rotate(-0.5deg);
+}
+
+/* Header bar */
+.slab-scanner__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: linear-gradient(180deg,
+              rgba(40,32,22,0.55) 0%,
+              rgba(20,16,11,0.45) 100%);
+  border-bottom: 1px solid rgba(201,169,110,0.22);
+  position: relative;
+  z-index: 3;
+}
+.slab-scanner__brand {
+  font-family: var(--v2-font-display);
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.slab-scanner__brand-mint  { color: #f5efe4; font-weight: 500; }
+.slab-scanner__brand-vault { color: #c9a96e; font-weight: 600; }
+.slab-scanner__brand-sep   { color: rgba(201,169,110,0.5); margin: 0 0.18em; font-weight: 500; }
+
+.slab-scanner__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--v2-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #c9a96e;
+}
+.slab-scanner__status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #e7c98a;
+  box-shadow: 0 0 8px #c9a96e;
+  animation: scanPulse 2s ease-in-out infinite;
+}
+
+/* Card window — 2.5:3.5 aspect, 8px inset margin from slab edges */
+.slab-scanner__window {
+  position: relative;
+  margin: 8px;
+  aspect-ratio: 2.5 / 3.5;
+  border: 1px solid rgba(201,169,110,0.25);
+  border-radius: 3px;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(45deg,
+      transparent 0,
+      transparent 7px,
+      rgba(201,169,110,0.04) 7px,
+      rgba(201,169,110,0.04) 8px),
+    linear-gradient(180deg,
+      rgba(15,12,8,0.70) 0%,
+      rgba(8,6,5,0.85) 100%);
+}
+.slab-scanner__window::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+              transparent,
+              rgba(201,169,110,0.4) 20%,
+              #e7c98a 50%,
+              rgba(201,169,110,0.4) 80%,
+              transparent);
+  box-shadow: 0 0 16px #c9a96e, 0 0 32px rgba(201,169,110,0.6);
+  animation: scanSweep 3.5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Corner viewfinder brackets (TL + BR) */
+.slab-scanner__bracket {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: #c9a96e;
+  border-style: solid;
+  pointer-events: none;
+  z-index: 2;
+  transition: width 220ms ease-out, height 220ms ease-out;
+}
+.slab-scanner__bracket--tl {
+  top: 8px; left: 8px;
+  border-width: 1px 0 0 1px;
+}
+.slab-scanner__bracket--br {
+  bottom: 8px; right: 8px;
+  border-width: 0 1px 1px 0;
+}
+
+/* Scanner readouts (decorative — aria-hidden in markup). Positioned
+   clear of the corner brackets even at dragover-grown 20px. */
+.slab-scanner__readout {
+  position: absolute;
+  font-family: var(--v2-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(201,169,110,0.55);
+  pointer-events: none;
+  z-index: 2;
+  white-space: nowrap;
+}
+.slab-scanner__readout--tl { top: 8px;    left: 36px; }
+.slab-scanner__readout--tr { top: 8px;    right: 12px; }
+.slab-scanner__readout--bl { bottom: 8px; left: 36px; }
+
+/* Window content — centered above the scan line via z-index */
+.slab-scanner__content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  z-index: 2;
+}
+.slab-scanner__content > svg {
+  margin-bottom: 14px;
+}
+.slab-scanner__title {
+  font-family: var(--v2-font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.2;
+  color: #f5efe4;
+  margin: 0 0 8px 0;
+}
+.slab-scanner__subtitle {
+  font-family: var(--v2-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #c8bfae;
+  margin: 0;
+}
+
+/* Footer bar */
+.slab-scanner__footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: linear-gradient(0deg,
+              rgba(40,32,22,0.55) 0%,
+              rgba(20,16,11,0.45) 100%);
+  border-top: 1px solid rgba(201,169,110,0.22);
+  position: relative;
+  z-index: 3;
+}
+.slab-scanner__footer-left {
+  font-family: var(--v2-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(201,169,110,0.7);
+}
+.slab-scanner__footer-center {
+  text-align: center;
+  font-family: var(--v2-font-display);
+  font-style: italic;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #f5efe4;
+}
+/* QR-style placeholder — decorative, aria-hidden. Static pattern. */
+.slab-scanner__qr {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 1px;
+  background: #f5efe4;
+  padding: 2px;
+  border-radius: 2px;
+  justify-self: end;
+}
+.slab-scanner__qr > span {
+  background: rgba(20,16,11,0.85);
+}
+.slab-scanner__qr > span:nth-child(2),
+.slab-scanner__qr > span:nth-child(4),
+.slab-scanner__qr > span:nth-child(6),
+.slab-scanner__qr > span:nth-child(10),
+.slab-scanner__qr > span:nth-child(13),
+.slab-scanner__qr > span:nth-child(14),
+.slab-scanner__qr > span:nth-child(16),
+.slab-scanner__qr > span:nth-child(20),
+.slab-scanner__qr > span:nth-child(22),
+.slab-scanner__qr > span:nth-child(24) {
+  background: transparent;
+}
+
+/* Drag-over state — driven by the same React `dragging` state that
+   toggled .scanner-beam--dragover before. We reuse the modifier class
+   verbatim per the v2 brief; the slab interprets it through these
+   slab-scoped selectors. */
+.slab-scanner.scanner-beam--dragover {
+  border-color: #e7c98a;
+  box-shadow: 0 0 50px rgba(201,169,110,0.35),
+              inset 0 0 30px rgba(201,169,110,0.08);
+}
+.slab-scanner.scanner-beam--dragover .slab-scanner__window {
+  border-color: #e7c98a;
+}
+.slab-scanner.scanner-beam--dragover .slab-scanner__bracket {
+  width: 20px;
+  height: 20px;
+}
+.slab-scanner.scanner-beam--dragover .slab-scanner__window::before {
+  animation-duration: 1.4s;
+  background: linear-gradient(90deg,
+              transparent,
+              #fff8e0 30%,
+              #ffffff 50%,
+              #fff8e0 70%,
+              transparent);
+  box-shadow: 0 0 24px #ffffff, 0 0 48px rgba(231,201,138,0.9);
+}
+
+/* ── Photo tips — three dark cards below the slab (idle-empty only) */
+.slab-scanner-tips {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  max-width: 380px;
+  margin: 24px auto 0;
+}
+@media (min-width: 768px) {
+  .slab-scanner-tips {
+    grid-template-columns: repeat(3, 1fr);
+    max-width: 100%;
+  }
+}
+.slab-scanner-tip {
+  padding: 20px 18px;
+  background: rgba(20,16,11,0.45);
+  border: 1px solid rgba(201,169,110,0.2);
+  border-radius: 3px;
+  transition: background 200ms ease-out, border-color 200ms ease-out;
+}
+.slab-scanner-tip:hover {
+  background: rgba(30,24,17,0.55);
+  border-color: rgba(201,169,110,0.45);
+}
+.slab-scanner-tip__num {
+  font-family: var(--v2-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: #c9a96e;
+  margin: 0 0 8px 0;
+}
+.slab-scanner-tip__title {
+  font-family: var(--v2-font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 17px;
+  line-height: 1.25;
+  color: #f5efe4;
+  margin: 0 0 6px 0;
+}
+.slab-scanner-tip__body {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(245,239,228,0.55);
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slab-scanner,
+  .slab-scanner__window::before,
+  .slab-scanner__status-dot {
+    animation: none;
+  }
+  .slab-scanner {
+    transition: none;
+    box-shadow: 0 0 40px rgba(201,169,110,0.20),
+                inset 0 0 25px rgba(201,169,110,0.06);
+  }
+  .slab-scanner:hover { transform: none; }
+  .slab-scanner__window::before {
+    top: 50%;
+    opacity: 1;
+  }
+  .slab-scanner__status-dot { opacity: 0.65; }
+  .slab-scanner__bracket { transition: none; }
+  .slab-scanner-tip { transition: none; }
+}
