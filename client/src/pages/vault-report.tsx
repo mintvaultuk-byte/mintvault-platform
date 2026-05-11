@@ -197,7 +197,7 @@ function HeroSection({ report }: { report: VaultReport }) {
                         fontSize: "clamp(72px, 16vw, 112px)",
             fontWeight: 900,
             lineHeight: 1,
-            color: isBlackLabel ? "#D4AF37" : "#D9A300",
+            color: isBlackLabel ? "#FFCB05" : "#D9A300",
             transform: gradeReady ? "scale(1)" : "scale(0.6)",
             opacity: gradeReady ? 1 : 0,
             transition: "transform 1.1s cubic-bezier(0.34,1.56,0.64,1) 0.1s, opacity 0.6s ease 0.1s",

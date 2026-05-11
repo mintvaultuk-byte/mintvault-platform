@@ -32,16 +32,16 @@ interface Props {
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function subgradeColor(g: number): string {
-  // Black Label tier accent — leave as #D4AF37 pending Black Label review (deferred to PR #88).
-  if (g >= 10) return "#D4AF37";
+  // Black Label tier accent — PR #88 swaps to Pikachu Yellow.
+  if (g >= 10) return "#FFCB05";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
 }
 
 function overallBg(g: number): string {
-  // Grade 9-10 premium-tier ramp — couples visually with Black Label (deferred to PR #88).
-  if (g >= 9)   return "from-[#D4AF37] to-[#B8960C]";
+  // Grade 9-10 premium-tier ramp — PR #88 swaps to Pikachu Yellow palette.
+  if (g >= 9)   return "from-[#FFCB05] to-[#D9A300]";
   if (g >= 7)   return "from-[#888888] to-[#555555]";
   if (g >= 5)   return "from-[#B87333] to-[#8B4513]";
   return "from-[#444444] to-[#222222]";
@@ -97,11 +97,11 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Black Label candidate — accent preserved at #D4AF37 pending Black Label review (PR #88). */}
+      {/* Black Label candidate — PR #88 swaps to Pikachu Yellow. */}
       {isBlack && (
-        <div className="flex items-center justify-center gap-2 border border-[#D4AF37]/50 rounded-lg px-3 py-2 bg-[#D4AF37]/10 animate-pulse">
-          <Star size={14} className="text-[#D4AF37] fill-[#D4AF37]" />
-          <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Black Label Candidate</span>
+        <div className="flex items-center justify-center gap-2 border border-[#FFCB05]/50 rounded-lg px-3 py-2 bg-[#FFCB05]/10 animate-pulse">
+          <Star size={14} className="text-[#FFCB05] fill-[#FFCB05]" />
+          <span className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Black Label Candidate</span>
         </div>
       )}
 

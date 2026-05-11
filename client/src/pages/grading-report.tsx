@@ -291,8 +291,8 @@ export default function GradingReportPage() {
           <p className="text-[#FFCB05] text-[10px] font-bold uppercase tracking-[0.2em]">MintVault UK</p>
           <p className={`text-xs font-bold uppercase tracking-widest ${t.textSec}`}>Digital Grading Report</p>
           <p className={`font-mono font-bold text-lg ${t.text}`}>{cert.certId}</p>
-          {/* Line is Black-Label-conditional, deferred to PR #88 — keeps #D4AF37 hairline. */}
-          <div className={`mt-3 h-px ${isBlack ? "bg-[#D4AF37]/20" : "bg-[#D4AF37]/30"}`} />
+          {/* PR #88 — Black-Label hairline swapped to Pikachu Yellow. */}
+          <div className={`mt-3 h-px ${isBlack ? "bg-[#FFCB05]/20" : "bg-[#FFCB05]/30"}`} />
         </div>
 
         {/* Download + defect controls */}
@@ -378,9 +378,9 @@ export default function GradingReportPage() {
               <Star size={14} className="fill-[#FFCB05]" />
             </div>
           )}
-          {/* Black-Label-conditional border + glow, deferred to PR #88. */}
-          <div className={`rounded-2xl p-8 text-center border-2 ${isBlack ? "border-[#D4AF37]/40 bg-[#111111]" : "border-[#E8E4DC] bg-white"}`}
-            style={isBlack ? { boxShadow: "0 0 40px rgba(212,175,55,0.15)" } : {}}>
+          {/* PR #88 — Black-Label-conditional border + glow swapped to Pikachu Yellow. */}
+          <div className={`rounded-2xl p-8 text-center border-2 ${isBlack ? "border-[#FFCB05]/40 bg-[#111111]" : "border-[#E8E4DC] bg-white"}`}
+            style={isBlack ? { boxShadow: "0 0 40px rgba(255,203,5,0.15)" } : {}}>
             <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${t.textMut}`}>Overall Grade</p>
             <p className="text-8xl font-black leading-none" style={{ color: "#FFCB05" }}>{grade.overall}</p>
             <p className={`text-xl font-bold uppercase tracking-widest mt-2 ${t.text}`}>{grade.label}</p>
