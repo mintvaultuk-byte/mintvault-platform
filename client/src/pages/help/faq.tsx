@@ -1,15 +1,24 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import { COMPANY, formatPostalAddress } from "@shared/company";
 
 interface FAQItem { q: string; a: string; }
 interface FAQGroup { category: string; items: FAQItem[]; }
+
+// Canonical postal address as a single-line string for inline copy.
+// Sourced from shared/company.ts — update postalAddress there to update
+// every customer-facing surface in lockstep.
+const POSTAL_ADDRESS_INLINE = formatPostalAddress(COMPANY.postalAddress, {
+  multiline: false,
+  includeDisplayName: true,
+});
 
 const FAQ_DATA: FAQGroup[] = [
   {
     category: "Submission",
     items: [
-      { q: "How do I submit cards for grading?", a: "Choose your service tier on our Pricing page, then click Submit Cards. You'll receive a submission reference number. Place each card in a penny sleeve and semi-rigid card saver, pack securely, and post to MintVault UK, Rochester, Kent, including your order number inside." },
+      { q: "How do I submit cards for grading?", a: `Choose your service tier on our Pricing page, then click Submit Cards. You'll receive a submission reference number. Place each card in a penny sleeve and semi-rigid card saver, pack securely, and post to ${POSTAL_ADDRESS_INLINE}, including your order number inside.` },
       { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. Black Label is a free automatic upgrade when every subgrade scores a 10 — no separate tier or fee." },
       { q: "How much does grading cost?", a: "Vault Queue grading is £19 per card. Standard is £25 per card. Express is £45 per card. Full pricing including bulk discounts is on our Pricing page." },
       { q: "What payment methods do you accept?", a: "We accept all major credit and debit cards via Stripe. Payment is taken at the time of submission. We do not currently accept bank transfer or PayPal." },

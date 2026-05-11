@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Mail, MapPin, Clock, Instagram, Facebook } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import { COMPANY, formatPostalAddress } from "@shared/company";
 
 export default function ContactPage() {
   const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
@@ -157,9 +158,13 @@ export default function ContactPage() {
                     <MapPin size={15} className="text-[#B8960C]" />
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-[#888] mb-1">Location</p>
-                    <p className="text-sm text-[#1A1A1A] font-medium">Rochester, Kent</p>
-                    <p className="text-sm text-[#666666]">United Kingdom</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-[#888] mb-1">Postal address</p>
+                    <p className="text-sm text-[#1A1A1A] font-medium">{COMPANY.postalAddress.displayName}</p>
+                    {formatPostalAddress(COMPANY.postalAddress, { multiline: true, includeDisplayName: false })
+                      .split("\n")
+                      .map((line, i) => (
+                        <p key={i} className="text-sm text-[#666666]">{line}</p>
+                      ))}
                   </div>
                 </div>
                 <div className="flex items-start gap-3">

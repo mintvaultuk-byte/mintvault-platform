@@ -1,5 +1,14 @@
 import { Resend } from "resend";
 import { APP_BASE_URL } from "./app-url";
+import { COMPANY, formatPostalAddress } from "@shared/company";
+
+// Pre-formatted postal address as HTML <br />-joined block. Sourced from
+// the canonical record on shared/company.ts so any address change updates
+// every email template in lockstep.
+const POSTAL_ADDRESS_HTML = formatPostalAddress(COMPANY.postalAddress, {
+  multiline: true,
+  includeDisplayName: true,
+}).split("\n").join("<br />");
 
 const FROM_EMAIL = "MintVault UK <noreply@mintvaultuk.com>";
 const FALLBACK_FROM = "MintVault UK <onboarding@resend.dev>";
@@ -126,7 +135,13 @@ ${crossoverRows}
 <ol style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders inside a padded envelope or box.</li>
 <li style="margin-bottom:8px;">Include a note with your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
-<li style="margin-bottom:8px;">Post via tracked and insured delivery to the address shown on your packing slip.</li>
+<li style="margin-bottom:8px;">Post via tracked and insured delivery to:</li>
+</ol>
+<div style="margin:8px 0 16px 24px;padding:12px 16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-family:Menlo,monospace;font-size:13px;line-height:1.6;">
+${POSTAL_ADDRESS_HTML}
+</div>
+<p style="color:#999;font-size:12px;margin:0 0 16px 24px;">Also printed on your packing slip — please include the slip inside the parcel.</p>
+<ol start="4" style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">We will confirm receipt and begin grading.</li>
 </ol>
 ${data.labelToken ? `
@@ -189,8 +204,12 @@ export async function sendSubmissionConfirmationV2(data: {
 <ol style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">Pack your cards securely using rigid card savers or top loaders.</li>
 <li style="margin-bottom:8px;">Include your Submission ID: <strong style="color:#D4AF37;">${data.submissionId}</strong></li>
-<li style="margin-bottom:8px;">Post via tracked and insured delivery.</li>
+<li style="margin-bottom:8px;">Post via tracked and insured delivery to:</li>
 </ol>
+<div style="margin:8px 0 16px 24px;padding:12px 16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-family:Menlo,monospace;font-size:13px;line-height:1.6;">
+${POSTAL_ADDRESS_HTML}
+</div>
+<p style="color:#999;font-size:12px;margin:0 0 16px 24px;">Also printed on your packing slip — please include the slip inside the parcel.</p>
 ${data.labelToken ? `
 <p style="margin-top:24px;">
 <a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
