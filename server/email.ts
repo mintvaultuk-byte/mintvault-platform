@@ -89,6 +89,80 @@ function trackingUrl(submissionId: string): string {
   return `${base}/track`;
 }
 
+/** HTML-escape a string for safe inclusion in email bodies. Preserves
+ *  line breaks by converting \n → <br />. Used by sendContactInquiry to
+ *  render free-form customer text without HTML injection risk. */
+function escapeHtmlForEmail(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\r?\n/g, "<br />");
+}
+
+const CONTACT_TOPIC_LABELS: Record<string, string> = {
+  "submission":         "Submission enquiry",
+  "grading":            "Grading question",
+  "cert-vault":         "Certificate / Vault",
+  "ownership":          "Ownership registry",
+  "returns-shipping":   "Returns & shipping",
+  "payment":            "Payment",
+  "other":              "Other",
+};
+
+/**
+ * Send a customer contact-form submission to the configured inbox.
+ *
+ * To: CONTACT_INBOX_EMAIL env var, fallback hello@mintvaultuk.com.
+ * From: getFromEmail() (verified Resend sender).
+ * Reply-To: data.email so the inbox operator can reply directly.
+ *
+ * Throws on Resend failure so the calling route can record the error
+ * against the contact_inquiries row.
+ */
+export async function sendContactInquiry(data: {
+  name: string;
+  email: string;
+  topic: string;
+  message: string;
+  submittedAt: Date;
+  inquiryId?: number;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+
+  const inbox = process.env.CONTACT_INBOX_EMAIL || "hello@mintvaultuk.com";
+  const topicLabel = CONTACT_TOPIC_LABELS[data.topic] || data.topic;
+  const safeName    = escapeHtmlForEmail(data.name);
+  const safeEmail   = escapeHtmlForEmail(data.email);
+  const safeMessage = escapeHtmlForEmail(data.message);
+  const submittedAtFmt = data.submittedAt.toISOString();
+
+  const body = `
+<p style="color:#ccc;font-size:13px;margin:0 0 16px 0;">New contact-form submission via mintvaultuk.com/help/contact.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:120px;">From</td><td style="padding:8px 0;color:#fff;">${safeName} &lt;${safeEmail}&gt;</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Topic</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${topicLabel}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Submitted</td><td style="padding:8px 0;color:#fff;font-family:Menlo,monospace;font-size:12px;">${submittedAtFmt}</td></tr>
+${data.inquiryId != null ? `<tr><td style="padding:8px 0;color:#999;">Inquiry ID</td><td style="padding:8px 0;color:#fff;font-family:Menlo,monospace;font-size:12px;">#${data.inquiryId}</td></tr>` : ""}
+</table>
+<h3 style="color:#D4AF37;font-size:14px;margin:24px 0 8px 0;">MESSAGE</h3>
+<div style="padding:16px;border:1px solid #333;border-radius:6px;background:rgba(255,255,255,0.03);color:#fff;font-size:13px;line-height:1.6;">
+${safeMessage}
+</div>
+<p style="color:#666;font-size:11px;margin-top:24px;">Reply directly to this email — the Reply-To header is set to the customer's address.</p>`;
+
+  return sendViaResend(resend, {
+    from: getFromEmail(),
+    replyTo: data.email,
+    to: inbox,
+    subject: `MintVault Contact: [${topicLabel}] — from ${data.name}`,
+    html: baseHtml("Customer Contact", body),
+  });
+}
+
 const SERVICE_TYPE_LABELS: Record<string, string> = {
   grading: "Card Grading",
   reholder: "Reholder",

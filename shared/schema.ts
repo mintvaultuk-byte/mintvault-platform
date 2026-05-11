@@ -125,6 +125,28 @@ export const loginAttempts = pgTable("login_attempts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Customer contact-form inbox. Every /help/contact submission writes a row
+// here BEFORE the Resend send attempt — guarantees the message survives
+// even if email delivery fails. email_sent_at is set on Resend success;
+// email_error captures the failure message for triage. Soft-delete only.
+export const contactInquiries = pgTable("contact_inquiries", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  topic: text("topic").notNull(),
+  message: text("message").notNull(),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+  emailSentAt: timestamp("email_sent_at"),
+  emailError: text("email_error"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  deletedAt: timestamp("deleted_at"),
+});
+
+export type ContactInquiry = typeof contactInquiries.$inferSelect;
+export const CONTACT_TOPICS = ["submission", "grading", "cert-vault", "ownership", "returns-shipping", "payment", "other"] as const;
+export type ContactTopic = typeof CONTACT_TOPICS[number];
+
 export const submissions = pgTable("submissions", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull(),
