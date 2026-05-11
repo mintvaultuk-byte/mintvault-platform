@@ -80,7 +80,7 @@ export default function PricingV2() {
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
             <p
               className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#D4AF37" }}
+              style={{ color: "#FFCB05" }}
             >
               Est. Kent &middot; Pricing
             </p>
@@ -153,8 +153,8 @@ export default function PricingV2() {
                       padding: "48px 40px",
                       backgroundColor: "var(--v2-paper)",
                       border: d.featured
-                        ? "1px solid rgba(212, 175, 55, 0.6)"
-                        : "1px solid rgba(212, 175, 55, 0.25)",
+                        ? "1px solid rgba(255,203,5, 0.6)"
+                        : "1px solid rgba(255,203,5, 0.25)",
                     }}
                   >
                     {d.featured && (
@@ -239,7 +239,7 @@ export default function PricingV2() {
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
               className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] no-text-shadow mb-3"
-              style={{ color: "#D4AF37" }}
+              style={{ color: "#FFCB05" }}
             >
               Black Label &middot; Earned, not sold
             </p>

@@ -145,18 +145,18 @@ function SubmissionProgress({ sub }: { sub: CustomerSubmission }) {
           <div key={step.key} className="flex items-center">
             <div className="flex flex-col items-center min-w-[42px]">
               <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] border transition-all ${
-                active ? "border-[#D4AF37] bg-[#D4AF37]/20 text-[#D4AF37] ring-2 ring-[#D4AF37]/30 ring-offset-1"
-                : done ? "border-[#D4AF37] bg-[#D4AF37]/15 text-[#D4AF37]"
+                active ? "border-[#FFCB05] bg-[#FFCB05]/20 text-[#FFCB05] ring-2 ring-[#FFCB05]/30 ring-offset-1"
+                : done ? "border-[#FFCB05] bg-[#FFCB05]/15 text-[#FFCB05]"
                 : "border-[#E0DBD0] bg-transparent text-[#BBBBBB]"
               }`}>
-                {done ? <Check size={10} /> : active ? <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" /> : <div className="w-1.5 h-1.5 rounded-full bg-[#D4DC]" />}
+                {done ? <Check size={10} /> : active ? <div className="w-2 h-2 rounded-full bg-[#FFCB05] animate-pulse" /> : <div className="w-1.5 h-1.5 rounded-full bg-[#D4DC]" />}
               </div>
-              <span className={`text-[8px] mt-0.5 tracking-wide uppercase text-center leading-tight ${done || active ? "text-[#B8960C]" : "text-[#AAAAAA]"}`}>
+              <span className={`text-[8px] mt-0.5 tracking-wide uppercase text-center leading-tight ${done || active ? "text-[#FFCB05]" : "text-[#AAAAAA]"}`}>
                 {step.shortLabel}
               </span>
             </div>
             {i < TRACKING_STEPS.length - 1 && (
-              <div className={`h-px w-3 mb-4 flex-shrink-0 ${i < current ? "bg-[#D4AF37]/50" : "bg-[#E0DBD0]"}`} />
+              <div className={`h-px w-3 mb-4 flex-shrink-0 ${i < current ? "bg-[#FFCB05]/50" : "bg-[#E0DBD0]"}`} />
             )}
           </div>
         );
@@ -179,7 +179,7 @@ function SubmissionTimeline({ sub }: { sub: CustomerSubmission }) {
     <div className="mt-4 space-y-1.5">
       {steps.map((s) => (
         <div key={s.label} className="flex items-center gap-2 text-xs">
-          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.done ? "bg-[#D4AF37]" : "bg-[#E0DBD0]"}`} />
+          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.done ? "bg-[#FFCB05]" : "bg-[#E0DBD0]"}`} />
           <span className={s.done ? "text-[#444444]" : "text-[#BBBBBB]"}>{s.label}</span>
           {s.time && <span className="text-[#999999] ml-auto">{fmtDate(s.time)}</span>}
         </div>
@@ -230,11 +230,11 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
   const totalGbp = ((sub.totalAmount ?? 0) / 100).toFixed(2);
 
   return (
-    <div className="border border-[#D4AF37]/20 bg-white rounded-xl overflow-hidden">
+    <div className="border border-[#FFCB05]/20 bg-white rounded-xl overflow-hidden">
       {/* Header */}
       <div className="flex items-start justify-between gap-3 px-4 py-3 bg-[#FAFAF8] border-b border-[#E8E4DC]">
         <div>
-          <span className="font-mono text-[#D4AF37] text-sm font-bold">{sub.submissionId}</span>
+          <span className="font-mono text-[#FFCB05] text-sm font-bold">{sub.submissionId}</span>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className="text-xs text-[#888888]">{sub.cardCount} card{sub.cardCount !== 1 ? "s" : ""}</span>
             <span className="text-[#CCCCCC]">·</span>
@@ -250,7 +250,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
       <div className="px-4 py-3">
         {/* Estimated completion */}
         {sub.estimatedCompletionDate && stepIdx < 6 && (
-          <div className="flex items-center gap-1.5 text-xs text-[#B8960C] bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg px-3 py-2 mb-3">
+          <div className="flex items-center gap-1.5 text-xs text-[#FFCB05] bg-[#FFCB05]/5 border border-[#FFCB05]/20 rounded-lg px-3 py-2 mb-3">
             <Clock size={11} className="shrink-0" />
             <span>Estimated completion: <strong>{fmtDate(sub.estimatedCompletionDate)}</strong></span>
           </div>
@@ -267,7 +267,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                 <a
                   href={`/api/customer/submissions/${sub.submissionId}/packing-slip?token=${sub.packingSlipToken}`}
                   download
-                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#FFCB05]/40 hover:text-[#FFCB05] transition-colors"
                 >
                   <Download size={11} />
                   Packing Slip
@@ -277,7 +277,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                 <a
                   href={`/api/customer/submissions/${sub.submissionId}/shipping-label?token=${sub.shippingLabelToken}`}
                   download
-                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
+                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#FFCB05]/40 hover:text-[#FFCB05] transition-colors"
                 >
                   <Download size={11} />
                   Shipping Label
@@ -295,13 +295,13 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                   value={trackingInput}
                   onChange={e => setTrackingInput(e.target.value)}
                   placeholder="e.g. AB123456789GB"
-                  className="flex-1 border border-[#E8E4DC] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="flex-1 border border-[#E8E4DC] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FFCB05] transition-colors"
                 />
                 <button
                   onClick={() => trackingMutation.mutate(trackingInput.trim())}
                   disabled={trackingMutation.isPending || !trackingInput.trim()}
                   className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-50 flex items-center gap-1 transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                  style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
                 >
                   {trackingMutation.isPending
                     ? <Loader2 size={10} className="animate-spin" />
@@ -326,7 +326,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                   <img
                     src={url}
                     alt={`Receipt photo ${i + 1}`}
-                    className="w-16 h-16 object-cover rounded-lg border border-[#E8E4DC] hover:border-[#D4AF37]/50 transition-colors"
+                    className="w-16 h-16 object-cover rounded-lg border border-[#E8E4DC] hover:border-[#FFCB05]/50 transition-colors"
                   />
                 </a>
               ))}
@@ -341,7 +341,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
               href={`https://www.royalmail.com/track-your-item#/tracking-results/${retTracking}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-xs font-semibold text-[#B8960C] border border-[#D4AF37]/30 bg-[#D4AF37]/5 rounded-lg px-3 py-2 hover:bg-[#D4AF37]/10 transition-colors"
+              className="inline-flex items-center gap-2 text-xs font-semibold text-[#FFCB05] border border-[#FFCB05]/30 bg-[#FFCB05]/5 rounded-lg px-3 py-2 hover:bg-[#FFCB05]/10 transition-colors"
             >
               <Truck size={12} />
               Track Return Parcel
@@ -371,9 +371,9 @@ function GradeBadge({ cert }: { cert: CustomerCert }) {
   const grade = cert.gradeOverall;
   if (!grade) return <span className="text-[#999999] text-xs">—</span>;
   const num = parseFloat(grade);
-  const colour = num >= 10 ? "text-emerald-500" : num >= 9 ? "text-[#D4AF37]" : num >= 8 ? "text-blue-500" : "text-[#999999]";
+  const colour = num >= 10 ? "text-emerald-500" : num >= 9 ? "text-[#FFCB05]" : num >= 8 ? "text-blue-500" : "text-[#999999]";
   return (
-    <span className={`font-bold ${isNonNum ? "text-[#D4AF37] text-xs" : `${colour} text-lg`}`}>
+    <span className={`font-bold ${isNonNum ? "text-[#FFCB05] text-xs" : `${colour} text-lg`}`}>
       {isNonNum ? grade : num}
     </span>
   );
@@ -401,7 +401,7 @@ function LoginForm() {
   if (sent) {
     return (
       <div className="max-w-md mx-auto text-center py-16 px-4">
-        <CheckCircle className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
+        <CheckCircle className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
         <h2 className="text-xl font-sans font-bold text-[#1A1A1A] tracking-tight mb-2">Check your inbox</h2>
         <p className="text-[#666666] text-sm">
           We sent a login link to <strong className="text-[#1A1A1A]">{email}</strong>. Click it to access your dashboard.
@@ -416,13 +416,13 @@ function LoginForm() {
   return (
     <div className="max-w-md mx-auto py-16 px-4">
       <div className="text-center mb-8">
-        <LayoutDashboard className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
+        <LayoutDashboard className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
         <h1 className="text-2xl font-sans font-bold text-[#1A1A1A] tracking-tight mb-2">Customer Dashboard</h1>
         <p className="text-[#666666] text-sm">
           Enter your email to receive a secure login link. No password needed.
         </p>
       </div>
-      <div className="border border-[#D4AF37]/20 bg-white rounded-xl p-6 shadow-sm">
+      <div className="border border-[#FFCB05]/20 bg-white rounded-xl p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm text-[#444444] mb-1.5">Email address</label>
@@ -432,7 +432,7 @@ function LoginForm() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="your@email.com"
               required
-              className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2.5 text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37] transition-colors text-sm"
+              className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2.5 text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#FFCB05] transition-colors text-sm"
             />
             <p className="text-xs text-[#999999] mt-1">Use the email you submitted cards with.</p>
           </div>
@@ -532,7 +532,7 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
   });
 
   if (isLoading) {
-    return <div className="h-28 animate-pulse bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10 mb-6" />;
+    return <div className="h-28 animate-pulse bg-[#FFCB05]/5 rounded-xl border border-[#FFCB05]/10 mb-6" />;
   }
 
   const isMember = vcMe?.tier && vcMe?.status && (vcMe.status === "active" || vcMe.status === "trialing");
@@ -545,10 +545,10 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
 
   if (!isMember) {
     return (
-      <div className="border border-[#D4AF37]/30 bg-white rounded-xl p-5 mb-6">
+      <div className="border border-[#FFCB05]/30 bg-white rounded-xl p-5 mb-6">
         <div className="flex items-center gap-2 mb-1">
-          <Shield size={16} className="text-[#D4AF37]" />
-          <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Join Vault Club</h2>
+          <Shield size={16} className="text-[#FFCB05]" />
+          <h2 className="text-sm font-bold text-[#FFCB05] uppercase tracking-widest">Join Vault Club</h2>
         </div>
         <p className="text-xs text-[#888888] mb-4">
           Get 10% off grading, monthly AI Pre-Grade credits, and your own activated Showroom.
@@ -556,7 +556,7 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
         <Link href="/vault-club">
           <button
             className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all active:scale-95"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
           >
             View Vault Club Plans →
           </button>
@@ -565,8 +565,8 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
     );
   }
 
-  const tierColour: Record<string, string> = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#D4AF37" };
-  const colour = vcMe!.tier ? tierColour[vcMe!.tier] : "#D4AF37";
+  const tierColour: Record<string, string> = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#FFCB05" };
+  const colour = vcMe!.tier ? tierColour[vcMe!.tier] : "#FFCB05";
   const statusLabel: Record<string, string> = { active: "Active", trialing: "Free Trial", past_due: "Payment Due", grace: "Grace Period" };
   const discountLabel: Record<string, string> = { silver: "10%" };
 
@@ -591,12 +591,12 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
           <button
             onClick={() => portalMutation.mutate()}
             disabled={portalMutation.isPending}
-            className="text-xs text-[#666666] border border-[#E8E4DC] bg-white rounded-lg px-3 py-1.5 font-semibold hover:border-[#D4AF37]/40 transition-colors disabled:opacity-60"
+            className="text-xs text-[#666666] border border-[#E8E4DC] bg-white rounded-lg px-3 py-1.5 font-semibold hover:border-[#FFCB05]/40 transition-colors disabled:opacity-60"
           >
             {portalMutation.isPending ? <Loader2 size={11} className="animate-spin inline" /> : "Manage"}
           </button>
           <Link href="/vault-club">
-            <button className="text-xs text-[#B8960C] border border-[#D4AF37]/30 bg-[#D4AF37]/5 rounded-lg px-3 py-1.5 font-semibold hover:bg-[#D4AF37]/10 transition-colors">
+            <button className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 bg-[#FFCB05]/5 rounded-lg px-3 py-1.5 font-semibold hover:bg-[#FFCB05]/10 transition-colors">
               View Club
             </button>
           </Link>
@@ -606,20 +606,20 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
       {/* Quick stats */}
       <div className="grid grid-cols-3 gap-2">
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
-          <Zap size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
+          <Zap size={12} className="text-[#FFCB05] mx-auto mb-0.5" />
           <p className="text-sm font-black text-[#1A1A1A]">{vcMe!.ai_credits_balance}</p>
           <p className="text-[10px] text-[#AAAAAA]">AI Credits</p>
           <div className="mt-1.5 h-1 bg-[#F0EDE6] rounded-full overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${creditPercent}%`, background: "linear-gradient(90deg,#B8960C,#D4AF37)" }} />
+            <div className="h-full rounded-full" style={{ width: `${creditPercent}%`, background: "linear-gradient(90deg,#FFCB05,#FFCB05)" }} />
           </div>
         </div>
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
-          <TrendingDown size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
+          <TrendingDown size={12} className="text-[#FFCB05] mx-auto mb-0.5" />
           <p className="text-sm font-black text-[#1A1A1A]">{(vcMe!.tier && discountLabel[vcMe!.tier]) || "—"}</p>
           <p className="text-[10px] text-[#AAAAAA]">Discount</p>
         </div>
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
-          <Award size={12} className="text-[#D4AF37] mx-auto mb-0.5" />
+          <Award size={12} className="text-[#FFCB05] mx-auto mb-0.5" />
           <p className="text-[10px] text-[#1A1A1A] font-semibold">{renewsDate || "—"}</p>
           <p className="text-[10px] text-[#AAAAAA]">Renews</p>
         </div>
@@ -698,7 +698,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
   };
 
   if (showroomLoading) {
-    return <div className="h-28 animate-pulse bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10 mb-6" />;
+    return <div className="h-28 animate-pulse bg-[#FFCB05]/5 rounded-xl border border-[#FFCB05]/10 mb-6" />;
   }
 
   const hasClaimed = showroomMe?.username;
@@ -710,10 +710,10 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
       // init bio from existing
     }
     return (
-      <div className="border border-[#D4AF37]/30 bg-white rounded-xl p-5 mb-6">
+      <div className="border border-[#FFCB05]/30 bg-white rounded-xl p-5 mb-6">
         <div className="flex items-center gap-2 mb-4">
-          <Globe size={16} className="text-[#D4AF37]" />
-          <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Your Showroom</h2>
+          <Globe size={16} className="text-[#FFCB05]" />
+          <h2 className="text-sm font-bold text-[#FFCB05] uppercase tracking-widest">Your Showroom</h2>
         </div>
 
         {/* Link */}
@@ -722,7 +722,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             href={`/showroom/${showroomMe!.username}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-bold text-[#B8960C] hover:text-[#D4AF37] transition-colors"
+            className="text-sm font-bold text-[#FFCB05] hover:text-[#FFCB05] transition-colors"
           >
             {showroomUrl}
           </a>
@@ -736,7 +736,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
           <a href={`/showroom/${showroomMe!.username}`} target="_blank" rel="noopener noreferrer">
             <button
               className="px-4 py-2 rounded-lg text-xs font-bold text-[#1A1400] transition-all"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
             >
               View Showroom
             </button>
@@ -762,14 +762,14 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             onChange={e => setBio(e.target.value.slice(0, 280))}
             placeholder="Tell collectors about yourself…"
             rows={2}
-            className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
+            className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#FFCB05] transition-colors resize-none"
           />
           {bioError && <p className="text-xs text-red-600 mt-1">{bioError}</p>}
           <button
             onClick={() => bioMutation.mutate()}
             disabled={bioMutation.isPending}
             className="mt-2 px-4 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-60 flex items-center gap-1 transition-all"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
           >
             {bioMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : bioSaved ? <Check size={11} /> : null}
             {bioSaved ? "Saved" : "Save Bio"}
@@ -787,13 +787,13 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
   };
 
   return (
-    <div className="border border-[#D4AF37]/30 bg-white rounded-xl p-5 mb-6">
+    <div className="border border-[#FFCB05]/30 bg-white rounded-xl p-5 mb-6">
       <div className="flex items-center gap-2 mb-1">
-        <Sparkles size={16} className="text-[#D4AF37]" />
-        <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Claim Your Showroom</h2>
+        <Sparkles size={16} className="text-[#FFCB05]" />
+        <h2 className="text-sm font-bold text-[#FFCB05] uppercase tracking-widest">Claim Your Showroom</h2>
       </div>
       <p className="text-xs text-[#888888] mb-4">
-        Get your own public collection page at <span className="text-[#B8960C] font-semibold">mintvaultuk.com/showroom/[your-name]</span>. Show off your verified graded cards to the world.
+        Get your own public collection page at <span className="text-[#FFCB05] font-semibold">mintvaultuk.com/showroom/[your-name]</span>. Show off your verified graded cards to the world.
       </p>
 
       <div className="space-y-3">
@@ -806,7 +806,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
               onChange={e => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
               placeholder="your-username"
               maxLength={20}
-              className="w-full pl-[76px] pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full pl-[76px] pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
             />
           </div>
           {usernameInput.length >= 3 && checkResult && (
@@ -830,7 +830,7 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
           onClick={() => claimMutation.mutate()}
           disabled={claimMutation.isPending || !checkResult?.available}
           className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
-          style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+          style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
         >
           {claimMutation.isPending && <Loader2 size={13} className="animate-spin" />}
           Claim Username
@@ -985,7 +985,7 @@ export default function DashboardPage() {
   if (meLoading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
+        <Loader2 className="w-8 h-8 text-[#FFCB05] animate-spin" />
       </div>
     );
   }
@@ -1070,15 +1070,15 @@ export default function DashboardPage() {
         {/* ── Section 1: My Submissions ──────────────────────────────────── */}
         <section className="mb-8">
           <div className="flex items-center gap-2 mb-4">
-            <Package size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">My Submissions</h2>
+            <Package size={16} className="text-[#FFCB05]" />
+            <h2 className="text-sm font-bold text-[#FFCB05] uppercase tracking-widest">My Submissions</h2>
           </div>
 
           {subsLoading ? (
-            <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
+            <div className="animate-pulse h-28 bg-[#FFCB05]/5 rounded-xl border border-[#FFCB05]/10" />
           ) : !submissions?.length ? (
             <div className="border border-white/10 rounded-xl p-8 text-center">
-              <Package size={32} className="text-[#D4AF37]/20 mx-auto mb-3" />
+              <Package size={32} className="text-[#FFCB05]/20 mx-auto mb-3" />
               <p className="text-white/60 text-sm mb-1">You haven't submitted any cards yet.</p>
               <Link href="/submit">
                 <button className="btn-gold mt-4 px-5 py-2 rounded-lg text-[#1A1400] text-xs font-bold tracking-wide">
@@ -1098,12 +1098,12 @@ export default function DashboardPage() {
         {/* ── Section 2: Graded Cards ────────────────────────────────────── */}
         <section className="mb-8">
           <div className="flex items-center gap-2 mb-4">
-            <Award size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Your Cards</h2>
+            <Award size={16} className="text-[#FFCB05]" />
+            <h2 className="text-sm font-bold text-[#FFCB05] uppercase tracking-widest">Your Cards</h2>
           </div>
 
           {certsLoading ? (
-            <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
+            <div className="animate-pulse h-28 bg-[#FFCB05]/5 rounded-xl border border-[#FFCB05]/10" />
           ) : !linkedCerts.length ? (
             <div className="border border-white/10 rounded-xl p-6 text-center">
               <p className="text-white/60 text-sm">No graded cards found for this email yet.</p>
@@ -1155,7 +1155,7 @@ export default function DashboardPage() {
                             </p>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <div className="text-2xl font-medium text-[#D4AF37] leading-none">
+                            <div className="text-2xl font-medium text-[#FFCB05] leading-none">
                               {cert.gradeOverall ?? "–"}
                             </div>
                             <div className="text-[9px] tracking-widest text-[#888] font-medium mt-1">
@@ -1176,7 +1176,7 @@ export default function DashboardPage() {
 
                         {/* Footer: cert ID + issue date */}
                         <div className="mt-auto pt-3 flex items-center justify-between">
-                          <span className="text-[11px] text-[#B8960C] font-medium tracking-wide group-hover:text-[#D4AF37]">
+                          <span className="text-[11px] text-[#FFCB05] font-medium tracking-wide group-hover:text-[#FFCB05]">
                             {cert.certId} <ExternalLink size={10} className="inline" />
                           </span>
                           <span className="text-[10px] text-[#888]">
@@ -1198,7 +1198,7 @@ export default function DashboardPage() {
                           href={`/logbook/${cert.certId}/owner.pdf`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[12px] text-[#B8960C] hover:text-[#D4AF37] font-medium inline-flex items-center gap-1.5"
+                          className="text-[12px] text-[#FFCB05] hover:text-[#FFCB05] font-medium inline-flex items-center gap-1.5"
                         >
                           <Lock size={11} />
                           Download Owner Copy
@@ -1207,7 +1207,7 @@ export default function DashboardPage() {
                           Includes your reference number — keep private
                         </span>
                         <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
-                          <a className="text-[11px] text-[#B8960C] hover:bg-[#FAF7F0] border border-[#D4AF37]/40 rounded-md py-1.5 px-3 font-medium transition-colors inline-flex items-center gap-1.5">
+                          <a className="text-[11px] text-[#FFCB05] hover:bg-[#FAF7F0] border border-[#FFCB05]/40 rounded-md py-1.5 px-3 font-medium transition-colors inline-flex items-center gap-1.5">
                             <ArrowRightLeft size={11} />
                             Transfer
                           </a>

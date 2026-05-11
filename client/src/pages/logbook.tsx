@@ -47,13 +47,13 @@ function titleCase(s: string | null | undefined): string {
 }
 
 function GoldDivider() {
-  return <div className="h-px bg-gradient-to-r from-transparent via-[#D4AF37]/40 to-transparent my-6" />;
+  return <div className="h-px bg-gradient-to-r from-transparent via-[#FFCB05]/40 to-transparent my-6" />;
 }
 
 function SubgradeBox({ label, value }: { label: string; value: number | string | null }) {
   const v = value !== null && value !== undefined ? String(value) : "\u2014";
   const num = typeof value === "number" ? value : parseFloat(String(value));
-  const color = isNaN(num) ? "text-[#888888]" : num >= 10 ? "text-[#D4AF37]" : num >= 8 ? "text-[#16A34A]" : num >= 6 ? "text-[#CA8A04]" : "text-[#DC2626]";
+  const color = isNaN(num) ? "text-[#888888]" : num >= 10 ? "text-[#FFCB05]" : num >= 8 ? "text-[#16A34A]" : num >= 6 ? "text-[#CA8A04]" : "text-[#DC2626]";
   return (
     <div className="text-center">
       <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-1">{label}</p>
@@ -65,7 +65,7 @@ function SubgradeBox({ label, value }: { label: string; value: number | string |
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-8">
-      <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] font-bold mb-4">{title}</h2>
+      <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#FFCB05] font-bold mb-4">{title}</h2>
       <div className="h-px bg-[#E8E4DC] mb-6" />
       {children}
     </div>
@@ -131,7 +131,7 @@ function DefectOverlayPair({
                 data-testid={`defect-circle-${d.id}`}
                 className={`absolute flex items-center justify-center font-bold text-[10px] rounded-full border-2 transition-transform ${
                   sevBorder(d.severity)
-                } ${isHi ? "scale-125 ring-2 ring-[#D4AF37]" : "hover:scale-110"}`}
+                } ${isHi ? "scale-125 ring-2 ring-[#FFCB05]" : "hover:scale-110"}`}
                 style={{
                   left: `${d.x_percent}%`,
                   top: `${d.y_percent}%`,
@@ -190,7 +190,7 @@ export default function LogbookPage() {
   if (isLoading) return (
     <div className="min-h-screen bg-white flex items-center justify-center">
       <div className="text-center">
-        <div className="w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <div className="w-8 h-8 border-2 border-[#FFCB05] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
         <p className="text-[#888888] text-sm">Loading logbook...</p>
       </div>
     </div>
@@ -220,7 +220,7 @@ export default function LogbookPage() {
         {/* Cover Hero */}
         <section className="pt-12 pb-8 px-4">
           <div className="max-w-3xl mx-auto text-center">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-6">MintVault Ownership Logbook</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] text-[#FFCB05] mb-6">MintVault Ownership Logbook</p>
 
             {/* Card images */}
             {(images.front || images.back) && (
@@ -232,7 +232,8 @@ export default function LogbookPage() {
 
             {/* Grade badge */}
             <div className="inline-block mb-4">
-              <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}>
+              <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#FFCB05]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(255,203,5,0.12)" }}>
+                {/* Black Label text colour preserved at #D4AF37 — deferred to PR #88. */}
                 <span className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-500" : "text-[#1A1A1A]"}`}>
                   {safe(grades.overall)}
                 </span>
@@ -251,7 +252,7 @@ export default function LogbookPage() {
             <GoldDivider />
 
             {/* Cert ID */}
-            <p className="font-mono text-lg text-[#D4AF37] tracking-wider">{data.certId}</p>
+            <p className="font-mono text-lg text-[#FFCB05] tracking-wider">{data.certId}</p>
             {provenance.issuedAt && (
               <p className="text-[#888888] text-xs mt-1">Issued {new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
             )}
@@ -262,8 +263,8 @@ export default function LogbookPage() {
         <section className="bg-[#F7F7F5] border-y border-[#E8E4DC] py-4 px-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-[#D4AF37]" />
-              <span className="text-[10px] uppercase tracking-[0.15em] text-[#D4AF37] font-bold">VaultSeal Verified</span>
+              <Shield className="w-4 h-4 text-[#FFCB05]" />
+              <span className="text-[10px] uppercase tracking-[0.15em] text-[#FFCB05] font-bold">VaultSeal Verified</span>
             </div>
             <span className="font-mono text-[10px] text-[#888888]">{verification.signature?.slice(0, 16)}...</span>
           </div>
@@ -367,7 +368,7 @@ export default function LogbookPage() {
                         <div
                           key={d.id}
                           className={`flex items-start gap-3 py-2 border-b transition-colors cursor-pointer ${
-                            isHighlighted ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC]"
+                            isHighlighted ? "border-[#FFCB05]/60 bg-[#FFCB05]/5" : "border-[#E8E4DC]"
                           }`}
                           onClick={() => setHighlightDefectId(isHighlighted ? null : d.id)}
                           data-testid={`defect-row-${d.id}`}
@@ -393,11 +394,11 @@ export default function LogbookPage() {
           {/* Ownership Status */}
           <Section title="Ownership">
             {provenance.ownershipStatus === "unclaimed" ? (
-              <div className="bg-[#FFF9E6] border border-[#D4AF37]/30 rounded-lg p-5 text-center">
-                <p className="text-[#B8960C] text-sm font-bold uppercase tracking-wider mb-2">Unclaimed Certificate</p>
+              <div className="bg-[#FFF9E6] border border-[#FFCB05]/30 rounded-lg p-5 text-center">
+                <p className="text-[#FFCB05] text-sm font-bold uppercase tracking-wider mb-2">Unclaimed Certificate</p>
                 <p className="text-[#888888] text-xs mb-4">This certificate has not been registered to an owner yet.</p>
                 <a href={`/claim?certId=${encodeURIComponent(data.certId)}`}
-                  className="inline-flex items-center gap-2 bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-6 py-2.5 rounded-lg transition-colors">
+                  className="inline-flex items-center gap-2 bg-[#FFCB05] hover:bg-[#FFCB05] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-6 py-2.5 rounded-lg transition-colors">
                   Claim This Certificate
                 </a>
               </div>
@@ -441,7 +442,7 @@ export default function LogbookPage() {
                 <div className="space-y-3">
                   {data.ownership.chain.map(owner => (
                     <div key={owner.ownerNumber} className="flex items-start gap-3">
-                      <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#E8E4DC]"}`} />
+                      <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#FFCB05]" : "border border-[#E8E4DC]"}`} />
                       <div>
                         <p className="text-sm text-[#1A1A1A]">
                           Owner {owner.ownerNumber}
@@ -466,24 +467,24 @@ export default function LogbookPage() {
           {/* Footer — Verification + Download */}
           <div className="text-center py-8">
             <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-xl p-6 mb-6">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] mb-3">Digital Signature</p>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[#FFCB05] mb-3">Digital Signature</p>
               <p className="font-mono text-xs text-[#555555] break-all mb-2">{verification.signature || "\u2014"}</p>
               <p className="text-[10px] text-[#888888]">Cryptographic hash covering certificate ID, card identity, and all grade data. Any modification invalidates this signature.</p>
             </div>
 
             <div className="flex flex-col items-center gap-3">
               <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
+                className="inline-flex items-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
                 <Download className="w-4 h-4" /> Download Logbook PDF
               </a>
               {isOwner && (
                 <>
                   <a href={`/logbook/${data.certId}/owner.pdf`} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors">
+                    className="inline-flex items-center gap-2 border border-[#FFCB05]/40 text-[#FFCB05] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#FFCB05]/10 transition-colors">
                     <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
                   </a>
                   <a href={`/transfer?certId=${encodeURIComponent(data.certId)}`}
-                    className="inline-flex items-center gap-2 border border-[#E8E4DC] text-[#888888] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:border-[#D4AF37]/40 hover:text-[#D4AF37] transition-colors">
+                    className="inline-flex items-center gap-2 border border-[#E8E4DC] text-[#888888] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:border-[#FFCB05]/40 hover:text-[#FFCB05] transition-colors">
                     <ArrowRightLeft className="w-3 h-3" /> Transfer Keepership
                   </a>
                 </>

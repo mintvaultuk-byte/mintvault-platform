@@ -121,15 +121,15 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <SquareStack size={15} className="text-[#D4AF37]" />
+          <SquareStack size={15} className="text-[#FFCB05]" />
           <h3 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest">Grading Queue</h3>
-          <span className="bg-[#D4AF37]/20 text-[#D4AF37] text-[10px] px-1.5 py-0.5 rounded font-bold">{ungradedCount}</span>
+          <span className="bg-[#FFCB05]/20 text-[#FFCB05] text-[10px] px-1.5 py-0.5 rounded font-bold">{ungradedCount}</span>
         </div>
         {sessionActive && (
           <div className="flex items-center gap-3 text-xs">
             <span className="flex items-center gap-1 text-[#333333]">
               <Clock size={11} />
-              Session: <span className="text-[#D4AF37] font-mono font-bold">{formatTime(sessionSeconds)}</span>
+              Session: <span className="text-[#FFCB05] font-mono font-bold">{formatTime(sessionSeconds)}</span>
             </span>
             {currentCertId && (
               <span className="flex items-center gap-1 text-[#333333]">
@@ -149,7 +149,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
           type="button"
           onClick={startSession}
           disabled={queue.length === 0}
-          className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-40 hover:opacity-90"
+          className="flex items-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-40 hover:opacity-90"
         >
           <Play size={13} />
           Start Grading Session
@@ -157,11 +157,11 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
       ) : (
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => goToCard(currentIdx - 1)} disabled={currentIdx <= 0}
-            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
+            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#FFCB05]/40 p-1.5 rounded transition-colors disabled:opacity-30">
             <ChevronLeft size={14} />
           </button>
           <button type="button" onClick={() => goToCard(currentIdx + 1)} disabled={currentIdx >= queue.length - 1}
-            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30">
+            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#FFCB05]/40 p-1.5 rounded transition-colors disabled:opacity-30">
             <ChevronRight size={14} />
           </button>
           <button type="button" onClick={() => { setSessionActive(false); setShowSummary(true); }}
@@ -186,15 +186,15 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
               onClick={() => { onSelectCert(item.id); }}
               className={`w-full text-left rounded-lg px-3 py-2.5 border transition-all text-xs ${
                 item.id === currentCertId
-                  ? "border-[#D4AF37] bg-[#D4AF37]/8 ring-1 ring-[#D4AF37]/30"
-                  : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"
+                  ? "border-[#FFCB05] bg-[#FFCB05]/8 ring-1 ring-[#FFCB05]/30"
+                  : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#FFCB05]/40 hover:bg-white"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-[#888888] text-[9px] font-mono">{item.certId}</span>
-                    {item.id === currentCertId && <span className="text-[#D4AF37] text-[9px] font-bold">● Current</span>}
+                    {item.id === currentCertId && <span className="text-[#FFCB05] text-[9px] font-bold">● Current</span>}
                   </div>
                   <p className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#333333]"}`}>{item.cardName || "Unnamed"}</p>
                   <p className="text-[#555555] text-[10px]">{item.cardSet} · {item.cardGame}</p>

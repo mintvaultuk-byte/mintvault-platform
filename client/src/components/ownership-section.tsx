@@ -116,8 +116,8 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
 
   if (isLoading) {
     return (
-      <div className="border border-[#D4AF37]/20 rounded-lg p-6">
-        <div className="flex items-center gap-2 text-[#D4AF37]/60">
+      <div className="border border-[#FFCB05]/20 rounded-lg p-6">
+        <div className="flex items-center gap-2 text-[#FFCB05]/60">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span className="text-sm">Loading ownership info...</span>
         </div>
@@ -126,11 +126,11 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
   }
 
   return (
-    <div className="border border-[#D4AF37]/20 rounded-lg p-5 space-y-4" data-testid="section-ownership">
+    <div className="border border-[#FFCB05]/20 rounded-lg p-5 space-y-4" data-testid="section-ownership">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-[#D4AF37]" />
-          <h3 className="text-sm font-bold text-[#D4AF37] tracking-wide">OWNERSHIP</h3>
+          <Shield className="w-4 h-4 text-[#FFCB05]" />
+          <h3 className="text-sm font-bold text-[#FFCB05] tracking-wide">OWNERSHIP</h3>
         </div>
         <Badge className={statusColor[data?.ownershipStatus || "unclaimed"] || statusColor.unclaimed} data-testid="badge-ownership-status">
           {data?.ownershipStatus || "unclaimed"}
@@ -146,9 +146,9 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       )}
 
       {/* Ownership Token */}
-      <div className="rounded-md border border-[#D4AF37]/20 bg-[#FAFAF8] p-3 space-y-2">
+      <div className="rounded-md border border-[#FFCB05]/20 bg-[#FAFAF8] p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-[#D4AF37]/70 tracking-widest uppercase">Ownership Token</span>
+          <span className="text-xs font-semibold text-[#FFCB05]/70 tracking-widest uppercase">Ownership Token</span>
           {data?.ownershipToken ? (
             <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400">Active</span>
           ) : (
@@ -158,7 +158,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
         {data?.ownershipToken ? (
           <div className="flex items-center gap-2">
             <code
-              className="flex-1 font-mono text-xs tracking-widest text-[#D4AF37] bg-gray-50 px-3 py-2 rounded border border-[#D4AF37]/30 select-all overflow-x-auto"
+              className="flex-1 font-mono text-xs tracking-widest text-[#FFCB05] bg-gray-50 px-3 py-2 rounded border border-[#FFCB05]/30 select-all overflow-x-auto"
               data-testid="text-ownership-token"
             >
               {data.ownershipToken}
@@ -169,7 +169,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
               onClick={() => {
                 navigator.clipboard.writeText(data.ownershipToken!);
               }}
-              className="border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/15 shrink-0"
+              className="border-[#FFCB05]/40 text-[#FFCB05] hover:bg-[#FFCB05]/15 shrink-0"
               data-testid="button-copy-ownership-token"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -186,14 +186,14 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       </div>
 
       {/* Claim code display */}
-      <div className="rounded-md border border-[#D4AF37]/20 bg-[#FAFAF8] p-3 space-y-2">
+      <div className="rounded-md border border-[#FFCB05]/20 bg-[#FAFAF8] p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-[#D4AF37]/70 tracking-widest uppercase">Claim Code</span>
+          <span className="text-xs font-semibold text-[#FFCB05]/70 tracking-widest uppercase">Claim Code</span>
           <div className="flex items-center gap-1.5">
             {data?.claimCodeUsedAt ? (
               <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400">Used</span>
             ) : data?.hasClaimCode ? (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/10 text-[#D4AF37]">Active</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-[#FFCB05]/10 text-[#FFCB05]">Active</span>
             ) : (
               <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]">None</span>
             )}
@@ -203,7 +203,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
         {visibleCode ? (
           <div className="flex items-center gap-2">
             <code
-              className="flex-1 font-mono text-lg font-bold tracking-[0.2em] text-[#D4AF37] bg-gray-50 px-3 py-2 rounded border border-[#D4AF37]/30 select-all"
+              className="flex-1 font-mono text-lg font-bold tracking-[0.2em] text-[#FFCB05] bg-gray-50 px-3 py-2 rounded border border-[#FFCB05]/30 select-all"
               data-testid="text-visible-claim-code"
             >
               {visibleCode}
@@ -216,7 +216,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
                 setCopiedCode(true);
                 setTimeout(() => setCopiedCode(false), 2000);
               }}
-              className="border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/15 shrink-0"
+              className="border-[#FFCB05]/40 text-[#FFCB05] hover:bg-[#FFCB05]/15 shrink-0"
               data-testid="button-copy-claim-code"
             >
               {copiedCode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -243,7 +243,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           variant="outline"
           onClick={() => regenMutation.mutate()}
           disabled={regenMutation.isPending}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[#FFCB05]/30 text-[#FFCB05] hover:bg-[#FFCB05]/10 text-xs"
           data-testid="button-regenerate-claim-code"
         >
           {regenMutation.isPending ? (
@@ -259,7 +259,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           variant="outline"
           onClick={() => insertMutation.mutate()}
           disabled={insertMutation.isPending}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[#FFCB05]/30 text-[#FFCB05] hover:bg-[#FFCB05]/10 text-xs"
           data-testid="button-print-claim-insert"
         >
           {insertMutation.isPending ? (
@@ -274,7 +274,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           size="sm"
           variant="outline"
           onClick={() => setShowAssign(!showAssign)}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[#FFCB05]/30 text-[#FFCB05] hover:bg-[#FFCB05]/10 text-xs"
           data-testid="button-manual-assign"
         >
           <UserPlus className="w-3 h-3 mr-1.5" />
@@ -283,7 +283,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       </div>
 
       {showAssign && (
-        <div className="border border-[#D4AF37]/10 rounded p-3 space-y-3 bg-[#0a0a0a]">
+        <div className="border border-[#FFCB05]/10 rounded p-3 space-y-3 bg-[#0a0a0a]">
           <Input
             placeholder="Owner email address"
             value={assignEmail}
@@ -303,7 +303,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
               size="sm"
               onClick={() => assignMutation.mutate()}
               disabled={assignMutation.isPending || !assignEmail.trim()}
-              className="bg-[#D4AF37] hover:bg-[#B8962E] text-black text-xs"
+              className="bg-[#FFCB05] hover:bg-[#B8962E] text-black text-xs"
               data-testid="button-confirm-assign"
             >
               {assignMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
@@ -322,7 +322,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       )}
 
       {data?.history && data.history.length > 0 && (
-        <div className="space-y-2 pt-2 border-t border-[#D4AF37]/10">
+        <div className="space-y-2 pt-2 border-t border-[#FFCB05]/10">
           <h4 className="text-xs font-semibold text-[#999999] tracking-wide">HISTORY</h4>
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
             {data.history.map((h) => (

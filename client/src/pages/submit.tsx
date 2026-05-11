@@ -105,10 +105,10 @@ function gameAccentColor(game: string): string {
   if (g.includes("yu-gi-oh") || g.includes("yugioh")) return "#7B2D8B";
   if (g.includes("magic")) return "#1A6FB5";
   if (g.includes("one piece")) return "#E84118";
-  return "#D4AF37";
+  return "#FFCB05";
 }
 
-function StepIndicator({ step, accentColor = "#D4AF37" }: { step: number; accentColor?: string }) {
+function StepIndicator({ step, accentColor = "#FFCB05" }: { step: number; accentColor?: string }) {
   return (
     <div className="flex items-center justify-center gap-1 mb-8">
       {stepLabels.map((label, i) => (
@@ -168,7 +168,7 @@ function Step1Tier({ state, setState, tiers, capacity }: {
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step1-title">
+      <h2 className="text-2xl font-sans font-black text-[#FFCB05] tracking-tight mb-2 text-center" data-testid="text-step1-title">
         Choose Service Level
       </h2>
       <p className="text-[#888888] text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
@@ -186,17 +186,17 @@ function Step1Tier({ state, setState, tiers, capacity }: {
               disabled={isFull}
               className={`w-full border rounded-2xl p-4 text-left transition-all ${
                 isFull
-                  ? "border-[#D4AF37]/10 opacity-50 cursor-not-allowed"
+                  ? "border-[#FFCB05]/10 opacity-50 cursor-not-allowed"
                   : isSelected
-                    ? "border-[#D4AF37] bg-[#D4AF37]/10"
-                    : "border-[#D4AF37]/20 hover:border-[#D4AF37]/50"
+                    ? "border-[#FFCB05] bg-[#FFCB05]/10"
+                    : "border-[#FFCB05]/20 hover:border-[#FFCB05]/50"
               }`}
               data-testid={`button-tier-${tier.id}`}
             >
               <div className="flex justify-between items-start">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider">{tier.name}</h3>
+                    <h3 className="text-[#FFCB05] font-bold text-lg tracking-wider">{tier.name}</h3>
                     {isFull && (
                       <span className="text-[10px] font-bold uppercase tracking-[0.12em] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5">
                         Fully Booked
@@ -205,7 +205,7 @@ function Step1Tier({ state, setState, tiers, capacity }: {
                   </div>
                   <p className="text-[#888888] text-sm mt-1">{tier.turnaround} from receipt</p>
                   {isSelected && estimatedReturn && (
-                    <p className="text-[#D4AF37]/70 text-xs mt-1.5 flex items-center gap-1" data-testid={`text-estimated-return-${tier.id}`}>
+                    <p className="text-[#FFCB05]/70 text-xs mt-1.5 flex items-center gap-1" data-testid={`text-estimated-return-${tier.id}`}>
                       <Check size={11} />
                       Est. return by {estimatedReturn}
                     </p>
@@ -227,21 +227,21 @@ function Step1Tier({ state, setState, tiers, capacity }: {
       {state.type === "grading" && (
         <div className="mt-8">
           <div className="relative flex items-center mb-4">
-            <div className="flex-1 h-px bg-[#D4AF37]/20" />
-            <span className="mx-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]/50">Other Services</span>
-            <div className="flex-1 h-px bg-[#D4AF37]/20" />
+            <div className="flex-1 h-px bg-[#FFCB05]/20" />
+            <span className="mx-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#FFCB05]/50">Other Services</span>
+            <div className="flex-1 h-px bg-[#FFCB05]/20" />
           </div>
           <div className="space-y-2">
             {OTHER_SERVICES_INFO.map((svc) => (
               <button
                 key={svc.id}
                 onClick={() => setState({ ...state, type: svc.id, tier: svc.id })}
-                className="w-full border border-[#D4AF37]/15 hover:border-[#D4AF37]/40 rounded-xl p-3.5 text-left transition-all bg-[#FAFAF8]"
+                className="w-full border border-[#FFCB05]/15 hover:border-[#FFCB05]/40 rounded-xl p-3.5 text-left transition-all bg-[#FAFAF8]"
                 data-testid={`button-other-service-${svc.id}`}
               >
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-[#D4AF37]/80 font-bold text-sm tracking-wider">{svc.name}</h3>
+                    <h3 className="text-[#FFCB05]/80 font-bold text-sm tracking-wider">{svc.name}</h3>
                     <p className="text-[#888888] text-xs mt-0.5">{svc.desc}</p>
                     <p className="text-[#AAAAAA] text-xs mt-0.5">{svc.turnaround} from receipt</p>
                   </div>
@@ -260,20 +260,20 @@ const GRADING_COMPANIES = ["PSA", "BGS", "CGC", "AGS", "ACE", "TAG", "SGC", "Oth
 
 function CrossoverFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/30 rounded-2xl p-4 bg-[#FFF9E6]">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#FFCB05]/30 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
-        <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Crossover Details</h3>
+        <h3 className="text-[#FFCB05] font-semibold text-sm tracking-wider mb-1">Crossover Details</h3>
         <p className="text-[#888888] text-xs mb-3">Tell us about the existing slab you're crossing over.</p>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">
           Original Grading Company <span className="text-red-400">*</span>
         </label>
         <select
           value={state.crossoverCompany}
           onChange={(e) => setState({ ...state, crossoverCompany: e.target.value, crossoverCompanyOther: "" })}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="select-crossover-company"
         >
           <option value="" className="bg-white">Select company...</option>
@@ -285,43 +285,43 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
 
       {state.crossoverCompany === "Other" && (
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Enter Grading Company</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Enter Grading Company</label>
           <input
             type="text"
             value={state.crossoverCompanyOther}
             onChange={(e) => setState({ ...state, crossoverCompanyOther: e.target.value })}
             placeholder="e.g. Beckett"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-crossover-company-other"
           />
         </div>
       )}
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Original Grade</label>
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Original Grade</label>
         <input
           type="text"
           value={state.crossoverOriginalGrade}
           onChange={(e) => setState({ ...state, crossoverOriginalGrade: e.target.value })}
           placeholder="e.g. 9.5 or NM-MT"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="input-crossover-grade"
         />
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Certificate Number</label>
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Certificate Number</label>
         <input
           type="text"
           value={state.crossoverCertNumber}
           onChange={(e) => setState({ ...state, crossoverCertNumber: e.target.value })}
           placeholder="e.g. 12345678"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="input-crossover-cert"
         />
       </div>
 
-      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/20 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#FFCB05]/20 pt-3">
         Crossover is subject to review. MintVault reserves the right to return cards that do not meet crossover standards.
       </p>
     </div>
@@ -333,20 +333,20 @@ const REHOLDER_REASONS = ["Damaged slab", "Cosmetic upgrade", "Label error / cor
 
 function ReholderFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#FFF9E6]">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#FFCB05]/20 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
-        <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Reholder Details</h3>
+        <h3 className="text-[#FFCB05] font-semibold text-sm tracking-wider mb-1">Reholder Details</h3>
         <p className="text-[#888888] text-xs mb-3">Tell us about the existing slab you need reheld.</p>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">
           Current Slab Company <span className="text-red-400">*</span>
         </label>
         <select
           value={state.reholderCompany}
           onChange={(e) => setState({ ...state, reholderCompany: e.target.value })}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="select-reholder-company"
         >
           <option value="" className="bg-white">Select company...</option>
@@ -357,13 +357,13 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">
           Reason for Reholder <span className="text-red-400">*</span>
         </label>
         <select
           value={state.reholderReason}
           onChange={(e) => setState({ ...state, reholderReason: e.target.value })}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="select-reholder-reason"
         >
           <option value="" className="bg-white">Select reason...</option>
@@ -374,30 +374,30 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Existing Cert / Grade Number (optional)</label>
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Existing Cert / Grade Number (optional)</label>
         <input
           type="text"
           value={state.reholderCertNumber}
           onChange={(e) => setState({ ...state, reholderCertNumber: e.target.value })}
           placeholder="e.g. 12345678 or PSA-9"
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="input-reholder-cert"
         />
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Current Slab Condition (optional)</label>
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Current Slab Condition (optional)</label>
         <input
           type="text"
           value={state.reholderCondition}
           onChange={(e) => setState({ ...state, reholderCondition: e.target.value })}
           placeholder="e.g. Cracked corner, yellowing, label damage..."
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="input-reholder-condition"
         />
       </div>
 
-      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#FFCB05]/10 pt-3">
         Reholdering applies to MintVault slabs only. Cards from other grading companies are subject to review. The original grade is retained unless a new grading service is also requested.
       </p>
     </div>
@@ -408,20 +408,20 @@ const AUTH_REASONS = ["Counterfeit suspicion", "Pre-sale verification", "Insuran
 
 function AuthenticationFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
-    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#FFF9E6]">
+    <div className="max-w-sm mx-auto mb-8 space-y-4 border border-[#FFCB05]/20 rounded-2xl p-4 bg-[#FFF9E6]">
       <div>
-        <h3 className="text-[#D4AF37] font-semibold text-sm tracking-wider mb-1">Authentication Details</h3>
+        <h3 className="text-[#FFCB05] font-semibold text-sm tracking-wider mb-1">Authentication Details</h3>
         <p className="text-[#888888] text-xs mb-3">Help us understand why you're requesting authentication.</p>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">
           Reason for Authentication <span className="text-red-400">*</span>
         </label>
         <select
           value={state.authReason}
           onChange={(e) => setState({ ...state, authReason: e.target.value })}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
           data-testid="select-auth-reason"
         >
           <option value="" className="bg-white">Select reason...</option>
@@ -432,18 +432,18 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Authenticity Concerns (optional)</label>
+        <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1">Authenticity Concerns (optional)</label>
         <textarea
           value={state.authConcerns}
           onChange={(e) => setState({ ...state, authConcerns: e.target.value })}
           placeholder="Describe any specific concerns about the card's authenticity..."
           rows={3}
-          className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
+          className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors resize-none"
           data-testid="textarea-auth-concerns"
         />
       </div>
 
-      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
+      <p className="text-[#888888] text-xs leading-relaxed border-t border-[#FFCB05]/10 pt-3">
         Authentication results in a certificate confirming the card is genuine. No condition grade is assigned. Cards found to be counterfeit will not be returned without prior arrangement.
       </p>
     </div>
@@ -491,7 +491,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step2-title">
+      <h2 className="text-2xl font-sans font-black text-[#FFCB05] tracking-tight mb-2 text-center" data-testid="text-step2-title">
         How Many Cards?
       </h2>
       <p className="text-[#888888] text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
@@ -502,7 +502,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
       <div className="max-w-sm mx-auto space-y-6">
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#FFCB05]/70 text-sm uppercase tracking-wider block mb-2">
             Number of Cards
           </label>
           <input
@@ -512,16 +512,16 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             value={state.quantity}
             onChange={(e) => handleQuantityChange(Math.max(0, parseInt(e.target.value) || 0))}
             placeholder="0"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] text-lg text-center focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-xl px-4 py-3 text-[#1A1A1A] text-lg text-center focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-quantity"
           />
         </div>
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#FFCB05]/70 text-sm uppercase tracking-wider block mb-2">
             Total Declared Value (£)
           </label>
           <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 text-lg">£</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#FFCB05]/60 text-lg">£</span>
             <input
               type="number"
               min="0"
@@ -529,7 +529,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
               value={state.declaredValue || ""}
               onChange={(e) => setState({ ...state, declaredValue: Math.max(0, parseFloat(e.target.value) || 0) })}
               placeholder="0"
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl pl-8 pr-4 py-3 text-[#1A1A1A] text-lg text-center focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+              className="w-full bg-transparent border border-[#FFCB05]/30 rounded-xl pl-8 pr-4 py-3 text-[#1A1A1A] text-lg text-center focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
               data-testid="input-declared-value"
             />
           </div>
@@ -537,15 +537,15 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
           {state.declaredValue > 0 && (
             <div className="mt-2 space-y-1.5">
               <div className="flex items-center gap-2 text-sm">
-                <Shield size={14} className="text-[#D4AF37]" />
-                <span className="text-[#D4AF37]/80">
+                <Shield size={14} className="text-[#FFCB05]" />
+                <span className="text-[#FFCB05]/80">
                   Insured shipping: {insurance.label} — £{(insurance.shippingPence / 100).toFixed(2)}
                 </span>
               </div>
               {surchargeInfo.surchargePence > 0 && (
                 <div className="flex items-center gap-2 text-sm" data-testid="text-insurance-surcharge">
-                  <Shield size={14} className="text-[#D4AF37]" />
-                  <span className="text-[#D4AF37]/80">
+                  <Shield size={14} className="text-[#FFCB05]" />
+                  <span className="text-[#FFCB05]/80">
                     Insurance protection: {surchargeInfo.label} (£{(declaredPerCard).toLocaleString()}/card avg)
                   </span>
                 </div>
@@ -554,7 +554,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
           )}
         </div>
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
+          <label className="text-[#FFCB05]/70 text-sm uppercase tracking-wider block mb-2">
             Submission Name (optional)
           </label>
           <input
@@ -562,7 +562,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             value={state.submissionName}
             onChange={(e) => setState({ ...state, submissionName: e.target.value })}
             placeholder="e.g. My Charizard Collection"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-submission-name"
           />
         </div>
@@ -572,14 +572,14 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
         <button
           type="button"
           onClick={toggleCardDetails}
-          className="w-full flex items-center justify-between border border-[#D4AF37]/30 rounded-2xl px-4 py-3 text-left transition-all hover:border-[#D4AF37]/50"
+          className="w-full flex items-center justify-between border border-[#FFCB05]/30 rounded-2xl px-4 py-3 text-left transition-all hover:border-[#FFCB05]/50"
           data-testid="button-toggle-card-details"
         >
           <div className="flex items-center gap-2">
-            <Plus size={16} className="text-[#D4AF37]" />
-            <span className="text-[#D4AF37] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
+            <Plus size={16} className="text-[#FFCB05]" />
+            <span className="text-[#FFCB05] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
           </div>
-          {showCardDetails ? <ChevronUp size={16} className="text-[#D4AF37]/60" /> : <ChevronDown size={16} className="text-[#D4AF37]/60" />}
+          {showCardDetails ? <ChevronUp size={16} className="text-[#FFCB05]/60" /> : <ChevronDown size={16} className="text-[#FFCB05]/60" />}
         </button>
 
         {showCardDetails && (
@@ -598,20 +598,20 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             {state.cardItems.map((item, index) => (
               <div
                 key={index}
-                className="border border-[#D4AF37]/20 rounded-2xl p-4 space-y-3"
+                className="border border-[#FFCB05]/20 rounded-2xl p-4 space-y-3"
                 data-testid={`card-item-${index}`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[#D4AF37] font-semibold text-sm tracking-wider">Card {index + 1}</span>
+                  <span className="text-[#FFCB05] font-semibold text-sm tracking-wider">Card {index + 1}</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Game</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Game</label>
                     <select
                       value={item.game}
                       onChange={(e) => updateCardItem(index, "game", e.target.value)}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                       data-testid={`select-game-${index}`}
                     >
                       <option value="" className="bg-white">Select game...</option>
@@ -621,53 +621,53 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                     </select>
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Card Name</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Card Name</label>
                     <input
                       type="text"
                       value={item.cardName}
                       onChange={(e) => updateCardItem(index, "cardName", e.target.value)}
                       placeholder="e.g. Charizard"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                       data-testid={`input-card-name-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Set Name</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Set Name</label>
                     <input
                       type="text"
                       value={item.setName}
                       onChange={(e) => updateCardItem(index, "setName", e.target.value)}
                       placeholder="e.g. Base Set"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                       data-testid={`input-set-name-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Card Number</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Card Number</label>
                     <input
                       type="text"
                       value={item.cardNumber}
                       onChange={(e) => updateCardItem(index, "cardNumber", e.target.value)}
                       placeholder="e.g. 4/102"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                       data-testid={`input-card-number-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Year</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Year</label>
                     <input
                       type="text"
                       value={item.year}
                       onChange={(e) => updateCardItem(index, "year", e.target.value)}
                       placeholder="e.g. 1999"
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                      className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                       data-testid={`input-year-${index}`}
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Declared Value (£)</label>
+                    <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Declared Value (£)</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40 text-sm">£</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#FFCB05]/40 text-sm">£</span>
                       <input
                         type="number"
                         min="0"
@@ -675,7 +675,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                         value={item.declaredValue || ""}
                         onChange={(e) => updateCardItem(index, "declaredValue", Math.max(0, parseFloat(e.target.value) || 0))}
                         placeholder="0"
-                        className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg pl-7 pr-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                        className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg pl-7 pr-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                         data-testid={`input-card-value-${index}`}
                       />
                     </div>
@@ -683,13 +683,13 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                 </div>
 
                 <div>
-                  <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Notes</label>
+                  <label className="text-[#FFCB05]/50 text-xs uppercase tracking-wider block mb-1">Notes</label>
                   <input
                     type="text"
                     value={item.notes}
                     onChange={(e) => updateCardItem(index, "notes", e.target.value)}
                     placeholder="Any special notes for this card..."
-                    className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+                    className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
                     data-testid={`input-card-notes-${index}`}
                   />
                 </div>
@@ -717,14 +717,14 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step3-title">
+      <h2 className="text-2xl font-sans font-black text-[#FFCB05] tracking-tight mb-2 text-center" data-testid="text-step3-title">
         Order Summary
       </h2>
       <p className="text-[#888888] text-center mb-8 text-sm">Review your submission before proceeding</p>
 
-      <div className="max-w-md mx-auto border border-[#D4AF37]/30 rounded-2xl overflow-hidden">
-        <div className="bg-[#D4AF37]/5 p-4 border-b border-[#D4AF37]/20">
-          <h3 className="text-[#D4AF37] font-semibold tracking-wider text-sm uppercase">Submission Details</h3>
+      <div className="max-w-md mx-auto border border-[#FFCB05]/30 rounded-2xl overflow-hidden">
+        <div className="bg-[#FFCB05]/5 p-4 border-b border-[#FFCB05]/20">
+          <h3 className="text-[#FFCB05] font-semibold tracking-wider text-sm uppercase">Submission Details</h3>
         </div>
         <div className="p-5 space-y-3">
           <SummaryRow label="Submission Type" value={typeName} testId="text-summary-type" />
@@ -740,8 +740,8 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           )}
 
           {state.type === "crossover" && state.crossoverCompany && (
-            <div className="border-t border-[#D4AF37]/15 pt-3 mt-1">
-              <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Crossover Details</p>
+            <div className="border-t border-[#FFCB05]/15 pt-3 mt-1">
+              <p className="text-[#FFCB05]/60 text-xs uppercase tracking-wider mb-2">Crossover Details</p>
               <SummaryRow
                 label="Original Company"
                 value={state.crossoverCompany === "Other" ? state.crossoverCompanyOther : state.crossoverCompany}
@@ -758,8 +758,8 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           )}
 
           {state.type === "reholder" && state.reholderCompany && (
-            <div className="border-t border-[#D4AF37]/10 pt-3 mt-1">
-              <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Reholder Details</p>
+            <div className="border-t border-[#FFCB05]/10 pt-3 mt-1">
+              <p className="text-[#FFCB05]/60 text-xs uppercase tracking-wider mb-2">Reholder Details</p>
               <SummaryRow label="Current Slab Company" value={state.reholderCompany} testId="text-summary-reholder-company" />
               {state.reholderCertNumber && (
                 <SummaryRow label="Cert / Grade No." value={state.reholderCertNumber} testId="text-summary-reholder-cert" />
@@ -774,8 +774,8 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           )}
 
           {state.type === "authentication" && state.authReason && (
-            <div className="border-t border-[#D4AF37]/10 pt-3 mt-1">
-              <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Authentication Details</p>
+            <div className="border-t border-[#FFCB05]/10 pt-3 mt-1">
+              <p className="text-[#FFCB05]/60 text-xs uppercase tracking-wider mb-2">Authentication Details</p>
               <SummaryRow label="Reason" value={state.authReason} testId="text-summary-auth-reason" />
               {state.authConcerns && (
                 <SummaryRow label="Concerns" value={state.authConcerns} testId="text-summary-auth-concerns" />
@@ -784,22 +784,22 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
             </div>
           )}
 
-          <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
+          <div className="border-t border-[#FFCB05]/20 pt-3 mt-3 space-y-2">
             <SummaryRow label="Service Fees" value={`£${(totals.subtotal / 100).toFixed(2)}`} testId="text-summary-subtotal" />
             {effectivePercent > 0 && (
               <div className="flex justify-between items-center">
-                <span className="text-[#D4AF37]/80 text-sm">{discountLabel}</span>
-                <span className="text-[#D4AF37] font-medium text-sm" data-testid="text-summary-discount">
+                <span className="text-[#FFCB05]/80 text-sm">{discountLabel}</span>
+                <span className="text-[#FFCB05] font-medium text-sm" data-testid="text-summary-discount">
                   -£{(effectiveAmount / 100).toFixed(2)}
                 </span>
               </div>
             )}
             {vcWins && (
-              <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>
+              <p className="text-[10px] text-[#FFCB05]/60 italic text-right">Vault Club benefit applied</p>
             )}
             <div className="flex justify-between items-start">
               <div className="flex-1">
-                <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-shipping-label">
+                <span className="text-[#FFCB05]/60 text-sm" data-testid="text-summary-shipping-label">
                   Fully Insured Return Shipping ({totals.shippingLabel})
                 </span>
               </div>
@@ -810,7 +810,7 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
             {totals.totalInsuranceFee > 0 && (
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-insurance-label">
+                  <span className="text-[#FFCB05]/60 text-sm" data-testid="text-summary-insurance-label">
                     Insurance Protection ({totals.insuranceSurchargeLabel})
                   </span>
                 </div>
@@ -821,26 +821,26 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
             )}
 
             <div className="pl-1 space-y-1 mt-1">
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#FFCB05]/50">
+                <Check size={12} className="text-[#FFCB05]/60 flex-shrink-0" />
                 <span>Fully insured return shipping</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#FFCB05]/50">
+                <Check size={12} className="text-[#FFCB05]/60 flex-shrink-0" />
                 <span>Signature required on delivery</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#FFCB05]/50">
+                <Check size={12} className="text-[#FFCB05]/60 flex-shrink-0" />
                 <span>Real-time status tracking</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[#D4AF37]/50">
-                <Check size={12} className="text-[#D4AF37]/60 flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[#FFCB05]/50">
+                <Check size={12} className="text-[#FFCB05]/60 flex-shrink-0" />
                 <span>Secure intake scanning on arrival</span>
               </div>
             </div>
 
-            <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]/20">
-              <span className="text-[#D4AF37] font-bold uppercase tracking-wider">Total</span>
+            <div className="flex justify-between items-center pt-2 border-t border-[#FFCB05]/20">
+              <span className="text-[#FFCB05] font-bold uppercase tracking-wider">Total</span>
               <span className="text-[#1A1A1A] font-bold text-xl" data-testid="text-summary-total">
                 £{(effectiveTotal / 100).toFixed(2)}
               </span>
@@ -855,8 +855,8 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           htmlFor="reveal-wrap"
           className={`flex items-start gap-3 border rounded-2xl p-4 cursor-pointer transition-all ${
             state.revealWrap
-              ? "border-[#D4AF37] bg-[#D4AF37]/8"
-              : "border-[#D4AF37]/25 hover:border-[#D4AF37]/50 bg-[#FAFAF8]"
+              ? "border-[#FFCB05] bg-[#FFCB05]/8"
+              : "border-[#FFCB05]/25 hover:border-[#FFCB05]/50 bg-[#FAFAF8]"
           }`}
           data-testid="label-reveal-wrap"
         >
@@ -865,13 +865,13 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
             id="reveal-wrap"
             checked={state.revealWrap}
             onChange={(e) => setState({ ...state, revealWrap: e.target.checked })}
-            className="mt-0.5 accent-[#D4AF37] shrink-0"
+            className="mt-0.5 accent-[#FFCB05] shrink-0"
             data-testid="checkbox-reveal-wrap"
           />
           <div>
             <p className="text-[#1A1A1A] font-semibold text-sm">
               🎁 MintVault Reveal Wrap{" "}
-              <span className="text-[#D4AF37] font-bold text-xs uppercase tracking-widest ml-1">Free</span>
+              <span className="text-[#FFCB05] font-bold text-xs uppercase tracking-widest ml-1">Free</span>
             </p>
             <p className="text-[#555555] text-xs mt-1 leading-relaxed">
               Receive your slabs sealed in gold holographic foil — tear them open to reveal your grade like opening a pack. Perfect for filming unboxing content.
@@ -886,13 +886,13 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
 function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step4-title">
+      <h2 className="text-2xl font-sans font-black text-[#FFCB05] tracking-tight mb-2 text-center" data-testid="text-step4-title">
         Return Shipping & Details
       </h2>
       <p className="text-[#888888] text-center mb-6 text-sm">Where should we return your cards?</p>
 
-      <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5" data-testid="text-shipping-notice">
-        <Info size={14} className="text-[#D4AF37] flex-shrink-0 mt-0.5" />
+      <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#FFCB05]/20 rounded p-3 bg-[#FFCB05]/5" data-testid="text-shipping-notice">
+        <Info size={14} className="text-[#FFCB05] flex-shrink-0 mt-0.5" />
         <span className="text-[#555555] text-xs leading-relaxed">
           Important: You are responsible for insured shipping to MintVault. Please use tracked and insured delivery appropriate to your declared item value.
         </span>
@@ -901,114 +901,114 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
       <div className="max-w-md mx-auto space-y-5">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">First Name *</label>
+            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">First Name *</label>
             <input
               type="text"
               value={state.firstName}
               onChange={(e) => setState({ ...state, firstName: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+              className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
               data-testid="input-first-name"
             />
           </div>
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Last Name *</label>
+            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Last Name *</label>
             <input
               type="text"
               value={state.lastName}
               onChange={(e) => setState({ ...state, lastName: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+              className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
               data-testid="input-last-name"
             />
           </div>
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Email *</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Email *</label>
           <input
             type="email"
             value={state.email}
             onChange={(e) => setState({ ...state, email: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-email"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Phone (recommended)</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Phone (recommended)</label>
           <input
             type="tel"
             value={state.phone}
             onChange={(e) => setState({ ...state, phone: e.target.value })}
             placeholder="e.g. 07700 900000"
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-phone"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 1 *</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 1 *</label>
           <input
             type="text"
             value={state.addressLine1}
             onChange={(e) => setState({ ...state, addressLine1: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-address-1"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 2</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Address Line 2</label>
           <input
             type="text"
             value={state.addressLine2}
             onChange={(e) => setState({ ...state, addressLine2: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-address-2"
           />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">City *</label>
+            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">City *</label>
             <input
               type="text"
               value={state.city}
               onChange={(e) => setState({ ...state, city: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+              className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
               data-testid="input-city"
             />
           </div>
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">County</label>
+            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">County</label>
             <input
               type="text"
               value={state.county}
               onChange={(e) => setState({ ...state, county: e.target.value })}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+              className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
               data-testid="input-county"
             />
           </div>
         </div>
 
         <div className="max-w-[200px]">
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Postcode *</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Postcode *</label>
           <input
             type="text"
             value={state.postcode}
             onChange={(e) => setState({ ...state, postcode: e.target.value })}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-lg px-4 py-2.5 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]/60 transition-colors"
             data-testid="input-postcode"
           />
         </div>
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Notes (optional)</label>
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Notes (optional)</label>
           <textarea
             value={state.notes}
             onChange={(e) => setState({ ...state, notes: e.target.value })}
             placeholder="Special instructions, handling notes, or anything else we should know..."
             rows={3}
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/60 transition-colors resize-none"
+            className="w-full bg-transparent border border-[#FFCB05]/30 rounded-xl px-4 py-3 text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/60 transition-colors resize-none"
             data-testid="input-notes"
           />
         </div>
@@ -1020,7 +1020,7 @@ function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: 
 function SummaryRow({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
     <div className="flex justify-between items-center">
-      <span className="text-[#D4AF37]/60 text-sm">{label}</span>
+      <span className="text-[#FFCB05]/60 text-sm">{label}</span>
       <span className="text-[#1A1A1A] font-medium text-sm" data-testid={testId}>{value}</span>
     </div>
   );
@@ -1138,33 +1138,33 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step5-title">
+      <h2 className="text-2xl font-sans font-black text-[#FFCB05] tracking-tight mb-2 text-center" data-testid="text-step5-title">
         Secure Payment
       </h2>
       <p className="text-[#1A1A1A]/50 text-center mb-8 text-sm">Complete your order</p>
 
       <form onSubmit={handleSubmit} className="max-w-md mx-auto space-y-5">
-        <div className="border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#D4AF37]/5 space-y-1">
+        <div className="border border-[#FFCB05]/20 rounded-2xl p-4 bg-[#FFCB05]/5 space-y-1">
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Shipping to</span>
+            <span className="text-[#FFCB05]/60">Shipping to</span>
             <span className="text-[#1A1A1A]">{state.firstName} {state.lastName}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Address</span>
+            <span className="text-[#FFCB05]/60">Address</span>
             <span className="text-[#1A1A1A] text-right">{state.addressLine1}, {state.city}, {state.postcode}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-[#D4AF37]/60">Email</span>
+            <span className="text-[#FFCB05]/60">Email</span>
             <span className="text-[#1A1A1A]">{state.email}</span>
           </div>
         </div>
 
-        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+        <div className="flex items-start gap-2 border border-[#FFCB05]/20 rounded p-3 bg-[#FFCB05]/5">
           <input
             type="checkbox"
             id="confirm-address"
             required
-            className="mt-1 accent-[#D4AF37]"
+            className="mt-1 accent-[#FFCB05]"
             data-testid="checkbox-confirm-address"
           />
           <label htmlFor="confirm-address" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
@@ -1176,7 +1176,7 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
         {flags.legalPagesLive ? (
           <>
             {/* Key points panel */}
-            <div className="border border-[#D4AF37]/20 rounded-lg p-4 bg-[#FFFDF5] space-y-2">
+            <div className="border border-[#FFCB05]/20 rounded-lg p-4 bg-[#FFFDF5] space-y-2">
               <p className="text-[#1A1A1A] text-sm font-semibold mb-2">Before you continue</p>
               <p className="text-[#555555] text-xs leading-relaxed">A few important points about MintVault grading:</p>
               <ul className="text-[#555555] text-xs leading-relaxed space-y-1.5 list-disc pl-4">
@@ -1187,52 +1187,52 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
                 <li>We may refuse to grade, return raw, or retain for investigation if a Card appears altered, counterfeit, or subject to a dispute.</li>
               </ul>
             </div>
-            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+            <div className="flex items-start gap-2 border border-[#FFCB05]/20 rounded p-3 bg-[#FFCB05]/5">
               <input type="checkbox" id="legal-accept" checked={termsAccepted && liabilityAccepted}
                 onChange={(e) => { setTermsAccepted(e.target.checked); setLiabilityAccepted(e.target.checked); }}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-legal-combined" />
+                className="mt-1 accent-[#FFCB05]" data-testid="checkbox-legal-combined" />
               <label htmlFor="legal-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I have read and accept the{" "}
-                <a href="/legal/website-terms" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Website Terms</a>,{" "}
-                <a href="/legal/submission-agreement" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Submission Agreement</a>, and{" "}
-                <a href="/legal/guarantee" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Guarantee &amp; Correction Policy</a>.
+                <a href="/legal/website-terms" target="_blank" rel="noopener noreferrer" className="text-[#FFCB05] underline">Website Terms</a>,{" "}
+                <a href="/legal/submission-agreement" target="_blank" rel="noopener noreferrer" className="text-[#FFCB05] underline">Submission Agreement</a>, and{" "}
+                <a href="/legal/guarantee" target="_blank" rel="noopener noreferrer" className="text-[#FFCB05] underline">Guarantee &amp; Correction Policy</a>.
               </label>
             </div>
           </>
         ) : (
           <>
-            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+            <div className="flex items-start gap-2 border border-[#FFCB05]/20 rounded p-3 bg-[#FFCB05]/5">
               <input type="checkbox" id="liability-accept" checked={liabilityAccepted}
                 onChange={(e) => setLiabilityAccepted(e.target.checked)}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-liability" />
+                className="mt-1 accent-[#FFCB05]" data-testid="checkbox-liability" />
               <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I confirm I have read and agree to the{" "}
-                <Link href="/terms-and-conditions"><span className="text-[#D4AF37] underline">Liability & Shipping Policy</span></Link>.
+                <Link href="/terms-and-conditions"><span className="text-[#FFCB05] underline">Liability & Shipping Policy</span></Link>.
                 I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
               </label>
             </div>
-            <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
+            <div className="flex items-start gap-2 border border-[#FFCB05]/20 rounded p-3 bg-[#FFCB05]/5">
               <input type="checkbox" id="terms-accept" checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-terms" />
+                className="mt-1 accent-[#FFCB05]" data-testid="checkbox-terms" />
               <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I confirm I have read and agree to the MintVault UK Ltd{" "}
-                <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
+                <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#FFCB05] underline">Terms & Conditions</a>
               </label>
             </div>
           </>
         )}
 
         <div>
-          <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
-          <div className="border border-[#D4AF37]/30 rounded-xl px-4 py-3" data-testid="card-element-wrapper">
+          <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>
+          <div className="border border-[#FFCB05]/30 rounded-xl px-4 py-3" data-testid="card-element-wrapper">
             <CardElement
               options={{
                 style: {
                   base: {
                     color: "#ffffff",
                     fontSize: "16px",
-                    "::placeholder": { color: "rgba(212, 175, 55, 0.3)" },
+                    "::placeholder": { color: "rgba(255,203,5, 0.3)" },
                   },
                   invalid: { color: "#ef4444" },
                 },
@@ -1296,7 +1296,7 @@ function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
       />
       <div className="text-center mb-8">
         <h1 className="text-2xl font-sans font-black text-[#1A1A1A] tracking-tight mb-2">
-          Choose a <span className="text-[#D4AF37]">Service</span>
+          Choose a <span className="text-[#FFCB05]">Service</span>
         </h1>
         <p className="text-[#1A1A1A]/50 text-sm">Select the type of submission you'd like to make</p>
       </div>
@@ -1305,10 +1305,10 @@ function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
           <button
             key={opt.id}
             onClick={() => onSelect(opt.id)}
-            className="border border-[#D4AF37]/20 hover:border-[#D4AF37]/60 bg-[#FAFAF8] hover:bg-[#D4AF37]/5 rounded-2xl p-5 text-left transition-all group"
+            className="border border-[#FFCB05]/20 hover:border-[#FFCB05]/60 bg-[#FAFAF8] hover:bg-[#FFCB05]/5 rounded-2xl p-5 text-left transition-all group"
             data-testid={`button-type-${opt.id}`}
           >
-            <h3 className="text-[#D4AF37] font-black text-lg tracking-tighter mb-1">
+            <h3 className="text-[#FFCB05] font-black text-lg tracking-tighter mb-1">
               {opt.name}
             </h3>
             <p className="text-[#1A1A1A]/70 text-sm font-medium mb-2">{opt.desc}</p>
@@ -1488,7 +1488,7 @@ function SubmitWizardInner() {
   return (
     <div className="px-4 py-8 max-w-2xl mx-auto min-h-screen bg-white">
       <div className="text-center mb-2">
-        <span className="text-[#D4AF37]/60 text-xs uppercase tracking-widest" data-testid="text-service-badge">
+        <span className="text-[#FFCB05]/60 text-xs uppercase tracking-widest" data-testid="text-service-badge">
           {typeName} Submission
         </span>
       </div>
@@ -1505,7 +1505,7 @@ function SubmitWizardInner() {
         {step > 1 && step < 5 && (
           <button
             onClick={() => setStep(step - 1)}
-            className="flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+            className="flex items-center gap-1.5 text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors"
             data-testid="button-back"
           >
             <ArrowLeft size={16} /> Back
@@ -1514,7 +1514,7 @@ function SubmitWizardInner() {
         {step === 5 && (
           <button
             onClick={() => setStep(4)}
-            className="flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+            className="flex items-center gap-1.5 text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors"
             data-testid="button-back"
           >
             <ArrowLeft size={16} /> Back
@@ -1556,8 +1556,8 @@ export default function SubmitPage() {
     return (
       <div className="px-4 py-12 text-center">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-[#D4AF37]/10 rounded w-48 mx-auto" />
-          <div className="h-4 bg-[#D4AF37]/10 rounded w-32 mx-auto" />
+          <div className="h-8 bg-[#FFCB05]/10 rounded w-48 mx-auto" />
+          <div className="h-4 bg-[#FFCB05]/10 rounded w-32 mx-auto" />
         </div>
       </div>
     );

@@ -99,7 +99,7 @@ export default function TrackPage() {
     <div className="px-4 py-12 max-w-2xl mx-auto">
       <div className="text-center mb-10">
         <h1
-          className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-widest mb-4 glow-gold"
+          className="text-3xl md:text-4xl font-bold text-[#FFCB05] tracking-widest mb-4 glow-gold"
           data-testid="text-track-title"
         >
           TRACK YOUR SUBMISSION
@@ -111,7 +111,7 @@ export default function TrackPage() {
 
       <form onSubmit={handleTrack} className="max-w-md mx-auto space-y-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40" size={18} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#FFCB05]/40" size={18} />
           <Input
             type="text"
             value={submissionId}
@@ -121,7 +121,7 @@ export default function TrackPage() {
             }}
             placeholder="Submission ID (e.g. MV-SUB-001)"
             data-testid="input-track-submission-id"
-            className="bg-transparent border-[#D4AF37]/40 pl-10 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#D4AF37] font-mono"
+            className="bg-transparent border-[#FFCB05]/40 pl-10 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#FFCB05] font-mono"
           />
         </div>
         <Input
@@ -133,13 +133,13 @@ export default function TrackPage() {
           }}
           placeholder="Email address used at checkout"
           data-testid="input-track-email"
-          className="bg-transparent border-[#D4AF37]/40 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#D4AF37]"
+          className="bg-transparent border-[#FFCB05]/40 text-[#1A1A1A] placeholder:text-[#999999] focus:border-[#FFCB05]"
         />
         <Button
           type="submit"
           disabled={loading}
           data-testid="button-track-submit"
-          className="w-full border border-[#D4AF37] bg-white text-[#D4AF37] font-semibold tracking-wide hover:bg-[#D4AF37]/10"
+          className="w-full border border-[#FFCB05] bg-white text-[#FFCB05] font-semibold tracking-wide hover:bg-[#FFCB05]/10"
           variant="outline"
         >
           {loading ? "Looking up..." : "Track Submission"}
@@ -154,14 +154,14 @@ export default function TrackPage() {
 
       {result && (
         <div className="mt-10 space-y-6">
-          <Card className="border-[#D4AF37]/20 bg-[#FAFAF8]">
+          <Card className="border-[#FFCB05]/20 bg-[#FAFAF8]">
             <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-              <CardTitle className="text-[#D4AF37] text-lg font-mono" data-testid="text-track-result-id">
+              <CardTitle className="text-[#FFCB05] text-lg font-mono" data-testid="text-track-result-id">
                 {result.submissionId}
               </CardTitle>
               <Badge
                 data-testid="badge-track-status"
-                className="bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/30"
+                className="bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/30"
               >
                 {SUBMISSION_STATUS_LABELS[result.status] || result.status}
               </Badge>
@@ -176,9 +176,9 @@ export default function TrackPage() {
                       <div
                         className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
                           isCurrent
-                            ? "bg-[#D4AF37] text-black"
+                            ? "bg-[#FFCB05] text-black"
                             : isActive
-                            ? "bg-[#D4AF37]/30 text-[#D4AF37]"
+                            ? "bg-[#FFCB05]/30 text-[#FFCB05]"
                             : "bg-[#E8E4DC] text-[#999999]"
                         }`}
                         data-testid={`step-${step.key}`}
@@ -187,7 +187,7 @@ export default function TrackPage() {
                       </div>
                       <span
                         className={`text-xs mt-1 ${
-                          isActive ? "text-[#D4AF37]" : "text-[#999999]"
+                          isActive ? "text-[#FFCB05]" : "text-[#999999]"
                         }`}
                       >
                         {step.label}
@@ -255,7 +255,7 @@ export default function TrackPage() {
               {(result.status === "shipped" || result.status === "completed") && result.returnTracking && (
                 <div className="border-t border-[#E8E4DC] pt-4">
                   <div className="flex items-center gap-2 mb-1">
-                    <Truck size={16} className="text-[#D4AF37]" />
+                    <Truck size={16} className="text-[#FFCB05]" />
                     <span className="text-[#444444] text-sm font-medium">Return Shipping</span>
                   </div>
                   {result.returnCarrier && (
@@ -263,7 +263,7 @@ export default function TrackPage() {
                       Carrier: {result.returnCarrier}
                     </p>
                   )}
-                  <p className="text-[#D4AF37] font-mono text-sm" data-testid="text-track-tracking">
+                  <p className="text-[#FFCB05] font-mono text-sm" data-testid="text-track-tracking">
                     {result.returnTracking}
                   </p>
                 </div>

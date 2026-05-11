@@ -46,7 +46,7 @@ export default function JournalV2() {
         <div className="mx-auto max-w-5xl px-6 pt-12 md:pt-20 pb-10 md:pb-14">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-            style={{ color: "#D4AF37" }}
+            style={{ color: "#FFCB05" }}
           >
             Est. Kent &middot; Journal
           </p>
@@ -110,7 +110,7 @@ export default function JournalV2() {
                   style={{
                     backgroundColor: "var(--v2-panel-dark)",
                     border: "1px solid rgba(255,255,255,0.08)",
-                    backgroundImage: "radial-gradient(circle at 30% 30%, rgba(212,175,55,0.15), transparent 65%)",
+                    backgroundImage: "radial-gradient(circle at 30% 30%, rgba(255,203,5,0.15), transparent 65%)",
                     paddingBottom: "100%",
                   }}
                 >

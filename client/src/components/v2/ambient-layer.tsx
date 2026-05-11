@@ -66,7 +66,7 @@ export default function AmbientLayer() {
           width: "70%",
           height: "70%",
           background:
-            "radial-gradient(circle, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.06) 30%, transparent 60%)",
+            "radial-gradient(circle, rgba(255,203,5, 0.18) 0%, rgba(255,203,5, 0.06) 30%, transparent 60%)",
           filter: "blur(60px)",
           willChange: "transform",
         }}
@@ -80,7 +80,7 @@ export default function AmbientLayer() {
           width: "60%",
           height: "60%",
           background:
-            "radial-gradient(circle, rgba(184, 150, 12, 0.13) 0%, rgba(184, 150, 12, 0.05) 30%, transparent 60%)",
+            "radial-gradient(circle, rgba(255,203,5, 0.13) 0%, rgba(255,203,5, 0.05) 30%, transparent 60%)",
           filter: "blur(50px)",
           willChange: "transform",
         }}

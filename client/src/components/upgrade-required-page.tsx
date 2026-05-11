@@ -19,10 +19,10 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center px-4 py-16 bg-[#FAFAF8]">
-      <div className="max-w-md w-full border border-[#D4AF37]/30 bg-white rounded-2xl p-8 shadow-sm text-center">
+      <div className="max-w-md w-full border border-[#FFCB05]/30 bg-white rounded-2xl p-8 shadow-sm text-center">
         <div
           className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6"
-          style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+          style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
         >
           <Shield size={28} className="text-[#1A1400]" />
         </div>
@@ -39,7 +39,7 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
             ? <><strong className="text-[#1A1A1A]">{featureName}</strong> requires</>
             : "This feature requires"
           }{" "}
-          a <strong className="text-[#B8960C]">{needed}</strong> membership{isUpgrade ? " or higher" : ""}.
+          a <strong className="text-[#FFCB05]">{needed}</strong> membership{isUpgrade ? " or higher" : ""}.
         </p>
 
         {isUpgrade && currentTier && (
@@ -56,7 +56,7 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
         <Link href="/vault-club">
           <button
             className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] mb-4 transition-all active:scale-95"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
           >
             {isUpgrade ? "Upgrade Vault Club →" : "View Vault Club →"}
           </button>

@@ -52,7 +52,7 @@ export default function HowToReadVaultPage() {
       {/* Hero */}
       <section className="border-b border-[#E8E4DC] bg-[#FAFAF8]">
         <div className="max-w-3xl mx-auto px-6 py-16 md:py-20 text-center">
-          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.25em] mb-4">Vault Reports</p>
+          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.25em] mb-4">Vault Reports</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] mb-4 leading-tight tracking-tight">
             How to Read a Vault
           </h1>
@@ -71,7 +71,7 @@ export default function HowToReadVaultPage() {
               <div className="flex-shrink-0 w-12 text-center">
                 <span
                   className="font-black leading-none"
-                  style={{ fontSize: 36, color: "#D4AF37", opacity: 0.25 }}
+                  style={{ fontSize: 36, color: "#FFCB05", opacity: 0.25 }}
                 >
                   {num}
                 </span>

@@ -17,7 +17,7 @@ const faqs = [
   },
   {
     question: "Which TCGs does MintVault grade?",
-    answer: "MintVault grades cards from all major trading card games including Pokemon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, Dragon Ball Super, Lorcana, Flesh and Blood, Digimon, Star Wars: Unlimited, Weiss Schwarz, Cardfight!! Vanguard, MetaZoo, and more. See our <a href='/tcg' class='text-[#D4AF37] hover:underline'>full TCG list</a> for details.",
+    answer: "MintVault grades cards from all major trading card games including Pokemon, Yu-Gi-Oh!, Magic: The Gathering, One Piece, Dragon Ball Super, Lorcana, Flesh and Blood, Digimon, Star Wars: Unlimited, Weiss Schwarz, Cardfight!! Vanguard, MetaZoo, and more. See our <a href='/tcg' class='text-[#FFCB05] hover:underline'>full TCG list</a> for details.",
   },
   {
     question: "Is TCG card grading worth the investment?",
@@ -83,7 +83,7 @@ export default function TcgGradingUk() {
         </p>
 
         <section className="mb-10" data-testid="section-for-collectors">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Collectors</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">TCG Grading for Collectors</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Serious TCG collectors grade their most prized cards to preserve them in pristine condition and create a professional, catalogued collection. A graded card in a tamper-evident slab is protected from the environmental and handling damage that affects raw cards over time.
@@ -98,13 +98,13 @@ export default function TcgGradingUk() {
               <strong className="text-white">Organisation</strong> — graded cards are uniform in size, easy to store upright, and simple to display. Many collectors find that a collection of slabbed cards looks significantly more impressive than a binder or box of raw cards.
             </p>
             <p>
-              Each MintVault certificate can be verified online using our <Link href="/verify" className="text-[#D4AF37] hover:underline" data-testid="link-cert">certificate lookup tool</Link>, providing a permanent digital record of each card in your collection.
+              Each MintVault certificate can be verified online using our <Link href="/verify" className="text-[#FFCB05] hover:underline" data-testid="link-cert">certificate lookup tool</Link>, providing a permanent digital record of each card in your collection.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-for-investors">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Investors</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">TCG Grading for Investors</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Trading cards have emerged as an alternative asset class, with some rare cards appreciating significantly in value over time. For investors, professional grading serves several important functions.
@@ -125,7 +125,7 @@ export default function TcgGradingUk() {
         </section>
 
         <section className="mb-10" data-testid="section-for-resellers">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">TCG Grading for Resellers</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">TCG Grading for Resellers</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Professional traders and resellers use grading to differentiate their inventory and command premium prices. Graded cards stand out in marketplace listings and attract more buyer interest.
@@ -140,13 +140,13 @@ export default function TcgGradingUk() {
               <strong className="text-white">Professional Presentation</strong> — a slabbed card with a printed label looks more professional than a raw card in a penny sleeve. This presentation helps build trust with buyers and can lead to repeat customers.
             </p>
             <p>
-              MintVault offers bulk discounts for larger submissions, making professional grading cost-effective for resellers with volume. See our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for details on bulk discount tiers.
+              MintVault offers bulk discounts for larger submissions, making professional grading cost-effective for resellers with volume. See our <Link href="/" className="text-[#FFCB05] hover:underline" data-testid="link-pricing">pricing page</Link> for details on bulk discount tiers.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-why-uk">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade Your TCG Cards in the UK</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Why Grade Your TCG Cards in the UK</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Shield size={20} />, title: "Domestic Service", desc: "Your cards stay within the UK. No international shipping risks, no customs paperwork, no import duties." },
@@ -156,8 +156,8 @@ export default function TcgGradingUk() {
               { icon: <Users size={20} />, title: "UK Customer Support", desc: "Contact our team directly in your time zone for questions about your submission." },
               { icon: <Shield size={20} />, title: "Insured Returns", desc: "All graded cards are returned via fully insured tracked delivery based on your declared card value." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#D4AF37]/15 rounded-lg p-4" data-testid={`card-why-${i}`}>
-                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#FFCB05]/15 rounded-lg p-4" data-testid={`card-why-${i}`}>
+                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -166,48 +166,48 @@ export default function TcgGradingUk() {
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm">
-            Compare UK grading with overseas services in our <Link href="/psa-alternative-uk" className="text-[#D4AF37] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
+            Compare UK grading with overseas services in our <Link href="/psa-alternative-uk" className="text-[#FFCB05] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-supported-games">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Supported Trading Card Games</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Supported Trading Card Games</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
             MintVault grades cards from all major trading card games. Our grading standards are applied consistently regardless of which TCG a card belongs to:
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             {["Pokemon", "Yu-Gi-Oh!", "Magic: The Gathering", "One Piece", "Dragon Ball Super", "Lorcana", "Flesh and Blood", "Digimon", "Star Wars: Unlimited", "Weiss Schwarz", "Cardfight!! Vanguard", "MetaZoo"].map((game) => (
-              <div key={game} className="border border-[#D4AF37]/15 rounded px-3 py-2 text-[#D4AF37]/80 text-xs text-center" data-testid={`badge-game-${game.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
+              <div key={game} className="border border-[#FFCB05]/15 rounded px-3 py-2 text-[#FFCB05]/80 text-xs text-center" data-testid={`badge-game-${game.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}>
                 {game}
               </div>
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm">
-            Visit our <Link href="/tcg" className="text-[#D4AF37] hover:underline" data-testid="link-tcg-page">TCG page</Link> for detailed information about each supported game, or <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submit your cards</Link> directly.
+            Visit our <Link href="/tcg" className="text-[#FFCB05] hover:underline" data-testid="link-tcg-page">TCG page</Link> for detailed information about each supported game, or <Link href="/submit" className="text-[#FFCB05] hover:underline" data-testid="link-submit">submit your cards</Link> directly.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-getting-started">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Getting Started</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Getting Started</h2>
           <div className="text-[#d4d4d4] text-sm leading-relaxed space-y-3">
             <p>
               Ready to grade your TCG cards? The process is straightforward:
             </p>
             <ol className="list-decimal list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
-              <li>Visit our <Link href="/submit" className="text-[#D4AF37] hover:underline">submission page</Link> and choose your service tier</li>
+              <li>Visit our <Link href="/submit" className="text-[#FFCB05] hover:underline">submission page</Link> and choose your service tier</li>
               <li>Enter the details for each card you want graded</li>
               <li>Pay securely online and receive your submission reference</li>
               <li>Package your cards safely and ship them to us with tracking and insurance</li>
               <li>Receive your graded cards back in tamper-evident slabs via insured delivery</li>
             </ol>
             <p>
-              Need help with preparation and packaging? Read our <Link href="/how-to-grade-pokemon-cards" className="text-[#D4AF37] hover:underline" data-testid="link-how-to">step-by-step grading guide</Link> for detailed instructions. While written with Pokemon cards in mind, the preparation advice applies equally to all TCGs.
+              Need help with preparation and packaging? Read our <Link href="/how-to-grade-pokemon-cards" className="text-[#FFCB05] hover:underline" data-testid="link-how-to">step-by-step grading guide</Link> for detailed instructions. While written with Pokemon cards in mind, the preparation advice applies equally to all TCGs.
             </p>
           </div>
         </section>
 
         <section className="mb-10" data-testid="section-explore">
-          <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-4">Explore More</h2>
+          <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-4">Explore More</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { href: "/pokemon-card-grading-uk", label: "Pokemon Card Grading UK" },
@@ -220,7 +220,7 @@ export default function TcgGradingUk() {
               { href: "/why-mintvault", label: "Why MintVault" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
+                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer" data-testid={`link-explore-${link.href.slice(1)}`}>
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

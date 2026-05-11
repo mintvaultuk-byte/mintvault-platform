@@ -16,7 +16,7 @@ interface Props {
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number): string {
-  if (g >= 10) return "#D4AF37";
+  if (g >= 10) return "#FFCB05";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
@@ -112,8 +112,8 @@ export default function EdgeGrading({ values, onChange, overrideGrade, onOverrid
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Minus size={14} className="text-[#D4AF37]" />
-        <h3 className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Edges</h3>
+        <Minus size={14} className="text-[#FFCB05]" />
+        <h3 className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Edges</h3>
       </div>
 
       <div className="flex flex-wrap gap-6">
@@ -138,7 +138,7 @@ export default function EdgeGrading({ values, onChange, overrideGrade, onOverrid
           {overrideGrade !== null && <span className="text-[#333333]"> (manual)</span>}
         </p>
         {!showOverride && (
-          <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override</button>
+          <button type="button" onClick={() => setShowOverride(true)} className="text-[#FFCB05]/50 text-[10px] hover:text-[#FFCB05]">Override</button>
         )}
         {showOverride && (
           <div className="flex items-center gap-2 mt-1">

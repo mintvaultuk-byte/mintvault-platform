@@ -52,7 +52,7 @@ function useTheme(isBlack: boolean) {
 
 function subgradeStyle(v: number | null): { bg: string; text: string } {
   if (v === null) return { bg: "bg-[#333333]", text: "text-[#888888]" };
-  if (v >= 10)  return { bg: "bg-[#D4AF37]", text: "text-[#1A1400]" };
+  if (v >= 10)  return { bg: "bg-[#FFCB05]", text: "text-[#1A1400]" };
   if (v >= 9)   return { bg: "bg-[#22C55E]", text: "text-white" };
   if (v >= 7)   return { bg: "bg-[#EAB308]", text: "text-[#1A1A1A]" };
   if (v >= 5)   return { bg: "bg-[#F97316]", text: "text-white" };
@@ -60,7 +60,7 @@ function subgradeStyle(v: number | null): { bg: string; text: string } {
 }
 
 function cornerColor(v: number): string {
-  if (v >= 9.5) return "text-[#D4AF37]";
+  if (v >= 9.5) return "text-[#FFCB05]";
   if (v >= 8)   return "text-[#22C55E]";
   if (v >= 6)   return "text-[#EAB308]";
   return "text-[#EF4444]";
@@ -143,7 +143,7 @@ function CardImagePanel({
             onClick={() => setVariant(v.key)}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all border ${
               variant === v.key
-                ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                ? "border-[#FFCB05] text-[#FFCB05] bg-[#FFCB05]/10"
                 : "border-[#333333] text-[#888888] hover:border-[#555555]"
             }`}
           >
@@ -177,11 +177,11 @@ function SubgradeCard({
         <div className="flex items-center justify-between mb-2">
           <p className={`text-[10px] font-bold uppercase tracking-widest ${isBlack ? "text-[#888888]" : "text-[#999999]"}`}>{label}</p>
           {children && (
-            open ? <ChevronUp size={12} className="text-[#D4AF37]" /> : <ChevronDown size={12} className="text-[#888888]" />
+            open ? <ChevronUp size={12} className="text-[#FFCB05]" /> : <ChevronDown size={12} className="text-[#888888]" />
           )}
         </div>
         <div className={`text-4xl font-black mb-2 ${style.text === "text-[#1A1400]" ? "" : style.text}`}
-          style={value !== null && value >= 10 ? { color: "#D4AF37" } : {}}>
+          style={value !== null && value >= 10 ? { color: "#FFCB05" } : {}}>
           {value !== null ? value : "—"}
         </div>
         <div className={`h-1.5 rounded-full overflow-hidden ${isBlack ? "bg-[#222222]" : "bg-[#F0EDE6]"}`}>
@@ -238,14 +238,14 @@ export default function GradingReportPage() {
     return (
       <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center px-4">
         <div className="text-center">
-          <AlertTriangle size={32} className="text-[#D4AF37] mx-auto mb-4" />
+          <AlertTriangle size={32} className="text-[#FFCB05] mx-auto mb-4" />
           <h1 className="text-[#1A1A1A] font-bold text-lg mb-2">Report Not Found</h1>
           <p className="text-[#666666] text-sm mb-4">
             {(error as any)?.message === "Grading report not yet available for this certificate"
               ? "This certificate has not yet been graded. Check back soon."
               : "This certificate does not have a public grading report."}
           </p>
-          <Link href="/" className="text-[#D4AF37] text-sm hover:underline">← Back to MintVault</Link>
+          <Link href="/" className="text-[#FFCB05] text-sm hover:underline">← Back to MintVault</Link>
         </div>
       </div>
     );
@@ -277,7 +277,7 @@ export default function GradingReportPage() {
           className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 print:hidden"
           onClick={() => setLightboxUrl(null)}
         >
-          <button className="absolute top-4 right-4 text-white hover:text-[#D4AF37]" onClick={() => setLightboxUrl(null)}>
+          <button className="absolute top-4 right-4 text-white hover:text-[#FFCB05]" onClick={() => setLightboxUrl(null)}>
             <X size={28} />
           </button>
           <img src={lightboxUrl} alt="Card image" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl" onClick={e => e.stopPropagation()} />
@@ -288,9 +288,10 @@ export default function GradingReportPage() {
 
         {/* ── Header ── */}
         <div className="text-center space-y-1 reveal-on-scroll">
-          <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-[0.2em]">MintVault UK</p>
+          <p className="text-[#FFCB05] text-[10px] font-bold uppercase tracking-[0.2em]">MintVault UK</p>
           <p className={`text-xs font-bold uppercase tracking-widest ${t.textSec}`}>Digital Grading Report</p>
           <p className={`font-mono font-bold text-lg ${t.text}`}>{cert.certId}</p>
+          {/* Line is Black-Label-conditional, deferred to PR #88 — keeps #D4AF37 hairline. */}
           <div className={`mt-3 h-px ${isBlack ? "bg-[#D4AF37]/20" : "bg-[#D4AF37]/30"}`} />
         </div>
 
@@ -299,7 +300,7 @@ export default function GradingReportPage() {
           <a
             href={`/api/cert/${cert.certId}/report/pdf`}
             download
-            className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-[#D4AF37]/20 transition-all"
+            className="flex items-center gap-2 bg-[#FFCB05]/10 border border-[#FFCB05]/40 text-[#FFCB05] px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-[#FFCB05]/20 transition-all"
           >
             <Download size={14} />
             Download PDF
@@ -310,7 +311,7 @@ export default function GradingReportPage() {
               onClick={() => setShowDefects(!showDefects)}
               className={`text-xs border px-3 py-2 rounded-lg transition-all ${
                 showDefects
-                  ? `border-[#D4AF37]/40 text-[#D4AF37]`
+                  ? `border-[#FFCB05]/40 text-[#FFCB05]`
                   : `${isBlack ? "border-[#333333] text-[#888888]" : "border-[#E8E4DC] text-[#999999]"}`
               }`}
             >
@@ -340,14 +341,14 @@ export default function GradingReportPage() {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] uppercase tracking-widest ${t.textMut}`}>Certificate</span>
-                <span className="text-xs font-mono font-medium text-[#D4AF37]">{cert.certId}</span>
+                <span className="text-xs font-mono font-medium text-[#FFCB05]">{cert.certId}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold uppercase`}>
                   <CheckCircle2 size={10} /> Active
                 </span>
                 {ownership.nfcEnabled && (
-                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#D4AF37]/15 text-[#D4AF37] font-bold uppercase">
+                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-[#FFCB05]/15 text-[#FFCB05] font-bold uppercase">
                     NFC-tracked
                   </span>
                 )}
@@ -371,23 +372,24 @@ export default function GradingReportPage() {
         {/* ── Overall grade hero ── */}
         <div className="reveal-on-scroll">
           {isBlack && (
-            <div className={`flex items-center justify-center gap-2 mb-3 text-[#D4AF37] text-xs font-bold uppercase tracking-widest animate-pulse`}>
-              <Star size={14} className="fill-[#D4AF37]" />
+            <div className={`flex items-center justify-center gap-2 mb-3 text-[#FFCB05] text-xs font-bold uppercase tracking-widest animate-pulse`}>
+              <Star size={14} className="fill-[#FFCB05]" />
               BLACK LABEL
-              <Star size={14} className="fill-[#D4AF37]" />
+              <Star size={14} className="fill-[#FFCB05]" />
             </div>
           )}
+          {/* Black-Label-conditional border + glow, deferred to PR #88. */}
           <div className={`rounded-2xl p-8 text-center border-2 ${isBlack ? "border-[#D4AF37]/40 bg-[#111111]" : "border-[#E8E4DC] bg-white"}`}
             style={isBlack ? { boxShadow: "0 0 40px rgba(212,175,55,0.15)" } : {}}>
             <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${t.textMut}`}>Overall Grade</p>
-            <p className="text-8xl font-black leading-none" style={{ color: "#D4AF37" }}>{grade.overall}</p>
+            <p className="text-8xl font-black leading-none" style={{ color: "#FFCB05" }}>{grade.overall}</p>
             <p className={`text-xl font-bold uppercase tracking-widest mt-2 ${t.text}`}>{grade.label}</p>
             {approvedDateFmt && (
               <p className={`text-xs mt-2 ${t.textMut}`}>Approved {approvedDateFmt}</p>
             )}
           </div>
           {grade.explanation && (
-            <div className={`mt-4 rounded-xl p-5 border-l-4 border-[#D4AF37] ${isBlack ? "bg-[#111111]" : "bg-[#FFF9E6]"}`}>
+            <div className={`mt-4 rounded-xl p-5 border-l-4 border-[#FFCB05] ${isBlack ? "bg-[#111111]" : "bg-[#FFF9E6]"}`}>
               <p className={`text-sm leading-relaxed italic ${isBlack ? "text-[#AAAAAA]" : "text-[#444444]"}`}>"{grade.explanation}"</p>
             </div>
           )}
@@ -396,7 +398,7 @@ export default function GradingReportPage() {
         {/* ── Subgrade breakdown ── */}
         {(subgrades.centering !== null || subgrades.corners !== null || subgrades.edges !== null || subgrades.surface !== null) && (
           <div className="reveal-on-scroll">
-            <h2 className={`text-xs font-bold uppercase tracking-widest mb-4 text-[#D4AF37]`}>Subgrade Breakdown</h2>
+            <h2 className={`text-xs font-bold uppercase tracking-widest mb-4 text-[#FFCB05]`}>Subgrade Breakdown</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
 
               <SubgradeCard label="Centering" value={subgrades.centering} isBlack={isBlack}>
@@ -405,7 +407,7 @@ export default function GradingReportPage() {
                     {[["Front L/R", centering.frontLR], ["Front T/B", centering.frontTB], ["Back L/R", centering.backLR], ["Back T/B", centering.backTB]].map(([l, v]) => v ? (
                       <div key={String(l)} className="flex justify-between">
                         <span className={`text-[10px] ${t.textMut}`}>{l}</span>
-                        <span className="text-[10px] font-mono font-bold text-[#D4AF37]">{v}</span>
+                        <span className="text-[10px] font-mono font-bold text-[#FFCB05]">{v}</span>
                       </div>
                     ) : null)}
                   </div>
@@ -466,7 +468,7 @@ export default function GradingReportPage() {
 
         {/* ── Defects ── */}
         <div className="reveal-on-scroll">
-          <h2 className="text-xs font-bold uppercase tracking-widest mb-4 text-[#D4AF37]">Identified Defects</h2>
+          <h2 className="text-xs font-bold uppercase tracking-widest mb-4 text-[#FFCB05]">Identified Defects</h2>
           {defects.length === 0 ? (
             <div className={`rounded-xl p-6 text-center ${t.card}`}>
               <CheckCircle2 size={28} className="text-emerald-500 mx-auto mb-2" />
@@ -497,7 +499,7 @@ export default function GradingReportPage() {
         <div className={`rounded-xl p-5 ${t.card} reveal-on-scroll`}>
           <div className="flex items-center gap-3 mb-3">
             <Shield size={18} className={authentication.status === "genuine" ? "text-emerald-500" : "text-red-400"} />
-            <h2 className={`text-xs font-bold uppercase tracking-widest text-[#D4AF37]`}>Authentication</h2>
+            <h2 className={`text-xs font-bold uppercase tracking-widest text-[#FFCB05]`}>Authentication</h2>
           </div>
           <p className={`text-sm ${t.textSec}`}>
             {authentication.status === "genuine"
@@ -508,13 +510,13 @@ export default function GradingReportPage() {
           </p>
           {authentication.notes && <p className={`text-xs mt-2 italic ${t.textMut}`}>{authentication.notes}</p>}
           {ownership.nfcEnabled && <p className={`text-xs mt-2 ${t.textMut}`}>This slab contains an NFC chip. Tap to verify authenticity.</p>}
-          {ownership.status === "claimed" && <p className={`text-xs mt-2 text-[#D4AF37]`}>✓ Registered owner on file.</p>}
+          {ownership.status === "claimed" && <p className={`text-xs mt-2 text-[#FFCB05]`}>✓ Registered owner on file.</p>}
         </div>
 
         {/* ── Population ── */}
         {population.totalGraded > 0 && (
           <div className={`rounded-xl p-5 ${t.card} reveal-on-scroll`}>
-            <h2 className={`text-xs font-bold uppercase tracking-widest mb-3 text-[#D4AF37]`}>Population Context</h2>
+            <h2 className={`text-xs font-bold uppercase tracking-widest mb-3 text-[#FFCB05]`}>Population Context</h2>
             <p className={`text-sm ${t.textSec}`}>
               MintVault has graded <strong className={t.text}>{population.totalGraded}</strong> {population.totalGraded === 1 ? "copy" : "copies"} of this card.
             </p>
@@ -524,12 +526,12 @@ export default function GradingReportPage() {
               </p>
             )}
             {isBlack && (
-              <p className="text-sm mt-1 text-[#D4AF37] font-bold">
+              <p className="text-sm mt-1 text-[#FFCB05] font-bold">
                 ★ This is one of {population.sameGradeCount} Black Label {population.sameGradeCount === 1 ? "copy" : "copies"} — the rarest grade at MintVault.
               </p>
             )}
             {population.higherGradeCount === 0 && population.totalGraded > 1 && (
-              <p className="text-sm mt-1 text-[#D4AF37]">★ Highest graded copy in the MintVault registry.</p>
+              <p className="text-sm mt-1 text-[#FFCB05]">★ Highest graded copy in the MintVault registry.</p>
             )}
           </div>
         )}
@@ -537,7 +539,7 @@ export default function GradingReportPage() {
         {/* ── Market Value ── */}
         {marketValue?.estimatedLow && marketValue?.estimatedHigh && (
           <div className={`rounded-xl p-5 ${t.card} reveal-on-scroll`}>
-            <h2 className="text-xs font-bold uppercase tracking-widest mb-3 text-[#D4AF37]">Estimated Market Value</h2>
+            <h2 className="text-xs font-bold uppercase tracking-widest mb-3 text-[#FFCB05]">Estimated Market Value</h2>
             <p className={`text-2xl font-black ${t.text}`}>
               {marketValue.currency === "GBP" ? "£" : "$"}{marketValue.estimatedLow} – {marketValue.currency === "GBP" ? "£" : "$"}{marketValue.estimatedHigh}
             </p>
@@ -556,7 +558,7 @@ export default function GradingReportPage() {
             <a
               href={`/api/cert/${cert.certId}/report/pdf`}
               download
-              className="inline-flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-[#D4AF37]/20 transition-all"
+              className="inline-flex items-center gap-2 bg-[#FFCB05]/10 border border-[#FFCB05]/40 text-[#FFCB05] px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-[#FFCB05]/20 transition-all"
             >
               <Download size={14} />
               Download PDF Report

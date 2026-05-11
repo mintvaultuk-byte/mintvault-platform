@@ -33,8 +33,8 @@ const V = {
   paperSunk: "#F4F0E6",
   line: "#E8E1D0",
   lineSoft: "#F0EBE0",
-  gold: "#B8960C",
-  goldSoft: "#D4AF37",
+  gold: "#FFCB05",
+  goldSoft: "#FFCB05",
   panelDark: "#1A1612",
   slabNavy: "hsl(220, 45%, 15%)",
   slabPetrol: "hsl(200, 50%, 25%)",
@@ -125,8 +125,8 @@ function AmbientLayer() {
   const y2 = 75 + Math.sin(time * 0.03) * 8;
   return (
     <div aria-hidden="true" style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: -1, overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: `${y1 - 35}%`, left: `${x1 - 35}%`, width: "70%", height: "70%", background: "radial-gradient(circle, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.06) 30%, transparent 60%)", filter: "blur(60px)" }} />
-      <div style={{ position: "absolute", top: `${y2 - 30}%`, left: `${x2 - 30}%`, width: "60%", height: "60%", background: "radial-gradient(circle, rgba(184, 150, 12, 0.13) 0%, rgba(184, 150, 12, 0.05) 30%, transparent 60%)", filter: "blur(50px)" }} />
+      <div style={{ position: "absolute", top: `${y1 - 35}%`, left: `${x1 - 35}%`, width: "70%", height: "70%", background: "radial-gradient(circle, rgba(255,203,5, 0.18) 0%, rgba(255,203,5, 0.06) 30%, transparent 60%)", filter: "blur(60px)" }} />
+      <div style={{ position: "absolute", top: `${y2 - 30}%`, left: `${x2 - 30}%`, width: "60%", height: "60%", background: "radial-gradient(circle, rgba(255,203,5, 0.13) 0%, rgba(255,203,5, 0.05) 30%, transparent 60%)", filter: "blur(50px)" }} />
     </div>
   );
 }
@@ -137,7 +137,7 @@ function DarkSectionGlow() {
   const alpha = 0.12 + breathe * 0.10;
   return (
     <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: "30%", left: "50%", width: "70%", height: "60%", transform: "translate(-50%, -50%)", background: `radial-gradient(ellipse, rgba(212, 175, 55, ${alpha}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`, filter: "blur(60px)" }} />
+      <div style={{ position: "absolute", top: "30%", left: "50%", width: "70%", height: "60%", transform: "translate(-50%, -50%)", background: `radial-gradient(ellipse, rgba(255,203,5, ${alpha}) 0%, rgba(255,203,5, 0.02) 35%, transparent 70%)`, filter: "blur(60px)" }} />
     </div>
   );
 }
@@ -161,10 +161,10 @@ function Slab3D({ width, rotateX = 0, rotateY = 0, rotateZ = 0, translateX = 0, 
     <div style={{ position: "absolute", width, height, transformStyle: "preserve-3d", transform: `translate3d(${translateX}px, ${translateY}px, ${translateZ}px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) rotateZ(${rotateZ}deg) scale(${scale})`, willChange: "transform" }}>
       {/* FRONT */}
       <SlabFace transform={`translateZ(${depth / 2}px)`} width={width} height={height}>
-        <div style={{ position: "absolute", inset: 0, borderRadius: 12, border: "1px solid rgba(212, 175, 55, 0.4)", backgroundColor: V.paperRaised, overflow: "hidden", boxShadow: "0 30px 60px -20px rgba(15,14,11,0.35), 0 12px 24px -10px rgba(15,14,11,0.18)" }}>
+        <div style={{ position: "absolute", inset: 0, borderRadius: 12, border: "1px solid rgba(255,203,5, 0.4)", backgroundColor: V.paperRaised, overflow: "hidden", boxShadow: "0 30px 60px -20px rgba(15,14,11,0.35), 0 12px 24px -10px rgba(15,14,11,0.18)" }}>
           <div style={{ height: "10%", display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "0 8px" }}>
             {topBadge && (
-              <span style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", color: V.goldSoft, fontSize: width * 0.05, letterSpacing: "0.1em", padding: "1px 6px", border: "1px solid rgba(212, 175, 55, 0.4)", borderRadius: 999, lineHeight: 1 }}>
+              <span style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", color: V.goldSoft, fontSize: width * 0.05, letterSpacing: "0.1em", padding: "1px 6px", border: "1px solid rgba(255,203,5, 0.4)", borderRadius: 999, lineHeight: 1 }}>
                 {topBadge}
               </span>
             )}
@@ -175,7 +175,7 @@ function Slab3D({ width, rotateX = 0, rotateY = 0, rotateZ = 0, translateX = 0, 
               MintVault
             </div>
           </div>
-          <div style={{ height: "25%", padding: "6px 10px", backgroundColor: V.paperRaised, borderTop: "1px solid rgba(212, 175, 55, 0.3)", display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
+          <div style={{ height: "25%", padding: "6px 10px", backgroundColor: V.paperRaised, borderTop: "1px solid rgba(255,203,5, 0.3)", display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
               <span style={{ fontFamily: "'Geist', system-ui, sans-serif", color: V.ink, fontSize: width * 0.07, fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {mainLabel}
@@ -198,9 +198,9 @@ function Slab3D({ width, rotateX = 0, rotateY = 0, rotateZ = 0, translateX = 0, 
         </div>
       </SlabFace>
       <SlabFace transform={`translateZ(-${depth / 2}px) rotateY(180deg)`} width={width} height={height}>
-        <div style={{ position: "absolute", inset: 0, borderRadius: 12, border: "1px solid rgba(212, 175, 55, 0.4)", background: `linear-gradient(155deg, ${V.slabNavy} 0%, ${V.slabPetrol} 100%)`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
-          <div style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontSize: width * 0.18, color: "rgba(212,175,55,0.55)", fontWeight: 400, lineHeight: 1 }}>MV</div>
-          <div style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: width * 0.04, letterSpacing: "0.3em", color: "rgba(212,175,55,0.5)", marginTop: 14 }}>REGISTERED</div>
+        <div style={{ position: "absolute", inset: 0, borderRadius: 12, border: "1px solid rgba(255,203,5, 0.4)", background: `linear-gradient(155deg, ${V.slabNavy} 0%, ${V.slabPetrol} 100%)`, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+          <div style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontSize: width * 0.18, color: "rgba(255,203,5,0.55)", fontWeight: 400, lineHeight: 1 }}>MV</div>
+          <div style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: width * 0.04, letterSpacing: "0.3em", color: "rgba(255,203,5,0.5)", marginTop: 14 }}>REGISTERED</div>
           {topBadge && <div style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: width * 0.035, letterSpacing: "0.2em", color: "rgba(255,255,255,0.4)", marginTop: 6 }}>{topBadge}</div>}
         </div>
       </SlabFace>
@@ -351,9 +351,9 @@ function PerkRow({ number, title, body, value, isFirst }) {
           fontWeight: 500,
           lineHeight: 1,
           fontSize: "clamp(2rem, 4vw, 3rem)",
-          color: visible ? "rgba(212, 175, 55, 0.75)" : "rgba(212, 175, 55, 0.25)",
+          color: visible ? "rgba(255,203,5, 0.75)" : "rgba(255,203,5, 0.25)",
           transition: "color 1000ms ease-out 200ms",
-          textShadow: visible ? "0 0 30px rgba(212, 175, 55, 0.4)" : "none",
+          textShadow: visible ? "0 0 30px rgba(255,203,5, 0.4)" : "none",
         }}
       >
         {number}
@@ -487,7 +487,7 @@ function SectionIII() {
               padding: 32,
               backgroundColor: V.paper,
               border: `1px solid ${V.goldSoft}`,
-              boxShadow: `0 0 40px rgba(212, 175, 55, ${glow * 0.7}), inset 0 0 30px rgba(212, 175, 55, ${glow * 0.2})`,
+              boxShadow: `0 0 40px rgba(255,203,5, ${glow * 0.7}), inset 0 0 30px rgba(255,203,5, ${glow * 0.2})`,
               transition: "box-shadow 1s ease-in-out",
               display: "flex",
               flexDirection: "column",

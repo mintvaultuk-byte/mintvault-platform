@@ -23,7 +23,7 @@ export default function StolenCardProtectionPage() {
 
         {/* Hero */}
         <div className="relative overflow-hidden" style={{ background: "linear-gradient(135deg,#0A0A0A 0%,#1A1200 100%)" }}>
-          <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.12) 0%, transparent 70%)" }} />
+          <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(255,203,5,0.12) 0%, transparent 70%)" }} />
           <div className="relative max-w-3xl mx-auto px-4 py-20 text-center">
             <div className="inline-flex items-center gap-2 bg-red-900/30 border border-red-700/40 rounded-full px-4 py-1.5 mb-6">
               <AlertTriangle size={13} className="text-red-400" />
@@ -66,7 +66,7 @@ export default function StolenCardProtectionPage() {
                 { step: "3", title: "Protected", desc: "A bright red banner appears on the certificate's Vault page and any NFC/QR scan shows a stolen warning." },
               ].map(({ step, title, desc }) => (
                 <div key={step} className="border border-[#E8E4DC] rounded-xl p-5">
-                  <div className="w-8 h-8 rounded-full bg-[#D4AF37] text-[#1A1400] font-black text-sm flex items-center justify-center mb-3">{step}</div>
+                  <div className="w-8 h-8 rounded-full bg-[#FFCB05] text-[#1A1400] font-black text-sm flex items-center justify-center mb-3">{step}</div>
                   <h3 className="font-bold text-[#1A1A1A] mb-1">{title}</h3>
                   <p className="text-xs text-[#888888] leading-relaxed">{desc}</p>
                 </div>
@@ -96,7 +96,7 @@ export default function StolenCardProtectionPage() {
               <button
                 onClick={() => reportCertId.length > 2 && navigate(`/cert/${reportCertId}`)}
                 className="px-4 py-2.5 rounded-lg text-sm font-bold text-[#1A1400] flex items-center gap-2 transition-all"
-                style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
               >
                 <Search size={14} />
                 Look Up
@@ -131,8 +131,8 @@ export default function StolenCardProtectionPage() {
           </section>
 
           {/* Ownership callout */}
-          <section className="rounded-2xl p-8 text-center" style={{ background: "linear-gradient(135deg,#0A0A0A,#1A1200)", border: "1px solid #D4AF37" }}>
-            <Shield size={32} className="text-[#D4AF37] mx-auto mb-4" />
+          <section className="rounded-2xl p-8 text-center" style={{ background: "linear-gradient(135deg,#0A0A0A,#1A1200)", border: "1px solid #FFCB05" }}>
+            <Shield size={32} className="text-[#FFCB05] mx-auto mb-4" />
             <h2 className="text-2xl font-black text-white mb-3" style={{ letterSpacing: "-0.02em" }}>Register Your Ownership</h2>
             <p className="text-[#B8A060] text-sm max-w-md mx-auto mb-6">
               Claiming ownership of your graded card links it to your identity — making it much easier to prove provenance if your card is ever stolen or disputed.
@@ -140,7 +140,7 @@ export default function StolenCardProtectionPage() {
             <a
               href="/claim"
               className="inline-block px-8 py-3 rounded-xl font-bold text-[#1A1400] text-sm transition-all"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
             >
               Claim Your Card
             </a>
@@ -210,7 +210,7 @@ function ReportForm() {
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="Full name"
-          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
         />
       </div>
       <div>
@@ -221,7 +221,7 @@ function ReportForm() {
           value={email}
           onChange={e => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
         />
         <p className="text-xs text-[#AAAAAA] mt-1">We'll send a verification link here.</p>
       </div>
@@ -232,7 +232,7 @@ function ReportForm() {
           onChange={e => setDescription(e.target.value)}
           placeholder="Briefly describe how the card was stolen"
           rows={3}
-          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37] resize-none"
+          className="w-full border border-[#E8E4DC] rounded-lg px-4 py-2.5 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05] resize-none"
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}

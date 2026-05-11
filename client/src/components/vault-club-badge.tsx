@@ -11,7 +11,7 @@ interface Props {
 const TIER_COLOURS: Record<string, string> = {
   bronze: "#CD7F32",
   silver: "#C0C0C0",
-  gold: "#D4AF37",
+  gold: "#FFCB05",
 };
 
 const TIER_LABELS: Record<string, string> = {

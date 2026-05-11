@@ -74,17 +74,17 @@ export default function CardGradingCostUk() {
         </p>
 
         <section className="mb-10" data-testid="section-cost-tiers">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Grading Tiers & Pricing</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Grading Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
               { tier: "Vault Queue", days: "40 working days", price: "£19/card", desc: "Best for bulk collections and patient submissions." },
               { tier: "Standard", days: "15 working days", price: "£25/card", desc: "A balanced turnaround for most submissions." },
               { tier: "Express", days: "5 working days", price: "£45/card", desc: "Priority processing for urgent or high-value cards." },
             ].map((t) => (
-              <div key={t.tier} className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+              <div key={t.tier} className="border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-white text-sm font-medium">{t.tier}</span>
-                  <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
+                  <span className="text-[#FFCB05] font-bold text-sm">{t.price}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-[#999999] text-xs">{t.desc}</span>
@@ -94,12 +94,12 @@ export default function CardGradingCostUk() {
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing & bulk discounts</Link>.
+            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#FFCB05] hover:underline">View full pricing & bulk discounts</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-cost-included">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">What's Included in Every Grading Fee</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">What's Included in Every Grading Fee</h2>
           <div className="space-y-2">
             {[
               "Professional grade assessment on a 1–10 scale",
@@ -109,7 +109,7 @@ export default function CardGradingCostUk() {
               "Fully insured return shipping based on declared card value",
             ].map((item) => (
               <div key={item} className="flex items-start gap-2 text-[#d4d4d4] text-sm">
-                <span className="text-[#D4AF37] mt-0.5 shrink-0">✓</span>
+                <span className="text-[#FFCB05] mt-0.5 shrink-0">✓</span>
                 <span>{item}</span>
               </div>
             ))}
@@ -117,11 +117,11 @@ export default function CardGradingCostUk() {
         </section>
 
         <section className="mb-10" data-testid="section-cost-vs-overseas">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">True Cost: UK vs Overseas Grading</h2>
+          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">True Cost: UK vs Overseas Grading</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
             When UK collectors send cards to overseas graders, the advertised grade fee is only part of the cost. Here's a realistic cost breakdown for sending 10 cards to a US grader:
           </p>
-          <div className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg p-4 space-y-2 text-sm mb-4">
+          <div className="border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg p-4 space-y-2 text-sm mb-4">
             {[
               ["Grading fee (10 cards @ ~$25)", "~£200"],
               ["International tracked shipping (outbound)", "~£30"],
@@ -130,9 +130,9 @@ export default function CardGradingCostUk() {
               ["Import VAT (20% on value + duty)", "~£45"],
               ["Total estimated cost", "~£325"],
             ].map(([label, value], i) => (
-              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#D4AF37]/20 font-semibold text-white" : "text-[#d4d4d4]"}`}>
+              <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#FFCB05]/20 font-semibold text-white" : "text-[#d4d4d4]"}`}>
                 <span>{label}</span>
-                <span className={i === 5 ? "text-[#D4AF37]" : ""}>{value}</span>
+                <span className={i === 5 ? "text-[#FFCB05]" : ""}>{value}</span>
               </div>
             ))}
           </div>
@@ -156,7 +156,7 @@ export default function CardGradingCostUk() {
               { href: "/card-grading-service-uk", label: "Card Grading Service UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

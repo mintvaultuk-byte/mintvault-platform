@@ -82,7 +82,7 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
           )}
           {card.is_black_label && (
             <div className="absolute bottom-2 left-2">
-              <span className="text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#D4AF37] px-1.5 py-0.5 rounded">
+              <span className="text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#FFCB05] px-1.5 py-0.5 rounded">
                 BLACK LABEL
               </span>
             </div>
@@ -95,7 +95,7 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
             {card.grade !== null && (
               <>
                 <span className="text-[#CCCCCC] mx-1">·</span>
-                <span className="text-sm font-black" style={{ color: "#D4AF37" }}>
+                <span className="text-sm font-black" style={{ color: "#FFCB05" }}>
                   Grade {card.grade}
                 </span>
               </>
@@ -114,7 +114,7 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
 
 function CardListItem({ card }: { card: ShowroomCard }) {
   return (
-    <div className={`flex items-center gap-4 p-3 rounded-xl border bg-white hover:border-[#D4AF37]/40 transition-all ${
+    <div className={`flex items-center gap-4 p-3 rounded-xl border bg-white hover:border-[#FFCB05]/40 transition-all ${
       card.is_black_label ? "border-[#1A1A1A]" : "border-[#E8E4DC]"
     }`}>
       {/* Thumbnail */}
@@ -134,7 +134,7 @@ function CardListItem({ card }: { card: ShowroomCard }) {
           {card.grade !== null && (
             <>
               <span className="text-[#CCCCCC] mx-1">·</span>
-              <span className="text-base font-black" style={{ color: "#D4AF37" }}>
+              <span className="text-base font-black" style={{ color: "#FFCB05" }}>
                 Grade {card.grade}
               </span>
             </>
@@ -145,14 +145,14 @@ function CardListItem({ card }: { card: ShowroomCard }) {
           {card.card_number && <span className="ml-1 text-[#CCCCCC]">#{card.card_number}</span>}
         </p>
         {card.is_black_label && (
-          <span className="inline-block text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#D4AF37] px-1.5 py-0.5 rounded mt-1">
+          <span className="inline-block text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#FFCB05] px-1.5 py-0.5 rounded mt-1">
             BLACK LABEL
           </span>
         )}
       </div>
       {/* Vault link */}
       <div className="flex-shrink-0">
-        <Link href={`/vault/${card.cert_id}`} className="text-xs text-[#B8960C] font-semibold hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors">
+        <Link href={`/vault/${card.cert_id}`} className="text-xs text-[#FFCB05] font-semibold hover:text-[#FFCB05] flex items-center gap-0.5 transition-colors">
           Vault <ExternalLink size={10} />
         </Link>
       </div>
@@ -165,7 +165,7 @@ function CardListItem({ card }: { card: ShowroomCard }) {
 function StatTile({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
   return (
     <div className="bg-white border border-[#E8E4DC] rounded-xl p-4 text-center">
-      <div className="flex items-center justify-center text-[#D4AF37] mb-2">{icon}</div>
+      <div className="flex items-center justify-center text-[#FFCB05] mb-2">{icon}</div>
       <div className="text-2xl font-black text-[#1A1A1A]">{value}</div>
       <div className="text-[10px] font-bold uppercase tracking-widest text-[#999999] mt-0.5">{label}</div>
     </div>
@@ -243,7 +243,7 @@ export default function ShowroomPage() {
     return (
       <ShowroomShell>
         <div className="min-h-[60vh] flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-[#D4AF37] border-t-transparent animate-spin" />
+          <div className="w-8 h-8 rounded-full border-2 border-[#FFCB05] border-t-transparent animate-spin" />
         </div>
       </ShowroomShell>
     );
@@ -267,13 +267,13 @@ export default function ShowroomPage() {
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap">
               <Link href="/showrooms">
-                <button className="px-5 py-2.5 rounded-xl border border-[#D4AF37]/40 text-[#D4AF37] text-sm font-bold hover:bg-[#D4AF37]/10 transition-all">
+                <button className="px-5 py-2.5 rounded-xl border border-[#FFCB05]/40 text-[#FFCB05] text-sm font-bold hover:bg-[#FFCB05]/10 transition-all">
                   Browse Showrooms
                 </button>
               </Link>
               <Link href="/dashboard">
                 <button className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}>
+                  style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}>
                   Claim your own
                 </button>
               </Link>
@@ -299,11 +299,11 @@ export default function ShowroomPage() {
             <div className="relative w-full rounded-2xl border border-white/10 overflow-hidden mb-8 select-none pointer-events-none" style={{ height: 180 }}>
               <div className="absolute inset-0 grid grid-cols-4 gap-2 p-3 opacity-20">
                 {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="aspect-[2.5/3.5] bg-[#D4AF37]/30 rounded-lg" />
+                  <div key={i} className="aspect-[2.5/3.5] bg-[#FFCB05]/30 rounded-lg" />
                 ))}
               </div>
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-sm">
-                <Lock size={32} className="text-[#D4AF37] mb-2" />
+                <Lock size={32} className="text-[#FFCB05] mb-2" />
                 <span className="text-xs font-bold text-[#888888] uppercase tracking-widest">Not yet activated</span>
               </div>
             </div>
@@ -315,7 +315,7 @@ export default function ShowroomPage() {
               This Showroom is reserved. The owner hasn't activated their Vault Club membership yet.
             </p>
             <div className="flex flex-col items-center gap-3">
-              <Link href="/vault-club" className="text-sm text-[#D4AF37] font-semibold hover:text-[#E8C76A] transition-colors">
+              <Link href="/vault-club" className="text-sm text-[#FFCB05] font-semibold hover:text-[#E8C76A] transition-colors">
                 Are you {data.username}? Activate your Showroom →
               </Link>
               <Link href="/showrooms" className="text-xs text-white/50 hover:text-white/70 transition-colors">
@@ -346,16 +346,16 @@ export default function ShowroomPage() {
         className="relative overflow-hidden"
         style={{ background: "linear-gradient(135deg,#0A0A0A 0%,#1A1200 100%)" }}
       >
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.12) 0%, transparent 70%)" }} />
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(255,203,5,0.12) 0%, transparent 70%)" }} />
         <div className="relative max-w-4xl mx-auto px-4 py-16 text-center">
-          <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-full px-3 py-1 mb-5">
-            <Shield size={11} className="text-[#D4AF37]" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#D4AF37]">Verified MintVault Collector</span>
+          <div className="inline-flex items-center gap-1.5 bg-[#FFCB05]/10 border border-[#FFCB05]/30 rounded-full px-3 py-1 mb-5">
+            <Shield size={11} className="text-[#FFCB05]" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#FFCB05]">Verified MintVault Collector</span>
           </div>
           <div className="flex items-center justify-center gap-3 mb-3">
             <h1
               className="text-4xl md:text-5xl font-black"
-              style={{ color: "#D4AF37" }}
+              style={{ color: "#FFCB05" }}
             >
               {data.display_name}
             </h1>
@@ -392,7 +392,7 @@ export default function ShowroomPage() {
           <select
             value={sort}
             onChange={e => setSort(e.target.value as SortKey)}
-            className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+            className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
@@ -403,7 +403,7 @@ export default function ShowroomPage() {
           <select
             value={gradeFilter}
             onChange={e => setGradeFilter(e.target.value)}
-            className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+            className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
           >
             <option value="all">All Grades</option>
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(g => (
@@ -414,7 +414,7 @@ export default function ShowroomPage() {
             <select
               value={setFilter}
               onChange={e => setSetFilter(e.target.value)}
-              className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+              className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
             >
               <option value="all">All Sets</option>
               {sets.map(s => <option key={s} value={s}>{s}</option>)}
@@ -423,14 +423,14 @@ export default function ShowroomPage() {
           <div className="ml-auto flex items-center gap-1 border border-[#E8E4DC] rounded-lg overflow-hidden">
             <button
               onClick={() => setLayout("grid")}
-              className={`p-2 transition-colors ${layout === "grid" ? "bg-[#D4AF37]/15 text-[#B8960C]" : "bg-white text-[#999999] hover:text-[#666666]"}`}
+              className={`p-2 transition-colors ${layout === "grid" ? "bg-[#FFCB05]/15 text-[#FFCB05]" : "bg-white text-[#999999] hover:text-[#666666]"}`}
               aria-label="Grid view"
             >
               <Grid2x2 size={14} />
             </button>
             <button
               onClick={() => setLayout("list")}
-              className={`p-2 transition-colors ${layout === "list" ? "bg-[#D4AF37]/15 text-[#B8960C]" : "bg-white text-[#999999] hover:text-[#666666]"}`}
+              className={`p-2 transition-colors ${layout === "list" ? "bg-[#FFCB05]/15 text-[#FFCB05]" : "bg-white text-[#999999] hover:text-[#666666]"}`}
               aria-label="List view"
             >
               <List size={14} />
@@ -457,7 +457,7 @@ export default function ShowroomPage() {
           <Link href="/dashboard">
             <button
               className="px-6 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
             >
               Claim yours →
             </button>

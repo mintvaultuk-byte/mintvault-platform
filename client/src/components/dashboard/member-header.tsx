@@ -48,19 +48,19 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout, sho
     const memberSince = fmtMonthYear(vcMe?.started_at);
     const renews = fmtDate(vcMe?.renews_at);
     return (
-      <div className="relative z-10 -mt-20 md:-mt-24 bg-[#0F0F0F] border-b-[1.5px] border-[#D4AF37] rounded-xl px-5 py-5 mb-12">
+      <div className="relative z-10 -mt-20 md:-mt-24 bg-[#0F0F0F] border-b-[1.5px] border-[#FFCB05] rounded-xl px-5 py-5 mb-12">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold tracking-[0.15em] text-[#D4AF37] uppercase mb-1.5">
+            <p className="text-[10px] font-bold tracking-[0.15em] text-[#FFCB05] uppercase mb-1.5">
               Vault Club
             </p>
             <h1 className="text-xl font-medium text-[#FAF9F5] leading-tight">
-              Welcome back, <span className="text-[#D4AF37]">{firstName}</span>
+              Welcome back, <span className="text-[#FFCB05]">{firstName}</span>
             </h1>
             {fullName && fullName !== firstName && (
               <p className="text-sm text-[#d4d4d4] mt-1.5">
                 {showroomHref ? (
-                  <Link href={showroomHref} className="text-[#D4AF37] hover:text-[#D4AF37]/80 transition-colors">
+                  <Link href={showroomHref} className="text-[#FFCB05] hover:text-[#FFCB05]/80 transition-colors">
                     {fullName}
                   </Link>
                 ) : (
@@ -78,19 +78,19 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout, sho
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             {/* SILVER MEMBER pill */}
-            <div className="inline-flex items-center gap-1.5 border border-[#D4AF37]/60 bg-[#D4AF37]/10 rounded-full px-2.5 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
-              <span className="text-[9px] font-bold tracking-[0.12em] text-[#D4AF37] uppercase whitespace-nowrap">
+            <div className="inline-flex items-center gap-1.5 border border-[#FFCB05]/60 bg-[#FFCB05]/10 rounded-full px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#FFCB05] animate-pulse" />
+              <span className="text-[9px] font-bold tracking-[0.12em] text-[#FFCB05] uppercase whitespace-nowrap">
                 Silver Member
               </span>
             </div>
             {/* Avatar */}
-            <div className="w-7 h-7 rounded-full bg-[#D4AF37] flex items-center justify-center text-[#0F0F0F] text-xs font-bold">
+            <div className="w-7 h-7 rounded-full bg-[#FFCB05] flex items-center justify-center text-[#0F0F0F] text-xs font-bold">
               {avatarLetter}
             </div>
             <Link
               href="/account/settings"
-              className="text-[10px] text-[#888888] hover:text-[#D4AF37] transition-colors flex items-center gap-1"
+              className="text-[10px] text-[#888888] hover:text-[#FFCB05] transition-colors flex items-center gap-1"
               aria-label="Account Settings"
             >
               <Settings size={11} />
@@ -98,7 +98,7 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout, sho
             </Link>
             <button
               onClick={onLogout}
-              className="text-[10px] text-[#888888] hover:text-[#D4AF37] transition-colors flex items-center gap-1"
+              className="text-[10px] text-[#888888] hover:text-[#FFCB05] transition-colors flex items-center gap-1"
               aria-label="Log out"
             >
               <LogOut size={11} />
@@ -114,12 +114,12 @@ export default function MemberHeader({ me, authMe, vcMe, isMember, onLogout, sho
   return (
     <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-7 h-7 rounded-full bg-[#D4AF37] flex items-center justify-center text-[#0F0F0F] text-xs font-bold flex-shrink-0">
+        <div className="w-7 h-7 rounded-full bg-[#FFCB05] flex items-center justify-center text-[#0F0F0F] text-xs font-bold flex-shrink-0">
           {avatarLetter}
         </div>
         <div className="min-w-0">
           <h1 className="text-lg font-medium text-[#1A1A1A] leading-tight">
-            Welcome back, <span className="text-[#B8960C]">{firstName}</span>
+            Welcome back, <span className="text-[#FFCB05]">{firstName}</span>
           </h1>
           <p className="text-xs text-[#888888] truncate">{me.email}</p>
         </div>

@@ -663,7 +663,7 @@ export const guides: Guide[] = [
 <h2>How to Claim Ownership</h2>
 <p>Your slab comes with a claim insert card. This contains a unique claim code — a short alphanumeric code specific to your certificate. To claim ownership:</p>
 <ol>
-  <li>Visit <a href="/ownership" class="text-[#D4AF37] hover:underline">mintvaultuk.com/ownership</a> or scan the QR code on the insert</li>
+  <li>Visit <a href="/ownership" class="text-[#FFCB05] hover:underline">mintvaultuk.com/ownership</a> or scan the QR code on the insert</li>
   <li>Enter your certificate number and claim code</li>
   <li>Enter your full name and email address</li>
   <li>Submit — ownership is registered immediately</li>
@@ -673,7 +673,7 @@ export const guides: Guide[] = [
 <h2>How to Transfer Ownership</h2>
 <p>If you sell or give away a registered card, you can transfer ownership to the new owner. This keeps the registry accurate and reassures the buyer.</p>
 <ol>
-  <li>Log in to your <a href="/dashboard" class="text-[#D4AF37] hover:underline">MintVault dashboard</a></li>
+  <li>Log in to your <a href="/dashboard" class="text-[#FFCB05] hover:underline">MintVault dashboard</a></li>
   <li>Find the certificate in your owned cards</li>
   <li>Click "Transfer Ownership" and enter the new owner's name and email address</li>
   <li>Both parties receive confirmation emails</li>
@@ -700,14 +700,14 @@ export const guides: Guide[] = [
 <h2>Before You Start: Is Your Card Worth Grading?</h2>
 <p>The most common question from first-time submitters is: which cards should I send? The short answer is: cards in near-mint condition where the graded value would comfortably exceed the grading fee.</p>
 <p>Check recent eBay sold listings for the card you are considering — search for the card name plus "PSA 10" or "GEM MT" to see what graded copies are selling for. If the graded value is at least 3–4× the grading fee, it is worth submitting.</p>
-<p>See our full guide on <a href="/guides/what-pokemon-cards-are-worth-grading" class="text-[#D4AF37] hover:underline">which cards are worth grading</a> for more detail.</p>
+<p>See our full guide on <a href="/guides/what-pokemon-cards-are-worth-grading" class="text-[#FFCB05] hover:underline">which cards are worth grading</a> for more detail.</p>
 
 <h2>Step 1: Choose Your Service Tier</h2>
-<p>MintVault offers three service tiers at different price points and turnaround times. Visit the <a href="/pricing" class="text-[#D4AF37] hover:underline">pricing page</a> to see all options. For most first-time submitters, the Vault Queue tier (40 working days) is the most affordable option, while Standard (15 working days) offers a good balance of cost and speed.</p>
+<p>MintVault offers three service tiers at different price points and turnaround times. Visit the <a href="/pricing" class="text-[#FFCB05] hover:underline">pricing page</a> to see all options. For most first-time submitters, the Vault Queue tier (40 working days) is the most affordable option, while Standard (15 working days) offers a good balance of cost and speed.</p>
 <p>If you have time-sensitive cards or are submitting ahead of a sale, consider the Express tier (5 working days).</p>
 
 <h2>Step 2: Fill in the Submission Form</h2>
-<p>Go to the <a href="/submit" class="text-[#D4AF37] hover:underline">Submit Cards page</a> and complete the online form. You will need to provide:</p>
+<p>Go to the <a href="/submit" class="text-[#FFCB05] hover:underline">Submit Cards page</a> and complete the online form. You will need to provide:</p>
 <ul>
   <li>The number of cards you are submitting</li>
   <li>Your service tier selection</li>
@@ -735,7 +735,7 @@ export const guides: Guide[] = [
 <p>Our receiving address is provided in your confirmation email and on the submission tracking page.</p>
 
 <h2>Step 6: Track Your Submission</h2>
-<p>Once your cards arrive at our facility, you will receive an email confirmation. Use the <a href="/track" class="text-[#D4AF37] hover:underline">Track Submission page</a> with your submission ID and email to monitor progress. You will receive email updates when:</p>
+<p>Once your cards arrive at our facility, you will receive an email confirmation. Use the <a href="/track" class="text-[#FFCB05] hover:underline">Track Submission page</a> with your submission ID and email to monitor progress. You will receive email updates when:</p>
 <ul>
   <li>Your cards are received and logged</li>
   <li>Grading is complete</li>
@@ -744,7 +744,7 @@ export const guides: Guide[] = [
 
 <h2>Step 7: Receive Your Slabs</h2>
 <p>Your cards are returned via fully insured Royal Mail Special Delivery. Each card arrives in a MintVault precision slab with a label showing the card name, set, grade, and subgrades. A QR code and NFC chip on each slab link to the permanent certificate record.</p>
-<p>A claim insert is included with each slab so you can register ownership in the MintVault registry. See our <a href="/guides/ownership-registry" class="text-[#D4AF37] hover:underline">ownership registry guide</a> for instructions.</p>
+<p>A claim insert is included with each slab so you can register ownership in the MintVault registry. See our <a href="/guides/ownership-registry" class="text-[#FFCB05] hover:underline">ownership registry guide</a> for instructions.</p>
 
 <h2>What If I'm Unhappy With the Grade?</h2>
 <p>Grades assigned by MintVault are final — we do not revise grades based on customer preference. If you believe a genuine administrative error has occurred (e.g. the wrong card was graded), contact us immediately with your certificate number and supporting photos.</p>

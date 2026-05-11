@@ -77,14 +77,14 @@ export default function AdminLoginPage({ onLogin }: Props) {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-full border-2 border-[#D4AF37]/40 flex items-center justify-center mx-auto mb-4">
+          <div className="w-14 h-14 rounded-full border-2 border-[#FFCB05]/40 flex items-center justify-center mx-auto mb-4">
             {step === "password" ? (
-              <Shield className="text-[#D4AF37]" size={28} />
+              <Shield className="text-[#FFCB05]" size={28} />
             ) : (
-              <KeyRound className="text-[#D4AF37]" size={28} />
+              <KeyRound className="text-[#FFCB05]" size={28} />
             )}
           </div>
-          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest glow-gold-sm" data-testid="text-admin-title">
+          <h1 className="text-2xl font-bold text-[#FFCB05] tracking-widest glow-gold-sm" data-testid="text-admin-title">
             STAFF ACCESS
           </h1>
           <p className="text-[#999999] text-sm mt-1">
@@ -95,7 +95,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
         {step === "password" ? (
           <form onSubmit={handlePasswordSubmit} className="space-y-4" data-testid="form-password">
             <div>
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Password</label>
+              <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Password</label>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -104,13 +104,13 @@ export default function AdminLoginPage({ onLogin }: Props) {
                   required
                   autoComplete="current-password"
                   autoFocus
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[#FFCB05]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05] transition-colors"
                   data-testid="input-admin-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors z-10 p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors z-10 p-1"
                   data-testid="button-toggle-password"
                   tabIndex={-1}
                 >
@@ -126,7 +126,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full border border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#FFCB05]/20 disabled:opacity-50 flex items-center justify-center gap-2"
               data-testid="button-admin-login"
             >
               <LogIn size={16} />
@@ -136,7 +136,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
         ) : (
           <form onSubmit={handlePinSubmit} className="space-y-4" data-testid="form-pin">
             <div>
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Security PIN</label>
+              <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Security PIN</label>
               <div className="relative">
                 <input
                   type={showPin ? "text" : "password"}
@@ -150,13 +150,13 @@ export default function AdminLoginPage({ onLogin }: Props) {
                   pattern="[0-9]*"
                   autoFocus
                   placeholder="Enter PIN"
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[#FFCB05]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[#FFCB05] transition-colors"
                   data-testid="input-admin-pin"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPin(!showPin)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors z-10 p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors z-10 p-1"
                   data-testid="button-toggle-pin"
                   tabIndex={-1}
                 >
@@ -172,7 +172,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
             <button
               type="submit"
               disabled={loading || pin.length < 6}
-              className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full border border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#FFCB05]/20 disabled:opacity-50 flex items-center justify-center gap-2"
               data-testid="button-admin-pin-submit"
             >
               <KeyRound size={16} />
@@ -182,7 +182,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
             <button
               type="button"
               onClick={() => { setStep("password"); setPin(""); setError(""); }}
-              className="w-full text-[#999999] text-xs hover:text-[#D4AF37] transition-colors"
+              className="w-full text-[#999999] text-xs hover:text-[#FFCB05] transition-colors"
               data-testid="button-back-to-password"
             >
               Back to password

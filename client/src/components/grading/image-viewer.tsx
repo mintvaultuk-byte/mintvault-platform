@@ -94,8 +94,8 @@ function prevZoomStep(current: number): number {
 
 const PULSE_CSS = `
 @keyframes defect-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(212,175,55,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,203,5,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(255,203,5,0); }
 }
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
@@ -273,8 +273,8 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                   disabled={!hasImage}
                   className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                     side === s && !showReference
-                      ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                      : hasImage ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40" : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
+                      ? "border-[#FFCB05] text-[#FFCB05] bg-[#FFCB05]/10"
+                      : hasImage ? "border-[#D4D0C8] text-[#333333] hover:border-[#FFCB05]/40" : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
                   }`}
                 >{s}{count > 0 ? ` (${count})` : ""}</button>
                 {hasImage && certId && !fullscreen && (
@@ -298,7 +298,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           })}
           {!fullscreen && referenceImageUrl && (
             <button type="button" onClick={() => setShowReference(v => !v)}
-              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"}`}
+              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#FFCB05] text-[#FFCB05] bg-[#FFCB05]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#FFCB05]/40"}`}
             >Reference</button>
           )}
         </div>
@@ -312,7 +312,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             return urls[key] != null;
           }).map(v => (
             <button key={v.key} type="button" onClick={() => setVariant(v.key)}
-              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#333333]"}`}
+              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#FFCB05] border-[#FFCB05]" : "text-[#555555] border-transparent hover:text-[#333333]"}`}
             >{v.label}</button>
           ))}
         </div>
@@ -383,21 +383,21 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                   {/* Outer frame — solid gold, traces card physical edge */}
                   <rect x={outer.left_pct} y={outer.top_pct}
                     width={outer.right_pct - outer.left_pct} height={outer.bottom_pct - outer.top_pct}
-                    fill="none" stroke="#D4AF37" strokeWidth="0.6" opacity="0.7" />
+                    fill="none" stroke="#FFCB05" strokeWidth="0.6" opacity="0.7" />
                   {/* Inner frame — dashed gold, traces artwork boundary */}
                   {inner && <rect x={inner.left_pct} y={inner.top_pct}
                     width={inner.right_pct - inner.left_pct} height={inner.bottom_pct - inner.top_pct}
-                    fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.8" />}
+                    fill="none" stroke="#FFCB05" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.8" />}
                   {/* Measurement lines + computed percentages */}
                   {inner && <>
-                    <line x1={outer.left_pct} y1={midY} x2={inner.left_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={(outer.left_pct + inner.left_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
-                    <line x1={inner.right_pct} y1={midY} x2={outer.right_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={(inner.right_pct + outer.right_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
-                    <line x1={midX} y1={outer.top_pct} x2={midX} y2={inner.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={midX} y={(outer.top_pct + inner.top_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
-                    <line x1={midX} y1={inner.bottom_pct} x2={midX} y2={outer.bottom_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={midX} y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
+                    <line x1={outer.left_pct} y1={midY} x2={inner.left_pct} y2={midY} stroke="#FFCB05" strokeWidth="0.3" opacity="0.6" />
+                    <text x={(outer.left_pct + inner.left_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#FFCB05" fontSize="3" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
+                    <line x1={inner.right_pct} y1={midY} x2={outer.right_pct} y2={midY} stroke="#FFCB05" strokeWidth="0.3" opacity="0.6" />
+                    <text x={(inner.right_pct + outer.right_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#FFCB05" fontSize="3" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
+                    <line x1={midX} y1={outer.top_pct} x2={midX} y2={inner.top_pct} stroke="#FFCB05" strokeWidth="0.3" opacity="0.6" />
+                    <text x={midX} y={(outer.top_pct + inner.top_pct) / 2 + 1} textAnchor="middle" fill="#FFCB05" fontSize="3" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
+                    <line x1={midX} y1={inner.bottom_pct} x2={midX} y2={outer.bottom_pct} stroke="#FFCB05" strokeWidth="0.3" opacity="0.6" />
+                    <text x={midX} y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1} textAnchor="middle" fill="#FFCB05" fontSize="3" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
                   </>}
                 </svg>
               );
@@ -410,7 +410,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                 const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
                 if (!isAi) humanIdx++;
                 const isHL = highlightId === d.id;
-                const col = isAi ? "#DC2626" : "#D4AF37";
+                const col = isAi ? "#DC2626" : "#FFCB05";
                 const badge = isAi ? "AI" : String(humanIdx);
                 return (
                   <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
@@ -449,12 +449,12 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       <div className="mt-2 flex items-center justify-end">
         <div className="flex items-center gap-0.5 bg-[#1A1A1A] border border-[#333333] rounded-full px-1 py-0.5">
           <button type="button" onClick={(e) => { e.stopPropagation(); zoomOut(); }} disabled={zoom <= 1}
-            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
+            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#FFCB05] disabled:text-[#555555] transition-colors rounded-full">
             <ZoomOut size={14} />
           </button>
           <span className="text-white text-[10px] font-mono w-10 text-center select-none">{Math.round(zoom * 100)}%</span>
           <button type="button" onClick={(e) => { e.stopPropagation(); zoomIn(); }} disabled={zoom >= 6}
-            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
+            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#FFCB05] disabled:text-[#555555] transition-colors rounded-full">
             <ZoomIn size={14} />
           </button>
           {zoom > 1 && (
@@ -504,7 +504,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
             </p>
             <div className="flex items-center gap-3">
               <button type="button" onClick={exitMarkMode}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all">
+                className="flex items-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all">
                 Done Marking
               </button>
             </div>
@@ -545,7 +545,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                 onClick={() => setPendingXY(null)}
               />
               <div
-                className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
+                className="fixed bg-white border border-[#FFCB05]/60 rounded-lg shadow-2xl overflow-hidden"
                 style={{
                   zIndex: 9999,
                   left: clampedLeft,
@@ -556,7 +556,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                 onClick={e => e.stopPropagation()}
               >
                 <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
+                  <span className="text-[#FFCB05] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
                   <button
                     type="button"
                     onClick={() => setPendingXY(null)}
@@ -572,7 +572,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
                       key={t}
                       type="button"
                       onClick={() => saveNewDefect(t)}
-                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors"
+                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#FFCB05]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors"
                     >
                       {t}
                     </button>
@@ -611,7 +611,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
           </div>
           <div className="space-y-1">
             <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Reference Image</p>
-            <div className="rounded-lg border border-[#D4AF37]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
+            <div className="rounded-lg border border-[#FFCB05]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
               <img src={referenceImageUrl} alt="reference" className="w-full h-full object-contain" />
             </div>
           </div>
@@ -624,25 +624,25 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">
         <button type="button" onClick={enterMarkMode}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#FFCB05]/40 text-[#FFCB05] hover:border-[#FFCB05] hover:bg-[#FFCB05]/10">
           <Maximize2 size={11} />
           Mark Defects
         </button>
         {certId && (side === "front" || side === "back") && urls[`${side}_original` as keyof ImageUrls] && (
           <button type="button" onClick={() => setManualCropSide(side as "front" | "back")}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#FFCB05]/40 text-[#FFCB05] hover:border-[#FFCB05] hover:bg-[#FFCB05]/10">
             <Crop size={11} />
             Manual Crop
           </button>
         )}
         <button type="button" onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40">
+          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#FFCB05]/40">
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
         {(centeringFront || centeringBack) && (
           <button type="button" onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#D4AF37]/40"}`}>
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#FFCB05] text-[#FFCB05] bg-[#FFCB05]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#FFCB05]/40"}`}>
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
         )}
@@ -650,7 +650,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
 
       {/* Manual Crop modal (lazy-loaded — won't crash if module fails) */}
       {manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
-        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#D4AF37] text-sm">Loading crop tool...</div>}>
+        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#FFCB05] text-sm">Loading crop tool...</div>}>
           <ManualCrop
             side={manualCropSide}
             certId={certId}
@@ -687,7 +687,7 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
 
   return (
     <div
-      className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[#D4AF37]/10" : ""}`}
+      className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[#FFCB05]/10" : ""}`}
       onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
@@ -696,7 +696,7 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
       <input ref={inputRef} type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
       {uploading ? (
         <>
-          <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
+          <Loader2 size={24} className="text-[#FFCB05] animate-spin" />
           <p className="text-[#555555] text-xs">Uploading {side}…</p>
         </>
       ) : (

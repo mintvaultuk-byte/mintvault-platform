@@ -224,7 +224,7 @@ function ReprintReasonModal({
               rows={4}
               maxLength={500}
               placeholder="e.g. Lost in post — Royal Mail reported as undeliverable, replacement requested by customer"
-              className="w-full px-3 py-2 text-sm bg-[#FAFAF8] border border-[#E8E4DC] rounded-md text-[#1A1A1A] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#D4AF37] resize-none"
+              className="w-full px-3 py-2 text-sm bg-[#FAFAF8] border border-[#E8E4DC] rounded-md text-[#1A1A1A] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#FFCB05] resize-none"
               data-testid="input-reprint-reason"
             />
             <p className="text-[10px] text-[#999999]">
@@ -381,7 +381,7 @@ function CertRow({
             href={`/api/admin/certificates/${cert.certId}/claim-insert`}
             onClick={(e) => e.stopPropagation()}
             download={`MintVault-ClaimInsert-${cert.certId}.pdf`}
-            className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1A1400] bg-[#D4AF37] hover:bg-[#B8960C] rounded-md transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1A1400] bg-[#FFCB05] hover:bg-[#FFCB05] rounded-md transition-colors whitespace-nowrap"
             data-testid={`btn-claim-insert-${cert.certId}`}
             title="Download Claim Insert PDF"
           >
@@ -1099,7 +1099,7 @@ function SheetPrintingPanel() {
           disabled={selected.size === 0 || downloadingInserts}
           data-testid="btn-claim-inserts"
           variant="outline"
-          className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
+          className="border-[#FFCB05]/60 text-[#FFCB05] hover:bg-[#FFCB05]/10 font-medium"
         >
           {downloadingInserts
             ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>

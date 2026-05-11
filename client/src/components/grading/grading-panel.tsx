@@ -46,8 +46,8 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
       }}
       className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
         status === "done" ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50" :
-        status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5" :
-        "border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+        status === "loading" ? "border border-[#FFCB05]/40 text-[#FFCB05] bg-[#FFCB05]/5" :
+        "border border-[#D4D0C8] text-[#333333] hover:text-[#FFCB05] hover:border-[#FFCB05]/40"
       }`}
     >
       {status === "loading" ? <><Loader2 size={11} className="animate-spin" /> Reprocessing…</> :
@@ -715,7 +715,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   return (
     <div className="bg-white border border-[#E8E4DC] rounded-xl p-4 space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Grading Workstation</p>
+        <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Manual Grading Workstation</p>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -724,7 +724,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             title={aiAnalysis ? "Clear all overrides and re-populate sub-grades from the last AI run this session" : "Run AI Identify & Grade first to enable this"}
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
               aiAnalysis
-                ? "text-[#555555] border border-[#D4D0C8] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+                ? "text-[#555555] border border-[#D4D0C8] hover:text-[#FFCB05] hover:border-[#FFCB05]/40"
                 : "text-[#999999] border border-[#E8E4DC] opacity-60 cursor-not-allowed"
             }`}
           >
@@ -733,7 +733,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <button
             type="button"
             onClick={() => setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; })}
-            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
+            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#FFCB05]/20 text-[#FFCB05] border border-[#FFCB05]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
             title="Toggle quick-grade mode (Q)"
           >
             <Zap size={10} />
@@ -808,9 +808,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                       data-testid={`btn-side-${s}`}
                       className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                         isActive
-                          ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                          ? "border-[#FFCB05] text-[#FFCB05] bg-[#FFCB05]/10"
                           : hasImage
-                            ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
+                            ? "border-[#D4D0C8] text-[#333333] hover:border-[#FFCB05]/40"
                             : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
                       }`}
                     >{s}{count > 0 ? ` (${count})` : ""}</button>
@@ -981,7 +981,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             })()}
           </div>
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
-            <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+            <p className="text-[#FFCB05] text-[10px] uppercase tracking-widest font-bold">Defects</p>
 
             <DefectAnnotation
               defects={defects}
@@ -1021,11 +1021,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                   <div key={key} className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${
                     isManual
                       ? "bg-blue-950/30 text-blue-400 border-blue-800/40"
-                      : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border-[#D4AF37]/20"
+                      : "bg-[#FFCB05]/10 text-[#FFCB05]/70 border-[#FFCB05]/20"
                   }`}>
                     <span className="uppercase font-bold">{key.slice(0, 1).toUpperCase()}</span>
                     <span>{isManual ? `Manual (AI: ${aiVal})` : `AI ${aiVal}`}</span>
-                    <span className="text-[#D4AF37]/50">·</span>
+                    <span className="text-[#FFCB05]/50">·</span>
                     <span className={`font-bold ${
                       aiAnalysis.confidence[key] === "high" ? "text-emerald-600" :
                       aiAnalysis.confidence[key] === "medium" ? "text-amber-600" : "text-red-600"
@@ -1083,15 +1083,15 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           {/* Centering — manual measurement buttons */}
           <div className="flex gap-2 mb-2">
             <button type="button" onClick={() => setManualCenteringSide("front")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#FFCB05] hover:border-[#FFCB05]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Front)
             </button>
             <button type="button" onClick={() => setManualCenteringSide("back")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
+              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#FFCB05] hover:border-[#FFCB05]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
               Manual Centering (Back)
             </button>
             {centeringMethod && (
-              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}>
+              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#FFCB05]/10 text-[#FFCB05]/70 border border-[#FFCB05]/20"}`}>
                 {centeringMethod}
               </span>
             )}
@@ -1161,7 +1161,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               onClick={generateDescription}
               disabled={generatingDescription || subgradesIncomplete}
               title={subgradesIncomplete ? "Set all four subgrades first" : "Write a grade rationale paragraph using the current subgrades + confirmed defects"}
-              className="w-full flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37] hover:border-[#D4AF37]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 border border-[#FFCB05]/30 text-[#FFCB05] hover:border-[#FFCB05]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               data-testid="btn-generate-description"
             >
               {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -1214,7 +1214,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                     : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                 }
                 data-testid="btn-approve-publish"
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
               >
                 {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                 {subgradesIncomplete ? "Set subgrades first" : "Approve & Publish"}
@@ -1280,13 +1280,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       {showConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-[#111111] border border-[#333333] rounded-xl p-6 max-w-sm w-full space-y-4">
-            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Approve &amp; Publish</p>
+            <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Approve &amp; Publish</p>
             <p className="text-[#CCCCCC] text-sm">
               Publish grade of <strong className="text-white">{finalGradeOverall} — {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}</strong> for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
             <p className="text-[#555555] text-xs">The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to subgrades or notes will be live immediately (recorded in the audit log).</p>
             {isBlack && (
-              <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
+              <div className="flex items-center gap-2 text-[#FFCB05] text-xs">
                 <span className="text-lg">★</span>
                 <span>This card qualifies for a BLACK LABEL — all subgrades are perfect 10.0</span>
               </div>
@@ -1297,7 +1297,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 type="button"
                 onClick={() => approveGrade()}
                 disabled={approving}
-                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
+                className="flex-1 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
                 {approving ? "Publishing…" : "Approve & Publish"}
               </button>
