@@ -126,3 +126,159 @@
   .addon-item-v2:hover { transform: none; }
   .faq-item-accent::before { transition: none; }
 }
+
+/* ── Scanner Beam dropzone (tools/estimate pre-grade tool) ─────────
+   Dark slab dropzone with an animated horizontal scan line, soft
+   pulsing gold glow, and a "PRE-GRADE READY" corner tag with a
+   pulsing dot. Used only by the idle-empty state of the estimate
+   tool. Hex values are intentionally specific to this component's
+   palette and not derived from --v2-gold tokens — the Scanner Beam
+   visual is warmer than the rest of the mintvault gold system. */
+@keyframes scanGlow {
+  0%, 100% {
+    box-shadow: 0 0 30px rgba(201,169,110,0.15),
+                inset 0 0 20px rgba(201,169,110,0.04);
+  }
+  50% {
+    box-shadow: 0 0 50px rgba(201,169,110,0.25),
+                inset 0 0 30px rgba(201,169,110,0.08);
+  }
+}
+@keyframes scanSweep {
+  0%   { top: 0;    opacity: 0; }
+  10%  {            opacity: 1; }
+  90%  {            opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+@keyframes scanPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+
+.scanner-beam {
+  display: block;
+  position: relative;
+  max-width: 520px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 64px 40px;
+  text-align: center;
+  overflow: hidden;
+  cursor: pointer;
+  background: linear-gradient(180deg,
+              rgba(20,16,11,0.6) 0%,
+              rgba(10,8,7,0.8) 100%);
+  border: 1px solid rgba(201,169,110,0.3);
+  border-radius: 3px;
+  animation: scanGlow 4s ease-in-out infinite;
+}
+.scanner-beam::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+              transparent,
+              rgba(201,169,110,0.4) 20%,
+              #e7c98a 50%,
+              rgba(201,169,110,0.4) 80%,
+              transparent);
+  box-shadow: 0 0 16px #c9a96e, 0 0 32px rgba(201,169,110,0.6);
+  animation: scanSweep 3.5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.scanner-beam::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(201,169,110,0.12);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 0;
+}
+.scanner-beam__tag {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--v2-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #c9a96e;
+  z-index: 2;
+}
+.scanner-beam__tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e7c98a;
+  box-shadow: 0 0 8px #c9a96e;
+  animation: scanPulse 2s ease-in-out infinite;
+}
+.scanner-beam__content {
+  position: relative;
+  z-index: 1;
+}
+.scanner-beam__icon-wrap {
+  margin-bottom: 20px;
+}
+.scanner-beam__title {
+  font-family: var(--v2-font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.2;
+  color: #f5efe4;
+  margin: 0 0 10px 0;
+}
+.scanner-beam__subtitle {
+  font-family: var(--v2-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #c8bfae;
+  margin: 0;
+}
+/* Drag-over: peak glow + warmer border + brighter scan line.
+   Toggled by the existing React `dragging` state — no new JS. */
+.scanner-beam--dragover {
+  border-color: #e7c98a;
+  box-shadow: 0 0 50px rgba(201,169,110,0.25),
+              inset 0 0 30px rgba(201,169,110,0.08);
+}
+.scanner-beam--dragover::before {
+  background: linear-gradient(90deg,
+              transparent,
+              rgba(231,201,138,0.5) 20%,
+              #e7c98a 50%,
+              rgba(231,201,138,0.5) 80%,
+              transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-beam,
+  .scanner-beam::before,
+  .scanner-beam__tag-dot {
+    animation: none;
+  }
+  /* Static mid-point: glow at peak, scan line frozen across middle,
+     dot at reduced opacity — preserves the visual identity without
+     motion. */
+  .scanner-beam {
+    box-shadow: 0 0 40px rgba(201,169,110,0.20),
+                inset 0 0 25px rgba(201,169,110,0.06);
+  }
+  .scanner-beam::before {
+    top: 50%;
+    opacity: 1;
+  }
+  .scanner-beam__tag-dot {
+    opacity: 0.65;
+  }
+}

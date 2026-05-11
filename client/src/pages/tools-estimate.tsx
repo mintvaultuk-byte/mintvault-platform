@@ -322,11 +322,7 @@ export default function ToolsEstimateV2() {
                   onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                   onDragLeave={() => setDragging(false)}
                   onDrop={handleDrop}
-                  className="block cursor-pointer rounded-lg py-16 px-6 text-center transition-colors"
-                  style={{
-                    border: `2px dashed ${dragging ? "var(--v2-gold)" : "var(--v2-line)"}`,
-                    backgroundColor: dragging ? "rgba(212,175,55,0.03)" : "transparent",
-                  }}
+                  className={`scanner-beam${dragging ? " scanner-beam--dragover" : ""}`}
                 >
                   <input
                     ref={fileInputRef}
@@ -337,19 +333,17 @@ export default function ToolsEstimateV2() {
                     aria-label="Upload card photo"
                     onChange={(e) => handleFileChoose(e.target.files?.[0] ?? null)}
                   />
-                  <Upload size={48} strokeWidth={1.5} style={{ color: "var(--v2-ink-mute)" }} className="mx-auto" />
-                  <p
-                    className="font-display italic font-medium text-2xl mt-5"
-                    style={{ color: "var(--v2-ink)" }}
-                  >
-                    Upload a card photo
-                  </p>
-                  <p
-                    className="font-mono-v2 text-xs uppercase tracking-wider mt-2"
-                    style={{ color: "var(--v2-ink-mute)" }}
-                  >
-                    Drag and drop, or click to browse
-                  </p>
+                  <span className="scanner-beam__tag" aria-hidden="true">
+                    <span className="scanner-beam__tag-dot" />
+                    PRE-GRADE READY
+                  </span>
+                  <div className="scanner-beam__content">
+                    <div className="scanner-beam__icon-wrap">
+                      <Upload size={44} strokeWidth={1.5} color="#c9a96e" className="mx-auto" />
+                    </div>
+                    <p className="scanner-beam__title">Upload a card photo</p>
+                    <p className="scanner-beam__subtitle">Drag &amp; drop &middot; or click to browse</p>
+                  </div>
                 </label>
 
                 <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
