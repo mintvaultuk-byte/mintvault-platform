@@ -4660,7 +4660,11 @@ export async function registerRoutes(
         items.push({ cert, claimCode: String(code) });
       }
       if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
-      if (claimed.length) return res.status(409).json({ error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")}). Use /api/admin/print-batch/reprint for claimed certs.` });
+      if (claimed.length) return res.status(409).json({
+        error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")}). Use /api/admin/print-batch/reprint for claimed certs.`,
+        claimedCertIds: claimed,
+        code: "CLAIMED_CERTS_PRESENT",
+      });
 
       const adminUser = (req.session as any)?.adminEmail || "admin";
       const batchId = deriveBatchId(ids, adminUser);
@@ -4773,6 +4777,169 @@ export async function registerRoutes(
       await storage.markSheetPrinted(sheetRef);
       res.json({ ok: true });
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // v525 — admin-only reprint endpoint for CLAIMED certs (damaged in post,
+  // lost, bad cut). Admin must supply a reason which is written to audit_log
+  // per cert. The customer-facing path at /api/admin/print-batch still
+  // rejects claimed certs (security boundary intact — that prevents the
+  // operational endpoint from being used to silently re-emit claim codes).
+  //
+  // Schema:
+  //   POST { certIds: string[], reason: string (10-500 chars after trim) }
+  //   Returns same envelope as /api/admin/print-batch (pdf/svg/png/batchId)
+  //
+  // Audit: one row per cert, action='reprint', details includes reason,
+  // batch_id. Plus the standard print_batch_generated row.
+  const reprintReasonSchema = z.object({
+    certIds: z.array(z.string().min(1)).min(1).max(8),
+    reason: z.string().trim().min(10).max(500),
+  });
+  app.post("/api/admin/print-batch/reprint", requireAdmin, async (req, res) => {
+    try {
+      const parsed = reprintReasonSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: "Invalid request: certIds (1-8 entries) and reason (10-500 chars) required",
+          detail: parsed.error.flatten(),
+        });
+      }
+      const { certIds, reason } = parsed.data;
+      const {
+        MAX_CERTS_PER_BATCH,
+        SHEET_LAYOUT_VERSION,
+        generatePrintBatchPDF,
+        generatePrintBatchCutSVG,
+        generatePrintBatchPNG,
+        deriveBatchId,
+      } = await import("./print-batch");
+      if (certIds.length > MAX_CERTS_PER_BATCH) {
+        return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
+      }
+      const ids = certIds.map(String);
+
+      // Resolve certs. Skip the "unclaimed only" check — that's the whole
+      // point of this endpoint. Still reject not-found / soft-deleted /
+      // missing-grade so the layout doesn't draw garbage.
+      const allCerts = await storage.listCertificates();
+      const items: { cert: any; claimCode: string }[] = [];
+      const missing: string[] = [];
+      const mintedFor: string[] = [];
+      for (const id of ids) {
+        const cert = allCerts.find((c: any) => c.certId === id);
+        if (!cert) { missing.push(id); continue; }
+        let code: string | undefined = (cert as any).claimCode || (cert as any).claim_code;
+        if (!code) {
+          // A claimed cert without a claim code shouldn't normally exist
+          // (claim required a code in the first place) but we mint defensively
+          // so the insert renders something rather than throwing.
+          code = await storage.getOrGenerateClaimCode(id);
+          mintedFor.push(id);
+        }
+        items.push({ cert, claimCode: String(code) });
+      }
+      if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
+
+      const adminUser = (req.session as any)?.adminEmail || "admin";
+      const batchId = deriveBatchId(ids, `${adminUser}|reprint`);
+      const generatedAt = new Date().toISOString();
+
+      // Reprint endpoint is NOT idempotent on the audit trail — every
+      // reprint of a claimed cert must produce a fresh audit_log entry
+      // with the reason. Generating duplicates if an admin double-clicks
+      // is a feature here: each click is a deliberate operational decision.
+      // We still derive batchId from inputs so the operator can match
+      // filenames at the printer.
+
+      const [pdfBuf, svgStr, pngBuf] = await Promise.all([
+        generatePrintBatchPDF(items),
+        Promise.resolve(generatePrintBatchCutSVG(items.length)),
+        generatePrintBatchPNG(items),
+      ]);
+
+      // One audit_log row per cert. Best-effort: failure here is logged
+      // but does not block the operator from getting the artifacts —
+      // recovery is a manual SQL insert if needed, the operator has the
+      // batch_id from the response.
+      const auditRows: { certId: string; ok: boolean }[] = [];
+      for (const it of items) {
+        const certId = (it.cert as any).certId as string;
+        try {
+          await db.execute(sql`
+            INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+            VALUES (
+              'cert',
+              ${certId},
+              'reprint',
+              ${adminUser},
+              ${JSON.stringify({
+                reason,
+                batch_id: batchId,
+                original_batch_id: null,
+                new_batch_id: `print_batch_${batchId}`,
+                cert_count: items.length,
+                sheet_layout_version: SHEET_LAYOUT_VERSION,
+              })}::jsonb,
+              NOW()
+            )
+          `);
+          auditRows.push({ certId, ok: true });
+        } catch (e: any) {
+          console.warn(`[reprint] audit_log failed for ${certId}:`, e.message);
+          auditRows.push({ certId, ok: false });
+        }
+      }
+
+      // Standard print_batch_generated row + labelPrints dual-write so
+      // history UI surfaces the reprint sheet the same as a regular batch.
+      try {
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+          VALUES (
+            'system',
+            ${`print_batch_${batchId}`},
+            'print_batch_generated',
+            ${adminUser},
+            ${JSON.stringify({
+              batch_id: batchId,
+              cert_ids: ids,
+              cert_count: items.length,
+              pdf_size_bytes: pdfBuf.length,
+              svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
+              png_size_bytes: pngBuf.length,
+              auto_generated_codes_for: mintedFor,
+              sheet_layout_version: SHEET_LAYOUT_VERSION,
+              layout: "front_plus_insert",
+              source: "reprint",
+              reason,
+            })}::jsonb,
+            NOW()
+          )
+        `);
+      } catch (auditErr: any) {
+        console.warn("[reprint] print_batch_generated audit_log failed:", auditErr.message);
+      }
+      try {
+        await storage.queueForPrinting(ids, `print_batch_${batchId}`);
+      } catch (qErr: any) {
+        console.warn("[reprint] queueForPrinting failed:", qErr.message);
+      }
+
+      res.json({
+        pdf: pdfBuf.toString("base64"),
+        svg: Buffer.from(svgStr, "utf8").toString("base64"),
+        png: pngBuf.toString("base64"),
+        batchId,
+        certIds: ids,
+        mintedFor,
+        generatedAt,
+        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+        auditRows,
+      });
+    } catch (err: any) {
+      console.error("[reprint] error:", err.message);
       res.status(500).json({ error: err.message });
     }
   });

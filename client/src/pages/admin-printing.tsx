@@ -167,6 +167,92 @@ function EditLabelModal({
   );
 }
 
+// ── Reprint Reason Modal — admin override for claimed certs ─────────────────
+// v525 — when /api/admin/print-batch rejects with 409 because one or more
+// selected certs are claimed, this modal collects the reason and re-submits
+// to /api/admin/print-batch/reprint. Reason 10-500 chars, recorded to
+// audit_log per cert.
+function ReprintReasonModal({
+  claimedCertIds,
+  allCertIds,
+  onCancel,
+  onSubmit,
+  submitting,
+}: {
+  claimedCertIds: string[];
+  allCertIds: string[];
+  onCancel: () => void;
+  onSubmit: (reason: string) => void;
+  submitting: boolean;
+}) {
+  const [reason, setReason] = useState("");
+  const trimmed = reason.trim();
+  const valid = trimmed.length >= 10 && trimmed.length <= 500;
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent
+        className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md"
+        data-testid="reprint-reason-modal"
+      >
+        <DialogHeader>
+          <DialogTitle className="text-yellow-400 flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" /> Reprint claimed cert(s)
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="rounded-md bg-[#FFF9E6] border border-yellow-700/30 p-3 text-[11px] text-yellow-700 flex gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">
+                {claimedCertIds.length} of {allCertIds.length} selected cert(s) already claimed:
+              </p>
+              <p className="font-mono text-[10px] break-all">{claimedCertIds.join(", ")}</p>
+              <p className="mt-2">
+                Reprinting a claimed cert is recorded to audit_log with the reason below.
+                Use only for damaged-in-post, lost, or bad-cut reprints.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="reprint-reason" className="text-xs text-[#666666]">
+              Reason (10-500 chars) <span className="text-red-500">*</span>
+            </Label>
+            <textarea
+              id="reprint-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={4}
+              maxLength={500}
+              placeholder="e.g. Lost in post — Royal Mail reported as undeliverable, replacement requested by customer"
+              className="w-full px-3 py-2 text-sm bg-[#FAFAF8] border border-[#E8E4DC] rounded-md text-[#1A1A1A] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#D4AF37] resize-none"
+              data-testid="input-reprint-reason"
+            />
+            <p className="text-[10px] text-[#999999]">
+              {trimmed.length} / 500 chars {trimmed.length < 10 && trimmed.length > 0 ? `(${10 - trimmed.length} more required)` : ""}
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onCancel} className="text-[#999999]">
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!valid || submitting}
+            onClick={() => onSubmit(trimmed)}
+            className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
+            data-testid="btn-submit-reprint-reason"
+          >
+            {submitting
+              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Reprinting…</>
+              : "Reprint with reason"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Certificate Row ───────────────────────────────────────────────────────────
 function CertRow({
   cert, selected, onToggle, onReprint, onEditLabel, reprintPending,
@@ -570,6 +656,15 @@ function SheetPrintingPanel() {
   const [reprintingId, setReprintingId] = useState<string | null>(null);
   const [editTarget, setEditTarget]     = useState<{ certId: string; cert: CertificateRecord } | null>(null);
 
+  // v525 — reprint-with-reason modal state. Populated when /api/admin/print-batch
+  // returns 409 (some selected certs already claimed). Submitting the reason
+  // posts to /api/admin/print-batch/reprint instead.
+  const [reprintModal, setReprintModal] = useState<{
+    claimedCertIds: string[];
+    allCertIds: string[];
+  } | null>(null);
+  const [reprintSubmitting, setReprintSubmitting] = useState(false);
+
   const { data: allCerts = [], isLoading: certsLoading, refetch: refetchCerts } =
     useQuery<CertForPrinting[]>({ queryKey: ["/api/admin/printing/queue"] });
 
@@ -628,28 +723,58 @@ function SheetPrintingPanel() {
     qc.invalidateQueries({ queryKey: ["/api/admin/printing/sheets"] });
   }, [refetchCerts, qc]);
 
+  // v525 — shared helper for saving the 3-file batch output. Used by
+  // single-cert reprint, multi-cert batch, and reprint-with-reason. All
+  // three filenames share the batchId so the operator can pair them.
+  const saveBatchFiles = useCallback((data: { pdf: string; svg: string; png: string; batchId: string }) => {
+    const decode = (b64: string, mime: string) => {
+      const bin = atob(b64);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      return new Blob([buf], { type: mime });
+    };
+    const saveBlob = (blob: Blob, filename: string) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
+    saveBlob(decode(data.png, "image/png"), `mintvault-batch-${data.batchId}.png`);
+    saveBlob(decode(data.pdf, "application/pdf"), `mintvault-batch-${data.batchId}.pdf`);
+  }, []);
+
   // v525 — single-cert reprint routes through the same /api/admin/print-batch
   // endpoint as multi-cert batches. Produces a 1-row sheet (front + claim
   // insert) with cut SVG + Cricut PNG. Eliminates the third parallel reprint
   // path that produced a legacy 72×22mm PDF with no insert and no cut SVG.
+  //
+  // If the cert is already claimed, the endpoint returns 409 with the
+  // claimedCertIds list; we open the ReprintReasonModal which then submits
+  // to /api/admin/print-batch/reprint with the operator's reason.
   const handleReprint = useCallback(async (certId: string) => {
     setReprintingId(certId);
     try {
       const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(error);
-      }
       const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
       saveBatchFiles(data);
       toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
       invalidate();
     } catch (err: any) {
-      toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+        setReprintModal({
+          claimedCertIds: err.body.claimedCertIds || [certId],
+          allCertIds: [certId],
+        });
+      } else {
+        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+      }
     } finally {
       setReprintingId(null);
     }
-  }, [toast, invalidate]);
+  }, [toast, invalidate, saveBatchFiles]);
 
   // Download claim insert sheet
   const [downloadingInserts, setDownloadingInserts] = useState(false);
@@ -676,45 +801,24 @@ function SheetPrintingPanel() {
     }
   }, [toast]);
 
-  // v525 — shared helper for saving the 3-file batch output. Used by
-  // single-cert reprint AND multi-cert batch print. All three filenames
-  // share the batchId so the operator can pair them at the printer.
-  const saveBatchFiles = useCallback((data: { pdf: string; svg: string; png: string; batchId: string }) => {
-    const decode = (b64: string, mime: string) => {
-      const bin = atob(b64);
-      const buf = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      return new Blob([buf], { type: mime });
-    };
-    const saveBlob = (blob: Blob, filename: string) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-    saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-    saveBlob(decode(data.png, "image/png"), `mintvault-batch-${data.batchId}.png`);
-    saveBlob(decode(data.pdf, "application/pdf"), `mintvault-batch-${data.batchId}.pdf`);
-  }, []);
-
-  // LatestSheetSection's "reprint sheet" button hits this. Runs the same
-  // print-batch flow and surfaces success/failure as a toast. No state
-  // tracking here — the per-row spinner is local to that section.
+  // LatestSheetSection's "reprint sheet" button hits this. If any cert in
+  // the historical sheet has since been claimed, 409 surfaces the modal.
   const reprintFromHistory = useCallback(async (certIds: string[]) => {
     try {
       const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(error);
-      }
       const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
       saveBatchFiles(data);
       toast({ title: "Sheet reprinted", description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}` });
       invalidate();
     } catch (err: any) {
-      toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+        setReprintModal({
+          claimedCertIds: err.body.claimedCertIds || [],
+          allCertIds: certIds,
+        });
+      } else {
+        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+      }
     }
   }, [toast, invalidate, saveBatchFiles]);
 
@@ -752,11 +856,6 @@ function SheetPrintingPanel() {
     setDownloadingBatch(true);
     try {
       const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
-      if (!res.ok) {
-        printWindow?.close();
-        const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(error);
-      }
       const data = await res.json() as {
         pdf: string; svg: string; png: string;
         batchId: string; certIds: string[]; mintedFor?: string[];
@@ -809,11 +908,41 @@ function SheetPrintingPanel() {
       invalidate();
     } catch (err: any) {
       printWindow?.close();
-      toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
+      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+        setReprintModal({
+          claimedCertIds: err.body.claimedCertIds || [],
+          allCertIds: certIds,
+        });
+      } else {
+        toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
+      }
     } finally {
       setDownloadingBatch(false);
     }
   }, [toast, invalidate, saveBatchFiles]);
+
+  // v525 — submitted from the ReprintReasonModal. Reposts the original
+  // selection to /api/admin/print-batch/reprint with the operator's reason.
+  const submitReprintWithReason = useCallback(async (reason: string) => {
+    if (!reprintModal) return;
+    const certIds = reprintModal.allCertIds;
+    setReprintSubmitting(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
+      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
+      saveBatchFiles(data);
+      toast({
+        title: "Reprint with reason recorded",
+        description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
+      });
+      setReprintModal(null);
+      invalidate();
+    } catch (err: any) {
+      toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+    } finally {
+      setReprintSubmitting(false);
+    }
+  }, [reprintModal, toast, invalidate, saveBatchFiles]);
 
   // Mark printed
   const markPrintedMutation = useMutation({
@@ -1025,6 +1154,17 @@ function SheetPrintingPanel() {
         onReprintSheet={reprintFromHistory}
         generating={downloadingBatch}
       />
+
+      {/* Reprint with reason modal */}
+      {reprintModal && (
+        <ReprintReasonModal
+          claimedCertIds={reprintModal.claimedCertIds}
+          allCertIds={reprintModal.allCertIds}
+          onCancel={() => setReprintModal(null)}
+          onSubmit={submitReprintWithReason}
+          submitting={reprintSubmitting}
+        />
+      )}
 
       {/* Edit label modal */}
       {editTarget && (
