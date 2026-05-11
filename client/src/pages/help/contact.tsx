@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { Mail, MapPin, Clock, Instagram, Facebook } from "lucide-react";
+import { Mail, MapPin, Clock, Instagram, Facebook, AlertCircle } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import { COMPANY, formatPostalAddress } from "@shared/company";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function ContactPage() {
   const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -15,11 +17,29 @@ export default function ContactPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    // Placeholder — log for now, email integration to follow
-    console.log("Contact form submission:", form);
-    await new Promise(r => setTimeout(r, 600));
-    setSubmitting(false);
-    setSubmitted(true);
+    setErrorMessage(null);
+    try {
+      // The form's <select name="subject"> already uses canonical topic
+      // values (submission / grading / cert-vault / ownership /
+      // returns-shipping / payment / other) matching the server zod schema.
+      await apiRequest("POST", "/api/contact", {
+        name: form.name,
+        email: form.email,
+        topic: form.subject,
+        message: form.message,
+      });
+      setSubmitted(true);
+    } catch (err: any) {
+      // 4xx / 5xx / network. Surface a generic actionable message; the
+      // exact server-side validation detail (if 400) is logged but not
+      // pushed to the customer to keep the UI simple.
+      setErrorMessage(
+        "Couldn't send your message. Please email hello@mintvaultuk.com directly or try again."
+      );
+      console.error("[contact-form] submit failed:", err?.message || err);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -56,7 +76,7 @@ export default function ContactPage() {
                 <p className="font-bold text-[#1A1A1A] text-lg">Message sent</p>
                 <p className="text-[#666666] text-sm">Thanks for getting in touch. We'll get back to you within 24 hours during business days.</p>
                 <button
-                  onClick={() => { setSubmitted(false); setForm({ name: "", email: "", subject: "", message: "" }); }}
+                  onClick={() => { setSubmitted(false); setErrorMessage(null); setForm({ name: "", email: "", subject: "", message: "" }); }}
                   className="text-[#B8960C] text-sm font-semibold hover:underline mt-2"
                 >
                   Send another message
@@ -103,9 +123,9 @@ export default function ContactPage() {
                     <option value="" disabled>Select a topic</option>
                     <option value="submission">Submission enquiry</option>
                     <option value="grading">Grading question</option>
-                    <option value="certificate">Certificate / Vault</option>
+                    <option value="cert-vault">Certificate / Vault</option>
                     <option value="ownership">Ownership registry</option>
-                    <option value="returns">Returns & shipping</option>
+                    <option value="returns-shipping">Returns & shipping</option>
                     <option value="payment">Payment</option>
                     <option value="other">Other</option>
                   </select>
@@ -123,6 +143,13 @@ export default function ContactPage() {
                     className="w-full px-4 py-3 rounded-xl border border-[#E8E4DC] bg-white text-[#1A1A1A] text-sm placeholder:text-[#BBBBBB] focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
                   />
                 </div>
+
+                {errorMessage && (
+                  <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" data-testid="contact-form-error">
+                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                    <p className="leading-relaxed">{errorMessage}</p>
+                  </div>
+                )}
 
                 <button
                   type="submit"

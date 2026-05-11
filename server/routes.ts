@@ -1,6 +1,7 @@
 import type { Express, Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
+import { z } from "zod";
 import { BUILD_STAMP, pricingTiers, calculateOrderTotals, getVaultClubDiscountPercent, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage, deductAiCredits } from "./storage";
@@ -495,6 +496,49 @@ async function migrateServiceTiersV213() {
     }
   } catch (e: any) { console.error("[archival-b2-migrate] failed:", e.message); }
 
+  // ── Contact-form inbox table. Idempotent CREATE TABLE IF NOT EXISTS.
+  // Audit-log the first run only via information_schema gate.
+  try {
+    const before = await db.execute(sql`
+      SELECT 1 FROM information_schema.tables
+      WHERE table_name = 'contact_inquiries' LIMIT 1
+    `);
+    const wasPresent = before.rows.length > 0;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS contact_inquiries (
+        id            SERIAL PRIMARY KEY,
+        name          TEXT NOT NULL,
+        email         TEXT NOT NULL,
+        topic         TEXT NOT NULL,
+        message       TEXT NOT NULL,
+        submitted_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+        email_sent_at TIMESTAMP,
+        email_error   TEXT,
+        ip_address    TEXT,
+        user_agent    TEXT,
+        deleted_at    TIMESTAMP
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_contact_inquiries_submitted_at
+        ON contact_inquiries(submitted_at DESC)
+        WHERE deleted_at IS NULL
+    `);
+    if (!wasPresent) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('schema', 'contact_inquiries', 'create_table_contact_inquiries', 'startup_migration',
+          ${JSON.stringify({
+            table: "contact_inquiries",
+            purpose: "customer contact-form inbox; row written before Resend send so messages survive email failures",
+            soft_delete: "deleted_at",
+            index: "idx_contact_inquiries_submitted_at",
+          })}::jsonb)
+      `);
+      console.log("[contact-inquiries-migrate] contact_inquiries table + index added + audit logged");
+    }
+  } catch (e: any) { console.error("[contact-inquiries-migrate] failed:", e.message); }
+
   // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
@@ -932,6 +976,77 @@ export async function registerRoutes(
     } catch (err: any) {
       console.error("[v2/waitlist] error:", err.message);
       return res.status(500).json({ error: "We couldn't add you right now. Please try again." });
+    }
+  });
+
+  // ── Contact-form endpoint ─────────────────────────────────────────────────
+  // Public POST. Validates with zod, writes to contact_inquiries BEFORE the
+  // Resend send (so messages survive email failures), then attempts Resend
+  // and records the outcome on the same row. Returns 200 even if Resend
+  // throws — the message is in the DB, operator can read from there.
+  const contactRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many contact-form submissions from this device. Please wait 15 minutes." },
+  });
+
+  const contactSchema = z.object({
+    name: z.string().trim().min(1, "Name is required").max(100, "Name too long"),
+    email: z.string().trim().email("Invalid email address").max(200, "Email too long"),
+    topic: z.enum(["submission", "grading", "cert-vault", "ownership", "returns-shipping", "payment", "other"]),
+    message: z.string().trim().min(10, "Message too short (min 10 characters)").max(5000, "Message too long (max 5000 characters)"),
+  });
+
+  app.post("/api/contact", contactRateLimit, async (req, res) => {
+    try {
+      const parsed = contactSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const firstIssue = parsed.error.issues[0];
+        return res.status(400).json({
+          error: firstIssue?.message || "Invalid submission",
+          field: firstIssue?.path?.[0] ?? null,
+        });
+      }
+      const { name, email, topic, message } = parsed.data;
+
+      const ipAddress = ((req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()) || req.ip || "unknown";
+      const userAgent = (req.headers["user-agent"] as string)?.slice(0, 500) || null;
+
+      // Write BEFORE send so the message survives any Resend failure.
+      const insertResult = await db.execute(sql`
+        INSERT INTO contact_inquiries (name, email, topic, message, ip_address, user_agent)
+        VALUES (${name}, ${email}, ${topic}, ${message}, ${ipAddress}, ${userAgent})
+        RETURNING id
+      `);
+      const inquiryId = (insertResult.rows[0] as any)?.id as number;
+
+      // Attempt the email. Don't fail the whole request on Resend errors —
+      // the DB row already exists; operator can read from there or retry.
+      const { sendContactInquiry } = await import("./email");
+      try {
+        await sendContactInquiry({
+          name, email, topic, message,
+          submittedAt: new Date(),
+          inquiryId,
+        });
+        await db.execute(sql`
+          UPDATE contact_inquiries SET email_sent_at = NOW() WHERE id = ${inquiryId}
+        `);
+        console.log(`[contact] inquiry ${inquiryId} sent to inbox (topic=${topic}, from=${email})`);
+      } catch (sendErr: any) {
+        const errMsg = (sendErr?.message || String(sendErr)).slice(0, 1000);
+        console.error(`[contact] inquiry ${inquiryId} Resend send failed: ${errMsg}`);
+        await db.execute(sql`
+          UPDATE contact_inquiries SET email_error = ${errMsg} WHERE id = ${inquiryId}
+        `);
+      }
+
+      return res.json({ ok: true, inquiryId });
+    } catch (err: any) {
+      console.error("[contact] route error:", err?.message || err);
+      return res.status(500).json({ error: "Couldn't process your message. Please try again." });
     }
   });
 
