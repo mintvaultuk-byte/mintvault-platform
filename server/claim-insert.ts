@@ -63,55 +63,80 @@ export async function generateClaimInsertPNG(
   const px      = (mm: number) => Math.round(mm * MM);
   const ptToPx  = (pt: number) => Math.round(pt * (DPI / 72));   // 1pt = 4.167px @ 300DPI
 
-  // ── White background — no gold border frame ─────────────────────────────
-  ctx.fillStyle = WHITE;
+  // ── Yellow border frame (PR #90 follow-up) ──────────────────────────────
+  // Symmetric 2mm yellow #FFCB05 border on all four sides. The 3mm footer
+  // band sits INSIDE the inner content area (just above the bottom border)
+  // so the bottom edge stacks: 2mm border → 3mm yellow band → content
+  // above. Reads as a single yellow frame from a glance.
+  //
+  // Layout (canvas mm):
+  //   Yellow border        outer 2mm on all 4 sides
+  //   Inner content area   x=2..83.6, y=2..49  (81.6 × 47mm)
+  //   Yellow footer band   y=49..52 (3mm, inside the inner area)
+  //   Yellow bottom border y=52..54
+  //
+  // The SVG cut layer in print-batch.ts traces the outer 85.6×54mm with a
+  // 0.25mm bleed inset, which puts the cut INSIDE the yellow border — any
+  // sub-mm registration drift slices through yellow rather than white.
+  const BORDER_MM        = 2;
+  const FOOTER_BAND_MM   = 3;
+
+  // Step 1 — fill entire canvas yellow (border base layer).
+  ctx.fillStyle = GOLD;
   ctx.fillRect(0, 0, PX_W, PX_H);
 
+  // Step 2 — paint inner white content area on top of the yellow.
+  const innerX = px(BORDER_MM);
+  const innerY = px(BORDER_MM);
+  const innerW = PX_W - 2 * px(BORDER_MM);
+  const innerH = PX_H - 2 * px(BORDER_MM);
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(innerX, innerY, innerW, innerH);
+
   // textBaseline="alphabetic" — y values are baselines (caps sit above).
-  // The approved spec gives mm-from-top values per element which read most
-  // cleanly when interpreted as baselines: e.g. 18pt header baseline at 7mm
-  // puts its caps ~5mm to 7mm, the 7pt subheader baseline at 10.5mm puts
-  // its caps ~9.4mm to 10.5mm — clean separation. textBaseline="top" would
-  // overlap the bottoms of the 18pt header into the 7pt subheader's caps.
+  // The approved spec gives mm-from-canvas-top baselines for each element.
+  // PR #90 follow-up uniformly shifts every element by +1mm so the 9-element
+  // stack fits the 47mm inner content area with the steps ending 1mm above
+  // the footer band: 18pt header baseline 7mm→8mm, …, last step 47mm→48mm,
+  // footer band starts at canvas y=49mm.
   ctx.textBaseline = "alphabetic";
 
-  // Left margin = 4mm; safe inset on the other edges = 3mm.
-  const leftX     = px(4);
-  const safeInset = px(3);
+  const leftX = px(4);   // 4mm from canvas edge = 2mm from inner white edge
 
-  // ── 1. "CLAIM YOUR CARD" header — 18pt extra-bold, #111111, y=7mm ───────
+  // ── 1. "CLAIM YOUR CARD" header — 18pt extra-bold, #111111, y=8mm ───────
   ctx.font      = `800 ${ptToPx(18)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#111111";
   ctx.textAlign = "left";
-  ctx.fillText("CLAIM YOUR CARD", leftX, px(7));
+  ctx.fillText("CLAIM YOUR CARD", leftX, px(8));
 
-  // ── 2. Subheader at 10.5mm — 7pt Helvetica-Bold #111111, tight tracking ─
+  // ── 2. Subheader at 11.5mm — 7pt Helvetica-Bold #111111 ─────────────────
   ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#111111";
   try { (ctx as any).letterSpacing = "0px"; } catch {}
-  ctx.fillText("UK TRADING CARD AUTHENTICATION REGISTRY", leftX, px(10.5));
+  ctx.fillText("UK TRADING CARD AUTHENTICATION REGISTRY", leftX, px(11.5));
 
-  // ── 3. "CERTIFICATE NO." label at 15mm — 7pt bold #555555 ───────────────
+  // ── 3. "CERTIFICATE NO." label at 16mm — 7pt bold #555555 ───────────────
   ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#555555";
-  ctx.fillText("CERTIFICATE NO.", leftX, px(15));
+  ctx.fillText("CERTIFICATE NO.", leftX, px(16));
 
-  // ── 4. Cert ID HERO at 23.5mm — 28pt Helvetica-Black #111111 ────────────
+  // ── 4. Cert ID HERO at 24.5mm — 28pt Helvetica-Black #111111 ────────────
   ctx.font      = `900 ${ptToPx(28)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#111111";
-  ctx.fillText(normalCertId, leftX, px(23.5));
+  ctx.fillText(normalCertId, leftX, px(24.5));
 
-  // ── 5. "CLAIM CODE" label at 29mm — 7pt bold #555555 ────────────────────
+  // ── 5. "CLAIM CODE" label at 30mm — 7pt bold #555555 ────────────────────
   ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#555555";
-  ctx.fillText("CLAIM CODE", leftX, px(29));
+  ctx.fillText("CLAIM CODE", leftX, px(30));
 
-  // ── 6. Claim code HERO at 35mm — 14pt Courier-Bold (900) #111111 ────────
+  // ── 6. Claim code HERO at 36mm — 14pt Courier-Bold (900) #111111 ────────
   ctx.font      = `900 ${ptToPx(14)}px "Courier New", Courier, monospace`;
   ctx.fillStyle = "#111111";
-  ctx.fillText(formattedCode, leftX, px(35));
+  ctx.fillText(formattedCode, leftX, px(36));
 
-  // ── 7. Three numbered steps starting at 41mm, line-height 3mm ───────────
+  // ── 7. Three numbered steps starting at 42mm, line-height 3mm ──────────
+  // Last step baseline at 48mm; footer band top at 49mm → 1mm clearance.
   ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
   ctx.fillStyle = "#222222";
   const steps = [
@@ -120,28 +145,30 @@ export async function generateClaimInsertPNG(
     "3. Verify email to claim ownership",
   ];
   for (let i = 0; i < steps.length; i++) {
-    ctx.fillText(steps[i], leftX, px(41 + i * 3));
+    ctx.fillText(steps[i], leftX, px(42 + i * 3));
   }
 
-  // ── 8. QR code — 25mm x 25mm, right side, slightly below centre ─────────
-  // Pure black on white for max inkjet scan reliability. Right edge sits at
-  // the 3mm safe inset; vertical anchor nudges down ~2mm from the geometric
-  // centre of the content zone (between subheader and footer band).
-  const qrSize  = px(25);
-  const qrBuf   = await generateQR(claimUrl, qrSize);
-  const qrImg   = await loadImage(qrBuf);
-  const qrX     = PX_W - safeInset - qrSize;
-  const zoneTop = px(13);                    // just below subheader
-  const zoneBot = PX_H - px(3);              // footer band top edge
-  const qrCY    = (zoneTop + zoneBot) / 2 + px(2);
-  const qrY     = Math.round(qrCY - qrSize / 2);
+  // ── 8. QR code — 25mm × 25mm, right side, slightly below centre ─────────
+  // Pure black on white for max inkjet scan reliability. Right edge sits
+  // 1mm inside the right yellow border (canvas x = 83.6 - 1 = 82.6mm).
+  // Vertical: centred between subheader baseline + 2mm "slightly below"
+  // nudge — clears the bottom step horizontally and the footer vertically.
+  const qrSize    = px(25);
+  const qrBuf     = await generateQR(claimUrl, qrSize);
+  const qrImg     = await loadImage(qrBuf);
+  const qrX       = PX_W - px(BORDER_MM + 1) - qrSize;
+  const footerTop = PX_H - px(BORDER_MM + FOOTER_BAND_MM);   // canvas y=49mm
+  const zoneTop   = px(14);                                  // just below subheader caps
+  const qrCY      = (zoneTop + footerTop) / 2 + px(2);
+  const qrY       = Math.round(qrCY - qrSize / 2);
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // ── 9. Footer band — 3mm tall, edge-to-edge yellow, #111111 text ────────
-  const footerY = PX_H - px(3);
-  const footerH = px(3);
-  ctx.fillStyle = GOLD;
-  ctx.fillRect(0, footerY, PX_W, footerH);
+  // ── 9. Footer band — 3mm tall yellow strip INSIDE the inner area, with
+  // #111111 text centred. Sits just above the 2mm bottom border. ──────────
+  const footerY  = footerTop;
+  const footerH  = px(FOOTER_BAND_MM);
+  ctx.fillStyle  = GOLD;
+  ctx.fillRect(innerX, footerY, innerW, footerH);
 
   ctx.textBaseline = "middle";
   ctx.font         = `bold ${ptToPx(5.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
