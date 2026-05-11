@@ -6904,11 +6904,22 @@ export async function registerRoutes(
           // pad with mat so the final display image has a passport-style
           // frame with the card visibly framed. Without this order the
           // mask would clip the bitmap corners (now far from the card).
+          //
+          // FINAL flatten: composite alpha against white and JPEG-encode at
+          // q85 mozjpeg progressive. maskRoundedCorners already sets white
+          // RGB under the transparent corners (image-processing.ts:40-44),
+          // so flatten-against-white is a no-op visually for the corners;
+          // mat-padded outer ring stays the mat colour. Saves ~74% per
+          // image vs the prior PNG output (2.1MB → ~550KB per side).
           const maskedBuf = await maskRoundedCorners(centreResult.buffer);
-          const croppedBuf = await padWithMat(maskedBuf, matRgb);
-          const ext2 = "png"; // PNG for transparency support
+          const paddedBuf = await padWithMat(maskedBuf, matRgb);
+          const croppedBuf = await (await import("sharp")).default(paddedBuf)
+            .flatten({ background: { r: 255, g: 255, b: 255 } })
+            .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+            .toBuffer();
+          const ext2 = "jpg";
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
-          await uploadToR2(cropKey, croppedBuf, "image/png");
+          await uploadToR2(cropKey, croppedBuf, "image/jpeg");
           updates[`grading_${angle}_cropped`] = cropKey;
 
           // 4. Quality check on cropped image
@@ -6916,17 +6927,18 @@ export async function registerRoutes(
           qualityResults[angle] = { ...quality, cropped, deskewAngle };
 
           // 5. Also update the primary front/back image paths used for display + AI.
-          // Canonical display key uses .png with correct image/png mime — croppedBuf is PNG bytes.
+          // Canonical display key uses .jpg with image/jpeg mime — croppedBuf
+          // is the flattened JPEG buffer.
           if (angle === "front") {
             frontCroppedBuf = croppedBuf;
-            const displayKey = r2KeyForImage(certId, "front", "png");
+            const displayKey = r2KeyForImage(certId, "front", "jpg");
             updates["front_image_path"] = displayKey;
-            await uploadToR2(displayKey, croppedBuf, "image/png");
+            await uploadToR2(displayKey, croppedBuf, "image/jpeg");
           } else if (angle === "back") {
             backCroppedBuf = croppedBuf;
-            const displayKey = r2KeyForImage(certId, "back", "png");
+            const displayKey = r2KeyForImage(certId, "back", "jpg");
             updates["back_image_path"] = displayKey;
-            await uploadToR2(displayKey, croppedBuf, "image/png");
+            await uploadToR2(displayKey, croppedBuf, "image/jpeg");
           }
 
           // 6. Variants — fire-and-forget (don't block the response)
