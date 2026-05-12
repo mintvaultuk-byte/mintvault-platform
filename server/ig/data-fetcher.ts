@@ -14,9 +14,15 @@
  * Other post types return mostly-static data with one live look-up where
  * useful (service_explainer pulls live tier prices from service_tiers).
  */
-import { and, desc, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { certificates, igPostQueue, serviceTiers, type IgPostType } from "@shared/schema";
+
+// Aspirational-grade floor: card_reveal + grade_breakdown only post certs
+// scoring at least this. Lower-grade slabs don't make compelling feed content.
+// If the high-grade pool is empty we fall back to any approved cert (with a
+// warning log) so the cron / Post Now never silently 404s.
+const HIGH_GRADE_FLOOR = "8.0";
 import type { IgPostData } from "./types";
 
 // Cert IDs are stored "MV-0000000001" but display as "MV42" — strip the
@@ -52,6 +58,8 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
     ));
 
   let cert: any = null;
+
+  // Preferred path: high-grade (≥ HIGH_GRADE_FLOOR), unposted, most recent first.
   try {
     const rows = await db
       .select()
@@ -59,18 +67,37 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
       .where(and(
         isNull(certificates.deletedAt),
         isNotNull(certificates.gradeApprovedAt),
-        // Pull-tab: don't post the same cert twice. If ig_post_queue
-        // doesn't exist yet (migration not applied), this WHERE will
-        // throw and we'll fall back to the "no filter" branch below.
+        gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
         notInArray(certificates.id, postedSubquery),
       ))
-      .orderBy(desc(certificates.gradeApprovedAt))
+      .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
       .limit(1);
     cert = rows[0] ?? null;
   } catch (err: any) {
     // Likely "relation ig_post_queue does not exist" — migration not applied.
-    // Fall back to any recent approved cert so the dry-run still works.
-    console.warn(`[ig-data] card_reveal: ig_post_queue lookup failed (${err?.message ?? err}). Falling back to any recent approved cert.`);
+    // Skip the unposted-filter, keep the grade filter.
+    console.warn(`[ig-data] card_reveal: ig_post_queue lookup failed (${err?.message ?? err}). Falling back to grade-only filter.`);
+    try {
+      const rows = await db
+        .select()
+        .from(certificates)
+        .where(and(
+          isNull(certificates.deletedAt),
+          isNotNull(certificates.gradeApprovedAt),
+          gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
+        ))
+        .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
+        .limit(1);
+      cert = rows[0] ?? null;
+    } catch {
+      cert = null;
+    }
+  }
+
+  // Final fallback: no grade ≥ 8 available. Drop the grade floor and pick
+  // any recent approved cert. Logged so the operator notices a quiet pool.
+  if (!cert) {
+    console.warn(`[ig-data] card_reveal: no certs found at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any recent approved cert.`);
     const rows = await db
       .select()
       .from(certificates)
@@ -84,7 +111,7 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
   }
 
   if (!cert) {
-    throw new Error("[ig-data] No approved, unposted certs available for card_reveal");
+    throw new Error("[ig-data] No approved certs available for card_reveal");
   }
 
   const tierLabel =
@@ -120,7 +147,8 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
 }
 
 export async function fetchGradeBreakdownData(): Promise<IgPostData> {
-  // Same picking logic as card_reveal — most-recent graded cert with subgrades.
+  // Most-recent graded cert with all four subgrades populated AND overall ≥ 8.
+  // Fall back to any subgraded cert if the high-grade pool is empty.
   let cert: any = null;
   try {
     const rows = await db
@@ -133,12 +161,36 @@ export async function fetchGradeBreakdownData(): Promise<IgPostData> {
         isNotNull(certificates.gradeCorners),
         isNotNull(certificates.gradeEdges),
         isNotNull(certificates.gradeSurface),
+        gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
       ))
-      .orderBy(desc(certificates.gradeApprovedAt))
+      .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
       .limit(1);
     cert = rows[0] ?? null;
   } catch (err: any) {
     console.warn(`[ig-data] grade_breakdown lookup failed: ${err?.message ?? err}`);
+  }
+
+  // Final fallback: no grade ≥ 8 with subgrades. Drop the grade floor.
+  if (!cert) {
+    console.warn(`[ig-data] grade_breakdown: no subgraded certs at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any subgraded cert.`);
+    try {
+      const rows = await db
+        .select()
+        .from(certificates)
+        .where(and(
+          isNull(certificates.deletedAt),
+          isNotNull(certificates.gradeApprovedAt),
+          isNotNull(certificates.gradeCentering),
+          isNotNull(certificates.gradeCorners),
+          isNotNull(certificates.gradeEdges),
+          isNotNull(certificates.gradeSurface),
+        ))
+        .orderBy(desc(certificates.gradeApprovedAt))
+        .limit(1);
+      cert = rows[0] ?? null;
+    } catch {
+      cert = null;
+    }
   }
 
   if (!cert) {

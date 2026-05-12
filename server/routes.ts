@@ -12000,9 +12000,23 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post("/api/admin/ig/post-now", requireAdmin, async (req, res) => {
     try {
       const adminEmail = (req.session as any)?.adminEmail ?? null;
+      // Optional override: admin can pin a specific post type instead of
+      // using today's day-of-week rotation. Validated against IG_POST_TYPES
+      // so a malformed body can't reach the cron entry point.
+      const { IG_POST_TYPES } = await import("@shared/schema");
+      const rawOverride = typeof req.body?.post_type === "string" ? req.body.post_type : null;
+      const postTypeOverride = rawOverride && (IG_POST_TYPES as readonly string[]).includes(rawOverride)
+        ? (rawOverride as typeof IG_POST_TYPES[number])
+        : undefined;
+
       const { runIgDailyPost } = await import("./jobs/ig-daily-post");
-      const result = await runIgDailyPost({ force: true });
-      try { await storage.writeAuditLog("ig_post", String(result.queueId ?? "n/a"), "post-now-triggered", adminEmail, result); } catch {}
+      const result = await runIgDailyPost({ force: true, postTypeOverride });
+      try {
+        await storage.writeAuditLog("ig_post", String(result.queueId ?? "n/a"), "post-now-triggered", adminEmail, {
+          ...result,
+          ...(postTypeOverride ? { override_type: postTypeOverride } : {}),
+        });
+      } catch {}
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

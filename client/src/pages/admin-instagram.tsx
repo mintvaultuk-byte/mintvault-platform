@@ -8,7 +8,7 @@ import {
   Loader2, RefreshCw, SkipForward, RotateCcw, Send, ImageIcon,
   CheckCircle2, AlertCircle, Clock, Ban,
 } from "lucide-react";
-import type { IgPostStatus } from "@shared/schema";
+import { IG_POST_TYPES, type IgPostStatus, type IgPostType } from "@shared/schema";
 
 // Match the existing admin-page convention — no AdminLayout wrapper, plain
 // React component that renders its own header. Auth guard runs on the API
@@ -57,6 +57,8 @@ export default function AdminInstagramPage() {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [imagePreview, setImagePreview] = useState<{ id: number; url: string } | null>(null);
+  // "" = auto (today's rotation). Specific value pins to that post type.
+  const [postTypeOverride, setPostTypeOverride] = useState<"" | IgPostType>("");
 
   // ── Settings + next post
   const settingsQ = useQuery<IgSettings>({
@@ -89,16 +91,18 @@ export default function AdminInstagramPage() {
     onError: (err: any) => toast({ title: "Update failed", description: err.message, variant: "destructive" }),
   });
 
-  // ── Post now (one-off)
+  // ── Post now (one-off). Sends post_type when an override is selected;
+  // otherwise the server falls back to today's day-of-week rotation.
   const postNowM = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/ig/post-now", {});
+      const body = postTypeOverride ? { post_type: postTypeOverride } : {};
+      const res = await apiRequest("POST", "/api/admin/ig/post-now", body);
       return res.json();
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["/api/admin/ig/queue"] });
       qc.invalidateQueries({ queryKey: ["/api/admin/ig/settings"] });
-      toast({ title: `Post-now: ${data.status}`, description: data.metaPostId ?? data.reason ?? "" });
+      toast({ title: `Post-now: ${data.status} (${data.postType ?? "?"})`, description: data.metaPostId ?? data.reason ?? "" });
     },
     onError: (err: any) => toast({ title: "Post-now failed", description: err.message, variant: "destructive" }),
   });
@@ -175,16 +179,31 @@ export default function AdminInstagramPage() {
               {settings?.postEnabled ? "Posting LIVE" : "Posting PAUSED"}
             </Button>
 
-            <Button
-              onClick={() => postNowM.mutate()}
-              disabled={!settings?.postEnabled || postNowM.isPending}
-              variant="outline"
-            >
-              {postNowM.isPending
-                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                : <Send className="w-4 h-4 mr-2" />}
-              Post Now
-            </Button>
+            <div className="flex items-center gap-2">
+              <select
+                value={postTypeOverride}
+                onChange={(e) => setPostTypeOverride(e.target.value as "" | IgPostType)}
+                disabled={postNowM.isPending}
+                className="h-9 px-2 py-1 text-sm border border-zinc-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+                aria-label="Post type override for Post Now"
+              >
+                <option value="">Auto (today's rotation)</option>
+                {IG_POST_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+
+              <Button
+                onClick={() => postNowM.mutate()}
+                disabled={!settings?.postEnabled || postNowM.isPending}
+                variant="outline"
+              >
+                {postNowM.isPending
+                  ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  : <Send className="w-4 h-4 mr-2" />}
+                Post Now
+              </Button>
+            </div>
 
             <div className="ml-auto text-xs text-zinc-500 space-x-3">
               <span>env IG_POST_ENABLED: <strong className={settings?.envGate ? "text-emerald-600" : "text-zinc-400"}>{settings?.envGate ? "true" : "false"}</strong></span>

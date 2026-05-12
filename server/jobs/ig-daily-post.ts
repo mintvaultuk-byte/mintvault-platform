@@ -21,7 +21,7 @@
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
-import { igPostQueue, igSettings, type IgPostType } from "@shared/schema";
+import { igPostQueue, igSettings, IG_POST_TYPES, type IgPostType } from "@shared/schema";
 import { fetchPostData, selectPostType } from "../ig/data-fetcher";
 import { generateIgImage } from "../ig/image-generator";
 import { generateCaption } from "../ig/caption-generator";
@@ -100,7 +100,9 @@ async function isPostingEnabled(): Promise<boolean> {
   }
 }
 
-export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ status: string; postType?: IgPostType; queueId?: number; metaPostId?: string; reason?: string }> {
+export async function runIgDailyPost(
+  opts: { force?: boolean; postTypeOverride?: IgPostType } = {},
+): Promise<{ status: string; postType?: IgPostType; queueId?: number; metaPostId?: string; reason?: string }> {
   const londonDay = londonDateKey();
 
   if (!opts.force) {
@@ -109,8 +111,25 @@ export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ 
     }
   }
 
-  const { postType, tierId } = selectPostType();
-  console.log(`[ig-cron] Selected post type: ${postType}${tierId ? ` (tier=${tierId})` : ""}`);
+  // Admin-override path: caller (POST /api/admin/ig/post-now) can pin the
+  // post type. Cron never passes postTypeOverride, so day-of-week rotation
+  // is preserved for the scheduled tick.
+  let postType: IgPostType;
+  let tierId: string | undefined;
+  if (opts.postTypeOverride && (IG_POST_TYPES as readonly string[]).includes(opts.postTypeOverride)) {
+    postType = opts.postTypeOverride;
+    // service_explainer still needs a tier; use this week's rotation pick
+    // so admin overrides don't have to also pick a tier.
+    if (postType === "service_explainer") {
+      tierId = selectPostType().tierId;
+    }
+    console.log(`[ig-cron] Admin override → post type: ${postType}${tierId ? ` (tier=${tierId})` : ""}`);
+  } else {
+    const sel = selectPostType();
+    postType = sel.postType;
+    tierId = sel.tierId;
+    console.log(`[ig-cron] Selected post type: ${postType}${tierId ? ` (tier=${tierId})` : ""}`);
+  }
 
   // 1. Fetch data
   let data;
@@ -160,7 +179,10 @@ export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ 
     return { status: "failed", reason: `queue-insert: ${err?.message ?? err}` };
   }
 
-  try { await storage.writeAuditLog("ig_post", String(queuedId), "ready", null, { postType, certPk, r2Key }); } catch {}
+  // Stable audit-log metadata for every status transition on this run.
+  const overrideMeta = opts.postTypeOverride ? { override_type: opts.postTypeOverride } : {};
+
+  try { await storage.writeAuditLog("ig_post", String(queuedId), "ready", null, { postType, certPk, r2Key, ...overrideMeta }); } catch {}
 
   // 6. Decide: live publish or dry-run?
   const enabled = await isPostingEnabled();
@@ -168,7 +190,7 @@ export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ 
     await db.update(igPostQueue)
       .set({ status: "ready", errorDetail: "IG_POST_ENABLED gate closed or admin toggle off" })
       .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "dry-run", null, { postType, certPk }); } catch {}
+    try { await storage.writeAuditLog("ig_post", String(queuedId), "dry-run", null, { postType, certPk, ...overrideMeta }); } catch {}
     console.log(`[ig-cron] Dry-run only — queue row ${queuedId} left in 'ready' state.`);
     return { status: "dry-run", postType, queueId: queuedId };
   }
@@ -180,7 +202,7 @@ export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ 
     await db.update(igPostQueue)
       .set({ status: "posted", metaPostId, postedAt: new Date() })
       .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "posted", null, { postType, certPk, metaPostId }); } catch {}
+    try { await storage.writeAuditLog("ig_post", String(queuedId), "posted", null, { postType, certPk, metaPostId, ...overrideMeta }); } catch {}
     console.log(`[ig-cron] Posted — queue=${queuedId} meta=${metaPostId}`);
     return { status: "posted", postType, queueId: queuedId, metaPostId };
   } catch (err: any) {
@@ -188,7 +210,7 @@ export async function runIgDailyPost(opts: { force?: boolean } = {}): Promise<{ 
     await db.update(igPostQueue)
       .set({ status: "failed", errorDetail: detail })
       .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "failed", null, { postType, certPk, error: detail }); } catch {}
+    try { await storage.writeAuditLog("ig_post", String(queuedId), "failed", null, { postType, certPk, error: detail, ...overrideMeta }); } catch {}
     console.error(`[ig-cron] Publish failed for queue=${queuedId}: ${detail}`);
     return { status: "failed", postType, queueId: queuedId, reason: detail };
   }
