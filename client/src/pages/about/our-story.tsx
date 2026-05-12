@@ -18,7 +18,7 @@ export default function OurStoryPage() {
           <div className="flex justify-center mb-10">
             <MintVaultWordmark size="lg" />
           </div>
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.25em] mb-4">Our Story</p>
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.25em] mb-4">Our Story</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] mb-6 leading-tight tracking-tight">
             Why We Built the UK's Only Verified Ownership Grader
           </h1>
@@ -29,7 +29,7 @@ export default function OurStoryPage() {
       <div className="max-w-2xl mx-auto px-6 py-16 md:py-24 space-y-16 no-text-shadow">
 
         <section>
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Beginning</p>
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Beginning</p>
           <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
             A collector's frustration
           </h2>
@@ -38,8 +38,8 @@ export default function OurStoryPage() {
           </p>
         </section>
 
-        <div className="border-l-2 border-[#FFCB05]/30 pl-6">
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Vision</p>
+        <div className="border-l-2 border-[#D4AF37]/30 pl-6">
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Vision</p>
           <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
             Something different
           </h2>
@@ -49,27 +49,27 @@ export default function OurStoryPage() {
         </div>
 
         <section>
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-6">What Makes Us Different</p>
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-6">What Makes Us Different</p>
           <div className="space-y-5">
             {[
               {
-                icon: <MapPin size={18} className="text-[#FFCB05]" />,
+                icon: <MapPin size={18} className="text-[#B8960C]" />,
                 title: "UK-Based",
                 desc: "No customs delays, no overseas shipping, fast Royal Mail tracked returns. Your cards never leave the country.",
               },
               {
-                icon: <Wifi size={18} className="text-[#FFCB05]" />,
+                icon: <Wifi size={18} className="text-[#B8960C]" />,
                 title: "Verified Ownership",
                 desc: "NFC-tracked slabs and a tamper-evident ownership registry. Prove who owns your card at any point in time.",
               },
               {
-                icon: <Shield size={18} className="text-[#FFCB05]" />,
+                icon: <Shield size={18} className="text-[#B8960C]" />,
                 title: "Full Transparency",
                 desc: "Every card receives a complete Vault — images, measurements, defect analysis, and ownership history. Every card has a Vault.",
               },
             ].map(({ icon, title, desc }) => (
-              <div key={title} className="flex gap-4 p-5 rounded-2xl bg-[#0a0e1a]/85 backdrop-blur-sm border border-[#FFCB05]/20">
-                <div className="w-10 h-10 rounded-xl bg-[#1a1410]/85 backdrop-blur-sm border border-[#FFCB05]/20 flex items-center justify-center flex-shrink-0">
+              <div key={title} className="flex gap-4 p-5 rounded-2xl bg-[#0a0e1a]/85 backdrop-blur-sm border border-[#D4AF37]/20">
+                <div className="w-10 h-10 rounded-xl bg-[#1a1410]/85 backdrop-blur-sm border border-[#D4AF37]/20 flex items-center justify-center flex-shrink-0">
                   {icon}
                 </div>
                 <div>
@@ -82,7 +82,7 @@ export default function OurStoryPage() {
         </section>
 
         <section>
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-4">Looking Forward</p>
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">Looking Forward</p>
           <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
             Built to last
           </h2>

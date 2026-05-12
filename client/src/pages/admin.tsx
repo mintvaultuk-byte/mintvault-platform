@@ -48,7 +48,7 @@ export default function AdminPage() {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="animate-pulse">
-          <div className="h-8 bg-[#FFCB05]/10 rounded w-32 mx-auto" />
+          <div className="h-8 bg-[#D4AF37]/10 rounded w-32 mx-auto" />
         </div>
       </div>
     );

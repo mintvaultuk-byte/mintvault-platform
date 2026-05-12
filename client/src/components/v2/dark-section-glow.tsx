@@ -58,7 +58,7 @@ export default function DarkSectionGlow() {
           width: "70%",
           height: "60%",
           transform: "translate(-50%, -50%)",
-          background: `radial-gradient(ellipse, rgba(255,203,5, ${alpha}) 0%, rgba(255,203,5, 0.02) 35%, transparent 70%)`,
+          background: `radial-gradient(ellipse, rgba(212, 175, 55, ${alpha}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`,
           filter: "blur(60px)",
           willChange: "opacity",
         }}

@@ -243,7 +243,7 @@ export default function VerifyV2() {
           <div>
             <p
               className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#FFCB05" }}
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; Verify
             </p>

@@ -88,7 +88,7 @@ export default function TransferPage() {
     <div className="min-h-screen py-12 px-4">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
-          <ArrowRightLeft className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
+          <ArrowRightLeft className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
           <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight">
             Transfer Ownership
           </h1>
@@ -99,11 +99,11 @@ export default function TransferPage() {
 
         {/* v2: Outgoing keeper confirmed — waiting for incoming keeper */}
         {pageState.type === "outgoing_confirmed" && (
-          <Card className="mb-6 border border-[#FFCB05]/40 bg-[#FFF9E6]">
+          <Card className="mb-6 border border-[#D4AF37]/40 bg-[#FFF9E6]">
             <CardContent className="flex items-start gap-3 pt-5 pb-4">
-              <Clock className="w-5 h-5 text-[#FFCB05] flex-shrink-0 mt-0.5" />
+              <Clock className="w-5 h-5 text-[#D4AF37] flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-[#FFCB05] font-semibold mb-1">Your authorisation received</p>
+                <p className="text-sm text-[#D4AF37] font-semibold mb-1">Your authorisation received</p>
                 <p className="text-sm text-[#444444]">
                   Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new keeper has been emailed. They must verify the Document Reference Number from the Logbook within 14 days. A further 14-day dispute window applies after they confirm.
                 </p>
@@ -114,11 +114,11 @@ export default function TransferPage() {
 
         {/* v1: Owner confirmed — waiting for new owner */}
         {pageState.type === "owner_confirmed" && (
-          <Card className="mb-6 border border-[#FFCB05]/40 bg-[#FFF9E6]">
+          <Card className="mb-6 border border-[#D4AF37]/40 bg-[#FFF9E6]">
             <CardContent className="flex items-start gap-3 pt-5 pb-4">
-              <Clock className="w-5 h-5 text-[#FFCB05] flex-shrink-0 mt-0.5" />
+              <Clock className="w-5 h-5 text-[#D4AF37] flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-[#FFCB05] font-semibold mb-1">Your confirmation received</p>
+                <p className="text-sm text-[#D4AF37] font-semibold mb-1">Your confirmation received</p>
                 <p className="text-sm text-[#444444]">
                   Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new owner has been emailed a confirmation link. The transfer will complete once they accept.
                 </p>
@@ -146,7 +146,7 @@ export default function TransferPage() {
                 <p className="text-sm text-red-300">{pageState.message}</p>
                 <button
                   onClick={() => setPageState({ type: "form" })}
-                  className="text-xs text-[#FFCB05] hover:underline mt-2 block"
+                  className="text-xs text-[#D4AF37] hover:underline mt-2 block"
                 >
                   ← Try again
                 </button>
@@ -156,9 +156,9 @@ export default function TransferPage() {
         )}
 
         {(pageState.type === "form" || pageState.type === "error") && (
-          <Card className="relative z-[3] border-[#FFCB05]/30 bg-white">
+          <Card className="relative z-[3] border-[#D4AF37]/30 bg-white">
             <CardHeader>
-              <CardTitle className="text-[#FFCB05] text-lg">Ownership Transfer</CardTitle>
+              <CardTitle className="text-[#D4AF37] text-lg">Ownership Transfer</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-5">
@@ -182,7 +182,7 @@ export default function TransferPage() {
                     placeholder="your@email.com"
                     value={fromEmail}
                     onChange={(e) => setFromEmail(e.target.value)}
-                    className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                    className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                   />
                   <p className="text-xs text-[#999999]">Must match the email you used to register ownership.</p>
                 </div>
@@ -195,7 +195,7 @@ export default function TransferPage() {
                     placeholder="newowner@email.com"
                     value={toEmail}
                     onChange={(e) => setToEmail(e.target.value)}
-                    className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                    className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                   />
                   <p className="text-xs text-[#999999]">The person you are transferring the card to.</p>
                 </div>
@@ -208,7 +208,7 @@ export default function TransferPage() {
                     placeholder="e.g. James Smith"
                     value={newOwnerName}
                     onChange={(e) => setNewOwnerName(e.target.value)}
-                    className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                    className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                     autoComplete="off"
                   />
                   <p className="text-xs text-[#999999]">Their name will appear on their Certificate of Authenticity PDF.</p>
@@ -244,7 +244,7 @@ export default function TransferPage() {
                 </ol>
                 <p className="text-xs text-[#999999] mt-3">
                   Registering a card for the first time?{" "}
-                  <a href="/claim" className="text-[#FFCB05] hover:underline">Register Ownership →</a>
+                  <a href="/claim" className="text-[#D4AF37] hover:underline">Register Ownership →</a>
                 </p>
               </div>
             </CardContent>

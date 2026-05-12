@@ -12,13 +12,9 @@
   --v2-line-soft: #EFE9DA;
 
   /* Gold */
-  /* Pikachu Yellow palette (closes PR #87). Primary + soft folded into one
-     since they served the same visual role; dark retained for borders/
-     hover states; darkest added for the rare deep-depth case. */
-  --v2-gold: #FFCB05;
-  --v2-gold-soft: #FFCB05;
-  --v2-gold-dark: #D9A300;
-  --v2-gold-darkest: #9C7600;
+  --v2-gold: #B8960C;
+  --v2-gold-soft: #D4AF37;
+  --v2-gold-dark: #8A6F08;
 
   /* Dark panel */
   --v2-panel-dark: #1A1612;
@@ -74,7 +70,7 @@
 .tier-card-v2:hover {
   transform: translateY(-8px) scale(1.04);
   box-shadow: 0 12px 32px rgba(15, 14, 11, 0.25),
-              0 0 60px rgba(255,203,5, 0.30);
+              0 0 60px rgba(212, 175, 55, 0.30);
 }
 
 /* ── Pricing v2 — addon item hover lift, calmer (Section III) ──── */
@@ -89,12 +85,12 @@
 /* ── Pricing v2 — Silver Vault Club card breathing glow (Section V) */
 @keyframes silverBreathe {
   0%, 100% {
-    box-shadow: 0 0 40px rgba(255,203,5, 0.20),
-                inset 0 0 30px rgba(255,203,5, 0.05);
+    box-shadow: 0 0 40px rgba(212, 175, 55, 0.20),
+                inset 0 0 30px rgba(212, 175, 55, 0.05);
   }
   50% {
-    box-shadow: 0 0 40px rgba(255,203,5, 0.65),
-                inset 0 0 30px rgba(255,203,5, 0.16);
+    box-shadow: 0 0 40px rgba(212, 175, 55, 0.65),
+                inset 0 0 30px rgba(212, 175, 55, 0.16);
   }
 }
 .silver-vault-card {

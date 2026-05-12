@@ -43,7 +43,7 @@ function InputBase({ className = "", ...props }: React.InputHTMLAttributes<HTMLI
   return (
     <input
       {...props}
-      className={`w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors ${className}`}
+      className={`w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors ${className}`}
     />
   );
 }
@@ -55,7 +55,7 @@ function GoldButton({
     <button
       {...props}
       className={`px-6 py-2.5 rounded-xl font-bold text-sm text-[#1A1400] flex items-center justify-center gap-2 disabled:opacity-60 transition-all ${className}`}
-      style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+      style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
     >
       {children}
     </button>
@@ -156,7 +156,7 @@ function ProfileTab({ me }: { me: AuthMe }) {
               checked={publicName}
               disabled={toggleMutation.isPending || (!publicName && !canToggleOn)}
               onChange={(e) => toggleMutation.mutate(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-[#CCCCCC] text-[#FFCB05] focus:ring-[#FFCB05]"
+              className="mt-0.5 h-4 w-4 rounded border-[#CCCCCC] text-[#D4AF37] focus:ring-[#D4AF37]"
               data-testid="toggle-public-name"
             />
             <div className="flex-1">
@@ -167,7 +167,7 @@ function ProfileTab({ me }: { me: AuthMe }) {
                 When on, anyone who verifies a card you own will see your display name. Off by default. Email and real name are never shown.
               </p>
               {!publicName && !canToggleOn && (
-                <p className="text-xs text-[#FFCB05] mt-1.5">
+                <p className="text-xs text-[#B8960C] mt-1.5">
                   Set a display name above first.
                 </p>
               )}
@@ -452,7 +452,7 @@ export default function AccountSettingsPage() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center">
-        <Loader2 size={28} className="text-[#FFCB05] animate-spin" />
+        <Loader2 size={28} className="text-[#D4AF37] animate-spin" />
       </div>
     );
   }
@@ -480,8 +480,8 @@ export default function AccountSettingsPage() {
 
           {/* Page header */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center">
-              <Settings size={18} className="text-[#FFCB05]" />
+            <div className="w-10 h-10 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center">
+              <Settings size={18} className="text-[#D4AF37]" />
             </div>
             <div>
               <h1 className="text-xl font-black text-[#1A1A1A]">
@@ -500,7 +500,7 @@ export default function AccountSettingsPage() {
                   onClick={() => setTab(t.key)}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all text-left ${
                     tab === t.key
-                      ? "bg-[#FFCB05]/10 text-[#FFCB05] border border-[#FFCB05]/30"
+                      ? "bg-[#D4AF37]/10 text-[#B8960C] border border-[#D4AF37]/30"
                       : t.key === "danger"
                         ? "text-red-500 hover:bg-red-50"
                         : "text-[#666666] hover:bg-[#F5F2EB]"

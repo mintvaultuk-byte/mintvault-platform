@@ -20,8 +20,8 @@ const grades = [
 function gradeBarColor(g: string): string {
   const n = parseFloat(g);
   if (isNaN(n)) return "#888888";
-  if (n >= 10) return "#FFCB05";
-  if (n >= 9)  return "#FFCB05";
+  if (n >= 10) return "#D4AF37";
+  if (n >= 9)  return "#B8960C";
   if (n >= 8)  return "#2563EB";
   if (n >= 7)  return "#16A34A";
   if (n >= 6)  return "#CA8A04";
@@ -60,7 +60,7 @@ export default function GradingScalePage() {
 
       {/* Grade table */}
       <section className="mb-12" data-testid="section-grade-table">
-        <div className="border border-[#FFCB05]/20 rounded-xl overflow-hidden">
+        <div className="border border-[#D4AF37]/20 rounded-xl overflow-hidden">
           {grades.map((row, i) => {
             const isSpecial = isNaN(parseFloat(row.grade));
             return (
@@ -103,16 +103,16 @@ export default function GradingScalePage() {
       {/* What we examine */}
       <section className="mb-12 reveal-on-scroll" data-testid="section-what-we-examine">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
             <Target size={16} className="text-[#1A1400]" />
           </div>
           <h2 className="text-xl font-bold text-white tracking-wide">What We Examine</h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {criteria.map((c, i) => (
-            <div key={i} className="border border-[#FFCB05]/20 rounded-xl p-5" data-testid={`card-criteria-${i}`}>
+            <div key={i} className="border border-[#D4AF37]/20 rounded-xl p-5" data-testid={`card-criteria-${i}`}>
               <h3 className="text-white font-bold text-sm mb-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#FFCB05] flex-shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] flex-shrink-0" />
                 {c.title}
               </h3>
               <p className="text-white text-xs leading-relaxed">{c.desc}</p>
@@ -123,9 +123,9 @@ export default function GradingScalePage() {
 
       {/* Grading promise */}
       <section className="mb-12 reveal-on-scroll" data-testid="section-grading-promise">
-        <div className="border-l-4 border-[#FFCB05] pl-5 py-2">
+        <div className="border-l-4 border-[#D4AF37] pl-5 py-2">
           <div className="flex items-center gap-2 mb-2">
-            <Shield size={16} className="text-[#FFCB05]" />
+            <Shield size={16} className="text-[#D4AF37]" />
             <h2 className="text-white font-bold text-sm uppercase tracking-widest">Our Grading Promise</h2>
           </div>
           <p className="text-white text-sm leading-relaxed">
@@ -135,8 +135,8 @@ export default function GradingScalePage() {
       </section>
 
       {/* CTA */}
-      <div className="border border-[#FFCB05]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
-        <CheckCircle size={24} className="text-[#FFCB05] mx-auto mb-3" />
+      <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
+        <CheckCircle size={24} className="text-[#D4AF37] mx-auto mb-3" />
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to grade your cards?</h3>
         <p className="text-[#1a1a1a] text-sm mb-4">Submit online and receive expert grading with a verifiable certificate.</p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">

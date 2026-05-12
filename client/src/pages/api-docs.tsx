@@ -35,7 +35,7 @@ export default function ApiDocsPage() {
 
         {/* Page header */}
         <div className="mb-10">
-          <p className="text-[#FFCB05] text-xs uppercase tracking-widest font-bold mb-2">Developer Reference</p>
+          <p className="text-[#D4AF37] text-xs uppercase tracking-widest font-bold mb-2">Developer Reference</p>
           <h1 className="text-3xl font-bold text-[#1A1A1A] mb-3">Public Verification API</h1>
           <p className="text-[#666666] text-sm leading-relaxed">
             Instantly verify any MintVault certificate from your own application, eBay listing, Discord bot, or marketplace integration.
@@ -51,8 +51,8 @@ export default function ApiDocsPage() {
             { label: "Response format", value: "JSON" },
             { label: "CORS", value: "Open (*)" },
           ].map((f) => (
-            <div key={f.label} className="border border-[#FFCB05]/20 rounded-lg p-3 bg-[#FFCB05]/5 text-center">
-              <p className="text-[#FFCB05] text-xs uppercase tracking-widest mb-1">{f.label}</p>
+            <div key={f.label} className="border border-[#D4AF37]/20 rounded-lg p-3 bg-[#D4AF37]/5 text-center">
+              <p className="text-[#D4AF37] text-xs uppercase tracking-widest mb-1">{f.label}</p>
               <p className="text-[#1A1A1A] font-bold text-sm">{f.value}</p>
             </div>
           ))}
@@ -62,11 +62,11 @@ export default function ApiDocsPage() {
         <Section title="Endpoint">
           <div className="flex items-center gap-3 mb-4">
             <span className="bg-emerald-50 text-emerald-700 font-bold text-xs px-2 py-1 rounded border border-emerald-300">GET</span>
-            <code className="text-[#FFCB05] font-mono text-sm">https://mintvaultuk.com/api/v1/verify/:certId</code>
+            <code className="text-[#D4AF37] font-mono text-sm">https://mintvaultuk.com/api/v1/verify/:certId</code>
           </div>
           <p className="text-[#666666] text-sm">
-            Replace <code className="text-[#FFCB05] font-mono">:certId</code> with any valid MintVault cert ID, e.g.{" "}
-            <code className="text-[#FFCB05] font-mono">MV42</code> or <code className="text-[#FFCB05] font-mono">MV-0000000042</code>.
+            Replace <code className="text-[#D4AF37] font-mono">:certId</code> with any valid MintVault cert ID, e.g.{" "}
+            <code className="text-[#D4AF37] font-mono">MV42</code> or <code className="text-[#D4AF37] font-mono">MV-0000000042</code>.
             Both formats are accepted.
           </p>
         </Section>
@@ -83,19 +83,19 @@ export default function ApiDocsPage() {
 
         {/* Field reference */}
         <Section title="Response Fields">
-          <div className="border border-[#FFCB05]/15 rounded-lg overflow-hidden">
+          <div className="border border-[#D4AF37]/15 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[#FFCB05]/15 bg-[#FFCB05]/5">
-                  <th className="text-left px-4 py-2.5 text-[#FFCB05] text-xs uppercase tracking-wider font-bold">Field</th>
-                  <th className="text-left px-4 py-2.5 text-[#FFCB05] text-xs uppercase tracking-wider font-bold">Type</th>
-                  <th className="text-left px-4 py-2.5 text-[#FFCB05] text-xs uppercase tracking-wider font-bold">Description</th>
+                <tr className="border-b border-[#D4AF37]/15 bg-[#D4AF37]/5">
+                  <th className="text-left px-4 py-2.5 text-[#D4AF37] text-xs uppercase tracking-wider font-bold">Field</th>
+                  <th className="text-left px-4 py-2.5 text-[#D4AF37] text-xs uppercase tracking-wider font-bold">Type</th>
+                  <th className="text-left px-4 py-2.5 text-[#D4AF37] text-xs uppercase tracking-wider font-bold">Description</th>
                 </tr>
               </thead>
               <tbody>
                 {FIELDS.map((f, i) => (
                   <tr key={f.name} className={`border-b border-[#E8E4DC] last:border-0 ${i % 2 === 0 ? "" : "bg-[#FAFAF8]"}`}>
-                    <td className="px-4 py-2.5 font-mono text-[#FFCB05] text-xs whitespace-nowrap">{f.name}</td>
+                    <td className="px-4 py-2.5 font-mono text-[#D4AF37] text-xs whitespace-nowrap">{f.name}</td>
                     <td className="px-4 py-2.5 text-[#999999] text-xs whitespace-nowrap">{f.type}</td>
                     <td className="px-4 py-2.5 text-[#444444] text-xs">{f.desc}</td>
                   </tr>
@@ -152,12 +152,12 @@ export default function ApiDocsPage() {
 
         {/* Fair use */}
         <div className="border border-[#E8E4DC] rounded-lg p-5 bg-[#FFF9E6] text-sm text-[#666666]">
-          <p className="text-[#FFCB05] font-semibold mb-2">Fair Use</p>
+          <p className="text-[#D4AF37] font-semibold mb-2">Fair Use</p>
           <p>
             This API is free and requires no registration. We ask that you cache responses where possible and stay within the 100 request/minute limit.
             Automated bulk scraping of the full certificate database is not permitted.
             If you need higher limits or a dedicated integration, contact us at{" "}
-            <span className="text-[#FFCB05]">mintvaultuk@gmail.com</span>.
+            <span className="text-[#D4AF37]">mintvaultuk@gmail.com</span>.
           </p>
         </div>
       </div>

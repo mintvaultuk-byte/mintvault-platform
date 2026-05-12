@@ -74,34 +74,34 @@ export default function OnePieceCardGradingUk() {
         </p>
 
         <section className="mb-10" data-testid="section-onepiece-tiers">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Service Tiers & Pricing</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
               { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
                 <span className="text-white text-sm font-medium">{t.tier}</span>
                 <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#FFCB05] font-bold text-sm">{t.price}</span>
+                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#FFCB05] hover:underline">View full pricing</Link>.
+            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-onepiece-ownership">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Verified Ownership Registry</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Verified Ownership Registry</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-3">
             MintVault is the only UK grading company with a verified ownership registry. After receiving your graded One Piece card, use the unique claim code to register your ownership online. When you sell the card, the ownership record transfers to the new owner — providing buyers with confidence that the card is genuine and the seller is its registered owner.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-onepiece-why">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Why Grade One Piece Cards?</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Why Grade One Piece Cards?</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { icon: <Shield size={16} />, title: "Protect your investment", desc: "Tamper-evident slabs prevent damage and preserve card condition indefinitely." },
@@ -109,8 +109,8 @@ export default function OnePieceCardGradingUk() {
               { icon: <CheckCircle size={16} />, title: "Verify authenticity", desc: "Grading confirms your card is genuine. All certs verifiable at mintvaultuk.com/cert." },
               { icon: <Clock size={16} />, title: "UK-based, fast turnaround", desc: "No international shipping or customs. Express tier available in 5 working days." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
-                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
+                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -127,7 +127,7 @@ export default function OnePieceCardGradingUk() {
         </div>
 
         <section className="mt-10" data-testid="section-onepiece-related">
-          <h2 className="text-lg font-bold text-[#FFCB05] tracking-wide mb-4">Related Services</h2>
+          <h2 className="text-lg font-bold text-[#D4AF37] tracking-wide mb-4">Related Services</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { href: "/trading-card-grading-uk", label: "Trading Card Grading UK" },
@@ -136,7 +136,7 @@ export default function OnePieceCardGradingUk() {
               { href: "/pricing", label: "View All Pricing" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

@@ -5,7 +5,7 @@ import { calculateOverallGrade, getGradeLabel } from "./grade-logic";
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function gradeColor(g: number): string {
-  if (g >= 10) return "#FFCB05";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
@@ -67,19 +67,19 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
   }, [focusField, subgrades, onChange, onFocusField]);
 
   return (
-    <div className="bg-white border border-[#FFCB05]/30 rounded-xl p-4 space-y-4">
+    <div className="bg-white border border-[#D4AF37]/30 rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Zap size={14} className="text-[#FFCB05]" />
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Quick Grade</p>
+          <Zap size={14} className="text-[#D4AF37]" />
+          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Quick Grade</p>
         </div>
         <p className="text-[#555555] text-[10px]">1-0 keys to set · Tab to move</p>
       </div>
 
       {/* Grade display */}
       <div className="text-center py-3 rounded-xl bg-[#F7F7F5] border border-[#E8E4DC]">
-        <p className="text-5xl font-black" style={{ color: "#FFCB05" }}>{overall}</p>
-        <p className="text-[#FFCB05] text-sm font-bold uppercase tracking-widest mt-1">{label}</p>
+        <p className="text-5xl font-black" style={{ color: "#D4AF37" }}>{overall}</p>
+        <p className="text-[#D4AF37] text-sm font-bold uppercase tracking-widest mt-1">{label}</p>
       </div>
 
       {/* Subgrade row */}
@@ -92,8 +92,8 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
               onClick={() => onFocusField(focusField === f.key ? null : f.key)}
               className={`w-full text-center py-2 rounded-lg border text-sm font-black transition-all ${
                 focusField === f.key
-                  ? "border-[#FFCB05] bg-[#FFCB05]/10 ring-1 ring-[#FFCB05]/40"
-                  : "border-[#D4D0C8] bg-[#F7F7F5] hover:border-[#FFCB05]/40"
+                  ? "border-[#D4AF37] bg-[#D4AF37]/10 ring-1 ring-[#D4AF37]/40"
+                  : "border-[#D4D0C8] bg-[#F7F7F5] hover:border-[#D4AF37]/40"
               }`}
               style={{ color: gradeColor(subgrades[f.key]) }}
             >
@@ -103,7 +103,7 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
               <select
                 value={subgrades[f.key]}
                 onChange={e => onChange({ ...subgrades, [f.key]: parseFloat(e.target.value) })}
-                className="w-full mt-1 bg-[#F7F7F5] border border-[#FFCB05]/40 text-[#1A1A1A] text-xs rounded px-1 py-1"
+                className="w-full mt-1 bg-[#F7F7F5] border border-[#D4AF37]/40 text-[#1A1A1A] text-xs rounded px-1 py-1"
                 autoFocus
               >
                 {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
@@ -117,13 +117,13 @@ export default function QuickGrade({ subgrades, onChange, onApprove, onSave, app
       <div className="flex gap-2">
         <button
           type="button" onClick={onSave} disabled={saving}
-          className="flex-1 border border-[#FFCB05]/20 text-[#FFCB05]/60 hover:text-[#FFCB05] hover:border-[#FFCB05]/40 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40"
+          className="flex-1 border border-[#D4AF37]/20 text-[#D4AF37]/60 hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-xs font-bold py-2.5 rounded-lg transition-all disabled:opacity-40"
         >
           {saving ? <Loader2 size={13} className="animate-spin mx-auto" /> : "Save Draft"}
         </button>
         <button
           type="button" onClick={onApprove} disabled={approving}
-          className="flex-[2] flex items-center justify-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase py-2.5 rounded-lg disabled:opacity-40 hover:opacity-90"
+          className="flex-[2] flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase py-2.5 rounded-lg disabled:opacity-40 hover:opacity-90"
         >
           {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
           Approve Grade

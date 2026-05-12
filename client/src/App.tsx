@@ -157,7 +157,6 @@ import HowItWorksV2 from "@/pages/how-it-works-v2";
 import HomeV3 from "@/pages/home-v3";
 import HomeV4 from "@/pages/home-v4";
 import PricingV2Mockup from "@/pages/pricing-v2";
-import VaultClubV2Mockup from "@/pages/vault-club-v2";
 import SignupPage from "@/pages/signup";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
@@ -209,9 +208,6 @@ function Router() {
         </Route>
         <Route path="/pricing-v2">
           <PricingV2Mockup />
-        </Route>
-        <Route path="/vault-club-v2">
-          <VaultClubV2Mockup />
         </Route>
         <Route path="/admin">
           <AdminPage />

@@ -52,15 +52,15 @@ export default function ResetPasswordPage() {
         <div className="w-full max-w-md bg-white rounded-2xl border border-[#E8E4DC] shadow-lg p-8 md:p-10">
           {done ? (
             <div className="text-center">
-              <div className="w-14 h-14 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mx-auto mb-5">
-                <CheckCircle size={24} className="text-[#FFCB05]" />
+              <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
+                <CheckCircle size={24} className="text-[#D4AF37]" />
               </div>
               <h1 className="text-xl font-black text-[#1A1A1A] mb-3">Password Updated</h1>
               <p className="text-sm text-[#666666] mb-6">Your password has been changed. You can now sign in with your new password.</p>
               <button
                 onClick={() => navigate("/login")}
                 className="px-8 py-3 rounded-xl font-bold text-sm text-[#1A1400] transition-all"
-                style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+                style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
               >
                 Sign In
               </button>
@@ -77,7 +77,7 @@ export default function ResetPasswordPage() {
                     <input
                       type={showPw ? "text" : "password"} required value={newPw} onChange={e => setNewPw(e.target.value)}
                       placeholder="10+ characters, letter + number"
-                      className="w-full pl-9 pr-10 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                      className="w-full pl-9 pr-10 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                     />
                     <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
                       {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -99,7 +99,7 @@ export default function ResetPasswordPage() {
                     <input
                       type={showPw ? "text" : "password"} required value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
                       placeholder="Repeat your new password"
-                      className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                      className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                     />
                   </div>
                 </div>
@@ -107,13 +107,13 @@ export default function ResetPasswordPage() {
                 <button
                   type="submit" disabled={mutation.isPending || !token}
                   className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] flex items-center justify-center gap-2 disabled:opacity-60 transition-all"
-                  style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
                 >
                   {mutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Updating…</> : "Set New Password"}
                 </button>
               </form>
               <p className="text-xs text-center text-[#888888] mt-6">
-                <Link href="/forgot-password" className="text-[#FFCB05] font-semibold hover:text-[#FFCB05]">Request a new link</Link>
+                <Link href="/forgot-password" className="text-[#B8960C] font-semibold hover:text-[#D4AF37]">Request a new link</Link>
               </p>
             </>
           )}

@@ -517,7 +517,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   function subgradeColor(val: string): string {
     const n = parseFloat(val);
     if (isNaN(n)) return "#999999";
-    if (n >= 10) return "#FFCB05";
+    if (n >= 10) return "#D4AF37";
     if (n >= 9)  return "#16A34A";
     if (n >= 7)  return "#CA8A04";
     return "#DC2626";
@@ -777,7 +777,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-[#FFCB05] tracking-widest mb-1" data-testid="text-form-title">
+      <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
         {isEdit
           ? (!certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
           : "NEW CERTIFICATE"}
@@ -807,7 +807,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
         />}
         {/* AI actions — Identify and Grade are independent and gated separately */}
         {isEdit && certificate?.id && (
-          <div className="border border-[#FFCB05]/30 rounded-lg p-4 bg-[#FFCB05]/5 space-y-3">
+          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Identify */}
               <button
@@ -815,7 +815,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 onClick={runIdentify}
                 disabled={!identifyEnabled || identifyLoading}
                 title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#FFCB05]/40 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
               >
                 <span className="flex items-center gap-2">
                   {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
@@ -830,7 +830,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 onClick={runGrade}
                 disabled={!fullGradeEnabled || gradeLoading}
                 title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#FFCB05]/40 bg-[#1A1A1A] text-[#FFCB05] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2A2A2A] transition-all"
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-[#1A1A1A] text-[#D4AF37] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2A2A2A] transition-all"
               >
                 <span className="flex items-center gap-2">
                   {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
@@ -857,7 +857,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
                 </span>
                 {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                  <button type="button" onClick={runIdentify} disabled={identifyLoading} className="text-[#FFCB05] text-[10px] hover:underline">
+                  <button type="button" onClick={runIdentify} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
                     Retry
                   </button>
                 )}
@@ -866,8 +866,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           </div>
         )}
 
-        <fieldset className="border border-[#FFCB05]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#FFCB05]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
+        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
+          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
 
           {/* TCG search + manual entry helpers */}
           <div className="flex items-center gap-3 text-[10px]">
@@ -876,7 +876,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               type="button"
               onClick={() => { setTcgSearchOpen(true); setTcgQuery(""); setTcgResults([]); }}
               disabled={!form.cardGame}
-              className="flex items-center gap-1 text-[#FFCB05] hover:text-[#FFCB05] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               <Database size={10} />
               Search TCG
@@ -894,9 +894,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
             <DialogContent className="max-w-lg p-0 overflow-hidden">
               <div className="p-4 pb-2 border-b border-[#E8E4DC]">
-                <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
-                <div className="flex items-center gap-2 border border-[#FFCB05]/30 rounded-lg px-3 py-2 focus-within:border-[#FFCB05] transition-colors">
-                  <Search size={14} className="text-[#FFCB05]/50 shrink-0" />
+                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
+                <div className="flex items-center gap-2 border border-[#D4AF37]/30 rounded-lg px-3 py-2 focus-within:border-[#D4AF37] transition-colors">
+                  <Search size={14} className="text-[#D4AF37]/50 shrink-0" />
                   <input
                     type="text"
                     value={tcgQuery}
@@ -905,7 +905,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     className="flex-1 bg-transparent text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] outline-none"
                     autoFocus
                   />
-                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[#FFCB05]" />}
+                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
                 </div>
                 <p className="text-[#AAAAAA] text-[9px] mt-1">Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters</p>
               </div>
@@ -921,7 +921,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     key={card.id}
                     type="button"
                     onClick={() => selectTcgCard(card)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#FFCB05]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#D4AF37]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
                   >
                     {card.imageUrl ? (
                       <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
@@ -958,13 +958,13 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 testId="input-set-name"
               />
               <div className="mt-1.5">
-                <label className="text-[#FFCB05]/40 text-[10px] uppercase tracking-wider block mb-1">Set ID (for autofill)</label>
+                <label className="text-[#D4AF37]/40 text-[10px] uppercase tracking-wider block mb-1">Set ID (for autofill)</label>
                 <input
                   type="text"
                   value={setId}
                   onChange={(e) => setSetId(e.target.value)}
                   placeholder="e.g. sv3pt5"
-                  className="w-full bg-transparent border border-[#FFCB05]/20 rounded px-2 py-1 text-[#1A1A1A] text-xs placeholder:text-[#FFCB05]/15 focus:outline-none focus:border-[#FFCB05]/50 transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/15 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
                   data-testid="input-set-id"
                 />
               </div>
@@ -981,16 +981,16 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               highlight={autofillRan && manuallyEdited.has("cardName")}
             />
             <div>
-              <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Card Number *</label>
+              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Card Number *</label>
               <div className="flex gap-2">
-                <div className="flex-1 flex items-center bg-transparent border border-[#FFCB05]/30 rounded overflow-hidden focus-within:border-[#FFCB05] transition-colors">
-                  <span className="pl-3 text-[#FFCB05]/50 text-sm select-none">#</span>
+                <div className="flex-1 flex items-center bg-transparent border border-[#D4AF37]/30 rounded overflow-hidden focus-within:border-[#D4AF37] transition-colors">
+                  <span className="pl-3 text-[#D4AF37]/50 text-sm select-none">#</span>
                   <input
                     type="text"
                     value={form.cardNumber}
                     onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
                     placeholder="e.g. 125/198"
-                    className="flex-1 bg-transparent px-2 py-2 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/20 focus:outline-none"
+                    className="flex-1 bg-transparent px-2 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none"
                     data-testid="input-card-number"
                   />
                 </div>
@@ -998,7 +998,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   type="button"
                   disabled={!canAutofill || autofillLoading}
                   onClick={() => handleAutofill(false)}
-                  className="px-3 py-2 border border-[#FFCB05]/30 rounded text-[#FFCB05] text-sm hover:bg-[#FFCB05]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  className="px-3 py-2 border border-[#D4AF37]/30 rounded text-[#D4AF37] text-sm hover:bg-[#D4AF37]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
                   data-testid="button-autofill"
                   title="Auto-fill card details"
                 >
@@ -1008,8 +1008,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               </div>
 
               {suggestions.length > 0 && (
-                <div className="mt-2 border border-[#FFCB05]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto" data-testid="autofill-suggestions">
-                  <p className="text-[#FFCB05]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">Suggestions</p>
+                <div className="mt-2 border border-[#D4AF37]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto" data-testid="autofill-suggestions">
+                  <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">Suggestions</p>
                   {suggestions.map((s) => (
                     <button
                       key={s.id}
@@ -1019,10 +1019,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         applyCardData(s, null);
                         toast({ title: "Card details auto-filled" });
                       }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-[#666666] hover:bg-[#FFCB05]/10 hover:text-[#1A1A1A] transition-colors"
+                      className="w-full text-left px-3 py-1.5 text-sm text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A] transition-colors"
                       data-testid={`suggestion-${s.id}`}
                     >
-                      <span className="text-[#FFCB05]">{s.cardNumber}</span>
+                      <span className="text-[#D4AF37]">{s.cardNumber}</span>
                       {" – "}
                       {s.cardName}
                       {s.rarity && <span className="text-[#999999]"> ({s.rarity})</span>}
@@ -1077,7 +1077,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             <button
               type="button"
               onClick={() => handleAutofill(true)}
-              className="text-[10px] text-[#FFCB05]/40 hover:text-[#FFCB05]/70 transition-colors underline"
+              className="text-[10px] text-[#D4AF37]/40 hover:text-[#D4AF37]/70 transition-colors underline"
               data-testid="button-search-other-languages"
             >
               Search other languages
@@ -1157,23 +1157,23 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 
             return (
               <div ref={unifiedRef} className="relative">
-                <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Variant</label>
+                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Variant</label>
                 <button
                   type="button"
                   onClick={() => { setUnifiedOpen(!unifiedOpen); setUnifiedSearch(""); }}
-                  className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[#FFCB05] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-amber-500/50" : "border-[#FFCB05]/30"}`}
+                  className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[#D4AF37] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
                   data-testid="select-unified"
                 >
-                  <span className={form.unifiedSelect ? "text-[#1A1A1A]" : "text-[#FFCB05]/20"}>
+                  <span className={form.unifiedSelect ? "text-[#1A1A1A]" : "text-[#D4AF37]/20"}>
                     {form.unifiedSelect
                       ? (form.unifiedSelect === "OTHER" ? "OTHER (manual)" : getUnifiedDisplayLabel(form.unifiedSelect))
                       : "Select or type a variant..."}
                   </span>
-                  <ChevronDown size={14} className="text-[#FFCB05]/50" />
+                  <ChevronDown size={14} className="text-[#D4AF37]/50" />
                 </button>
                 {unifiedOpen && (
-                  <div className="absolute z-50 left-0 right-0 mt-1 border border-[#FFCB05]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col" data-testid="unified-dropdown">
-                    <div className="p-2 border-b border-[#FFCB05]/10">
+                  <div className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col" data-testid="unified-dropdown">
+                    <div className="p-2 border-b border-[#D4AF37]/10">
                       <input
                         type="text"
                         value={unifiedSearch}
@@ -1192,7 +1192,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                           if (e.key === "Escape") setUnifiedOpen(false);
                         }}
                         placeholder="Type to filter or add a new variant..."
-                        className="w-full bg-transparent border border-[#FFCB05]/20 rounded px-2 py-1.5 text-[#1A1A1A] text-xs placeholder:text-[#FFCB05]/20 focus:outline-none focus:border-[#FFCB05]/50"
+                        className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1.5 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50"
                         autoFocus
                         data-testid="input-unified-search"
                       />
@@ -1202,7 +1202,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         <button
                           type="button"
                           onClick={() => { applyUnifiedSelection(""); setUnifiedOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs text-[#999999] hover:bg-[#FFCB05]/10 hover:text-[#666666] transition-colors border-b border-[#FFCB05]/10"
+                          className="w-full text-left px-3 py-2 text-xs text-[#999999] hover:bg-[#D4AF37]/10 hover:text-[#666666] transition-colors border-b border-[#D4AF37]/10"
                           data-testid="unified-clear"
                         >
                           Clear selection
@@ -1212,7 +1212,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         <button
                           type="button"
                           onClick={() => addCustomVariant(unifiedSearch)}
-                          className="w-full text-left px-3 py-2 text-sm text-[#FFCB05] hover:bg-[#FFCB05]/10 transition-colors flex items-center gap-2 border-b border-[#FFCB05]/10"
+                          className="w-full text-left px-3 py-2 text-sm text-[#D4AF37] hover:bg-[#D4AF37]/10 transition-colors flex items-center gap-2 border-b border-[#D4AF37]/10"
                           data-testid="unified-add-custom"
                         >
                           <Plus size={13} />
@@ -1224,7 +1224,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                           key={o.value}
                           type="button"
                           onClick={() => { applyUnifiedSelection(o.value); setUnifiedOpen(false); setUnifiedSearch(""); }}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#FFCB05]/15 text-[#FFCB05]" : "text-[#666666] hover:bg-[#FFCB05]/10 hover:text-[#1A1A1A]"}`}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A]"}`}
                           data-testid={`unified-option-${o.value}`}
                         >
                           <span className="block">{o.label}</span>
@@ -1252,7 +1252,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
                       }}
                       placeholder="Enter custom rarity / variant / collection..."
-                      className="w-full bg-transparent border border-[#FFCB05]/20 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/20 focus:outline-none focus:border-[#FFCB05]/50 transition-colors"
+                      className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
                       data-testid="input-other-text"
                     />
                     {dbRarityOthers.length > 0 && (
@@ -1264,7 +1264,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                               key={v}
                               type="button"
                               onClick={() => setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))}
-                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[#FFCB05]/20 border-[#FFCB05]/60 text-[#FFCB05]" : "bg-transparent border-[#FFCB05]/15 text-[#666666] hover:border-[#FFCB05]/40 hover:text-[#1A1A1A]"}`}
+                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#666666] hover:border-[#D4AF37]/40 hover:text-[#1A1A1A]"}`}
                               data-testid={`rarity-other-chip-${v}`}
                             >
                               {v}
@@ -1279,7 +1279,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           })()}
 
           <div>
-            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Designations</label>
+            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Designations</label>
             <div className="flex flex-wrap gap-2" data-testid="designations-chips">
               {DESIGNATION_OPTIONS.map((d) => {
                 const active = designations.includes(d.code);
@@ -1288,7 +1288,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     key={d.code}
                     type="button"
                     onClick={() => toggleDesignation(d.code)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[#FFCB05]/20 border-[#FFCB05]/60 text-[#FFCB05]" : "bg-transparent border-[#FFCB05]/15 text-[#999999] hover:border-[#FFCB05]/30 hover:text-[#666666]"}`}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#999999] hover:border-[#D4AF37]/30 hover:text-[#666666]"}`}
                     data-testid={`designation-${d.code}`}
                     title={d.help}
                   >
@@ -1332,22 +1332,22 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           </div>
 
           {/* Grader Notes with preset helper */}
-          <div className="border border-[#FFCB05]/20 rounded-lg p-3 space-y-3 bg-[#FFCB05]/[0.02]">
+          <div className="border border-[#D4AF37]/20 rounded-lg p-3 space-y-3 bg-[#D4AF37]/[0.02]">
             <div className="flex items-center gap-2">
-              <FileText size={13} className="text-[#FFCB05]/60 shrink-0" />
-              <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider">Grader Notes</label>
+              <FileText size={13} className="text-[#D4AF37]/60 shrink-0" />
+              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider">Grader Notes</label>
             </div>
 
             {/* Template buttons */}
             <div>
-              <p className="text-[#FFCB05]/40 text-[10px] uppercase tracking-widest mb-1.5">Insert template</p>
+              <p className="text-[#D4AF37]/40 text-[10px] uppercase tracking-widest mb-1.5">Insert template</p>
               <div className="flex flex-wrap gap-1.5">
                 {NOTE_TEMPLATES.map((t) => (
                   <button
                     key={t.label}
                     type="button"
                     onClick={() => updateField("notes", t.text)}
-                    className="text-xs px-2.5 py-1 rounded border border-[#FFCB05]/30 text-[#FFCB05]/70 hover:border-[#FFCB05]/60 hover:text-[#FFCB05] hover:bg-[#FFCB05]/5 transition-all"
+                    className="text-xs px-2.5 py-1 rounded border border-[#D4AF37]/30 text-[#D4AF37]/70 hover:border-[#D4AF37]/60 hover:text-[#D4AF37] hover:bg-[#D4AF37]/5 transition-all"
                     data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
                   >
                     {t.label} Notes
@@ -1362,13 +1362,13 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               onChange={(e) => updateField("notes", e.target.value)}
               rows={4}
               placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-              className="w-full bg-transparent border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/20 focus:outline-none focus:border-[#FFCB05] transition-colors resize-none"
+              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
               data-testid="input-cert-notes"
             />
 
             {/* Preset chips */}
             <div>
-              <p className="text-[#FFCB05]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
+              <p className="text-[#D4AF37]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
               <div className="flex flex-wrap gap-1.5">
                 {PRESET_NOTES.map((preset) => {
                   const lines = form.notes.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -1384,8 +1384,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       }}
                       className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
                         alreadyAdded
-                          ? "border-[#FFCB05]/15 text-[#FFCB05]/25 cursor-default"
-                          : "border-[#FFCB05]/25 text-[#666666] hover:border-[#FFCB05]/50 hover:text-[#1A1A1A] hover:bg-[#FFCB05]/5 cursor-pointer"
+                          ? "border-[#D4AF37]/15 text-[#D4AF37]/25 cursor-default"
+                          : "border-[#D4AF37]/25 text-[#666666] hover:border-[#D4AF37]/50 hover:text-[#1A1A1A] hover:bg-[#D4AF37]/5 cursor-pointer"
                       }`}
                       data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
                     >
@@ -1399,11 +1399,11 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           </div>
         </fieldset>
 
-        <fieldset className="border border-[#FFCB05]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#FFCB05]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
+        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
+          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
 
           <div>
-            <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Grade Type *</label>
+            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Grade Type *</label>
             <select
               value={form.gradeType}
               onChange={(e) => {
@@ -1422,7 +1422,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   }),
                 }));
               }}
-              className="w-full bg-transparent border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
               data-testid="select-grade-type"
             >
               <option value="numeric" className="bg-white">Numeric (1–10)</option>
@@ -1433,8 +1433,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           </div>
 
           {isNonNum && (
-            <div className="bg-[#FFCB05]/5 border border-[#FFCB05]/20 rounded-lg p-3">
-              <p className="text-[#FFCB05] text-sm font-semibold">
+            <div className="bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3">
+              <p className="text-[#D4AF37] text-sm font-semibold">
                 {form.gradeType === "NO" ? "AUTHENTIC – No Numerical Grade" : "AUTHENTIC ALTERED – No Numerical Grade"}
               </p>
               <p className="text-[#666666] text-xs mt-1">
@@ -1448,7 +1448,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           {!isNonNum && (
             <>
               <div>
-                <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Overall Grade *</label>
+                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Overall Grade *</label>
                 <select
                   value={form.gradeOverall === "10" && form.labelType === "black" ? "black_label" : form.gradeOverall}
                   onChange={(e) => {
@@ -1459,7 +1459,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       setForm(f => ({ ...f, gradeOverall: v, labelType: "standard" }));
                     }
                   }}
-                  className="w-full bg-transparent border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="select-grade-overall"
                 >
                   <option value="" className="bg-white">Select grade...</option>
@@ -1471,11 +1471,11 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               </div>
 
               <div>
-                <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">Service Tier</label>
+                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Service Tier</label>
                 <select
                   value={form.serviceTier}
                   onChange={(e) => updateField("serviceTier", e.target.value)}
-                  className="w-full bg-transparent border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="select-service-tier"
                 >
                   <option value="" className="bg-white">Standard (default)</option>
@@ -1492,8 +1492,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 
         {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
         {false && isEdit && (
-          <fieldset className="border border-[#FFCB05]/20 rounded-lg p-4 space-y-4">
-            <legend className="text-[#FFCB05]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+          <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
+            <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Upload size={12} />
               Grading Images
             </legend>
@@ -1512,7 +1512,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   <label
                     key={angle}
                     className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
-                      ${gradingImages[angle] ? "border-[#FFCB05]/60 bg-[#FFCB05]/5" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#FFCB05]/40 hover:bg-white"}`}
+                      ${gradingImages[angle] ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
                   >
                     <input
                       type="file"
@@ -1526,10 +1526,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     {displayUrl ? (
                       <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
                     ) : (
-                      <Upload size={20} className={isRequired ? "text-[#FFCB05]/60" : "text-[#CCCCCC]"} />
+                      <Upload size={20} className={isRequired ? "text-[#D4AF37]/60" : "text-[#CCCCCC]"} />
                     )}
                     <span className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[#666666] font-semibold" : "text-[#AAAAAA]"}`}>{label}</span>
-                    {gradingImages[angle] && <span className="text-[9px] text-[#FFCB05] truncate w-full">{gradingImages[angle]!.name}</span>}
+                    {gradingImages[angle] && <span className="text-[9px] text-[#D4AF37] truncate w-full">{gradingImages[angle]!.name}</span>}
                   </label>
                 );
               })}
@@ -1541,7 +1541,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 type="button"
                 onClick={uploadGradingImages}
                 disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
-                className="flex items-center gap-2 bg-[#FFCB05]/10 border border-[#FFCB05]/40 text-[#FFCB05] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#FFCB05]/20 disabled:opacity-40"
+                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-40"
               >
                 {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {gradingUploading ? "Uploading…" : "Upload & Process"}
@@ -1575,7 +1575,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 <select
                   value={cardLookupGame}
                   onChange={(e) => setCardLookupGame(e.target.value)}
-                  className="bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[#FFCB05]"
+                  className="bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[#D4AF37]"
                 >
                   <option value="pokemon">Pokémon</option>
                   <option value="mtg">MTG</option>
@@ -1587,13 +1587,13 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   onChange={(e) => setCardLookupQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
                   placeholder="Card name…"
-                  className="flex-1 bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-3 py-1.5 placeholder-[#AAAAAA] focus:outline-none focus:border-[#FFCB05]"
+                  className="flex-1 bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-3 py-1.5 placeholder-[#AAAAAA] focus:outline-none focus:border-[#D4AF37]"
                 />
                 <button
                   type="button"
                   onClick={runCardLookup}
                   disabled={cardLookupLoading || !cardLookupQuery.trim()}
-                  className="flex items-center gap-1 bg-[#FFCB05]/10 border border-[#FFCB05]/40 text-[#FFCB05] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[#FFCB05]/20"
+                  className="flex items-center gap-1 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[#D4AF37]/20"
                 >
                   {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
                 </button>
@@ -1613,7 +1613,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         setCardLookupResults([]);
                         toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
                       }}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-[#FFCB05]/5 border-b border-[#F0EDE8] last:border-0 flex items-start gap-3"
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0 flex items-start gap-3"
                     >
                       {r.imageUrl && <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />}
                       <div>
@@ -1634,8 +1634,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 
         {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
         {false && isEdit && (
-          <fieldset className="border border-[#FFCB05]/30 rounded-lg p-4 space-y-4">
-            <legend className="text-[#FFCB05] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+          <fieldset className="border border-[#D4AF37]/30 rounded-lg p-4 space-y-4">
+            <legend className="text-[#D4AF37] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Cpu size={12} />
               AI-Assisted Grading
             </legend>
@@ -1646,7 +1646,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 type="button"
                 onClick={runAiAnalysis}
                 disabled={aiLoading}
-                className="flex items-center gap-2 bg-[#FFCB05]/10 border border-[#FFCB05]/40 text-[#FFCB05] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#FFCB05]/20 disabled:opacity-50"
+                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50"
                 data-testid="button-analyze-ai"
               >
                 {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
@@ -1655,7 +1655,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             </div>
 
             {aiLoading && (
-              <div className="flex items-center gap-3 text-[#FFCB05] text-xs bg-[#FFCB05]/5 border border-[#FFCB05]/20 rounded-lg p-3">
+              <div className="flex items-center gap-3 text-[#D4AF37] text-xs bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3">
                 <Loader2 size={14} className="animate-spin shrink-0" />
                 Sending images to Claude Vision. This takes 15–30 seconds…
               </div>
@@ -1681,7 +1681,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         min="1" max="10" step="0.5"
                         value={aiDraft[cat]}
                         onChange={(e) => setAiDraft(d => ({ ...d, [cat]: e.target.value }))}
-                        className="w-full bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-xs text-center focus:outline-none focus:border-[#FFCB05]"
+                        className="w-full bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-xs text-center focus:outline-none focus:border-[#D4AF37]"
                       />
                       <p className="text-[#888888] text-[9px] leading-tight mt-1.5 line-clamp-2">
                         {aiAnalysis[cat]?.notes || ""}
@@ -1715,7 +1715,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       {aiDefects.map((d, i) => (
                         <div key={i} className="flex items-start gap-2 bg-[#FAFAF8] border border-[#E8E4DC] rounded px-3 py-2">
                           <div className="flex-1 min-w-0">
-                            <span className="text-[#FFCB05] text-xs font-semibold uppercase">{d.type?.replace(/_/g, " ")}</span>
+                            <span className="text-[#D4AF37] text-xs font-semibold uppercase">{d.type?.replace(/_/g, " ")}</span>
                             <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
                             <span className="text-[#666666] text-xs">{d.location}</span>
                             <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
@@ -1741,7 +1741,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     <div>
                       <p className="text-[#888888] text-[10px] uppercase tracking-widest">AI Draft Overall</p>
                       <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>{aiDraft.overall || "—"}</p>
-                      <p className="text-[#FFCB05] text-xs">{aiAnalysis.grade_label || ""}</p>
+                      <p className="text-[#D4AF37] text-xs">{aiAnalysis.grade_label || ""}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">Override Overall</p>
@@ -1750,7 +1750,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         min="1" max="10" step="0.5"
                         value={aiDraft.overall}
                         onChange={(e) => setAiDraft(d => ({ ...d, overall: e.target.value }))}
-                        className="w-24 bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-sm text-center focus:outline-none focus:border-[#FFCB05]"
+                        className="w-24 bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-sm text-center focus:outline-none focus:border-[#D4AF37]"
                       />
                     </div>
                   </div>
@@ -1768,7 +1768,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     type="button"
                     onClick={approveGrade}
                     disabled={approveLoading || !aiDraft.overall}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
                     data-testid="button-approve-grade"
                   >
                     {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
@@ -1796,7 +1796,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
         <button
           type="submit"
           disabled={mutation.isPending}
-          className="w-full border border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#FFCB05]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
           data-testid="button-save-cert"
         >
           <Save size={16} />
@@ -1824,7 +1824,7 @@ function FormInput({
 }) {
   return (
     <div>
-      <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <input
         type={type || "text"}
         value={value}
@@ -1834,7 +1834,7 @@ function FormInput({
         step={step}
         min={min}
         max={max}
-        className={`w-full bg-transparent border rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/20 focus:outline-none focus:border-[#FFCB05] transition-colors ${highlight ? "border-amber-500/50" : "border-[#FFCB05]/30"}`}
+        className={`w-full bg-transparent border rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors ${highlight ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
         data-testid={testId}
       />
     </div>
@@ -1854,11 +1854,11 @@ function FormSelect({
 }) {
   return (
     <div>
-      <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
         data-testid={testId}
       >
         <option value="">Select...</option>
@@ -1892,10 +1892,10 @@ function FileUpload({
 
   return (
     <div>
-      <label className="text-[#FFCB05]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <label
         className={`relative block border-2 border-dashed rounded-xl cursor-pointer transition-all overflow-hidden
-          ${dragging ? "border-[#FFCB05] bg-[#FFCB05]/5" : displaySrc ? "border-[#FFCB05]/40 bg-[#FAFAF8]" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#FFCB05]/40 hover:bg-white"}`}
+          ${dragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : displaySrc ? "border-[#D4AF37]/40 bg-[#FAFAF8]" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
@@ -1914,7 +1914,7 @@ function FileUpload({
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center min-h-[140px]">
-            <Upload size={24} className="text-[#FFCB05]/50" />
+            <Upload size={24} className="text-[#D4AF37]/50" />
             <p className="text-[#666666] text-xs font-medium">Drag & drop or click to upload</p>
             <p className="text-[#AAAAAA] text-[10px]">JPG, PNG, WEBP</p>
           </div>
@@ -1948,8 +1948,8 @@ function SubmissionItemLink({
   });
 
   return (
-    <fieldset className="border border-[#FFCB05]/20 rounded-lg p-4 space-y-2" data-testid="fieldset-submission-link">
-      <legend className="text-[#FFCB05]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
+    <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-2" data-testid="fieldset-submission-link">
+      <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
         <Link2 size={12} /> Link to Submission
       </legend>
       <p className="text-[#999999] text-xs">Optionally link this certificate to a customer submission item. Fields will auto-populate.</p>
@@ -1964,7 +1964,7 @@ function SubmissionItemLink({
           const item = items?.find((i: any) => String(i.id) === id);
           onChange(id, item);
         }}
-        className="w-full bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
         data-testid="select-submission-item"
       >
         <option value="">No link (standalone certificate)</option>
@@ -2043,7 +2043,7 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
 
   return (
     <div ref={ref} className="relative">
-      <label className="text-[#FFCB05]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
+      <label className="text-[#D4AF37]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
       <input
         type="text"
         value={query}
@@ -2051,16 +2051,16 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
         onFocus={() => setOpen(true)}
         placeholder="Type to search sets…"
         data-testid={testId}
-        className="w-full bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#FFCB05]"
+        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]"
       />
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-72 overflow-y-auto">
           {filtered.map(s => (
             <button key={s.id} type="button"
               onClick={() => { onChange(s.name, s.id); setQuery(s.name); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-xs hover:bg-[#FFCB05]/5 border-b border-[#F0EDE8] last:border-0"
+              className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0"
             >
-              <span className="font-mono text-[#FFCB05] text-[10px] mr-2">{s.id}</span>
+              <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
               <span className="text-[#1A1A1A] font-medium">{s.name}</span>
               {(s as any).source === "custom" && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">Custom</span>}
               <span className="text-[#999999] ml-2">· {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}</span>
@@ -2069,7 +2069,7 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
           {/* Add new set button */}
           <button type="button"
             onClick={() => { setShowAddForm(true); setAddForm(f => ({ ...f, setId: query, setName: "" })); }}
-            className="w-full text-left px-3 py-2.5 text-xs text-[#FFCB05] font-bold hover:bg-[#FFCB05]/5 border-t border-[#E8E4DC] flex items-center gap-1"
+            className="w-full text-left px-3 py-2.5 text-xs text-[#D4AF37] font-bold hover:bg-[#D4AF37]/5 border-t border-[#E8E4DC] flex items-center gap-1"
           >
             <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
           </button>
@@ -2080,7 +2080,7 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
       {showAddForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddForm(false)}>
           <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
-            <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
             <div>
               <label className="text-[#666666] text-[10px] block mb-0.5">Set Code *</label>
               <input value={addForm.setId} onChange={e => setAddForm(f => ({ ...f, setId: e.target.value }))}
@@ -2111,7 +2111,7 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
             <div className="flex gap-2 pt-1">
               <button type="button" onClick={() => setShowAddForm(false)} className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]">Cancel</button>
               <button type="button" onClick={saveNewSet} disabled={addSaving || !addForm.setId || !addForm.setName}
-                className="flex-1 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50">
+                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50">
                 {addSaving ? "Saving…" : "Add Set"}
               </button>
             </div>

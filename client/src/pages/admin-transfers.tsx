@@ -110,7 +110,7 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E8E4DC]">
           <h3 className="text-lg font-bold text-[#1A1A1A]">
-            Resolve Transfer — <span className="font-mono text-[#FFCB05]">{transfer.certId}</span>
+            Resolve Transfer — <span className="font-mono text-[#D4AF37]">{transfer.certId}</span>
           </h3>
           <button
             type="button"
@@ -151,9 +151,9 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
 
           {/* Force Finalise — only for pending_dispute + disputed */}
           {canFinalise && (
-            <div className="border border-[#FFCB05]/40 bg-[#FFFDF5] rounded-lg p-4">
+            <div className="border border-[#D4AF37]/40 bg-[#FFFDF5] rounded-lg p-4">
               <div className="flex items-start gap-2 mb-3">
-                <AlertTriangle size={16} className="text-[#FFCB05] shrink-0 mt-0.5" />
+                <AlertTriangle size={16} className="text-[#B8960C] shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-bold text-[#1A1A1A]">Force Finalise</p>
                   <p className="text-xs text-[#666666] mt-1">
@@ -163,7 +163,7 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
                     FROM: {transfer.fromEmail}<br />
                     TO:   {transfer.toEmail}
                   </p>
-                  <p className="text-xs text-[#FFCB05] font-semibold mt-2">This action cannot be reversed.</p>
+                  <p className="text-xs text-[#B8960C] font-semibold mt-2">This action cannot be reversed.</p>
                 </div>
               </div>
               <label className="block text-xs text-[#888888] uppercase tracking-wider mb-1.5">
@@ -175,7 +175,7 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
                 disabled={anyPending}
                 rows={3}
                 placeholder="e.g. Dispute reviewed, incoming keeper provided proof of delivery..."
-                className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#FFCB05] disabled:opacity-60"
+                className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37] disabled:opacity-60"
               />
               {finaliseError && (
                 <p className="text-xs text-red-600 mt-2">{finaliseError}</p>
@@ -214,7 +214,7 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
               disabled={anyPending}
               rows={3}
               placeholder="e.g. Fraud suspected, abandoned by both parties, duplicate transfer..."
-              className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#FFCB05] disabled:opacity-60"
+              className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37] disabled:opacity-60"
             />
             {cancelError && (
               <p className="text-xs text-red-600 mt-2">{cancelError}</p>
@@ -259,16 +259,16 @@ export default function AdminTransfers() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center gap-3 mb-2">
-        <ArrowRightLeft className="w-5 h-5 text-[#FFCB05]" />
+        <ArrowRightLeft className="w-5 h-5 text-[#D4AF37]" />
         <h2 className="text-lg font-bold text-[#1A1A1A] tracking-tight">Ownership Transfers</h2>
         <span className="text-xs text-[#999999]">{rows.length} total</span>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white border border-[#FFCB05]/20 rounded-lg p-4">
+        <div className="bg-white border border-[#D4AF37]/20 rounded-lg p-4">
           <p className="text-xs text-[#999999] uppercase tracking-wider">Active</p>
-          <p className="text-2xl font-bold text-[#FFCB05]">{active.length}</p>
+          <p className="text-2xl font-bold text-[#D4AF37]">{active.length}</p>
         </div>
         <div className="bg-white border border-green-200 rounded-lg p-4">
           <p className="text-xs text-[#999999] uppercase tracking-wider">Completed</p>
@@ -281,7 +281,7 @@ export default function AdminTransfers() {
       </div>
 
       {/* Transfer table */}
-      <div className="bg-white border border-[#FFCB05]/20 rounded-lg overflow-hidden">
+      <div className="bg-white border border-[#D4AF37]/20 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-[#FAFAF5] text-left text-[10px] uppercase tracking-wider text-[#999999]">
@@ -302,7 +302,7 @@ export default function AdminTransfers() {
               const actionable = ACTIONABLE_STATUSES.includes(t.status);
               return (
                 <tr key={t.id} className="border-t border-[#F0F0F0] hover:bg-[#FAFAF5] transition-colors">
-                  <td className="px-4 py-2 font-mono text-xs text-[#FFCB05]">{t.certId}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-[#D4AF37]">{t.certId}</td>
                   <td className="px-4 py-2 text-xs text-[#666666] max-w-[160px] truncate">{t.fromEmail}</td>
                   <td className="px-4 py-2 text-xs text-[#666666] max-w-[160px] truncate">{t.toEmail}</td>
                   <td className="px-4 py-2"><StatusBadge status={t.status} flowVersion={t.flowVersion} /></td>
@@ -313,7 +313,7 @@ export default function AdminTransfers() {
                       <button
                         type="button"
                         onClick={() => setResolveTarget(t)}
-                        className="text-xs font-semibold text-[#FFCB05] hover:text-[#FFCB05] transition-colors"
+                        className="text-xs font-semibold text-[#B8960C] hover:text-[#D4AF37] transition-colors"
                       >
                         Resolve →
                       </button>

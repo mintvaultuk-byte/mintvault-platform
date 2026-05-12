@@ -112,7 +112,7 @@ function RevealSection({ children, delay = 0, className = "" }: {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-bold uppercase tracking-[0.25em] mb-8" style={{ color: "#FFCB05" }}>
+    <p className="text-xs font-bold uppercase tracking-[0.25em] mb-8" style={{ color: "#B8960C" }}>
       {children}
     </p>
   );
@@ -121,10 +121,10 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 function GradeBar({ score }: { score: number | null }) {
   const pct = score !== null ? (score / 10) * 100 : 0;
   return (
-    <div className="w-full h-1.5 rounded-full mt-2" style={{ background: "rgba(255,203,5,0.15)" }}>
+    <div className="w-full h-1.5 rounded-full mt-2" style={{ background: "rgba(212,175,55,0.15)" }}>
       <div
         className="h-1.5 rounded-full transition-all duration-700"
-        style={{ width: `${pct}%`, background: "linear-gradient(90deg,#FFCB05,#FFCB05,#FFD700)" }}
+        style={{ width: `${pct}%`, background: "linear-gradient(90deg,#B8960C,#D4AF37,#FFD700)" }}
       />
     </div>
   );
@@ -172,7 +172,7 @@ function HeroSection({ report }: { report: VaultReport }) {
         className="absolute pointer-events-none"
         style={{
           width: 500, height: 500,
-          background: "radial-gradient(circle,rgba(255,203,5,0.07) 0%,transparent 70%)",
+          background: "radial-gradient(circle,rgba(212,175,55,0.07) 0%,transparent 70%)",
           top: "50%", left: "50%", transform: "translate(-50%,-50%)",
         }}
       />
@@ -183,7 +183,7 @@ function HeroSection({ report }: { report: VaultReport }) {
         <p
           className="text-xs font-bold uppercase tracking-[0.35em] mb-1"
           style={{
-            color: isBlackLabel ? "#888888" : "#D9A300",
+            color: isBlackLabel ? "#888888" : "#B8860B",
             opacity: gradeReady ? 1 : 0,
             transition: "opacity 0.5s ease 0.1s",
           }}
@@ -197,13 +197,13 @@ function HeroSection({ report }: { report: VaultReport }) {
                         fontSize: "clamp(72px, 16vw, 112px)",
             fontWeight: 900,
             lineHeight: 1,
-            color: isBlackLabel ? "#FFCB05" : "#D9A300",
+            color: isBlackLabel ? "#D4AF37" : "#B8860B",
             transform: gradeReady ? "scale(1)" : "scale(0.6)",
             opacity: gradeReady ? 1 : 0,
             transition: "transform 1.1s cubic-bezier(0.34,1.56,0.64,1) 0.1s, opacity 0.6s ease 0.1s",
             textShadow: gradeReady
               ? (isBlackLabel
-                  ? "0 0 60px rgba(255,203,5,0.35)"
+                  ? "0 0 60px rgba(212,175,55,0.35)"
                   : "0 0 60px rgba(184,134,11,0.25)")
               : "none",
           }}
@@ -219,9 +219,9 @@ function HeroSection({ report }: { report: VaultReport }) {
             transition: "opacity 0.6s ease 0.4s",
           }}
         >
-          <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, transparent, #FFCB05)" }} />
-          <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#FFCB05", flexShrink: 0 }} />
-          <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, #FFCB05, transparent)" }} />
+          <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, transparent, #D4AF37)" }} />
+          <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#D4AF37", flexShrink: 0 }} />
+          <div style={{ width: 48, height: 1, background: "linear-gradient(90deg, #D4AF37, transparent)" }} />
         </div>
       </div>
 
@@ -235,7 +235,7 @@ function HeroSection({ report }: { report: VaultReport }) {
             style={{
               maxWidth: "min(340px, 85vw)",
               width: "100%",
-              boxShadow: "0 4px 32px rgba(0,0,0,0.12), 0 16px 48px rgba(255,203,5,0.1)",
+              boxShadow: "0 4px 32px rgba(0,0,0,0.12), 0 16px 48px rgba(212,175,55,0.1)",
             }}
           />
         ) : (
@@ -247,7 +247,7 @@ function HeroSection({ report }: { report: VaultReport }) {
               border: "1px solid #E8E4DC",
             }}
           >
-            <Shield size={48} style={{ color: "rgba(255,203,5,0.35)" }} />
+            <Shield size={48} style={{ color: "rgba(184,150,12,0.35)" }} />
           </div>
         )}
       </div>
@@ -263,7 +263,7 @@ function HeroSection({ report }: { report: VaultReport }) {
         >
           {report.card.name || "Unknown Card"}
         </h1>
-        <p className="text-sm font-medium mb-6" style={{ color: "#FFCB05" }}>
+        <p className="text-sm font-medium mb-6" style={{ color: "#B8960C" }}>
           {[report.card.set, report.card.year].filter(Boolean).join(" · ")}
         </p>
 
@@ -271,9 +271,9 @@ function HeroSection({ report }: { report: VaultReport }) {
         <div
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-widest"
           style={{
-            border: "1px solid rgba(255,203,5,0.4)",
-            color: "#FFCB05",
-            background: "rgba(255,203,5,0.08)",
+            border: "1px solid rgba(184,150,12,0.4)",
+            color: "#B8960C",
+            background: "rgba(212,175,55,0.08)",
           }}
         >
           <Check size={12} />
@@ -284,7 +284,7 @@ function HeroSection({ report }: { report: VaultReport }) {
       {/* Scroll cue */}
       <div
         className="absolute bottom-6 left-1/2 -translate-x-1/2 animate-bounce"
-        style={{ color: "#FFCB05" }}
+        style={{ color: "#B8960C" }}
       >
         <ChevronDown size={20} />
       </div>
@@ -321,7 +321,7 @@ function GradeBreakdown({ report }: { report: VaultReport }) {
                     className="font-black leading-none"
                     style={{
                                             fontSize: 40,
-                      color: "#FFCB05",
+                      color: "#B8960C",
                     }}
                   >
                     {score !== null ? score : "—"}
@@ -330,7 +330,7 @@ function GradeBreakdown({ report }: { report: VaultReport }) {
                   {/* Tooltip */}
                   <div
                     className="absolute bottom-full left-0 mb-2 w-48 p-2 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10"
-                    style={{ background: "#1A1A1A", border: "1px solid rgba(255,203,5,0.4)", color: "#bbb" }}
+                    style={{ background: "#1A1A1A", border: "1px solid rgba(212,175,55,0.4)", color: "#bbb" }}
                   >
                     {tip}
                   </div>
@@ -378,45 +378,45 @@ function CenteringBlueprint({ report }: { report: VaultReport }) {
                   style={{ maxWidth: "100%", background: "#F0EDE4", borderRadius: 8, border: "1px solid #E8E4DC" }}
                 >
                   {/* Outer card outline */}
-                  <rect x={10} y={10} width={W - 20} height={H - 20} fill="none" stroke="rgba(255,203,5,0.15)" strokeWidth={1} />
+                  <rect x={10} y={10} width={W - 20} height={H - 20} fill="none" stroke="rgba(212,175,55,0.15)" strokeWidth={1} />
                   {/* Inner artwork area */}
                   <rect
                     x={10 + borderL * 3.8}
                     y={10 + borderT * 5}
                     width={W - 20 - borderL * 3.8 - borderR * 3.8}
                     height={H - 20 - borderT * 5 - borderB * 5}
-                    fill="rgba(255,203,5,0.03)"
-                    stroke="rgba(255,203,5,0.5)"
+                    fill="rgba(212,175,55,0.03)"
+                    stroke="rgba(212,175,55,0.5)"
                     strokeWidth={1}
                   />
 
                   {/* Dimension lines — left */}
-                  <line x1={10} y1={H / 2} x2={10 + borderL * 3.8} y2={H / 2} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={10} y1={H / 2 - 6} x2={10} y2={H / 2 + 6} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={10 + borderL * 3.8} y1={H / 2 - 6} x2={10 + borderL * 3.8} y2={H / 2 + 6} stroke="#FFCB05" strokeWidth={1} />
-                  <text x={10 + (borderL * 3.8) / 2} y={H / 2 - 8} textAnchor="middle" fill="#FFCB05" fontSize={9} fontFamily="monospace">{lv}</text>
+                  <line x1={10} y1={H / 2} x2={10 + borderL * 3.8} y2={H / 2} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={10} y1={H / 2 - 6} x2={10} y2={H / 2 + 6} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={10 + borderL * 3.8} y1={H / 2 - 6} x2={10 + borderL * 3.8} y2={H / 2 + 6} stroke="#D4AF37" strokeWidth={1} />
+                  <text x={10 + (borderL * 3.8) / 2} y={H / 2 - 8} textAnchor="middle" fill="#D4AF37" fontSize={9} fontFamily="monospace">{lv}</text>
 
                   {/* Dimension lines — right */}
-                  <line x1={W - 10 - borderR * 3.8} y1={H / 2} x2={W - 10} y2={H / 2} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W - 10 - borderR * 3.8} y1={H / 2 - 6} x2={W - 10 - borderR * 3.8} y2={H / 2 + 6} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W - 10} y1={H / 2 - 6} x2={W - 10} y2={H / 2 + 6} stroke="#FFCB05" strokeWidth={1} />
-                  <text x={W - 10 - (borderR * 3.8) / 2} y={H / 2 - 8} textAnchor="middle" fill="#FFCB05" fontSize={9} fontFamily="monospace">{rv}</text>
+                  <line x1={W - 10 - borderR * 3.8} y1={H / 2} x2={W - 10} y2={H / 2} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W - 10 - borderR * 3.8} y1={H / 2 - 6} x2={W - 10 - borderR * 3.8} y2={H / 2 + 6} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W - 10} y1={H / 2 - 6} x2={W - 10} y2={H / 2 + 6} stroke="#D4AF37" strokeWidth={1} />
+                  <text x={W - 10 - (borderR * 3.8) / 2} y={H / 2 - 8} textAnchor="middle" fill="#D4AF37" fontSize={9} fontFamily="monospace">{rv}</text>
 
                   {/* Dimension lines — top */}
-                  <line x1={W / 2} y1={10} x2={W / 2} y2={10 + borderT * 5} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W / 2 - 6} y1={10} x2={W / 2 + 6} y2={10} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W / 2 - 6} y1={10 + borderT * 5} x2={W / 2 + 6} y2={10 + borderT * 5} stroke="#FFCB05" strokeWidth={1} />
-                  <text x={W / 2 + 10} y={10 + (borderT * 5) / 2 + 4} textAnchor="start" fill="#FFCB05" fontSize={9} fontFamily="monospace">{tv}</text>
+                  <line x1={W / 2} y1={10} x2={W / 2} y2={10 + borderT * 5} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W / 2 - 6} y1={10} x2={W / 2 + 6} y2={10} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W / 2 - 6} y1={10 + borderT * 5} x2={W / 2 + 6} y2={10 + borderT * 5} stroke="#D4AF37" strokeWidth={1} />
+                  <text x={W / 2 + 10} y={10 + (borderT * 5) / 2 + 4} textAnchor="start" fill="#D4AF37" fontSize={9} fontFamily="monospace">{tv}</text>
 
                   {/* Dimension lines — bottom */}
-                  <line x1={W / 2} y1={H - 10 - borderB * 5} x2={W / 2} y2={H - 10} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W / 2 - 6} y1={H - 10 - borderB * 5} x2={W / 2 + 6} y2={H - 10 - borderB * 5} stroke="#FFCB05" strokeWidth={1} />
-                  <line x1={W / 2 - 6} y1={H - 10} x2={W / 2 + 6} y2={H - 10} stroke="#FFCB05" strokeWidth={1} />
-                  <text x={W / 2 + 10} y={H - 10 - (borderB * 5) / 2 + 4} textAnchor="start" fill="#FFCB05" fontSize={9} fontFamily="monospace">{bv}</text>
+                  <line x1={W / 2} y1={H - 10 - borderB * 5} x2={W / 2} y2={H - 10} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W / 2 - 6} y1={H - 10 - borderB * 5} x2={W / 2 + 6} y2={H - 10 - borderB * 5} stroke="#D4AF37" strokeWidth={1} />
+                  <line x1={W / 2 - 6} y1={H - 10} x2={W / 2 + 6} y2={H - 10} stroke="#D4AF37" strokeWidth={1} />
+                  <text x={W / 2 + 10} y={H - 10 - (borderB * 5) / 2 + 4} textAnchor="start" fill="#D4AF37" fontSize={9} fontFamily="monospace">{bv}</text>
 
                   {/* Corner markers */}
                   {[[10, 10], [W - 10, 10], [10, H - 10], [W - 10, H - 10]].map(([cx, cy], i) => (
-                    <circle key={i} cx={cx} cy={cy} r={2} fill="rgba(255,203,5,0.4)" />
+                    <circle key={i} cx={cx} cy={cy} r={2} fill="rgba(212,175,55,0.4)" />
                   ))}
                 </svg>
               </div>
@@ -445,7 +445,7 @@ function CenteringBlueprint({ report }: { report: VaultReport }) {
                     style={{ borderColor: "#E8E4DC" }}
                   >
                     <span className="text-xs font-bold uppercase tracking-wider" style={{ color: "#888" }}>{label}</span>
-                    <span className="font-bold font-mono text-sm" style={{ color: color || "#FFCB05" }}>{value}</span>
+                    <span className="font-bold font-mono text-sm" style={{ color: color || "#B8960C" }}>{value}</span>
                   </div>
                 ))}
               </div>
@@ -512,9 +512,9 @@ function DefectSection({ report }: { report: VaultReport }) {
                 onClick={() => setShowDefects(!showDefects)}
                 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-4 py-2 rounded-full mb-8 transition-all"
                 style={{
-                  border: `1px solid rgba(255,203,5,${showDefects ? "0.6" : "0.25"})`,
-                  color: showDefects ? "#FFCB05" : "#666",
-                  background: showDefects ? "rgba(255,203,5,0.08)" : "transparent",
+                  border: `1px solid rgba(212,175,55,${showDefects ? "0.6" : "0.25"})`,
+                  color: showDefects ? "#D4AF37" : "#666",
+                  background: showDefects ? "rgba(212,175,55,0.08)" : "transparent",
                 }}
               >
                 {showDefects ? <Eye size={14} /> : <EyeOff size={14} />}
@@ -541,9 +541,9 @@ function DefectSection({ report }: { report: VaultReport }) {
                         transform: "translate(-50%,-50%)",
                         width: 22,
                         height: 22,
-                        background: SEVERITY_COLORS[d.severity] || "#FFCB05",
+                        background: SEVERITY_COLORS[d.severity] || "#D4AF37",
                         color: "#0a0a0a",
-                        boxShadow: `0 0 12px ${SEVERITY_COLORS[d.severity] || "#FFCB05"}80`,
+                        boxShadow: `0 0 12px ${SEVERITY_COLORS[d.severity] || "#D4AF37"}80`,
                       }}
                     >
                       {d.id}
@@ -556,9 +556,9 @@ function DefectSection({ report }: { report: VaultReport }) {
                     return (
                       <div
                         className="absolute left-1/2 -translate-x-1/2 bottom-full mb-3 p-3 rounded-lg text-left w-56 z-20 shadow-lg"
-                        style={{ background: "#1A1A1A", border: "1px solid rgba(255,203,5,0.4)" }}
+                        style={{ background: "#1A1A1A", border: "1px solid rgba(212,175,55,0.4)" }}
                       >
-                        <p className="text-xs font-bold mb-1" style={{ color: SEVERITY_COLORS[d.severity] || "#FFCB05" }}>
+                        <p className="text-xs font-bold mb-1" style={{ color: SEVERITY_COLORS[d.severity] || "#D4AF37" }}>
                           #{d.id} — {DEFECT_TYPE_LABELS[d.type] || d.type}
                         </p>
                         <p className="text-xs capitalize mb-1" style={{ color: "#aaa" }}>
@@ -582,7 +582,7 @@ function DefectSection({ report }: { report: VaultReport }) {
                     >
                       <div
                         className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-                        style={{ background: SEVERITY_COLORS[d.severity] || "#FFCB05", color: "#0a0a0a" }}
+                        style={{ background: SEVERITY_COLORS[d.severity] || "#D4AF37", color: "#0a0a0a" }}
                       >
                         {d.id}
                       </div>
@@ -685,13 +685,13 @@ function timeAgo(isoString: string): string {
 
 function EbaySkeletonRow() {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "rgba(255,203,5,0.12)" }}>
-      <div className="w-10 h-10 rounded flex-shrink-0 animate-pulse" style={{ background: "rgba(255,203,5,0.1)" }} />
+    <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: "rgba(212,175,55,0.12)" }}>
+      <div className="w-10 h-10 rounded flex-shrink-0 animate-pulse" style={{ background: "rgba(212,175,55,0.1)" }} />
       <div className="flex-1 space-y-1.5">
-        <div className="h-3 rounded animate-pulse" style={{ background: "rgba(255,203,5,0.1)", width: "75%" }} />
-        <div className="h-2.5 rounded animate-pulse" style={{ background: "rgba(255,203,5,0.07)", width: "40%" }} />
+        <div className="h-3 rounded animate-pulse" style={{ background: "rgba(212,175,55,0.1)", width: "75%" }} />
+        <div className="h-2.5 rounded animate-pulse" style={{ background: "rgba(212,175,55,0.07)", width: "40%" }} />
       </div>
-      <div className="w-14 h-4 rounded animate-pulse" style={{ background: "rgba(255,203,5,0.1)" }} />
+      <div className="w-14 h-4 rounded animate-pulse" style={{ background: "rgba(212,175,55,0.1)" }} />
     </div>
   );
 }
@@ -725,7 +725,7 @@ function EbaySection({ certId }: { certId: string }) {
           {!isLoading && sortedGrades.length > 0 && (
             <div className="mb-6 rounded-2xl overflow-hidden" style={{ border: "1px solid #E8E4DC" }}>
               <div className="px-4 py-2.5" style={{ background: "#FAFAF8", borderBottom: "1px solid #E8E4DC" }}>
-                <p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#FFCB05" }}>
+                <p className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: "#B8960C" }}>
                   Currently asking on eBay UK
                 </p>
               </div>
@@ -734,16 +734,16 @@ function EbaySection({ certId }: { certId: string }) {
                   key={grade}
                   className="flex items-center justify-between px-4 py-2.5"
                   style={{
-                    borderBottom: i < sortedGrades.length - 1 ? "1px solid rgba(255,203,5,0.1)" : "none",
+                    borderBottom: i < sortedGrades.length - 1 ? "1px solid rgba(212,175,55,0.1)" : "none",
                     background: i % 2 === 0 ? "#FFFFFF" : "#FAFAF8",
                   }}
                 >
                   <span
                     className="text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded"
                     style={{
-                      background: "rgba(255,203,5,0.12)",
-                      color: "#FFCB05",
-                      border: "1px solid rgba(255,203,5,0.25)",
+                      background: "rgba(212,175,55,0.12)",
+                      color: "#B8960C",
+                      border: "1px solid rgba(212,175,55,0.25)",
                     }}
                   >
                     {grade}
@@ -751,7 +751,7 @@ function EbaySection({ certId }: { certId: string }) {
                   <div className="flex items-center gap-3">
                     <span
                       className="font-black"
-                      style={{ fontSize: 20, color: "#FFCB05" }}
+                      style={{ fontSize: 20, color: "#B8960C" }}
                     >
                       {formatPence(averagePence)}
                     </span>
@@ -782,12 +782,12 @@ function EbaySection({ certId }: { certId: string }) {
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 px-4 py-3 transition-colors"
                   style={{
-                    borderBottom: i < listings.length - 1 ? "1px solid rgba(255,203,5,0.12)" : "none",
+                    borderBottom: i < listings.length - 1 ? "1px solid rgba(212,175,55,0.12)" : "none",
                     background: "transparent",
                     display: "flex",
                     textDecoration: "none",
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(255,203,5,0.04)"; }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(212,175,55,0.04)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                 >
                   {/* Thumbnail */}
@@ -803,7 +803,7 @@ function EbaySection({ certId }: { certId: string }) {
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <Shield size={18} style={{ color: "rgba(255,203,5,0.3)" }} />
+                        <Shield size={18} style={{ color: "rgba(184,150,12,0.3)" }} />
                       </div>
                     )}
                   </div>
@@ -826,9 +826,9 @@ function EbaySection({ certId }: { certId: string }) {
                       <span
                         className="inline-block text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded"
                         style={{
-                          background: "rgba(255,203,5,0.12)",
-                          color: "#FFCB05",
-                          border: "1px solid rgba(255,203,5,0.25)",
+                          background: "rgba(212,175,55,0.12)",
+                          color: "#B8960C",
+                          border: "1px solid rgba(212,175,55,0.25)",
                         }}
                       >
                         {listing.grade}
@@ -840,11 +840,11 @@ function EbaySection({ certId }: { certId: string }) {
                   <div className="flex-shrink-0 flex flex-col items-end gap-1 ml-2">
                     <span
                       className="font-black text-sm"
-                      style={{ color: "#FFCB05" }}
+                      style={{ color: "#B8960C" }}
                     >
                       {formatPence(listing.price_pence)}
                     </span>
-                    <ExternalLink size={11} style={{ color: "rgba(255,203,5,0.5)" }} />
+                    <ExternalLink size={11} style={{ color: "rgba(184,150,12,0.5)" }} />
                   </div>
                 </a>
               ))}
@@ -895,7 +895,7 @@ function OwnershipSection({ report }: { report: VaultReport }) {
   const tierAccent: Record<string, string> = {
     bronze: "rgba(205,127,50,0.20)",
     silver: "rgba(192,192,192,0.25)",
-    gold: "rgba(255,203,5,0.30)",
+    gold: "rgba(212,175,55,0.30)",
   };
   const borderStyle = ownerTier ? { borderLeft: `3px solid ${tierAccent[ownerTier]?.replace(/[\d.]+\)$/, "0.8)")}`, paddingLeft: 16 } : {};
 
@@ -907,9 +907,9 @@ function OwnershipSection({ report }: { report: VaultReport }) {
             <SectionHeading>Ownership History</SectionHeading>
             {ownerTier && (
               <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border" style={{
-                borderColor: ownerTier === "gold" ? "rgba(255,203,5,0.4)" : ownerTier === "silver" ? "rgba(192,192,192,0.4)" : "rgba(205,127,50,0.4)",
-                background: ownerTier === "gold" ? "rgba(255,203,5,0.08)" : ownerTier === "silver" ? "rgba(192,192,192,0.08)" : "rgba(205,127,50,0.08)",
-                color: ownerTier === "gold" ? "#FFCB05" : ownerTier === "silver" ? "#C0C0C0" : "#CD7F32",
+                borderColor: ownerTier === "gold" ? "rgba(212,175,55,0.4)" : ownerTier === "silver" ? "rgba(192,192,192,0.4)" : "rgba(205,127,50,0.4)",
+                background: ownerTier === "gold" ? "rgba(212,175,55,0.08)" : ownerTier === "silver" ? "rgba(192,192,192,0.08)" : "rgba(205,127,50,0.08)",
+                color: ownerTier === "gold" ? "#D4AF37" : ownerTier === "silver" ? "#C0C0C0" : "#CD7F32",
               }}>
                 <VaultClubBadge tier={ownerTier} size="sm" />
                 {ownerTier.charAt(0).toUpperCase() + ownerTier.slice(1)} Vault Member
@@ -924,7 +924,7 @@ function OwnershipSection({ report }: { report: VaultReport }) {
               {entries.length > 1 && (
                 <div
                   className="absolute left-3 top-4 bottom-4"
-                  style={{ width: 2, background: "linear-gradient(180deg,#FFCB05,rgba(255,203,5,0.1))" }}
+                  style={{ width: 2, background: "linear-gradient(180deg,#D4AF37,rgba(212,175,55,0.1))" }}
                 />
               )}
               <div className="space-y-8">
@@ -936,9 +936,9 @@ function OwnershipSection({ report }: { report: VaultReport }) {
                         className="absolute -left-8 flex items-center justify-center rounded-full font-black text-xs flex-shrink-0"
                         style={{
                           width: 28, height: 28,
-                          background: i === 0 ? "linear-gradient(135deg,#FFCB05,#FFCB05)" : "#FAFAF8",
-                          border: "2px solid #FFCB05",
-                          color: i === 0 ? "#1A1400" : "#FFCB05",
+                          background: i === 0 ? "linear-gradient(135deg,#B8960C,#D4AF37)" : "#FAFAF8",
+                          border: "2px solid #D4AF37",
+                          color: i === 0 ? "#1A1400" : "#B8960C",
                                                   }}
                       >
                         {i + 1}
@@ -949,7 +949,7 @@ function OwnershipSection({ report }: { report: VaultReport }) {
                         style={{
                           background: "#FAFAF8",
                           border: i === 0 && ownerTier === "gold"
-                            ? "2px solid rgba(255,203,5,0.35)"
+                            ? "2px solid rgba(212,175,55,0.35)"
                             : i === 0 && ownerTier === "silver"
                             ? "1.5px solid rgba(192,192,192,0.35)"
                             : i === 0 && ownerTier === "bronze"
@@ -967,7 +967,7 @@ function OwnershipSection({ report }: { report: VaultReport }) {
                             VERIFIED
                           </div>
                         </div>
-                        <p className="text-xs mt-1" style={{ color: "#FFCB05" }}>{entry.method}</p>
+                        <p className="text-xs mt-1" style={{ color: "#B8960C" }}>{entry.method}</p>
                         <p className="text-xs mt-1" style={{ color: "#888" }}>
                           {entry.date ? new Date(entry.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }) : ""}
                         </p>
@@ -1005,7 +1005,7 @@ function PopulationSection({ report }: { report: VaultReport }) {
               className="font-black leading-none mb-2"
               style={{
                                 fontSize: "clamp(36px,8vw,64px)",
-                color: "#FFCB05",
+                color: "#B8960C",
               }}
             >
               {population.thisGrade} <span className="text-2xl md:text-3xl" style={{ color: "#888" }}>of {population.totalGraded}</span>
@@ -1026,12 +1026,12 @@ function PopulationSection({ report }: { report: VaultReport }) {
                     style={{
                       height: `${Math.max(pct, count > 0 ? 4 : 0)}%`,
                       background: isThis
-                        ? "linear-gradient(180deg,#FFD700,#FFCB05)"
-                        : "rgba(255,203,5,0.2)",
-                      boxShadow: isThis ? "0 0 12px rgba(255,203,5,0.4)" : "none",
+                        ? "linear-gradient(180deg,#FFD700,#D4AF37)"
+                        : "rgba(212,175,55,0.2)",
+                      boxShadow: isThis ? "0 0 12px rgba(212,175,55,0.4)" : "none",
                     }}
                   />
-                  <span className="text-[9px] md:text-xs" style={{ color: isThis ? "#FFCB05" : "#AAAAAA" }}>
+                  <span className="text-[9px] md:text-xs" style={{ color: isThis ? "#B8960C" : "#AAAAAA" }}>
                     {k}
                   </span>
                 </div>
@@ -1138,16 +1138,16 @@ function StolenReportModal({ certId, onClose }: { certId: string; onClose: () =>
           <div className="text-center py-4">
             <p className="font-bold text-[#1A1A1A] text-lg mb-2">Report Submitted</p>
             <p className="text-sm text-[#666666]">Check your inbox — we've sent a verification link. Click it to confirm and flag this certificate.</p>
-            <button onClick={onClose} className="mt-6 text-sm font-bold text-[#FFCB05] border border-[#FFCB05] rounded-lg px-6 py-2 hover:bg-[#FFCB05]/5 transition-colors">Close</button>
+            <button onClick={onClose} className="mt-6 text-sm font-bold text-[#B8960C] border border-[#B8960C] rounded-lg px-6 py-2 hover:bg-[#B8960C]/5 transition-colors">Close</button>
           </div>
         ) : (
           <>
             <h3 className="font-black text-[#1A1A1A] text-lg mb-1">Report Stolen Card</h3>
             <p className="text-xs text-[#888888] mb-4">We'll email you a verification link. Once confirmed, a warning appears on this certificate's public page.</p>
             <form onSubmit={handleSubmit} className="space-y-3">
-              <input required value={name} onChange={e => setName(e.target.value)} placeholder="Your name" className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]" />
-              <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Your email" className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]" />
-              <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional: describe how it was stolen" rows={3} className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05] resize-none" />
+              <input required value={name} onChange={e => setName(e.target.value)} placeholder="Your name" className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#B8960C]" />
+              <input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Your email" className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#B8960C]" />
+              <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional: describe how it was stolen" rows={3} className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] focus:outline-none focus:border-[#B8960C] resize-none" />
               {error && <p className="text-xs text-red-600">{error}</p>}
               <button type="submit" disabled={submitting} className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-all disabled:opacity-50" style={{ background: "linear-gradient(135deg,#c0392b,#e74c3c)" }}>
                 {submitting ? "Submitting…" : "Submit Report"}
@@ -1186,7 +1186,7 @@ function ShareSection({ report }: { report: VaultReport }) {
               onClick={handleShare}
               className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all"
               style={{
-                background: "linear-gradient(135deg,#FFCB05,#FFCB05)",
+                background: "linear-gradient(135deg,#B8960C,#D4AF37)",
                 color: "#1A1400",
               }}
             >
@@ -1200,9 +1200,9 @@ function ShareSection({ report }: { report: VaultReport }) {
               rel="noopener noreferrer"
               className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all"
               style={{
-                border: "1px solid #FFCB05",
-                color: "#FFCB05",
-                background: "rgba(255,203,5,0.04)",
+                border: "1px solid #B8960C",
+                color: "#B8960C",
+                background: "rgba(184,150,12,0.04)",
               }}
             >
               <Download size={16} />
@@ -1250,9 +1250,9 @@ function VaultLoading() {
     >
       <div
         className="w-12 h-12 rounded-full border-2 border-t-transparent animate-spin mb-4"
-        style={{ borderColor: "#FFCB05", borderTopColor: "transparent" }}
+        style={{ borderColor: "#B8960C", borderTopColor: "transparent" }}
       />
-      <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#FFCB05" }}>
+      <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#B8960C" }}>
         Loading Vault
       </p>
     </div>
@@ -1265,7 +1265,7 @@ function VaultError({ certId }: { certId: string }) {
       className="min-h-screen flex flex-col items-center justify-center px-4 text-center"
       style={{ background: "#FAFAF8" }}
     >
-      <div className="mb-6" style={{ color: "rgba(255,203,5,0.35)" }}>
+      <div className="mb-6" style={{ color: "rgba(184,150,12,0.35)" }}>
         <Shield size={56} />
       </div>
       <p
@@ -1279,7 +1279,7 @@ function VaultError({ certId }: { certId: string }) {
       </p>
       <p className="text-xs" style={{ color: "#AAAAAA" }}>
         Verify the cert ID and try again, or visit{" "}
-        <a href="/verify" style={{ color: "#FFCB05" }}>Certificate Lookup</a>
+        <a href="/verify" style={{ color: "#B8960C" }}>Certificate Lookup</a>
       </p>
     </div>
   );
@@ -1308,7 +1308,7 @@ export default function VaultReportPage() {
   const ownerTier = report.ownerVaultClubTier || null;
   const outerStyle: React.CSSProperties = {
     background: "#FAFAF8", minHeight: "100vh", color: "#1A1A1A",
-    ...(ownerTier === "gold" ? { outline: "2px solid rgba(255,203,5,0.35)", outlineOffset: -2 } : {}),
+    ...(ownerTier === "gold" ? { outline: "2px solid rgba(212,175,55,0.35)", outlineOffset: -2 } : {}),
   };
 
   return (

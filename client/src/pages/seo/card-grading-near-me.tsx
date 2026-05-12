@@ -74,7 +74,7 @@ export default function CardGradingNearMe() {
         </p>
 
         <section className="mb-10" data-testid="section-nearme-how">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">How Postal Card Grading Works</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">How Postal Card Grading Works</h2>
           <div className="space-y-4">
             {[
               { step: "1", title: "Submit online", desc: "Go to mintvaultuk.com/submit, enter your card details, choose your service tier, and pay securely online." },
@@ -82,8 +82,8 @@ export default function CardGradingNearMe() {
               { step: "3", title: "We grade your cards", desc: "Our graders assess each card on centering, corners, edges, and surface. You'll be notified when grading is complete." },
               { step: "4", title: "Cards returned in slabs", desc: "Your graded cards are sealed in tamper-evident NFC-enabled precision slabs and returned via insured tracked delivery." },
             ].map((item) => (
-              <div key={item.step} className="flex gap-4 border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
-                <div className="shrink-0 w-8 h-8 rounded-full bg-[#FFCB05] text-[#1A1400] font-bold text-sm flex items-center justify-center">
+              <div key={item.step} className="flex gap-4 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
+                <div className="shrink-0 w-8 h-8 rounded-full bg-[#D4AF37] text-[#1A1400] font-bold text-sm flex items-center justify-center">
                   {item.step}
                 </div>
                 <div>
@@ -96,7 +96,7 @@ export default function CardGradingNearMe() {
         </section>
 
         <section className="mb-10" data-testid="section-nearme-features">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Everything Included, Wherever You Are</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Everything Included, Wherever You Are</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { icon: <Shield size={16} />, title: "UK-based processing", desc: "Cards graded and returned entirely within the UK — no customs, no international risk." },
@@ -104,8 +104,8 @@ export default function CardGradingNearMe() {
               { icon: <CheckCircle size={16} />, title: "Online tracking", desc: "Track your submission status online at any time using your submission reference." },
               { icon: <CheckCircle size={16} />, title: "NFC-tracked slabs", desc: "Every slab has an NFC chip — buyers can verify your certificate with a phone scan." },
             ].map((item, i) => (
-              <div key={i} className="flex gap-3 border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
-                <div className="text-[#FFCB05] shrink-0 mt-0.5">{item.icon}</div>
+              <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
+                <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1">{item.title}</h3>
                   <p className="text-[#d4d4d4] text-xs leading-relaxed">{item.desc}</p>
@@ -116,22 +116,22 @@ export default function CardGradingNearMe() {
         </section>
 
         <section className="mb-10" data-testid="section-nearme-tiers">
-          <h2 className="text-2xl font-bold text-[#FFCB05] tracking-wide mb-4">Service Tiers & Pricing</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
             {[
               { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
               { tier: "Standard", days: "15 working days", price: "£25/card" },
               { tier: "Express", days: "5 working days", price: "£45/card" },
             ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#FFCB05]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
+              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
                 <span className="text-white text-sm font-medium">{t.tier}</span>
                 <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#FFCB05] font-bold text-sm">{t.price}</span>
+                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
               </div>
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#FFCB05] hover:underline">View full pricing</Link>.
+            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
@@ -150,7 +150,7 @@ export default function CardGradingNearMe() {
               { href: "/trading-card-grading-uk", label: "Trading Card Grading UK" },
             ].map((link) => (
               <Link key={link.href} href={link.href}>
-                <span className="flex items-center gap-2 border border-[#FFCB05]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#FFCB05] text-sm hover:border-[#FFCB05]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
+                <span className="flex items-center gap-2 border border-[#D4AF37]/45 bg-[#0a0e1a]/70 backdrop-blur-sm rounded px-4 py-2.5 text-[#D4AF37] text-sm hover:border-[#D4AF37]/70 hover:bg-[#0a0e1a]/85 transition-all cursor-pointer">
                   <ArrowRight size={14} /> {link.label}
                 </span>
               </Link>

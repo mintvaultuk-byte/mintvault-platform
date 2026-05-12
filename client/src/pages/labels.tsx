@@ -32,7 +32,7 @@ export default function LabelsPage() {
   return (
     <div className="px-4 py-12 max-w-3xl mx-auto">
       <h1
-        className="text-3xl md:text-4xl font-bold text-[#FFCB05] tracking-widest text-center mb-4 glow-gold"
+        className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-widest text-center mb-4 glow-gold"
         data-testid="text-labels-title"
       >
         PREMIUM MINTVAULT LABELS
@@ -42,8 +42,8 @@ export default function LabelsPage() {
         is engineered to protect your investment.
       </p>
 
-      <div className="border border-[#FFCB05]/20 rounded-lg p-6 md:p-8 mb-10">
-        <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-4 glow-gold-sm" data-testid="text-slab-design-heading">
+      <div className="border border-[#D4AF37]/20 rounded-lg p-6 md:p-8 mb-10">
+        <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-4 glow-gold-sm" data-testid="text-slab-design-heading">
           Slab Design
         </h2>
         <div className="space-y-3 text-gray-300 leading-relaxed">
@@ -59,7 +59,7 @@ export default function LabelsPage() {
         </div>
       </div>
 
-      <h2 className="text-xl font-bold text-[#FFCB05] tracking-wide mb-6 glow-gold-sm text-center" data-testid="text-security-heading">
+      <h2 className="text-xl font-bold text-[#D4AF37] tracking-wide mb-6 glow-gold-sm text-center" data-testid="text-security-heading">
         Security Features
       </h2>
 
@@ -67,14 +67,14 @@ export default function LabelsPage() {
         {features.map((feature, i) => (
           <div
             key={i}
-            className="border border-[#FFCB05]/20 rounded-lg p-5 md:p-6 flex gap-4"
+            className="border border-[#D4AF37]/20 rounded-lg p-5 md:p-6 flex gap-4"
             data-testid={`card-feature-${i}`}
           >
-            <div className="w-12 h-12 border border-[#FFCB05]/40 rounded-lg flex items-center justify-center text-[#FFCB05] shrink-0">
+            <div className="w-12 h-12 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] shrink-0">
               {feature.icon}
             </div>
             <div>
-              <h3 className="text-[#FFCB05] font-semibold mb-1" data-testid={`text-feature-title-${i}`}>
+              <h3 className="text-[#D4AF37] font-semibold mb-1" data-testid={`text-feature-title-${i}`}>
                 {feature.title}
               </h3>
               <p className="text-gray-400 text-sm leading-relaxed" data-testid={`text-feature-desc-${i}`}>

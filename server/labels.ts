@@ -41,12 +41,8 @@ const PDF_H = 20 * MM_TO_PT;
 const FRAME_W = 18;   // px — gold border fill width (outer edge = canvas edge)
 
 // ── Colour palette ──────────────────────────────────────────────────────────
-// Pikachu Yellow palette (PR #87). GOLD = primary brand yellow; GOLD_DARK
-// retained as border/contrast partner; GOLD_LIGHT folded into the primary
-// since they served the same visual role.
-const GOLD       = "#FFCB05";   // separators, accents
-const GOLD_DARK  = "#D9A300";
-const GOLD_LIGHT = "#FFCB05";
+const GOLD_DARK  = "#A07820";
+const GOLD_LIGHT = "#D4AF37";
 const BLACK      = "#000000";
 const WHITE      = "#FFFFFF";
 
@@ -319,8 +315,10 @@ function buildLine4(cert: CertificateRecord): string {
 function drawGoldFrame(ctx: any) {
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
-  // v424 — flat GOLD fill (was 5-stop diagonal gradient).
-  ctx.fillStyle = GOLD;
+  // v424 — flat GOLD_LIGHT fill (was 5-stop diagonal gradient). Brand-
+  // unification pass folded the separate slightly-darker outer-frame
+  // shade into GOLD_LIGHT so every gold surface uses one brand value.
+  ctx.fillStyle = GOLD_LIGHT;
   // Four strips — top, bottom, left, right
   ctx.fillRect(0,               0,               PX_W,   FRAME_W);
   ctx.fillRect(0,               PX_H - FRAME_W,  PX_W,   FRAME_W);
@@ -344,7 +342,11 @@ export async function generateLabelPNG(
     && parseFloat(cert.gradeEdges     || "0") === 10
     && parseFloat(cert.gradeSurface   || "0") === 10;
   const labelBg = isBlack ? BLACK : WHITE;
-  const labelFg = isBlack ? WHITE : "#000000";
+  // Black Label foreground: GOLD_LIGHT for premium gold-on-black look.
+  // Affects three text elements inside drawFront(): card title block (L742),
+  // rarity strip (L629), and cert ID in grade-panel column (L606). White
+  // Label is unaffected (black on white).
+  const labelFg = isBlack ? GOLD_LIGHT : "#000000";
 
   const canvas = createCanvas(PX_W, PX_H);
   const ctx = canvas.getContext("2d");
@@ -500,12 +502,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillStyle = GOLD_LIGHT;
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
-    // Bottom edge — crisp 3px darker line for depth (kept; not a gradient).
-    ctx.fillStyle = "#9C7600";
-    ctx.fillRect(panelX, panelY + panelH - 3, PANEL_W, 3);
-
     // Subtle vertical separator on the left edge of the panel
-    ctx.strokeStyle = "rgba(255,215,0,0.25)";
+    ctx.strokeStyle = "rgba(212,175,55,0.25)";
     ctx.lineWidth   = 1;
     ctx.beginPath();
     ctx.moveTo(panelX, panelY);
@@ -549,7 +547,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // the digit sits visually centred in the full lower panel zone.
     const descBot      = cardNumBot + ABBR_TOP_PAD + abbrFontSize;
     const ABBR_NUM_GAP = 6;
-    const NUM_BOT_PAD  = 10;
+    const NUM_BOT_PAD  = 7;
     const numZoneTop   = descBot + ABBR_NUM_GAP;
     const numZoneBot   = stripY - NUM_BOT_PAD;
     const numZoneH     = numZoneBot - numZoneTop;
@@ -560,17 +558,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // em-box middle (digits have no descender; visual mass is top-heavy).
     // 0.08*em pushes the digit down so it reads visually centred rather
     // than mathematically centred.
-    const gradeNumCY   = (descBot + stripY) / 2 + gradeFontSize * 0.08;
+    const gradeNumCY   = (descBot + stripY) / 2 - gradeFontSize * 0.04;
 
     ctx.shadowOffsetX = 1;
     ctx.shadowOffsetY = 1;
     ctx.shadowBlur    = 1;
     ctx.shadowColor   = "rgba(0,0,0,0.25)";
     ctx.font         = `bold ${gradeFontSize}px Arial, Helvetica, sans-serif`;
-    // PR #88: grade number anchored to explicit #111111. Reads identically
-    // to the prior #1A1A1A on white; on Black Label, the digit sits on the
-    // yellow grade panel so contrast is bright-yellow → near-black.
-    ctx.fillStyle    = "#111111";
+    ctx.fillStyle    = "#1A1A1A";
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(gradeStr, panelCX, gradeNumCY);
@@ -605,8 +600,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // ── GRADE PANEL cert ID — centred in the grade panel's strip zone ──────────
   {
-    const certStripSz  = 28;
-    const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 14);
+    const certStripSz  = 36;
+    const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 16);
     ctx.font         = `bold ${certStripFit}px Arial, Helvetica, sans-serif`;
     ctx.fillStyle    = labelFg;
     ctx.textAlign    = "center";
@@ -647,7 +642,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   //   3. Use textAlign="left" with an explicit x so the text lands exactly
   //      in the centre of the correctly-sized border box.
   const MV_HDR_SZ    = 32;                           // v429: 42→32 (~24% smaller) — wordmark is no longer the dominant element; the 3-line text block below is.
-  const MV_HDR_PAD   = 8;                            // v429: 21→8 — wordmark hugs the gold frame more closely; frees 13px for text zone.
+  const MV_HDR_PAD   = 19;                           // v5: 8→19 — gives the wordmark box breathing room below the top gold frame (was 3px, now 14px).
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
   const MV_BELOW_GAP = 2;                            // v429: 4→2 — every pixel matters for the expanded text zone.
@@ -675,29 +670,24 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const BOX_Y    = MV_HDR_Y - BOX_PY;
   const BOX_CY   = BOX_Y + BOX_H / 2;                       // vertical centre of box
 
-  // Step 3 — PR #88: Black Label gets a solid yellow fill BEHIND the wordmark
-  // so the box reads as a yellow bar with black text. White label keeps the
-  // yellow border only (no fill) so the label background shows through.
-  const isBlack = labelBg === BLACK;
-  if (isBlack) {
-    ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillRect(BOX_X, BOX_Y, BOX_W, BOX_H);
-  }
+  // Step 3 — draw gold border box
   ctx.strokeStyle = GOLD_LIGHT;
   ctx.lineWidth   = BOX_LW;
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
   ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
 
-  // Step 4 — PR #88: wordmark text is solid black on yellow. Was yellow text
-  // on a yellow border which produced an outlined / transparent look against
-  // the yellow label frame.
+  // Step 4 — v424 — solid GOLD_LIGHT fill replaces the 5-stop gradient and
+  // glow shadow. The gradient was washing out the centre of each letter on
+  // physical labels; flat gold reads cleanly at the new 70mm width.
   try { (ctx as any).letterSpacing = `${MV_LS}px`; } catch {}
   ctx.textAlign    = "left";
   ctx.textBaseline = "middle";
-  const mvTextX    = BOX_X + BOX_PX;
+  const mvTextX    = BOX_X + Math.round((BOX_W - mvBaseW) / 2);
 
-  ctx.fillStyle   = "#111111";
+  // White label: black wordmark on the gold-bordered white box (high contrast).
+  // Black Label: gold wordmark on the gold-bordered black box (premium look).
+  ctx.fillStyle   = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
   ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
@@ -712,10 +702,13 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
   const textZoneH = contentB - textZoneT;
 
-  const TXT_FAMILY      = '"Arial Black", Arial, Helvetica, sans-serif';
-  const TXT_WEIGHT      = "700";
-  const TARGET_SIZE     = 40;   // v433: 32→40 — main lines bump back up so they're clearly bigger than rarity below
-  const MIN_SIZE        = 24;   // v433: 22→24 — raised floor preserves hierarchy on long-name shrinks
+  // Title family drops "Arial Black" so weight 600 (semibold) actually renders
+  // as semibold via Arial — "Arial Black" is a single-weight (900) face and
+  // would override the requested weight.
+  const TXT_FAMILY      = 'Arial, Helvetica, sans-serif';
+  const TXT_WEIGHT      = "600";  // was "700" — lighter title per print pass
+  const TARGET_SIZE     = 34;     // was 40 — ~15% reduction
+  const MIN_SIZE        = 20;     // was 24 — ~15% reduction
   const MIN_GAP_FACTOR  = 0.1;
 
   // v432 — rarity moves OUT of the white panel and into the bottom strip,
@@ -796,7 +789,7 @@ function drawContactlessIcon(
   ctx.restore();
 }
 
-async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, _labelBg = WHITE, labelFg = "#1A1A1A") {
+async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
   // v425 — QR shrunk 187→160 and cert font max 28→24. Post-v424 the inner
@@ -865,63 +858,24 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   const logoRightX   = LOGO_LX + LOGO_DRAW_W;
   const NFC_ICON_CX  = Math.round((logoRightX + gfLeft) / 2);
 
-  // ── LEFT: MintVault wordmark — PR #88 replaces the muddy raster shield ────
-  // The previous mintvault-logo.png rendered as brown/dark-gold which fought
-  // the new Pikachu Yellow brand. Replaced with native text rendering so the
-  // wordmark is exactly #FFCB05 (matches the URL + tap-text colour on this
-  // label) and prints cleanly at any DPI.
-  //
-  // Two-line lockup: "MINTVAULT" in Bodoni Moda 900 (matches the front-label
-  // wordmark family) over "TRADING CARD GRADING" in bold sans-serif. Both
-  // lines occupy the same width band the raster logo did (LOGO_LX → +LOGO_DRAW_W).
-  {
-    const wordmarkX  = LOGO_LX;
-    const wordmarkW  = LOGO_DRAW_W;
-    const wordmarkCX = wordmarkX + wordmarkW / 2;
-    const wordmarkCY = I_TOP + Math.round(I_H / 2);
+  // ── LEFT: MintVault logo — primary visual anchor ──────────────────────────
+  if (logo) {
+    const ly = I_TOP + Math.round((I_H - LOGO_DRAW) / 2); // vertically centred within inner area
+    ctx.drawImage(logo, LOGO_LX, ly, LOGO_DRAW_W, LOGO_DRAW);
 
-    // Main wordmark — Bodoni Moda 900, sized to fit the available width.
-    const MAIN_SIZE   = 56;
-    const MAIN_LS     = 2;
-    const SUBTITLE_SZ = 13;
-    const STACK_GAP   = 12;
-
-    try { (ctx as any).letterSpacing = `${MAIN_LS}px`; } catch {}
-    ctx.font         = `900 ${MAIN_SIZE}px "Bodoni Moda", "Times New Roman", serif`;
-    ctx.fillStyle    = GOLD_LIGHT;
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.shadowBlur   = 0;
-    ctx.shadowColor  = "transparent";
-
-    // Stack: main baseline above centre, subtitle baseline below centre.
-    const mainY     = wordmarkCY - STACK_GAP / 2;
-    const subtitleY = wordmarkCY + STACK_GAP / 2 + SUBTITLE_SZ;
-    ctx.fillText("MINTVAULT", wordmarkCX, mainY);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    try { (ctx as any).letterSpacing = "1.4px"; } catch {}
-    ctx.font      = `bold ${SUBTITLE_SZ}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillText("TRADING CARD GRADING", wordmarkCX, subtitleY);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    ctx.textAlign    = "left";
-    ctx.textBaseline = "alphabetic";
-
-    // Redraw gold frame on top so the wordmark never bleeds into the border.
+    // Redraw gold frame on top so logo never bleeds into the border.
     drawGoldFrame(ctx);
   }
-  void logo; // raster logo no longer used on the back label (PR #88).
 
-  // ── CENTRE TOP: website URL — v425 flat GOLD_LIGHT (v424 used GOLD_DARK
-  // which printed as muddy brown; matches the front MINTVAULT wordmark). ──
+  // ── CENTRE TOP: website URL ───────────────────────────────────────────────
+  // v6: white-label uses black text for inkjet legibility on white background;
+  // Black Label keeps GOLD_LIGHT for the premium gold-on-black treatment.
   {
     const urlY    = I_TOP + 24;
     const urlSz   = 38;
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_LIGHT;
+    ctx.fillStyle        = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
     ctx.shadowBlur       = 0;
@@ -929,13 +883,14 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
   }
 
-  // ── CENTRE BOTTOM: tap instruction — v425 flat GOLD_LIGHT (was GOLD_DARK) ──
+  // ── CENTRE BOTTOM: tap instruction ────────────────────────────────────────
+  // v6: white-label black, Black Label GOLD_LIGHT.
   {
     const nfcY    = I_BOTTOM - 31;
     const nfcSz   = 34;
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${nfcSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = GOLD_LIGHT;
+    ctx.fillStyle        = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
     ctx.textAlign        = "center";
     ctx.textBaseline     = "middle";
     ctx.shadowBlur       = 0;
@@ -971,8 +926,6 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
     const imgData = offCtx.getImageData(0, 0, iconSz, iconSz);
     const d = imgData.data;
-    // PR #88: tint with GOLD_LIGHT (#FFCB05) instead of GOLD_DARK (#D9A300)
-    // so the NFC icon matches the URL + tap-text colour on the back label.
     const goldHex = GOLD_LIGHT.replace("#", "");
     const gR = parseInt(goldHex.substring(0, 2), 16);
     const gG = parseInt(goldHex.substring(2, 4), 16);

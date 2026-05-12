@@ -30,7 +30,7 @@ interface ScanHistoryResponse {
 
 function gradeColor(g: number | null): string {
   if (g == null) return "text-[#888888]";
-  if (g >= 10) return "text-[#FFCB05]";
+  if (g >= 10) return "text-[#D4AF37]";
   if (g >= 8) return "text-[#16A34A]";
   if (g >= 6) return "text-[#CA8A04]";
   return "text-[#DC2626]";
@@ -60,7 +60,7 @@ export default function AdminScanHistory() {
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <ScanLine className="w-5 h-5 text-[#FFCB05]" />
+          <ScanLine className="w-5 h-5 text-[#D4AF37]" />
           <h2 className="text-lg font-bold text-[#1A1A1A] tracking-tight">Scan History</h2>
           {data && <span className="text-xs text-[#888888]">{data.total} scans</span>}
         </div>
@@ -68,7 +68,7 @@ export default function AdminScanHistory() {
           {["all", "graded", "pending"].map(s => (
             <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
               className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded transition-colors ${
-                statusFilter === s ? "bg-[#FFCB05]/10 text-[#FFCB05] border border-[#FFCB05]/30" : "text-[#888888] border border-[#E8E4DC] hover:border-[#FFCB05]/30"
+                statusFilter === s ? "bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/30" : "text-[#888888] border border-[#E8E4DC] hover:border-[#D4AF37]/30"
               }`}>
               {s}
             </button>
@@ -78,7 +78,7 @@ export default function AdminScanHistory() {
 
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 text-[#FFCB05] animate-spin" />
+          <Loader2 className="w-6 h-6 text-[#D4AF37] animate-spin" />
         </div>
       )}
 
@@ -115,7 +115,7 @@ export default function AdminScanHistory() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-[#FFCB05]">{s.certId}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-[#D4AF37]">{s.certId}</td>
                     <td className="px-4 py-2">
                       <p className="text-[#1A1A1A] text-xs font-medium truncate max-w-[200px]">{s.cardName || "Pending identification"}</p>
                       {s.cardGame && <p className="text-[10px] text-[#888888]">{s.cardGame}</p>}
@@ -165,11 +165,11 @@ export default function AdminScanHistory() {
               <p className="text-xs text-[#888888]">Page {data.page} of {data.totalPages}</p>
               <div className="flex items-center gap-1">
                 <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
-                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#FFCB05] disabled:opacity-30 transition-colors">
+                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#D4AF37] disabled:opacity-30 transition-colors">
                   <ChevronLeft size={14} />
                 </button>
                 <button onClick={() => setPage(p => Math.min(data.totalPages, p + 1))} disabled={page >= data.totalPages}
-                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#FFCB05] disabled:opacity-30 transition-colors">
+                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#D4AF37] disabled:opacity-30 transition-colors">
                   <ChevronRight size={14} />
                 </button>
               </div>

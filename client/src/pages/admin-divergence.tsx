@@ -135,7 +135,7 @@ export default function AdminDivergencePage() {
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          <TrendingUp size={22} className="text-[#FFCB05]" />
+          <TrendingUp size={22} className="text-[#D4AF37]" />
           <div>
             <h1 className="text-xl font-bold text-[#1A1A1A]">AI Divergence</h1>
             <p className="text-[#888888] text-sm">
@@ -176,7 +176,7 @@ export default function AdminDivergencePage() {
             type="button"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-[#D4D0C8] text-[#333] hover:border-[#FFCB05] hover:text-[#FFCB05] disabled:opacity-60"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-[#D4D0C8] text-[#333] hover:border-[#D4AF37] hover:text-[#D4AF37] disabled:opacity-60"
           >
             <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
             Refresh
@@ -186,7 +186,7 @@ export default function AdminDivergencePage() {
 
       {isLoading && (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-2 border-[#FFCB05] border-t-transparent rounded-full" />
+          <div className="animate-spin w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full" />
         </div>
       )}
 

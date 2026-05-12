@@ -87,8 +87,10 @@ export function registerVaultClubRoutes(app: Express): void {
   // ── POST /api/vault-club/checkout ──────────────────────────────────────────
   // Re-enabled 2026-05-05 — lean perk model is now fully enforced (10% grading
   // discount, 50 AI Pre-Grade credits/mo, Showroom, badge). Silver-only since
-  // Bronze and Gold deprecated 2026-04-19. Annual plans get a 14-day trial
-  // (DMCC-compatible reminder copy lives in welcome email).
+  // Bronze and Gold deprecated 2026-04-19. No trial — locked pricing £9.99/mo
+  // or £99/yr flat. Both intervals bill immediately on signup (the 14-day
+  // annual trial was removed 2026-05-12: it crept in outside the locked
+  // pricing and conflicted with the brand's commitment to flat pricing).
   app.post("/api/vault-club/checkout", requireAuth, async (req: Request, res: Response) => {
     try {
       const userId = (req.session as any).userId as string;
@@ -136,17 +138,11 @@ export function registerVaultClubRoutes(app: Express): void {
         metadata: { user_id: userId, tier, interval },
       };
 
-      // Annual plans get a 14-day trial; monthly plans do not.
-      if (interval === "year") {
-        sessionParams.subscription_data = {
-          trial_period_days: 14,
-          metadata: { user_id: userId, tier, interval },
-        };
-      } else {
-        sessionParams.subscription_data = {
-          metadata: { user_id: userId, tier, interval },
-        };
-      }
+      // Both monthly and annual subscriptions bill immediately on signup.
+      // No trial — locked pricing per Vault Club spec (£9.99/mo or £99/yr).
+      sessionParams.subscription_data = {
+        metadata: { user_id: userId, tier, interval },
+      };
 
       const session = await stripe.checkout.sessions.create(sessionParams);
       return res.json({ url: session.url });

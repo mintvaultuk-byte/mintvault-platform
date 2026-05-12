@@ -47,7 +47,7 @@ export default function TcgPage() {
   return (
     <div className="px-4 py-12 max-w-3xl mx-auto">
       <h1
-        className="text-3xl md:text-4xl font-bold text-[#FFCB05] tracking-widest text-center mb-4 glow-gold"
+        className="text-3xl md:text-4xl font-bold text-[#D4AF37] tracking-widest text-center mb-4 glow-gold"
         data-testid="text-tcg-title"
       >
         SUPPORTED TCGs
@@ -60,13 +60,13 @@ export default function TcgPage() {
         {tcgList.map((tcg, i) => (
           <div
             key={i}
-            className="border border-[#FFCB05]/20 rounded-lg p-5 flex flex-col items-center text-center"
+            className="border border-[#D4AF37]/20 rounded-lg p-5 flex flex-col items-center text-center"
             data-testid={`card-tcg-${i}`}
           >
-            <div className="w-14 h-14 border border-[#FFCB05]/40 rounded-lg flex items-center justify-center text-[#FFCB05] mb-3">
+            <div className="w-14 h-14 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] mb-3">
               {tcg.icon}
             </div>
-            <h3 className="text-[#FFCB05] font-semibold text-lg mb-1.5" data-testid={`text-tcg-name-${i}`}>
+            <h3 className="text-[#D4AF37] font-semibold text-lg mb-1.5" data-testid={`text-tcg-name-${i}`}>
               {tcg.name}
             </h3>
             <p className="text-gray-400 text-sm leading-relaxed" data-testid={`text-tcg-desc-${i}`}>
@@ -76,8 +76,8 @@ export default function TcgPage() {
         ))}
       </div>
 
-      <div className="border border-[#FFCB05]/20 rounded-lg p-6 mt-10 text-center" data-testid="card-tcg-cta">
-        <h3 className="text-[#FFCB05] font-semibold text-lg mb-2 glow-gold-sm">
+      <div className="border border-[#D4AF37]/20 rounded-lg p-6 mt-10 text-center" data-testid="card-tcg-cta">
+        <h3 className="text-[#D4AF37] font-semibold text-lg mb-2 glow-gold-sm">
           Don't see your TCG?
         </h3>
         <p className="text-gray-400 text-sm mb-4">
@@ -86,7 +86,7 @@ export default function TcgPage() {
         </p>
         <a
           href="mailto:info@mintvaultuk.co.uk"
-          className="inline-block border border-[#FFCB05] bg-black text-[#FFCB05] px-6 py-2.5 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#FFCB05]/10"
+          className="inline-block border border-[#D4AF37] bg-black text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#D4AF37]/10"
           data-testid="button-contact-tcg"
         >
           Contact Us

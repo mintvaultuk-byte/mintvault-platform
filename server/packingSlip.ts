@@ -5,7 +5,7 @@ import fs from "fs";
 import { APP_BASE_URL } from "./app-url";
 import { COMPANY, formatPostalAddress } from "@shared/company";
 
-const GOLD = "#FFCB05";
+const GOLD = "#D4AF37";
 const DARK = "#111111";
 const GREY_DARK = "#333333";
 const GREY_MID = "#666666";

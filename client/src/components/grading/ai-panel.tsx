@@ -171,8 +171,8 @@ function ActionButton({ label, status, error: err, onClick, cost }: {
         className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-xs font-bold uppercase transition-all ${
           status === "done" ? "border-emerald-200 bg-emerald-50 text-emerald-600" :
           status === "error" ? "border-red-300 bg-red-50 text-red-600" :
-          status === "loading" ? "border-[#FFCB05]/40 bg-[#FFCB05]/5 text-[#FFCB05]" :
-          "border-[#D4D0C8] text-[#333333] hover:border-[#FFCB05]/40 hover:text-[#FFCB05]"
+          status === "loading" ? "border-[#D4AF37]/40 bg-[#D4AF37]/5 text-[#D4AF37]" :
+          "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40 hover:text-[#D4AF37]"
         }`}>
         <span className="flex items-center gap-2">
           {status === "loading" ? <Loader2 size={13} className="animate-spin" /> :
@@ -529,11 +529,11 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
   const isLoading = !["idle", "complete", "error"].includes(step);
 
   return (
-    <div className="bg-white border border-[#FFCB05]/20 rounded-xl p-4 space-y-4">
+    <div className="bg-white border border-[#D4AF37]/20 rounded-xl p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Bot size={16} className="text-[#FFCB05]" />
-        <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">AI Grading Assistant</p>
+        <Bot size={16} className="text-[#D4AF37]" />
+        <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">AI Grading Assistant</p>
       </div>
 
       {/* Four individual action buttons */}
@@ -549,7 +549,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
         />
         <button type="button" onClick={runAllThree}
           disabled={centeringStatus === "loading" || defectsStatus === "loading" || gradeStatus === "loading" || isLoading}
-          className="flex items-center justify-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-3 py-2.5 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all"
+          className="flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-3 py-2.5 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all"
           title="Centering + Defects + Grade (does not re-identify)"
         >
           <Bot size={13} />
@@ -562,7 +562,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
           type="button"
           onClick={runAnalysis}
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 border border-[#D4D0C8] text-[#333333] hover:text-[#FFCB05] hover:border-[#FFCB05]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
+          className="w-full flex items-center justify-center gap-2 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
         >
           {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
           {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze (Full)" : "Analyze with AI (Full)"}
@@ -601,7 +601,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
           {identification && (
             <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-[#FFCB05]/70 text-[10px] font-bold uppercase tracking-widest">Card Identified</p>
+                <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">Card Identified</p>
                 <div className="flex items-center gap-2">
                   {(identification as any).manuallyVerified || (identification as any).dbSource === "manual-tcg-search" ? (
                     <span className="flex items-center gap-1 text-emerald-600 text-[10px]">
@@ -622,7 +622,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
                   <button
                     type="button"
                     onClick={() => { setPanelTcgOpen(true); setPanelTcgQuery(""); setPanelTcgResults([]); }}
-                    className="flex items-center gap-1 text-[#FFCB05] text-[10px] font-bold hover:text-[#FFCB05] transition-colors"
+                    className="flex items-center gap-1 text-[#D4AF37] text-[10px] font-bold hover:text-[#B8960C] transition-colors"
                   >
                     <Database size={9} />
                     Change
@@ -641,7 +641,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
                   <p className="text-[#1A1A1A] text-sm font-bold truncate">{identification.officialName}</p>
                   <p className="text-[#333333] text-xs">{identification.officialSet}{identification.officialNumber ? ` · ${identification.officialNumber}` : ""}</p>
                   <p className="text-[#555555] text-[10px]">{identification.detected_game?.toUpperCase()} · {identification.detected_language} · {identification.detected_rarity}</p>
-                  {identification.is_holo && <span className="text-[9px] text-[#FFCB05] bg-[#FFCB05]/10 px-1.5 py-0.5 rounded">HOLO</span>}
+                  {identification.is_holo && <span className="text-[9px] text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">HOLO</span>}
                 </div>
               </div>
             </div>
@@ -653,7 +653,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
               href={referenceImageUrl || identification?.referenceImageUrl || "#"}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-[#FFCB05]/60 text-xs hover:text-[#FFCB05] transition-colors"
+              className="flex items-center gap-1.5 text-[#D4AF37]/60 text-xs hover:text-[#D4AF37] transition-colors"
             >
               <ExternalLink size={11} />
               View reference image
@@ -671,7 +671,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
             ].map(({ label, value, conf }) => (
               <div key={label} className="bg-[#F7F7F5] rounded-lg p-2 text-center">
                 <p className="text-[#555555] text-[8px] uppercase tracking-widest">{label}</p>
-                <p className="text-[#FFCB05] text-lg font-black">{value}</p>
+                <p className="text-[#D4AF37] text-lg font-black">{value}</p>
                 <ConfidenceBadge level={conf} />
               </div>
             ))}
@@ -708,7 +708,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
 
           {/* Centering detail */}
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-1">
-            <p className="text-[#FFCB05]/70 text-[10px] font-bold uppercase tracking-widest">Centering</p>
+            <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">Centering</p>
             <div className="grid grid-cols-2 gap-x-4 text-xs">
               <span className="text-[#555555]">Front L/R</span>
               <span className="text-[#1A1A1A]">{result.centering.front_left_right}</span>
@@ -725,7 +725,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
           {/* Defects */}
           {result.defects.length > 0 && (
             <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
-              <p className="text-[#FFCB05]/70 text-[10px] font-bold uppercase tracking-widest">
+              <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest">
                 Defects Detected ({result.defects.length})
               </p>
               <div className="space-y-1.5">
@@ -752,7 +752,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
           {/* Grade explanation */}
           {result.grade_explanation && (
             <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3">
-              <p className="text-[#FFCB05]/70 text-[10px] font-bold uppercase tracking-widest mb-1.5">AI Grade Explanation</p>
+              <p className="text-[#D4AF37]/70 text-[10px] font-bold uppercase tracking-widest mb-1.5">AI Grade Explanation</p>
               <p className="text-[#333333] text-xs leading-relaxed">{result.grade_explanation}</p>
             </div>
           )}
@@ -791,9 +791,9 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
       <Dialog open={panelTcgOpen} onOpenChange={setPanelTcgOpen}>
         <DialogContent className="max-w-lg p-0 overflow-hidden">
           <div className="p-4 pb-2 border-b border-[#E8E4DC]">
-            <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
-            <div className="flex items-center gap-2 border border-[#FFCB05]/30 rounded-lg px-3 py-2 focus-within:border-[#FFCB05] transition-colors">
-              <Search size={14} className="text-[#FFCB05]/50 shrink-0" />
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
+            <div className="flex items-center gap-2 border border-[#D4AF37]/30 rounded-lg px-3 py-2 focus-within:border-[#D4AF37] transition-colors">
+              <Search size={14} className="text-[#D4AF37]/50 shrink-0" />
               <input
                 type="text"
                 value={panelTcgQuery}
@@ -802,7 +802,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
                 className="flex-1 bg-transparent text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] outline-none"
                 autoFocus
               />
-              {panelTcgLoading && <Loader2 size={14} className="animate-spin text-[#FFCB05]" />}
+              {panelTcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
             </div>
           </div>
           <div className="max-h-[320px] overflow-y-auto">
@@ -816,7 +816,7 @@ export default function AiPanel({ certId, onAnalysisComplete, referenceImageUrl,
                 key={card.id}
                 type="button"
                 onClick={() => selectPanelTcgCard(card)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#FFCB05]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#D4AF37]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
               >
                 {card.imageUrl ? (
                   <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />

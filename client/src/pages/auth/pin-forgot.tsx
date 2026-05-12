@@ -49,8 +49,8 @@ export default function PinForgotPage() {
         canonical="https://mintvaultuk.com/auth/pin/forgot"
       />
       <div className="w-full max-w-md rounded-2xl overflow-hidden shadow-xl bg-[#0A0A0A] p-8 md:p-10">
-        <div className="w-10 h-10 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mb-5 mx-auto">
-          <Mail size={18} className="text-[#FFCB05]" />
+        <div className="w-10 h-10 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mb-5 mx-auto">
+          <Mail size={18} className="text-[#D4AF37]" />
         </div>
         <h1 className="text-2xl font-black text-white mb-2 text-center">Reset Your PIN</h1>
         <p className="text-[#888888] text-sm mb-6 text-center">
@@ -76,7 +76,7 @@ export default function PinForgotPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-2.5 bg-[#1A1A1A] border border-[#333333] rounded-lg text-sm text-white placeholder:text-[#555555] focus:outline-none focus:border-[#FFCB05] transition-colors"
+                className="w-full px-4 py-2.5 bg-[#1A1A1A] border border-[#333333] rounded-lg text-sm text-white placeholder:text-[#555555] focus:outline-none focus:border-[#D4AF37] transition-colors"
                 data-testid="input-email"
               />
             </div>
@@ -85,7 +85,7 @@ export default function PinForgotPage() {
               type="submit"
               disabled={forgotMutation.isPending}
               className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-60 transition-all flex items-center justify-center gap-2"
-              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
               data-testid="button-send-reset"
             >
               {forgotMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : "Send Reset Link"}
@@ -95,7 +95,7 @@ export default function PinForgotPage() {
 
         <div className="border-t border-[#333333] my-6" />
 
-        <Link href="/customer-login" className="block text-xs text-[#888888] hover:text-[#FFCB05] transition-colors text-center">
+        <Link href="/customer-login" className="block text-xs text-[#888888] hover:text-[#D4AF37] transition-colors text-center">
           Back to sign-in
         </Link>
       </div>

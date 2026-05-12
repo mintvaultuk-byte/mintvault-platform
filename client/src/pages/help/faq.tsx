@@ -74,7 +74,7 @@ function FAQAccordion({ items }: { items: FAQItem[] }) {
             className="w-full flex items-center justify-between px-5 py-4 text-left bg-white hover:bg-[#FAFAF8] transition-colors"
           >
             <span className="font-semibold text-[#1A1A1A] text-sm pr-4">{q}</span>
-            {open === i ? <ChevronUp size={16} className="text-[#FFCB05] flex-shrink-0" /> : <ChevronDown size={16} className="text-[#888] flex-shrink-0" />}
+            {open === i ? <ChevronUp size={16} className="text-[#B8960C] flex-shrink-0" /> : <ChevronDown size={16} className="text-[#888] flex-shrink-0" />}
           </button>
           {open === i && (
             <div className="px-5 pb-4 pt-1 bg-[#FAFAF8] border-t border-[#E8E4DC]">
@@ -99,7 +99,7 @@ export default function FAQPage() {
       {/* Hero */}
       <section className="border-b border-[#E8E4DC] bg-[#FAFAF8]">
         <div className="max-w-3xl mx-auto px-6 py-16 md:py-20 text-center">
-          <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.25em] mb-4">Help</p>
+          <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.25em] mb-4">Help</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] mb-4 leading-tight tracking-tight">
             Frequently Asked Questions
           </h1>
@@ -110,7 +110,7 @@ export default function FAQPage() {
       <div className="max-w-2xl mx-auto px-6 py-16 space-y-12">
         {FAQ_DATA.map(({ category, items }) => (
           <section key={category}>
-            <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-[0.2em] mb-4">{category}</p>
+            <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">{category}</p>
             <FAQAccordion items={items} />
           </section>
         ))}
