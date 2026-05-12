@@ -598,20 +598,20 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.fillStyle = labelBg;
   ctx.fillRect(I_LEFT, stripY, I_W, STRIP_H);
 
-  // ── GRADE PANEL cert ID — centred in the grade panel's strip zone ──────────
+  // ── GRADE PANEL cert ID — right-anchored 8px from inner gold border ────────
   {
-    const certStripSz  = 36;
+    const certStripSz  = 24;   // match back-label cert ID size (L815 certFontH)
     const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 16);
     ctx.font         = `bold ${certStripFit}px Arial, Helvetica, sans-serif`;
     ctx.fillStyle    = labelFg;
-    ctx.textAlign    = "center";
+    ctx.textAlign    = "right";
     ctx.textBaseline = "middle";
     ctx.shadowBlur    = 0;
     ctx.shadowColor   = "transparent";
-    // +3 optical down-shift: caps-only text (MV2) has visual mass in upper
-    // half, so em-box-middle centring reads high. Pattern matches grade-digit
-    // optical adjustment (PR #26).
-    ctx.fillText(cert.certId, panelCX, stripY + Math.round(STRIP_H / 2) + 3);
+    // +3 optical down-shift: top-heavy mass distribution (digits/caps) reads
+    // high when em-box-middle centred. Pattern matches grade-digit optical
+    // adjustment (PR #26).
+    ctx.fillText(cert.certId.replace(/^MV/, ""), I_RIGHT - 8, stripY + Math.round(STRIP_H / 2) + 3);
   }
 
   // v433 — rarity left-aligned at the same X as the main text block above
@@ -829,15 +829,18 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // QR image on white background
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
-  // Cert ID — readable below the QR box, centred under it.
-  ctx.textAlign    = "center";
+  // Cert ID — readable below the QR box, right-anchored against the inner
+  // gold border so it grows leftward as cert IDs lengthen. The visual render
+  // strips the "MV" prefix (cert.certId stays "MV42" everywhere else — only
+  // the printed glyphs differ).
+  ctx.textAlign    = "right";
   ctx.textBaseline = "middle";
-  const certBackFit = fitFontSize(ctx, cert.certId, wbW - 8, certFontH, 14);
+  const certBackFit = fitFontSize(ctx, cert.certId.replace(/^MV/, ""), wbW - 8, certFontH, 14);
   ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
   ctx.fillStyle     = labelFg;
   ctx.shadowBlur    = 0;
   ctx.shadowColor   = "transparent";
-  ctx.fillText(cert.certId, qrCenterX, certMidY);
+  ctx.fillText(cert.certId.replace(/^MV/, ""), qrX + qrSize - 8, certMidY);
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
