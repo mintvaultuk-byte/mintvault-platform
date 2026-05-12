@@ -414,6 +414,21 @@ async function runTransferV2Sweep() {
     }
   }, 60_000);
 
+  // Instagram daily-post cron. Self-paced via setInterval inside
+  // startIgDailyPostScheduler() — fires once per UK day inside the
+  // 10:00-11:00 London window. Soft-fails if ig_post_queue is missing
+  // (migration not yet applied on this branch). Never publishes unless
+  // IG_POST_ENABLED=true AND the ig_settings.post_enabled toggle is on.
+  setTimeout(async () => {
+    try {
+      const { startIgDailyPostScheduler } = await import("./jobs/ig-daily-post");
+      startIgDailyPostScheduler();
+      log("scheduler armed", "ig-cron");
+    } catch (err: any) {
+      log(`startup error: ${err?.message || err}`, "ig-cron");
+    }
+  }, 60_000);
+
   // R2 → B2 cold-archive sweep. First run after 60s (let migrations finish
   // + B2 client lazy-init on first use), then daily. Idempotent at the
   // object level via existsInB2 — safe across both Fly machines without

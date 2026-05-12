@@ -40,11 +40,11 @@ const GRADING_STATUS_LABEL: Record<GradingStatus, string> = {
   awaiting_images:  "Awaiting images",
 };
 
-// Match the existing badge palette in CertRow (bg-green-50 / bg-[#FFCB05]/20 / etc).
+// Match the existing badge palette in CertRow (bg-green-50 / bg-[#D4AF37]/20 / etc).
 const GRADING_STATUS_BADGE_CLASS: Record<GradingStatus, string> = {
   graded:           "bg-green-50 text-green-600",
   in_progress:      "bg-yellow-50 text-yellow-700",
-  awaiting_grade:   "bg-[#FFCB05]/20 text-[#FFCB05]",
+  awaiting_grade:   "bg-[#D4AF37]/20 text-[#D4AF37]",
   awaiting_images:  "bg-[#E8E4DC] text-[#999999]",
 };
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
@@ -179,7 +179,7 @@ export default function AdminDashboard({ onLogout }: Props) {
         <div className="max-w-3xl mx-auto px-4 py-6">
           <button
             onClick={handleFormClose}
-            className="text-[#FFCB05]/60 hover:text-[#FFCB05] text-sm mb-4 transition-colors"
+            className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-sm mb-4 transition-colors"
             data-testid="button-back-list"
           >
             &larr; Back to list
@@ -294,7 +294,7 @@ export default function AdminDashboard({ onLogout }: Props) {
               {gradingCert ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">{gradingCert.certId}</span>
+                    <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">{gradingCert.certId}</span>
                     <span className="text-[#555555] text-xs">{gradingCert.cardName}</span>
                   </div>
                   <GradingPanel
@@ -360,21 +360,21 @@ function AdminHeader({
     : "...";
 
   return (
-    <header className="border-b border-[#FFCB05]/20 bg-white/95 px-4 py-3">
+    <header className="border-b border-[#D4AF37]/20 bg-white/95 px-4 py-3">
       <div className="max-w-5xl mx-auto flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <span className="text-[#FFCB05] font-bold tracking-widest text-sm">MINTVAULT</span>
-              <span className="text-[#FFCB05]/30 text-xs">ADMIN</span>
+              <span className="text-[#D4AF37] font-bold tracking-widest text-sm">MINTVAULT</span>
+              <span className="text-[#D4AF37]/30 text-xs">ADMIN</span>
             </div>
             <nav className="flex gap-1">
               <button
                 onClick={() => onTabChange("dashboard")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "dashboard"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-dashboard"
               >
@@ -384,8 +384,8 @@ function AdminHeader({
                 onClick={() => onTabChange("certs")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "certs"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-certs"
               >
@@ -395,8 +395,8 @@ function AdminHeader({
                 onClick={() => onTabChange("submissions")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "submissions"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-submissions"
               >
@@ -406,8 +406,8 @@ function AdminHeader({
                 onClick={() => onTabChange("intake")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "intake"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-intake"
               >
@@ -417,8 +417,8 @@ function AdminHeader({
                 onClick={() => onTabChange("pricing")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "pricing"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-pricing"
               >
@@ -428,8 +428,8 @@ function AdminHeader({
                 onClick={() => onTabChange("capacity")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "capacity"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-capacity"
               >
@@ -439,8 +439,8 @@ function AdminHeader({
                 onClick={() => onTabChange("printing")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "printing"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-printing"
               >
@@ -450,8 +450,8 @@ function AdminHeader({
                 onClick={() => onTabChange("grading")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "grading"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-grading"
               >
@@ -461,8 +461,8 @@ function AdminHeader({
                 onClick={() => onTabChange("learning")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "learning"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-learning"
               >
@@ -472,8 +472,8 @@ function AdminHeader({
                 onClick={() => onTabChange("capture-health")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "capture-health"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-capture-health"
               >
@@ -483,8 +483,8 @@ function AdminHeader({
                 onClick={() => onTabChange("divergence")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "divergence"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-divergence"
               >
@@ -494,8 +494,8 @@ function AdminHeader({
                 onClick={() => onTabChange("transfers")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "transfers"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-transfers"
               >
@@ -505,8 +505,8 @@ function AdminHeader({
                 onClick={() => onTabChange("scans")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
                   activeTab === "scans"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05]"
-                    : "text-[#FFCB05]/50 hover:text-[#FFCB05]"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
+                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-scans"
               >
@@ -516,7 +516,7 @@ function AdminHeader({
           </div>
           <button
             onClick={onLogout}
-            className="text-[#FFCB05]/50 hover:text-[#FFCB05] text-sm flex items-center gap-1.5 transition-colors"
+            className="text-[#D4AF37]/50 hover:text-[#D4AF37] text-sm flex items-center gap-1.5 transition-colors"
             data-testid="button-logout"
           >
             <LogOut size={14} /> Logout
@@ -568,8 +568,8 @@ function CapacitySection() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   const tiers = [
-    { slug: "standard", label: "Standard", color: "#FFCB05" },
-    { slug: "priority", label: "Priority",  color: "#FFCB05" },
+    { slug: "standard", label: "Standard", color: "#D4AF37" },
+    { slug: "priority", label: "Priority",  color: "#B8960C" },
     { slug: "express",  label: "Express",   color: "#E8C547" },
   ] as const;
 
@@ -594,9 +594,9 @@ function CapacitySection() {
   };
 
   return (
-    <div className="border border-[#FFCB05]/20 rounded-lg p-5 mb-6">
+    <div className="border border-[#D4AF37]/20 rounded-lg p-5 mb-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[#FFCB05] font-bold tracking-widest text-xs uppercase">Capacity &amp; Queue</h3>
+        <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase">Capacity &amp; Queue</h3>
         {saveMsg && <span className="text-xs text-emerald-400">{saveMsg}</span>}
       </div>
 
@@ -614,7 +614,7 @@ function CapacitySection() {
             <div key={slug} className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="text-[#FFCB05] font-bold uppercase tracking-wider">{label}</span>
+                  <span className="text-[#D4AF37] font-bold uppercase tracking-wider">{label}</span>
                   {full && !forceOpen && (
                     <span className="bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Full</span>
                   )}
@@ -626,7 +626,7 @@ function CapacitySection() {
               </div>
               <div className="h-2 bg-[#E8E0C8] rounded-full overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-[#FFCB05]"}`}
+                  className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-[#D4AF37]"}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -639,7 +639,7 @@ function CapacitySection() {
                     value={editing.max}
                     min={0}
                     onChange={(e) => setEditing({ ...editing, max: parseInt(e.target.value) || 0 })}
-                    className="w-20 bg-transparent border border-[#FFCB05]/30 rounded px-2 py-1 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#FFCB05]"
+                    className="w-20 bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
                   />
                   <label className="flex items-center gap-1.5 text-xs text-[#999999] cursor-pointer">
                     <input
@@ -653,13 +653,13 @@ function CapacitySection() {
                   <button
                     onClick={handleSave}
                     disabled={saving}
-                    className="text-xs border border-[#FFCB05] text-[#FFCB05] rounded px-3 py-1 hover:bg-[#FFCB05]/10 disabled:opacity-50 transition-colors"
+                    className="text-xs border border-[#D4AF37] text-[#D4AF37] rounded px-3 py-1 hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors"
                   >
                     {saving ? "Saving…" : "Save"}
                   </button>
                   <button
                     onClick={() => setEditing(null)}
-                    className="text-xs text-[#999999] hover:text-[#FFCB05] transition-colors"
+                    className="text-xs text-[#999999] hover:text-[#D4AF37] transition-colors"
                   >
                     Cancel
                   </button>
@@ -667,7 +667,7 @@ function CapacitySection() {
               ) : (
                 <button
                   onClick={() => setEditing({ slug, max: max, forceOpen })}
-                  className="text-[10px] text-[#FFCB05]/50 hover:text-[#FFCB05] transition-colors"
+                  className="text-[10px] text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors"
                 >
                   Edit limits
                 </button>
@@ -732,7 +732,7 @@ function StolenReportsSection() {
         {reports.map((r) => (
           <div key={r.id} className="flex items-center justify-between py-2 border-b border-red-100 last:border-0 text-sm gap-4">
             <div className="flex-1 min-w-0">
-              <span className="text-[#FFCB05] font-mono text-xs font-bold mr-2">{r.cert_id}</span>
+              <span className="text-[#D4AF37] font-mono text-xs font-bold mr-2">{r.cert_id}</span>
               <span className="text-[#1A1A1A]">{r.reporter_name}</span>
               <span className="text-[#999999] ml-2 text-xs">&lt;{r.reporter_email}&gt;</span>
               {!r.verified_at && (
@@ -743,7 +743,7 @@ function StolenReportsSection() {
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <a href={`/vault/${r.cert_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors">
+              <a href={`/vault/${r.cert_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors">
                 View
               </a>
               <button
@@ -830,7 +830,7 @@ function DashboardView({
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-[#FFCB05] tracking-widest mb-6" data-testid="text-dashboard-title">
+      <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest mb-6" data-testid="text-dashboard-title">
         DASHBOARD
       </h1>
 
@@ -862,7 +862,7 @@ function DashboardView({
       <div className="flex flex-wrap gap-3 mb-8">
         <button
           onClick={onNewCert}
-          className="border border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#FFCB05]/20 flex items-center gap-2"
+          className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 flex items-center gap-2"
           data-testid="button-quick-new-cert"
         >
           <Plus size={16} /> Create New Cert
@@ -874,12 +874,12 @@ function DashboardView({
             onChange={(e) => setCertSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCertSearch()}
             placeholder="Search Cert ID..."
-            className="bg-transparent border border-[#FFCB05]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/30 focus:outline-none focus:border-[#FFCB05] transition-colors w-48"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors w-48"
             data-testid="input-quick-search"
           />
           <button
             onClick={handleCertSearch}
-            className="border border-[#FFCB05]/30 text-[#FFCB05]/60 hover:text-[#FFCB05] px-3 py-2 rounded transition-colors"
+            className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-3 py-2 rounded transition-colors"
             data-testid="button-quick-search"
           >
             <Search size={14} />
@@ -887,14 +887,14 @@ function DashboardView({
         </div>
         <a
           href="/api/admin/certificates/export-csv"
-          className="border border-[#FFCB05]/30 text-[#FFCB05]/60 hover:text-[#FFCB05] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
+          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
           data-testid="button-export-csv"
         >
           <FileDown size={14} /> Export CSV
         </a>
         <a
           href="/api/admin/ownership-export"
-          className="border border-[#FFCB05]/30 text-[#FFCB05]/60 hover:text-[#FFCB05] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
+          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
           data-testid="button-export-ownership-csv"
         >
           <Shield size={14} /> Ownership CSV
@@ -902,7 +902,7 @@ function DashboardView({
         <button
           onClick={() => backfillClaimMutation.mutate()}
           disabled={backfillClaimMutation.isPending}
-          className="border border-[#FFCB05]/30 text-[#FFCB05]/60 hover:text-[#FFCB05] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
           data-testid="button-backfill-claim-codes"
         >
           {backfillClaimMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
@@ -910,12 +910,12 @@ function DashboardView({
         </button>
       </div>
       {backfillStatus && (
-        <p className="text-xs text-[#FFCB05]/80 -mt-6 mb-6" data-testid="text-backfill-status">{backfillStatus}</p>
+        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-backfill-status">{backfillStatus}</p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div className="border border-[#FFCB05]/20 rounded-lg p-5">
-          <h3 className="text-[#FFCB05] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-dist-title">Grade Distribution</h3>
+        <div className="border border-[#D4AF37]/20 rounded-lg p-5">
+          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-dist-title">Grade Distribution</h3>
           {stats?.gradeDistribution ? (
             <GradeChart
               data={stats.gradeDistribution}
@@ -926,8 +926,8 @@ function DashboardView({
           )}
         </div>
 
-        <div className="border border-[#FFCB05]/20 rounded-lg p-5">
-          <h3 className="text-[#FFCB05] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-type-title">By Grade Type</h3>
+        <div className="border border-[#D4AF37]/20 rounded-lg p-5">
+          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-type-title">By Grade Type</h3>
           <div className="space-y-1 mb-5">
             {[
               {
@@ -956,17 +956,17 @@ function DashboardView({
                 tabIndex={0}
                 onKeyDown={(e) => e.key === "Enter" && onGoToCerts(filter)}
                 className="flex items-center justify-between px-3 py-2 rounded cursor-pointer
-                  hover:bg-[#FFCB05]/8 hover:border hover:border-[#FFCB05]/20 border border-transparent
-                  active:scale-[0.98] active:bg-[#FFCB05]/12 transition-all select-none group"
+                  hover:bg-[#D4AF37]/8 hover:border hover:border-[#D4AF37]/20 border border-transparent
+                  active:scale-[0.98] active:bg-[#D4AF37]/12 transition-all select-none group"
                 data-testid={testId}
               >
                 <div className="flex items-center gap-2">
-                  <Tag size={14} className="text-[#FFCB05]/50 group-hover:text-[#FFCB05]/80 transition-colors" />
-                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#FFCB05]/90 transition-colors">{label}</span>
+                  <Tag size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37]/80 transition-colors" />
+                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#D4AF37]/90 transition-colors">{label}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[#FFCB05] font-bold text-sm">{count}</span>
-                  <ArrowRight size={12} className="text-[#FFCB05]/20 group-hover:text-[#FFCB05]/50 transition-colors" />
+                  <span className="text-[#D4AF37] font-bold text-sm">{count}</span>
+                  <ArrowRight size={12} className="text-[#D4AF37]/20 group-hover:text-[#D4AF37]/50 transition-colors" />
                 </div>
               </div>
             ))}
@@ -978,12 +978,12 @@ function DashboardView({
       <CapacitySection />
       <StolenReportsSection />
 
-      <div className="border border-[#FFCB05]/20 rounded-lg p-5">
+      <div className="border border-[#D4AF37]/20 rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[#FFCB05] font-bold tracking-widest text-xs uppercase" data-testid="text-recent-title">Recent Activity</h3>
+          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase" data-testid="text-recent-title">Recent Activity</h3>
           <button
             onClick={() => onGoToCerts({})}
-            className="text-[#FFCB05]/50 hover:text-[#FFCB05] text-xs transition-colors flex items-center gap-1"
+            className="text-[#D4AF37]/50 hover:text-[#D4AF37] text-xs transition-colors flex items-center gap-1"
             data-testid="button-view-all"
           >
             View All Certificates <ArrowRight size={11} />
@@ -1041,17 +1041,17 @@ function RecentCertRow({
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && handleOpen()}
       className="flex items-center justify-between py-2.5 px-2 -mx-2 rounded border border-transparent
-        cursor-pointer hover:bg-[#FFCB05]/5 hover:border-[#FFCB05]/15 active:scale-[0.99] active:bg-[#FFCB05]/8
-        border-b border-b-[#FFCB05]/5 last:border-b-0 transition-all select-none group"
+        cursor-pointer hover:bg-[#D4AF37]/5 hover:border-[#D4AF37]/15 active:scale-[0.99] active:bg-[#D4AF37]/8
+        border-b border-b-[#D4AF37]/5 last:border-b-0 transition-all select-none group"
       data-testid={`recent-cert-${cert.id}`}
     >
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[#FFCB05] font-mono text-xs font-bold">{cert.certId}</span>
+          <span className="text-[#D4AF37] font-mono text-xs font-bold">{cert.certId}</span>
           <button
             onClick={handleCopy}
             title="Copy cert ID"
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-[#FFCB05]/40 hover:text-[#FFCB05] p-0.5 rounded"
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-[#D4AF37]/40 hover:text-[#D4AF37] p-0.5 rounded"
             data-testid={`button-copy-certid-${cert.id}`}
           >
             {copied
@@ -1060,7 +1060,7 @@ function RecentCertRow({
           </button>
         </div>
         <span className="text-[#1A1A1A] text-sm truncate">{cert.cardName}</span>
-        <span className="text-[#FFCB05]/40 text-xs shrink-0 hidden sm:inline">{cert.setName}</span>
+        <span className="text-[#D4AF37]/40 text-xs shrink-0 hidden sm:inline">{cert.setName}</span>
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
@@ -1074,7 +1074,7 @@ function RecentCertRow({
         <span className="text-[#999999] text-xs hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
         </span>
-        <ArrowRight size={12} className="text-[#FFCB05]/15 group-hover:text-[#FFCB05]/40 transition-colors" />
+        <ArrowRight size={12} className="text-[#D4AF37]/15 group-hover:text-[#D4AF37]/40 transition-colors" />
       </div>
     </div>
   );
@@ -1097,21 +1097,21 @@ function StatTile({
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onClick?.() : undefined}
-      className={`border border-[#FFCB05]/20 rounded-lg p-5 flex items-center gap-4 relative transition-all select-none
+      className={`border border-[#D4AF37]/20 rounded-lg p-5 flex items-center gap-4 relative transition-all select-none
         ${clickable
-          ? "cursor-pointer hover:border-[#FFCB05]/50 hover:bg-[#FFCB05]/5 hover:shadow-[0_0_14px_rgba(255,203,5,0.12)] active:scale-[0.98] active:bg-[#FFCB05]/10"
+          ? "cursor-pointer hover:border-[#D4AF37]/50 hover:bg-[#D4AF37]/5 hover:shadow-[0_0_14px_rgba(212,175,55,0.12)] active:scale-[0.98] active:bg-[#D4AF37]/10"
           : ""}`}
       data-testid={testId}
     >
-      <div className="w-10 h-10 rounded-full border border-[#FFCB05]/30 flex items-center justify-center text-[#FFCB05]/60 shrink-0">
+      <div className="w-10 h-10 rounded-full border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37]/60 shrink-0">
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={`font-bold text-[#FFCB05] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>{value}</p>
+        <p className={`font-bold text-[#D4AF37] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>{value}</p>
         <p className="text-[#999999] text-xs uppercase tracking-wider">{label}</p>
       </div>
       {clickable && (
-        <ArrowRight size={13} className="text-[#FFCB05]/25 shrink-0" aria-hidden />
+        <ArrowRight size={13} className="text-[#D4AF37]/25 shrink-0" aria-hidden />
       )}
     </div>
   );
@@ -1141,15 +1141,15 @@ function GradeChart({
             className={`flex-1 flex flex-col items-center gap-1 h-full justify-end group select-none
               ${clickable ? "cursor-pointer" : ""}`}
           >
-            <span className="text-[#FFCB05] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
+            <span className="text-[#D4AF37] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
             <div
               className={`w-full rounded-t transition-all
                 ${clickable
-                  ? "bg-[#FFCB05]/30 group-hover:bg-[#FFCB05]/60 group-active:bg-[#FFCB05]/80 group-hover:shadow-[0_0_8px_rgba(255,203,5,0.25)]"
-                  : "bg-[#FFCB05]/15"}`}
+                  ? "bg-[#D4AF37]/30 group-hover:bg-[#D4AF37]/60 group-active:bg-[#D4AF37]/80 group-hover:shadow-[0_0_8px_rgba(212,175,55,0.25)]"
+                  : "bg-[#D4AF37]/15"}`}
               style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
             />
-            <span className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#FFCB05]" : "text-[#999999]"}`}>
+            <span className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#D4AF37]" : "text-[#999999]"}`}>
               {d.grade}
             </span>
           </div>
@@ -1243,14 +1243,14 @@ function CertsView({
     <div className="max-w-5xl mx-auto px-4 py-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#FFCB05] tracking-widest" data-testid="text-certs-title">
+          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-certs-title">
             CERTIFICATES
           </h1>
           <p className="text-[#999999] text-sm">{totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}{hasActiveFilters ? " (filtered)" : ""}</p>
         </div>
         <button
           onClick={onNewCert}
-          className="border border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#FFCB05]/20 flex items-center gap-2"
+          className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 flex items-center gap-2"
           data-testid="button-new-cert"
         >
           <Plus size={16} /> New Certificate
@@ -1259,13 +1259,13 @@ function CertsView({
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#FFCB05]/40" size={16} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40" size={16} />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search cert ID, card name, set..."
-            className="w-full bg-transparent border border-[#FFCB05]/30 rounded px-4 py-2 pl-9 text-[#1A1A1A] text-sm placeholder:text-[#FFCB05]/30 focus:outline-none focus:border-[#FFCB05] transition-colors"
+            className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-4 py-2 pl-9 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-search-certs"
           />
         </div>
@@ -1278,7 +1278,7 @@ function CertsView({
                 statusFilter === f
                   ? f === "voided"
                     ? "bg-red-50 text-red-600 border-red-200"
-                    : "bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/40"
+                    : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-${f}`}
@@ -1292,7 +1292,7 @@ function CertsView({
               onClick={() => setGradeTypeFilter(gradeTypeFilter === gt ? "all" : gt)}
               className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
                 gradeTypeFilter === gt
-                  ? "bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/40"
+                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-gradetype-${gt}`}
@@ -1300,7 +1300,7 @@ function CertsView({
               {gt === "numeric" ? "Numeric" : gt === "authentic" ? "Auth Only" : "Altered"}
             </button>
           ))}
-          <div className="w-px h-5 bg-[#FFCB05]/10" />
+          <div className="w-px h-5 bg-[#D4AF37]/10" />
           {(["all", "claimed", "unclaimed"] as const).map((o) => (
             <button
               key={o}
@@ -1308,10 +1308,10 @@ function CertsView({
               className={`text-xs px-3 py-1.5 rounded border transition-colors flex items-center gap-1 ${
                 ownershipFilter === o
                   ? o === "claimed"
-                    ? "bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/40"
+                    ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                     : o === "unclaimed"
                     ? "bg-gray-700 text-[#333333] border-gray-600"
-                    : "bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/40"
+                    : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-ownership-${o}`}
@@ -1332,7 +1332,7 @@ function CertsView({
               onClick={() => setGradingStatusFilter(g)}
               className={`text-xs px-3 py-1.5 rounded border transition-colors ${
                 gradingStatusFilter === g
-                  ? "bg-[#FFCB05]/20 text-[#FFCB05] border-[#FFCB05]/40"
+                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-grading-${g}`}
@@ -1349,7 +1349,7 @@ function CertsView({
           <select
             value={gradeFilter}
             onChange={(e) => setGradeFilter(e.target.value)}
-            className="bg-transparent border border-[#FFCB05]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#FFCB05] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="select-grade-filter"
           >
             <option value="" className="bg-white">All grades</option>
@@ -1364,7 +1364,7 @@ function CertsView({
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="bg-transparent border border-[#FFCB05]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#FFCB05] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-date-from-certs"
           />
         </div>
@@ -1374,14 +1374,14 @@ function CertsView({
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="bg-transparent border border-[#FFCB05]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#FFCB05] transition-colors"
+            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="input-date-to-certs"
           />
         </div>
         {hasActiveFilters && (
           <button
             onClick={() => { setStatusFilter("all"); setGradeTypeFilter("all"); setGradeFilter(""); setDateFrom(""); setDateTo(""); setSearchQuery(""); setOwnershipFilter("all"); setGradingStatusFilter("all"); }}
-            className="text-xs text-[#999999] hover:text-[#FFCB05] flex items-center gap-1 transition-colors"
+            className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
             data-testid="button-clear-filters-certs"
           >
             <X size={12} /> Clear filters
@@ -1392,12 +1392,12 @@ function CertsView({
       {isLoading ? (
         <div className="animate-pulse space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-[#FFCB05]/5 rounded" />
+            <div key={i} className="h-16 bg-[#D4AF37]/5 rounded" />
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 border border-[#FFCB05]/10 rounded-lg">
-          <FileText className="mx-auto text-[#FFCB05]/20 mb-3" size={40} />
+        <div className="text-center py-16 border border-[#D4AF37]/10 rounded-lg">
+          <FileText className="mx-auto text-[#D4AF37]/20 mb-3" size={40} />
           <p className="text-[#999999]">
             {searchQuery ? "No matching certificates" : statusFilter === "voided" ? "No voided certificates" : "No certificates yet"}
           </p>
@@ -1437,7 +1437,7 @@ function CertRow({
 
   return (
     <div
-      className="border border-[#FFCB05]/15 rounded-lg p-4 flex flex-col gap-3"
+      className="border border-[#D4AF37]/15 rounded-lg p-4 flex flex-col gap-3"
       data-testid={`cert-row-${cert.id}`}
     >
       <div className="flex items-center justify-between gap-3">
@@ -1446,16 +1446,16 @@ function CertRow({
             <img
               src={(cert as any).frontImageUrl || cert.frontImagePath}
               alt={cert.cardName ?? ""}
-              className="w-10 h-14 object-cover rounded border border-[#FFCB05]/20"
+              className="w-10 h-14 object-cover rounded border border-[#D4AF37]/20"
             />
           ) : (
-            <div className="w-10 h-14 rounded border border-[#FFCB05]/10 flex items-center justify-center">
-              <Image size={14} className="text-[#FFCB05]/20" />
+            <div className="w-10 h-14 rounded border border-[#D4AF37]/10 flex items-center justify-center">
+              <Image size={14} className="text-[#D4AF37]/20" />
             </div>
           )}
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[#FFCB05] font-mono text-xs font-bold" data-testid={`text-cert-id-${cert.id}`}>
+              <span className="text-[#D4AF37] font-mono text-xs font-bold" data-testid={`text-cert-id-${cert.id}`}>
                 {cert.certId}
               </span>
               <span className={`text-xs px-1.5 py-0.5 rounded ${
@@ -1469,7 +1469,7 @@ function CertRow({
                 {cert.status}
               </span>
               {(cert as any).ownershipStatus === "claimed" ? (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-[#FFCB05]/20 text-[#FFCB05] flex items-center gap-0.5" data-testid={`badge-owned-${cert.id}`}>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/20 text-[#D4AF37] flex items-center gap-0.5" data-testid={`badge-owned-${cert.id}`}>
                   <Shield size={9} className="inline" /> claimed
                 </span>
               ) : (
@@ -1504,7 +1504,7 @@ function CertRow({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={onEdit}
-            className="text-[#FFCB05]/50 hover:text-[#FFCB05] p-1.5 border border-[#FFCB05]/20 rounded transition-colors"
+            className="text-[#D4AF37]/50 hover:text-[#D4AF37] p-1.5 border border-[#D4AF37]/20 rounded transition-colors"
             title="Edit"
             data-testid={`button-edit-${cert.id}`}
           >
@@ -1523,56 +1523,56 @@ function CertRow({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-[#FFCB05]/10 pt-3">
-        <span className="text-[#FFCB05]/40 text-xs uppercase tracking-wider mr-1">Labels:</span>
+      <div className="flex flex-wrap items-center gap-2 border-t border-[#D4AF37]/10 pt-3">
+        <span className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mr-1">Labels:</span>
 
         <button
           onClick={onPreview}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-preview-${cert.id}`}
         >
           <Eye size={10} /> Preview
         </button>
 
-        <span className="text-[#FFCB05]/20">|</span>
+        <span className="text-[#D4AF37]/20">|</span>
 
         <a
           href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-dl-front-pdf-${cert.id}`}
         >
           <Download size={10} /> Front PDF
         </a>
         <a
           href={`/api/admin/certificates/${cert.id}/label/front?format=png`}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-dl-front-png-${cert.id}`}
         >
           <Download size={10} /> Front PNG
         </a>
 
-        <span className="text-[#FFCB05]/20">|</span>
+        <span className="text-[#D4AF37]/20">|</span>
 
         <a
           href={`/api/admin/certificates/${cert.id}/label/back?format=pdf`}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-dl-back-pdf-${cert.id}`}
         >
           <Download size={10} /> Back PDF
         </a>
         <a
           href={`/api/admin/certificates/${cert.id}/label/back?format=png`}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-dl-back-png-${cert.id}`}
         >
           <Download size={10} /> Back PNG
         </a>
 
-        <span className="text-[#FFCB05]/20">|</span>
+        <span className="text-[#D4AF37]/20">|</span>
 
         <a
           href={`/api/admin/certificates/${cert.id}/label/both?format=pdf`}
-          className="text-xs text-[#FFCB05]/60 hover:text-[#FFCB05] border border-[#FFCB05]/20 hover:border-[#FFCB05]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
           data-testid={`button-dl-both-pdf-${cert.id}`}
         >
           <Printer size={10} /> Both PDF
@@ -1674,19 +1674,19 @@ function LabelPreviewModal({
       onClick={onClose}
     >
       <div
-        className="bg-white border border-[#FFCB05]/30 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white border border-[#D4AF37]/30 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-[#FFCB05]/20">
+        <div className="flex items-center justify-between p-4 border-b border-[#D4AF37]/20">
           <div>
-            <h3 className="text-[#FFCB05] font-bold tracking-widest text-sm" data-testid="text-preview-title">
+            <h3 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-preview-title">
               LABEL PREVIEW
             </h3>
             <p className="text-[#999999] text-xs mt-0.5">{cert.certId} · {cert.cardName}</p>
           </div>
           <button
             onClick={onClose}
-            className="text-[#FFCB05]/50 hover:text-[#FFCB05] transition-colors"
+            className="text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors"
             data-testid="button-close-preview"
           >
             <X size={18} />
@@ -1695,12 +1695,12 @@ function LabelPreviewModal({
 
         <div className="p-4 space-y-6">
           <div>
-            <p className="text-[#FFCB05]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/front?format=png&preview=1&t=${ts}`}
                 alt="Front label preview"
-                className="max-w-full h-auto border border-[#FFCB05]/20 rounded"
+                className="max-w-full h-auto border border-[#D4AF37]/20 rounded"
                 style={{ imageRendering: "auto" }}
                 data-testid="img-preview-front"
               />
@@ -1708,52 +1708,52 @@ function LabelPreviewModal({
           </div>
 
           <div>
-            <p className="text-[#FFCB05]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
+            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
             <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
               <img
                 src={`/api/admin/certificates/${cert.id}/label/back?format=png&preview=1&t=${ts}`}
                 alt="Back label preview"
-                className="max-w-full h-auto border border-[#FFCB05]/20 rounded"
+                className="max-w-full h-auto border border-[#D4AF37]/20 rounded"
                 style={{ imageRendering: "auto" }}
                 data-testid="img-preview-back"
               />
             </div>
           </div>
 
-          <div className="border-t border-[#FFCB05]/10 pt-4">
+          <div className="border-t border-[#D4AF37]/10 pt-4">
             <p className="text-[#999999] text-xs mb-3">Print specs: 826 x 236px at 300 DPI = 70mm x 20mm exact</p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}
-                className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#FFCB05]/10 transition-colors"
+                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
                 data-testid="button-modal-dl-front-pdf"
               >
                 <Download size={11} /> Front PDF
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=png`}
-                className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#FFCB05]/10 transition-colors"
+                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
                 data-testid="button-modal-dl-front-png"
               >
                 <Download size={11} /> Front PNG
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/back?format=pdf`}
-                className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#FFCB05]/10 transition-colors"
+                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
                 data-testid="button-modal-dl-back-pdf"
               >
                 <Download size={11} /> Back PDF
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/back?format=png`}
-                className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#FFCB05]/10 transition-colors"
+                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
                 data-testid="button-modal-dl-back-png"
               >
                 <Download size={11} /> Back PNG
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/both?format=pdf`}
-                className="text-xs text-[#FFCB05] border border-[#FFCB05]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#FFCB05]/10 transition-colors"
+                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
                 data-testid="button-modal-dl-both-pdf"
               >
                 <Printer size={11} /> Both PDF

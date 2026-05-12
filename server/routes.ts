@@ -2736,7 +2736,7 @@ export async function registerRoutes(
       res.setHeader("Content-Disposition", `attachment; filename="MintVault-DGR-${certId}.pdf"`);
       doc.pipe(res);
 
-      const GOLD = "#FFCB05";
+      const GOLD = "#D4AF37";
       const DARK = isBlack ? "#FFFFFF" : "#1A1A1A";
       const BG   = isBlack ? "#0A0A0A" : "#FFFFFF";
 
@@ -2837,7 +2837,7 @@ export async function registerRoutes(
       const by = doc.y;
       for (const s of subs) {
         const val = s.val != null ? parseFloat(s.val) : null;
-        const bColor = val === null ? "#555555" : val >= 9.5 ? "#FFCB05" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
+        const bColor = val === null ? "#555555" : val >= 9.5 ? "#D4AF37" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
         doc.rect(bx, by, boxW, boxH).fillColor(bColor).fill();
         doc.fontSize(7).fillColor("#FFFFFF").text(s.label.toUpperCase(), bx, by + 6, { width: boxW, align: "center" });
         doc.fontSize(22).fillColor("#FFFFFF").text(val !== null ? String(val) : "—", bx, by + 16, { width: boxW, align: "center" });
@@ -6517,14 +6517,14 @@ export async function registerRoutes(
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(255,203,5,0.25); border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #FFCB05; margin: 0 0 16px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 32px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 16px; }
   h1 { color: #FAF7F1; font-size: 24px; font-weight: 600; margin: 0 0 16px; }
   p { color: rgba(250,247,241,0.78); font-size: 15px; line-height: 1.55; margin: 0 0 16px; }
-  strong.email { color: #FFCB05; font-weight: 600; word-break: break-all; }
+  strong.email { color: #D4AF37; font-weight: 600; word-break: break-all; }
   .actions { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
   button { font: inherit; font-size: 15px; padding: 12px 18px; border-radius: 10px; border: 0; cursor: pointer; width: 100%; }
-  button.primary { background: linear-gradient(135deg,#FFCB05,#FFCB05); color: #1A1400; font-weight: 700; }
+  button.primary { background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; }
   button.secondary { background: transparent; color: #FAF7F1; border: 1px solid rgba(250,247,241,0.25); }
   button:hover { filter: brightness(1.08); }
   form { margin: 0; }
@@ -6634,11 +6634,11 @@ export async function registerRoutes(
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; background: #1A1612; color: #FAF7F1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(255,203,5,0.25); border-radius: 16px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #FFCB05; margin: 0 0 14px; }
+  .card { width: 100%; max-width: 480px; background: #221C16; border: 1px solid rgba(212,175,55,0.25); border-radius: 16px; padding: 28px; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #D4AF37; margin: 0 0 14px; }
   h1 { color: #FAF7F1; font-size: 22px; font-weight: 600; margin: 0 0 14px; line-height: 1.25; }
   p { color: rgba(250,247,241,0.78); font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
-  .cta { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; background: linear-gradient(135deg,#FFCB05,#FFCB05); color: #1A1400; font-weight: 700; font-size: 15px; text-align: center; text-decoration: none; margin: 18px 0 12px; }
+  .cta { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; background: linear-gradient(135deg,#B8960C,#D4AF37); color: #1A1400; font-weight: 700; font-size: 15px; text-align: center; text-decoration: none; margin: 18px 0 12px; }
   .copy-block { background: #15110D; border: 1px solid rgba(250,247,241,0.08); border-radius: 8px; padding: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; color: rgba(250,247,241,0.55); }
   .meta { color: rgba(250,247,241,0.45); font-size: 12px; margin-top: 16px; }
   .steps { color: rgba(250,247,241,0.55); font-size: 12px; line-height: 1.6; margin: 14px 0 0; padding-left: 18px; }
@@ -11922,6 +11922,140 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       await db.execute(sql`DELETE FROM custom_sets WHERE set_id = ${req.params.setId}`);
       res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Instagram automation admin ────────────────────────────────────────────
+  // Six routes power the /admin/instagram page. All require admin auth.
+  // Audit-log entry written on every state change (entity_type='ig_post' or
+  // 'ig_settings'). Soft-delete only — skipped rows get deleted_at, never DROP.
+  app.get("/api/admin/ig/settings", requireAdmin, async (_req, res) => {
+    try {
+      const { igSettings, igPostQueue } = await import("@shared/schema");
+      const { desc, isNull } = await import("drizzle-orm");
+      const settings = await db.select().from(igSettings).limit(1);
+      const next = await db
+        .select()
+        .from(igPostQueue)
+        .where(isNull(igPostQueue.deletedAt))
+        .orderBy(desc(igPostQueue.scheduledFor))
+        .limit(1);
+      res.json({
+        postEnabled:  settings[0]?.postEnabled ?? false,
+        envGate:      process.env.IG_POST_ENABLED === "true",
+        dryRunEnvVar: process.env.IG_DRY_RUN === "true",
+        nextPost:     next[0] ?? null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/admin/ig/settings", requireAdmin, async (req, res) => {
+    try {
+      const { igSettings } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const enabled = !!req.body?.postEnabled;
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      // Ensure single row exists (id=1).
+      const existing = await db.select().from(igSettings).limit(1);
+      if (existing.length === 0) {
+        await db.insert(igSettings).values({ id: 1, postEnabled: enabled, updatedBy: adminEmail });
+      } else {
+        await db.update(igSettings)
+          .set({ postEnabled: enabled, updatedAt: new Date(), updatedBy: adminEmail })
+          .where(eq(igSettings.id, existing[0].id));
+      }
+      try { await storage.writeAuditLog("ig_settings", "1", enabled ? "enable" : "disable", adminEmail, {}); } catch {}
+      res.json({ ok: true, postEnabled: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/ig/queue", requireAdmin, async (req, res) => {
+    try {
+      const { igPostQueue } = await import("@shared/schema");
+      const { desc, isNull, sql: drizzleSql } = await import("drizzle-orm");
+      const page  = Math.max(1, parseInt(String(req.query.page  ?? "1"), 10) || 1);
+      const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit ?? "20"), 10) || 20));
+      const offset = (page - 1) * limit;
+      const rows = await db
+        .select()
+        .from(igPostQueue)
+        .where(isNull(igPostQueue.deletedAt))
+        .orderBy(desc(igPostQueue.scheduledFor))
+        .limit(limit)
+        .offset(offset);
+      const countRes = await db.execute<{ n: number }>(drizzleSql`SELECT COUNT(*)::int AS n FROM ig_post_queue WHERE deleted_at IS NULL`);
+      const total = (countRes as any).rows?.[0]?.n ?? 0;
+      res.json({ rows, page, limit, total });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/ig/post-now", requireAdmin, async (req, res) => {
+    try {
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      const { runIgDailyPost } = await import("./jobs/ig-daily-post");
+      const result = await runIgDailyPost({ force: true });
+      try { await storage.writeAuditLog("ig_post", String(result.queueId ?? "n/a"), "post-now-triggered", adminEmail, result); } catch {}
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/admin/ig/queue/:id/skip", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      await db.update(igPostQueue)
+        .set({ status: "skipped", deletedAt: new Date() })
+        .where(eq(igPostQueue.id, id));
+      try { await storage.writeAuditLog("ig_post", String(id), "skipped", adminEmail, {}); } catch {}
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/admin/ig/queue/:id/retry", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      await db.update(igPostQueue)
+        .set({ status: "pending", errorDetail: null })
+        .where(eq(igPostQueue.id, id));
+      try { await storage.writeAuditLog("ig_post", String(id), "retry", adminEmail, {}); } catch {}
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Signed URL for queue-row image preview (admin only, 60s expiry).
+  app.get("/api/admin/ig/queue/:id/image-url", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+      const row = rows[0];
+      if (!row?.imageR2Key) return res.status(404).json({ error: "No image for this queue row" });
+      const { getR2SignedUrl } = await import("./r2");
+      const url = await getR2SignedUrl(row.imageR2Key, 60);
+      res.json({ url });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

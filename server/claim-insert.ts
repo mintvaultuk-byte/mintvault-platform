@@ -1,5 +1,6 @@
 import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
+import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
 const DPI = 300;
@@ -14,17 +15,16 @@ const MM_TO_PT = 2.83465;
 const PDF_W = CARD_W_MM * MM_TO_PT;
 const PDF_H = CARD_H_MM * MM_TO_PT;
 
-// ── Colour palette ────────────────────────────────────────────────────────
-// PR #88 typography overhaul: design principle is "black text on white,
-// yellow only in the single footer band". Inkjet printers cannot reliably
-// render small light-coloured text on white, so the redesign respects that
-// physical constraint by anchoring all readable text to #111111 / #222222 /
-// #555555. Yellow is the brand signal but never sits behind body text.
-const WHITE = "#FFFFFF";
-// PR #91 — print-yellow palette. Slightly darker than the site brand
-// (#FFCB05) for legibility on inkjet-printed paper. Used by the outer
-// border AND the inner footer band; both reference this single constant.
-const GOLD  = "#E6B505";
+const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
+
+// ── Colour palette (white background, matches certificate style) ──────────────
+const WHITE   = "#FFFFFF";
+const DARK    = "#1A1A1A";   // replaces BLACK text on white bg
+const GOLD    = "#D4AF37";
+const GOLD_DK = "#A07820";   // unified with labels.ts GOLD_DARK for cross-print consistency
+const GRAY    = "#555555";   // body text on white
+const GRAY_LT = "#888888";   // labels/captions on white
+const GRAY_BG = "#F5F0E8";   // alternating row bg (matches certificate)
 
 const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
 
@@ -49,6 +49,45 @@ async function generateQR(url: string, size: number): Promise<Buffer> {
   });
 }
 
+// Draw a solid gold border frame on the canvas (matches certificate style).
+// v6: inner vertical side bars removed; only outer border + corner ornaments.
+function drawBorderFrame(ctx: any, w: number, h: number) {
+  const bw = 8;    // outer bar width (px)
+
+  // Outer gold bars
+  ctx.fillStyle = GOLD;
+  ctx.fillRect(0, 0, w, bw);           // top
+  ctx.fillRect(0, h - bw, w, bw);      // bottom
+  ctx.fillRect(0, 0, bw, h);           // left
+  ctx.fillRect(w - bw, 0, bw, h);      // right
+
+  // Corner ornaments
+  const cs = 12;
+  const co = bw + 1;
+  ctx.fillStyle = GOLD;
+  const corners = [
+    [co, co], [w - co - cs, co],
+    [co, h - co - cs], [w - co - cs, h - co - cs],
+  ] as [number, number][];
+  for (const [cx, cy] of corners) {
+    ctx.fillRect(cx, cy, cs, cs);
+  }
+}
+
+function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 export async function generateClaimInsertPNG(
   certId: string,
   claimCode: string,
@@ -58,132 +97,176 @@ export async function generateClaimInsertPNG(
   const canvas = createCanvas(PX_W, PX_H);
   const ctx = canvas.getContext("2d");
 
-  const normalCertId  = normalizeCertId(certId);
+  const normalCertId = normalizeCertId(certId);
   const formattedCode = formatClaimCode(claimCode);
-  const claimUrl      = `${CLAIM_BASE_URL}?cert=${encodeURIComponent(normalCertId)}`;
+  const claimUrl = `${CLAIM_BASE_URL}?cert=${encodeURIComponent(normalCertId)}`;
 
-  // ── 300 DPI conversion helpers ──────────────────────────────────────────
-  const px      = (mm: number) => Math.round(mm * MM);
-  const ptToPx  = (pt: number) => Math.round(pt * (DPI / 72));   // 1pt = 4.167px @ 300DPI
-
-  // ── Yellow border frame (PR #90 follow-up) ──────────────────────────────
-  // Symmetric 2mm yellow #FFCB05 border on all four sides. The 3mm footer
-  // band sits INSIDE the inner content area (just above the bottom border)
-  // so the bottom edge stacks: 2mm border → 3mm yellow band → content
-  // above. Reads as a single yellow frame from a glance.
-  //
-  // Layout (canvas mm):
-  //   Yellow border        outer 2mm on all 4 sides
-  //   Inner content area   x=2..83.6, y=2..49  (81.6 × 47mm)
-  //   Yellow footer band   y=49..52 (3mm, inside the inner area)
-  //   Yellow bottom border y=52..54
-  //
-  // The SVG cut layer in print-batch.ts traces the outer 85.6×54mm with a
-  // 0.25mm bleed inset, which puts the cut INSIDE the yellow border — any
-  // sub-mm registration drift slices through yellow rather than white.
-  const BORDER_MM        = 2;
-  const FOOTER_BAND_MM   = 3;
-
-  // Step 1 — fill entire canvas yellow (border base layer).
-  ctx.fillStyle = GOLD;
+  // ── White background ──────────────────────────────────────────────────────────
+  ctx.fillStyle = WHITE;
   ctx.fillRect(0, 0, PX_W, PX_H);
 
-  // Step 2 — paint inner white content area on top of the yellow.
-  const innerX = px(BORDER_MM);
-  const innerY = px(BORDER_MM);
-  const innerW = PX_W - 2 * px(BORDER_MM);
-  const innerH = PX_H - 2 * px(BORDER_MM);
-  ctx.fillStyle = WHITE;
-  ctx.fillRect(innerX, innerY, innerW, innerH);
+  // ── Gold border frame (same style as certificate) ─────────────────────────────
+  drawBorderFrame(ctx, PX_W, PX_H);
 
-  // textBaseline="alphabetic" — y values are baselines (caps sit above).
-  // The approved spec gives mm-from-canvas-top baselines for each element.
-  // PR #90 follow-up uniformly shifts every element by +1mm so the 9-element
-  // stack fits the 47mm inner content area with the steps ending 1mm above
-  // the footer band: 18pt header baseline 7mm→8mm, …, last step 47mm→48mm,
-  // footer band starts at canvas y=49mm.
-  ctx.textBaseline = "alphabetic";
+  // textBaseline="top" — y always refers to the TOP of the glyph cap-height.
+  // y += fontSize + gap means exactly `gap` pixels of visible space below each element.
+  ctx.textBaseline = "top";
 
-  const leftX = px(4);   // 4mm from canvas edge = 2mm from inner white edge
+  const pad = 32;
 
-  // ── 1. "CLAIM YOUR CARD" header — 18pt extra-bold, #111111, y=8mm ───────
-  ctx.font      = `800 ${ptToPx(18)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#111111";
+  // ── Logo: centered at top, up to 200px wide ───────────────────────────────────
+  let logo: any = null;
+  try { logo = await loadImage(LOGO_PATH); } catch {}
+
+  const logoMaxW = 280;
+  const logoMaxH = 96;
+  let logoBottom = pad;
+  if (logo) {
+    const aspect = logo.width / logo.height;
+    let dw = Math.min(logoMaxW, Math.round(logoMaxH * aspect));
+    let dh = Math.round(dw / aspect);
+    if (dh > logoMaxH) { dh = logoMaxH; dw = Math.round(dh * aspect); }
+    const dx = Math.round((PX_W - dw) / 2);
+    ctx.drawImage(logo, dx, pad, dw, dh);
+    logoBottom = pad + dh;
+  } else {
+    ctx.font = "900 38px \"Arial Black\", Arial, sans-serif";
+    ctx.fillStyle = GOLD;
+    ctx.textAlign = "center";
+    ctx.fillText("MINTVAULT UK", PX_W / 2, pad + 6);
+    ctx.textAlign = "left";
+    logoBottom = pad + 50;
+  }
+
+  // ── Registry subtitle (14px, centered) ─────────────────────────────────────
+  // 12px gap below logo bottom → subtitle TOP at logoBottom + 12.
+  // Subtitle is 14px tall → subtitle BOTTOM at logoBottom + 26.
+  // 20px gap → header divider at logoBottom + 26 + 20 = logoBottom + 46.
+  const subtitleY = logoBottom + 12;
+  ctx.font = "900 24px \"Arial Black\", Arial, sans-serif";
+  ctx.fillStyle = "#000000";
+  ctx.textAlign = "center";
+  ctx.fillText("UK TRADING CARD AUTHENTICATION REGISTRY", PX_W / 2, subtitleY);
   ctx.textAlign = "left";
-  ctx.fillText("CLAIM YOUR CARD", leftX, px(8));
 
-  // ── 2. Subheader at 11.5mm — 7pt Helvetica-Bold #111111 ─────────────────
-  ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#111111";
-  try { (ctx as any).letterSpacing = "0px"; } catch {}
-  ctx.fillText("UK TRADING CARD AUTHENTICATION REGISTRY", leftX, px(11.5));
+  // ── Header gold divider ───────────────────────────────────────────────────────
+  // 20px clear gap below subtitle bottom (subtitleY + 24) before the 2px line.
+  const headerDivY = subtitleY + 24 + 20;
+  ctx.fillStyle = GOLD;
+  ctx.globalAlpha = 0.6;
+  ctx.fillRect(pad, headerDivY, PX_W - pad * 2, 2);
+  ctx.globalAlpha = 1;
 
-  // ── 3. "CERTIFICATE NO." label at 16mm — 7pt bold #555555 ───────────────
-  ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#555555";
-  ctx.fillText("CERTIFICATE NO.", leftX, px(16));
+  // ── Two-column layout: left = text, right = QR ───────────────────────────────
+  const rightColX = Math.round(PX_W * 0.56);
+  const contentLeft = pad + 4;
 
-  // ── 4. Cert ID HERO at 24.5mm — 28pt Helvetica-Black #111111 ────────────
-  ctx.font      = `900 ${ptToPx(28)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#111111";
-  ctx.fillText(normalCertId, leftX, px(24.5));
+  // y starts 22px below the BOTTOM of the header divider (headerDivY + 2 + 20 = +22)
+  let y = headerDivY + 22;
 
-  // ── 5. "CLAIM CODE" label at 30mm — 7pt bold #555555 ────────────────────
-  ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#555555";
-  ctx.fillText("CLAIM CODE", leftX, px(30));
+  // "CLAIM YOUR CARD" (28px) — dark text for inkjet print legibility on white
+  ctx.font = "bold 28px Arial, Helvetica, sans-serif";
+  ctx.fillStyle = DARK;
+  ctx.textAlign = "left";
+  ctx.fillText("CLAIM YOUR CARD", contentLeft, y);
+  y += 28 + 20; // 20px gap before next section
 
-  // ── 6. Claim code HERO at 36mm — 14pt Courier-Bold (900) #111111 ────────
-  ctx.font      = `900 ${ptToPx(14)}px "Courier New", Courier, monospace`;
-  ctx.fillStyle = "#111111";
-  ctx.fillText(formattedCode, leftX, px(36));
+  // "Certificate No." label (28px Arial Black, pure black)
+  ctx.font = "900 28px \"Arial Black\", Arial, sans-serif";
+  ctx.fillStyle = "#000000";
+  ctx.fillText("Certificate No.", contentLeft, y);
+  y += 28 + 10; // 10px gap between label and its value
 
-  // ── 7. Three numbered steps starting at 42mm, line-height 3mm ──────────
-  // Last step baseline at 48mm; footer band top at 49mm → 1mm clearance.
-  ctx.font      = `bold ${ptToPx(7)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle = "#222222";
+  // Certificate value (44px Courier) — pure black
+  ctx.font = "bold 44px 'Courier New', Courier, monospace";
+  ctx.fillStyle = "#000000";
+  ctx.fillText(normalCertId, contentLeft, y);
+  y += 44 + 14;
+
+  // "Claim Code" label (28px Arial Black, pure black)
+  ctx.font = "900 28px \"Arial Black\", Arial, sans-serif";
+  ctx.fillStyle = "#000000";
+  ctx.fillText("Claim Code", contentLeft, y);
+  y += 28 + 10;
+
+  // Claim code value — 48px Courier, pure black
+  ctx.font = "bold 48px 'Courier New', Courier, monospace";
+  ctx.fillStyle = "#000000";
+  ctx.fillText(formattedCode, contentLeft, y);
+  y += 48 + 14;
+
+  // Section divider (left column only) — 1px line. Gap below compressed 20→14.
+  ctx.fillStyle = GOLD_DK;
+  ctx.globalAlpha = 0.25;
+  ctx.fillRect(contentLeft, y, rightColX - contentLeft - 20, 1);
+  ctx.globalAlpha = 1;
+  y += 1 + 14;
+
+  // Steps (bold 28px Arial, pure black)
+  ctx.font = "bold 28px Arial, Helvetica, sans-serif";
+  ctx.fillStyle = "#000000";
   const steps = [
     "1. Visit mintvaultuk.com/claim",
     "2. Enter cert no. & claim code",
     "3. Verify email to claim ownership",
   ];
-  for (let i = 0; i < steps.length; i++) {
-    ctx.fillText(steps[i], leftX, px(42 + i * 3));
+  for (const step of steps) {
+    ctx.fillText(step, contentLeft, y);
+    y += 28 + 10;
   }
 
-  // ── 8. QR code — 25mm × 25mm, right side, slightly below centre ─────────
-  // Pure black on white for max inkjet scan reliability. Right edge sits
-  // 1mm inside the right yellow border (canvas x = 83.6 - 1 = 82.6mm).
-  // Vertical: centred between subheader baseline + 2mm "slightly below"
-  // nudge — clears the bottom step horizontally and the footer vertically.
-  const qrSize    = px(25);
-  const qrBuf     = await generateQR(claimUrl, qrSize);
-  const qrImg     = await loadImage(qrBuf);
-  const qrX       = PX_W - px(BORDER_MM + 1) - qrSize;
-  const footerTop = PX_H - px(BORDER_MM + FOOTER_BAND_MM);   // canvas y=49mm
-  const zoneTop   = px(14);                                  // just below subheader caps
-  const qrCY      = (zoneTop + footerTop) / 2 + px(2);
-  const qrY       = Math.round(qrCY - qrSize / 2);
-  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+  // ── QR code — right column, vertically centred between header divider & footer ─
+  const qrSize = 220;
+  const qrBuf = await generateQR(claimUrl, qrSize);
+  const qrImg = await loadImage(qrBuf);
 
-  // ── 9. Footer band — 3mm tall yellow strip INSIDE the inner area, with
-  // #111111 text centred. Sits just above the 2mm bottom border. ──────────
-  const footerY  = footerTop;
-  const footerH  = px(FOOTER_BAND_MM);
-  ctx.fillStyle  = GOLD;
-  ctx.fillRect(innerX, footerY, innerW, footerH);
+  const qrPad = 8;
+  const qrBoxSize = qrSize + qrPad * 2;
+  const rightColW = (PX_W - pad) - rightColX;
+  const qrX = rightColX + Math.round((rightColW - qrBoxSize) / 2);
 
-  ctx.textBaseline = "middle";
-  ctx.font         = `bold ${ptToPx(5.5)}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  ctx.fillStyle    = "#111111";
-  ctx.textAlign    = "center";
+  // Content zone: from just below the header divider to just above the footer
+  const zoneTop = headerDivY + 2 + 22;
+  const zoneBot = PX_H - pad - 34;       // leaves room for footer line + 20px gap + text
+  const qrY = Math.round((zoneTop + zoneBot - qrBoxSize) / 2);
+
+  // Warm cream background tile behind QR
+  ctx.fillStyle = GRAY_BG;
+  roundRect(ctx, qrX - 2, qrY - 2, qrBoxSize + 4, qrBoxSize + 4, 8);
+  ctx.fill();
+  ctx.drawImage(qrImg, qrX + qrPad, qrY + qrPad, qrSize, qrSize);
+
+  // "Scan to claim" caption (bold 22px Arial, pure black)
+  ctx.font = "bold 22px Arial, Helvetica, sans-serif";
+  ctx.fillStyle = "#000000";
+  ctx.textAlign = "center";
+  ctx.fillText("Scan to claim", qrX + qrBoxSize / 2, qrY + qrBoxSize + 16);
+  ctx.textAlign = "left";
+
+  // ── Footer: thin gold line then text, both at bottom ─────────────────────────
+  // footerTextTop = TOP of footer text (textBaseline="top").
+  // footerLineY   = TOP of the 1px divider line.
+  // Disclaimer was removed — the freed 579-601 band is reclaimed by lowering
+  // the divider into it. Line-to-text gap compressed to 8px (was 14) so the
+  // line drops below step 3 bottom (569) with ≥5px clearance, while keeping
+  // text bottom at the safe edge (PX_H - pad = 606).
+  const footerTextTop = PX_H - pad - 24;
+  const footerLineY   = footerTextTop - 8;
+  console.log(`[claim-insert] PX_H=${PX_H} pad=${pad} footerTextTop=${footerTextTop} footerLineY=${footerLineY} gap=${footerTextTop - footerLineY - 1}px`);
+  ctx.fillStyle = GOLD_DK;
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(pad, footerLineY, PX_W - pad * 2, 1);
+  ctx.globalAlpha = 1;
+
+  ctx.font = "900 24px \"Arial Black\", Arial, sans-serif";
+  ctx.fillStyle = "#000000";
+  ctx.textAlign = "center";
   ctx.fillText(
-    "mintvaultuk.com  —  MintVault UK  —  UK Trading Card Authentication",
+    "mintvaultuk.com  \u00b7  MintVault UK  \u00b7  UK Trading Card Authentication",
     PX_W / 2,
-    footerY + footerH / 2,
+    footerTextTop,
   );
-  ctx.textAlign    = "left";
-  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
 
   return canvas.toBuffer("image/png");
 }

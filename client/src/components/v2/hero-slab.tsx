@@ -175,7 +175,7 @@ function Slab3D({
             position: "absolute",
             inset: 0,
             borderRadius: 12,
-            border: "1px solid rgba(255,203,5, 0.4)",
+            border: "1px solid rgba(212, 175, 55, 0.4)",
             backgroundColor: "var(--v2-paper-raised)",
             overflow: "hidden",
             boxShadow:
@@ -200,7 +200,7 @@ function Slab3D({
                   fontSize: width * 0.05,
                   letterSpacing: "0.1em",
                   padding: "1px 6px",
-                  border: "1px solid rgba(255,203,5, 0.4)",
+                  border: "1px solid rgba(212, 175, 55, 0.4)",
                   borderRadius: 999,
                   lineHeight: 1,
                 }}
@@ -255,7 +255,7 @@ function Slab3D({
               height: "25%",
               padding: "6px 10px",
               backgroundColor: "var(--v2-paper-raised)",
-              borderTop: "1px solid rgba(255,203,5, 0.3)",
+              borderTop: "1px solid rgba(212, 175, 55, 0.3)",
               display: "flex",
               flexDirection: "column",
               justifyContent: "center",
@@ -339,7 +339,7 @@ function Slab3D({
             position: "absolute",
             inset: 0,
             borderRadius: 12,
-            border: "1px solid rgba(255,203,5, 0.4)",
+            border: "1px solid rgba(212, 175, 55, 0.4)",
             background:
               "linear-gradient(155deg, var(--v2-slab-gradient-navy) 0%, var(--v2-slab-gradient-petrol) 100%)",
             overflow: "hidden",
@@ -353,7 +353,7 @@ function Slab3D({
             className="font-display italic"
             style={{
               fontSize: width * 0.18,
-              color: "rgba(255,203,5,0.55)",
+              color: "rgba(212,175,55,0.55)",
               fontWeight: 400,
               lineHeight: 1,
             }}
@@ -365,7 +365,7 @@ function Slab3D({
             style={{
               fontSize: width * 0.04,
               letterSpacing: "0.3em",
-              color: "rgba(255,203,5,0.5)",
+              color: "rgba(212,175,55,0.5)",
               marginTop: 14,
             }}
           >

@@ -17,9 +17,9 @@ const V = {
   paperSunk: "#F4F0E6",
   line: "#E8E1D0",
   lineSoft: "#EFE9DA",
-  gold: "#FFCB05",
-  goldSoft: "#FFCB05",
-  goldDark: "#D9A300",
+  gold: "#B8960C",
+  goldSoft: "#D4AF37",
+  goldDark: "#8A6F08",
   panelDark: "#1A1612",
   panelDarkSoft: "#2A241C",
   slabNavy: "hsl(220, 45%, 15%)",
@@ -123,7 +123,7 @@ function Slab3D({
           position: "absolute",
           inset: 0,
           borderRadius: 12,
-          border: "1px solid rgba(255,203,5, 0.4)",
+          border: "1px solid rgba(212, 175, 55, 0.4)",
           backgroundColor: V.paperRaised,
           overflow: "hidden",
           boxShadow: "0 30px 60px -20px rgba(15,14,11,0.35), 0 12px 24px -10px rgba(15,14,11,0.18)",
@@ -143,7 +143,7 @@ function Slab3D({
                 fontSize: width * 0.05,
                 letterSpacing: "0.1em",
                 padding: "1px 6px",
-                border: "1px solid rgba(255,203,5, 0.4)",
+                border: "1px solid rgba(212, 175, 55, 0.4)",
                 borderRadius: 999,
                 lineHeight: 1,
               }}>
@@ -191,7 +191,7 @@ function Slab3D({
             height: "25%",
             padding: "6px 10px",
             backgroundColor: V.paperRaised,
-            borderTop: "1px solid rgba(255,203,5, 0.3)",
+            borderTop: "1px solid rgba(212, 175, 55, 0.3)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
@@ -253,7 +253,7 @@ function Slab3D({
           position: "absolute",
           inset: 0,
           borderRadius: 12,
-          border: "1px solid rgba(255,203,5, 0.4)",
+          border: "1px solid rgba(212, 175, 55, 0.4)",
           background: `linear-gradient(155deg, ${V.slabNavy} 0%, ${V.slabPetrol} 100%)`,
           overflow: "hidden",
           display: "flex",
@@ -265,7 +265,7 @@ function Slab3D({
             fontFamily: "'Fraunces', Georgia, serif",
             fontStyle: "italic",
             fontSize: width * 0.18,
-            color: `rgba(255,203,5,0.55)`,
+            color: `rgba(212,175,55,0.55)`,
             fontWeight: 400,
             lineHeight: 1,
           }}>
@@ -275,7 +275,7 @@ function Slab3D({
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: width * 0.04,
             letterSpacing: "0.3em",
-            color: "rgba(255,203,5,0.5)",
+            color: "rgba(212,175,55,0.5)",
             marginTop: 14,
           }}>
             REGISTERED
@@ -737,7 +737,7 @@ function SectionInspection() {
             bottom: 24, right: 24,
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: 10,
-            color: "rgba(255,203,5,0.55)",
+            color: "rgba(212,175,55,0.55)",
             letterSpacing: "0.3em",
           }}>
             {Math.round(rot * 360)}°
@@ -760,7 +760,7 @@ function Portal({ children, height = "70vh" }) {
       background: `radial-gradient(ellipse at center, ${V.panelDarkSoft} 0%, ${V.panelDark} 80%)`,
       borderRadius: 16,
       overflow: "hidden",
-      boxShadow: `inset 0 0 80px rgba(0,0,0,0.6), inset 0 2px 0 rgba(255,203,5,0.18), 0 40px 80px -30px rgba(15,14,11,0.4)`,
+      boxShadow: `inset 0 0 80px rgba(0,0,0,0.6), inset 0 2px 0 rgba(212,175,55,0.18), 0 40px 80px -30px rgba(15,14,11,0.4)`,
       border: `1px solid ${V.line}`,
     }}>
       {/* Inner gold frame line */}
@@ -768,7 +768,7 @@ function Portal({ children, height = "70vh" }) {
         position: "absolute",
         inset: 8,
         borderRadius: 12,
-        border: `1px solid rgba(255,203,5, 0.18)`,
+        border: `1px solid rgba(212, 175, 55, 0.18)`,
         pointerEvents: "none",
         zIndex: 2,
       }} />
@@ -778,7 +778,7 @@ function Portal({ children, height = "70vh" }) {
         top: "50%", left: "50%",
         width: "60%", height: "60%",
         transform: "translate(-50%, -50%)",
-        background: `radial-gradient(ellipse, rgba(255,203,5,0.12) 0%, transparent 70%)`,
+        background: `radial-gradient(ellipse, rgba(212,175,55,0.12) 0%, transparent 70%)`,
         filter: "blur(40px)",
         pointerEvents: "none",
       }} />
@@ -989,8 +989,8 @@ function SectionC() {
               borderRadius: 12,
               backgroundColor: "transparent",
               border: tier.featured
-                ? `1px solid rgba(255,203,5, 0.6)`
-                : `1px solid rgba(255,203,5, 0.25)`,
+                ? `1px solid rgba(212, 175, 55, 0.6)`
+                : `1px solid rgba(212, 175, 55, 0.25)`,
               display: "flex",
               flexDirection: "column",
             }}>
@@ -1565,7 +1565,7 @@ function MiniSlab({ grade }) {
       borderRadius: 5,
       padding: 3,
       boxShadow: "0 4px 10px rgba(0,0,0,0.45)",
-      border: "1px solid rgba(255,203,5,0.3)",
+      border: "1px solid rgba(212,175,55,0.3)",
     }}>
       <div style={{
         position: "relative",

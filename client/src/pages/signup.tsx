@@ -60,8 +60,8 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center px-4">
           <div className="max-w-md w-full text-center">
-            <div className="w-16 h-16 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mx-auto mb-6">
-              <CheckCircle size={28} className="text-[#FFCB05]" />
+            <div className="w-16 h-16 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-6">
+              <CheckCircle size={28} className="text-[#D4AF37]" />
             </div>
             <h1 className="text-2xl font-black text-[#1A1A1A] mb-3">Account Created</h1>
             <p className="text-[#666666] mb-3">We've sent a verification link to <strong>{email}</strong>.</p>
@@ -69,7 +69,7 @@ export default function SignupPage() {
             <button
               onClick={() => navigate("/dashboard")}
               className="px-8 py-3 rounded-xl font-bold text-sm text-[#1A1400] transition-all"
-              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
             >
               Go to Dashboard
             </button>
@@ -99,7 +99,7 @@ export default function SignupPage() {
                 <input
                   type="email" required value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                  className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                 />
               </div>
             </div>
@@ -111,7 +111,7 @@ export default function SignupPage() {
                 <input
                   type="text" value={displayName} onChange={e => setDisplayName(e.target.value)}
                   placeholder="How we'll address you"
-                  className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                  className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                 />
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function SignupPage() {
                 <input
                   type={showPw ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="10+ characters, letter + number"
-                  className="w-full pl-9 pr-10 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                  className="w-full pl-9 pr-10 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                 />
                 <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA] hover:text-[#666666]">
                   {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -148,13 +148,13 @@ export default function SignupPage() {
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox" checked={terms} onChange={e => setTerms(e.target.checked)}
-                className="mt-0.5 accent-[#FFCB05]"
+                className="mt-0.5 accent-[#D4AF37]"
               />
               <span className="text-xs text-[#666666]">
                 I agree to the{" "}
-                <Link href="/terms-and-conditions" target="_blank" className="text-[#FFCB05] underline">Terms & Conditions</Link>{" "}
+                <Link href="/terms-and-conditions" target="_blank" className="text-[#B8960C] underline">Terms & Conditions</Link>{" "}
                 and{" "}
-                <Link href="/liability-and-insurance" target="_blank" className="text-[#FFCB05] underline">Liability Policy</Link>
+                <Link href="/liability-and-insurance" target="_blank" className="text-[#B8960C] underline">Liability Policy</Link>
               </span>
             </label>
 
@@ -164,7 +164,7 @@ export default function SignupPage() {
               type="submit"
               disabled={signupMutation.isPending}
               className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] flex items-center justify-center gap-2 disabled:opacity-60 transition-all"
-              style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
             >
               {signupMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Creating account…</> : "Create Account"}
             </button>
@@ -172,7 +172,7 @@ export default function SignupPage() {
 
           <p className="text-xs text-center text-[#888888] mt-6">
             Already have an account?{" "}
-            <Link href="/login" className="text-[#FFCB05] font-semibold hover:text-[#FFCB05]">Sign in</Link>
+            <Link href="/login" className="text-[#B8960C] font-semibold hover:text-[#D4AF37]">Sign in</Link>
           </p>
         </div>
       </div>

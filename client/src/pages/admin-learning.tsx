@@ -239,7 +239,7 @@ export default function AdminLearningPage() {
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Brain size={22} className="text-[#FFCB05]" />
+        <Brain size={22} className="text-[#D4AF37]" />
         <div>
           <h1 className="text-xl font-bold text-[#1A1A1A]">AI Learning Dashboard</h1>
           <p className="text-[#888888] text-sm">Track AI accuracy and improve grading consistency over time</p>
@@ -248,17 +248,17 @@ export default function AdminLearningPage() {
 
       {loadingOverview ? (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-2 border-[#FFCB05] border-t-transparent rounded-full" />
+          <div className="animate-spin w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full" />
         </div>
       ) : (
         <>
           {/* Overview stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: "Total Graded",    value: o?.total_graded ?? 0,    icon: <BarChart3 size={16} className="text-[#FFCB05]" /> },
-              { label: "This Month",      value: o?.this_month ?? 0,       icon: <TrendingUp size={16} className="text-[#FFCB05]" /> },
-              { label: "Average Grade",   value: o?.avg_grade ? Number(o.avg_grade).toFixed(1) : "—", icon: <CheckCircle2 size={16} className="text-[#FFCB05]" /> },
-              { label: "Avg Time/Card",   value: formatSeconds(Number(avgTimeSeconds)), icon: <Clock size={16} className="text-[#FFCB05]" /> },
+              { label: "Total Graded",    value: o?.total_graded ?? 0,    icon: <BarChart3 size={16} className="text-[#D4AF37]" /> },
+              { label: "This Month",      value: o?.this_month ?? 0,       icon: <TrendingUp size={16} className="text-[#D4AF37]" /> },
+              { label: "Average Grade",   value: o?.avg_grade ? Number(o.avg_grade).toFixed(1) : "—", icon: <CheckCircle2 size={16} className="text-[#D4AF37]" /> },
+              { label: "Avg Time/Card",   value: formatSeconds(Number(avgTimeSeconds)), icon: <Clock size={16} className="text-[#D4AF37]" /> },
             ].map(({ label, value, icon }) => (
               <div key={label} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-4">
                 <div className="flex items-center gap-1.5 mb-2">{icon}<p className="text-[#888888] text-xs uppercase tracking-widest">{label}</p></div>
@@ -268,9 +268,9 @@ export default function AdminLearningPage() {
           </div>
 
           {o && o.black_label_count > 0 && (
-            <div className="flex items-center gap-2 bg-[#FFCB05]/10 border border-[#FFCB05]/30 rounded-xl px-4 py-3">
-              <span className="text-[#FFCB05] text-lg">★</span>
-              <p className="text-[#FFCB05] font-bold text-sm">{o.black_label_count} Black Label{o.black_label_count !== 1 ? "s" : ""} awarded</p>
+            <div className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-xl px-4 py-3">
+              <span className="text-[#D4AF37] text-lg">★</span>
+              <p className="text-[#D4AF37] font-bold text-sm">{o.black_label_count} Black Label{o.black_label_count !== 1 ? "s" : ""} awarded</p>
             </div>
           )}
 
@@ -282,7 +282,7 @@ export default function AdminLearningPage() {
                 {overview!.grade_distribution.map(({ final_grade, count }) => (
                   <div key={final_grade} className="flex-1 flex flex-col items-center gap-1">
                     <div
-                      className="w-full bg-[#FFCB05] rounded-t-sm min-h-1"
+                      className="w-full bg-[#D4AF37] rounded-t-sm min-h-1"
                       style={{ height: `${(count / maxCount) * 80}px` }}
                     />
                     <span className="text-[8px] text-[#888888] font-mono">{final_grade}</span>
@@ -297,7 +297,7 @@ export default function AdminLearningPage() {
           {hasAiData && (
             <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-5">
               <div className="flex items-center gap-2">
-                <Brain size={16} className="text-[#FFCB05]" />
+                <Brain size={16} className="text-[#D4AF37]" />
                 <h2 className="text-[#1A1A1A] font-bold">AI Accuracy</h2>
               </div>
               <p className="text-[#555555] text-sm">
@@ -338,7 +338,7 @@ export default function AdminLearningPage() {
           {stats && (
             <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
               <div className="flex items-center gap-2">
-                <Brain size={16} className="text-[#FFCB05]" />
+                <Brain size={16} className="text-[#D4AF37]" />
                 <h2 className="text-[#1A1A1A] font-bold">AI Accuracy (Predictions)</h2>
               </div>
               {stats.ai_accuracy.approved_count >= 30 ? (
@@ -365,7 +365,7 @@ export default function AdminLearningPage() {
               ) : (
                 <div className="text-center py-2">
                   <p className="text-[#555555] text-sm">
-                    Need <strong className="text-[#FFCB05]">{Math.max(0, 30 - stats.ai_accuracy.approved_count)}</strong> more graded card{30 - stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions before accuracy figures are statistically meaningful.
+                    Need <strong className="text-[#D4AF37]">{Math.max(0, 30 - stats.ai_accuracy.approved_count)}</strong> more graded card{30 - stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions before accuracy figures are statistically meaningful.
                   </p>
                   <p className="text-[#888888] text-xs mt-2">
                     Currently {stats.ai_accuracy.approved_count} approved · {stats.ai_accuracy.prediction_count} predictions logged.
@@ -378,11 +378,11 @@ export default function AdminLearningPage() {
           {/* Prompt suggestions */}
           <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-[#FFCB05]" />
+              <AlertTriangle size={16} className="text-[#D4AF37]" />
               <h2 className="text-[#1A1A1A] font-bold">Prompt Refinement Suggestions</h2>
             </div>
             {suggestions.map((s, i) => (
-              <div key={i} className="border-l-4 border-[#FFCB05] bg-[#FFCB05]/5 rounded-r-xl pl-4 pr-4 py-3">
+              <div key={i} className="border-l-4 border-[#D4AF37] bg-[#D4AF37]/5 rounded-r-xl pl-4 pr-4 py-3">
                 <p className="text-[#555555] text-sm leading-relaxed">{s}</p>
               </div>
             ))}
@@ -396,7 +396,7 @@ export default function AdminLearningPage() {
                 {overview!.activity_last_30_days.map(({ day, count }) => (
                   <div key={day} className="flex-1 flex flex-col items-center" title={`${day}: ${count}`}>
                     <div
-                      className="w-full bg-[#FFCB05]/60 rounded-t-sm min-h-0.5"
+                      className="w-full bg-[#D4AF37]/60 rounded-t-sm min-h-0.5"
                       style={{ height: `${(count / maxActivity) * 52}px` }}
                     />
                   </div>
@@ -421,7 +421,7 @@ export default function AdminLearningPage() {
                     <div key={card_game} className="flex items-center gap-3">
                       <span className="text-sm text-[#1A1A1A] w-24 capitalize">{card_game || "Other"}</span>
                       <div className="flex-1 h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#FFCB05] rounded-full" style={{ width: `${pct}%` }} />
+                        <div className="h-full bg-[#D4AF37] rounded-full" style={{ width: `${pct}%` }} />
                       </div>
                       <span className="text-xs text-[#888888] w-12 text-right">{count} ({pct}%)</span>
                     </div>
@@ -440,7 +440,7 @@ export default function AdminLearningPage() {
           {flagsData?.flags && flagsData.flags.length > 0 && (
             <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
               <div className="flex items-center gap-2">
-                <ToggleLeft size={16} className="text-[#FFCB05]" />
+                <ToggleLeft size={16} className="text-[#D4AF37]" />
                 <h2 className="text-[#1A1A1A] font-bold">AI Feature Toggles</h2>
               </div>
               <p className="text-[#555555] text-xs">
@@ -457,7 +457,7 @@ export default function AdminLearningPage() {
                           <p className="text-sm font-bold text-[#1A1A1A]">{copy.title}</p>
                           <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
                             f.overrideSet
-                              ? "border-[#FFCB05] bg-[#FFCB05]/10 text-[#FFCB05]"
+                              ? "border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37]"
                               : "border-[#D4D0C8] bg-white text-[#888888]"
                           }`}>
                             {f.overrideSet ? "Custom" : "Default"}
@@ -483,7 +483,7 @@ export default function AdminLearningPage() {
                         disabled={isSubmitting}
                         onClick={() => setPendingFlag({ flag: f, nextEnabled: !f.enabled })}
                         className={`flex-shrink-0 inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
-                          f.enabled ? "bg-[#FFCB05] border-[#FFCB05]" : "bg-[#E8E4DC] border-[#D4D0C8]"
+                          f.enabled ? "bg-[#D4AF37] border-[#D4AF37]" : "bg-[#E8E4DC] border-[#D4D0C8]"
                         } ${isSubmitting ? "opacity-60" : ""}`}
                         title={`Toggle ${copy.title}`}
                       >
@@ -503,7 +503,7 @@ export default function AdminLearningPage() {
           {embedStatus && (
             <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-3">
               <div className="flex items-center gap-2">
-                <Database size={16} className="text-[#FFCB05]" />
+                <Database size={16} className="text-[#D4AF37]" />
                 <h2 className="text-[#1A1A1A] font-bold">RAG Corpus</h2>
               </div>
               {embedStatus.ready === false ? (
@@ -517,7 +517,7 @@ export default function AdminLearningPage() {
                     {" "}({embedStatus.percentage}%).
                   </p>
                   <div className="h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#FFCB05] rounded-full transition-all" style={{ width: `${embedStatus.percentage}%` }} />
+                    <div className="h-full bg-[#D4AF37] rounded-full transition-all" style={{ width: `${embedStatus.percentage}%` }} />
                   </div>
                   {embedStatus.oldest_unembedded_cert_id && (
                     <p className="text-[#888888] text-xs">
@@ -576,7 +576,7 @@ export default function AdminLearningPage() {
                 type="button"
                 onClick={() => applyFlagToggle(pendingFlag.flag, pendingFlag.nextEnabled)}
                 disabled={submittingFlag === pendingFlag.flag.name}
-                className="px-3 py-1.5 text-sm rounded bg-[#FFCB05] text-[#111111] font-bold disabled:opacity-60"
+                className="px-3 py-1.5 text-sm rounded bg-[#D4AF37] text-white font-bold disabled:opacity-60"
               >
                 {submittingFlag === pendingFlag.flag.name ? "Applying…" : "Confirm"}
               </button>

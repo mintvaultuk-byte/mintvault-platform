@@ -41,8 +41,8 @@ function SpecCard({
         className="w-14 h-14 rounded-xl flex items-center justify-center"
         style={{
           backgroundColor: onDark
-            ? "rgba(255,203,5,0.1)"
-            : "rgba(255,203,5,0.08)",
+            ? "rgba(212,175,55,0.1)"
+            : "rgba(212,175,55,0.08)",
           color: "var(--v2-gold)",
         }}
       >
@@ -134,7 +134,7 @@ export default function TechnologyV2() {
           <div>
             <p
               className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#FFCB05" }}
+              style={{ color: "#D4AF37" }}
             >
               Est. Kent &middot; Technology
             </p>
@@ -155,7 +155,7 @@ export default function TechnologyV2() {
             </p>
             <p
               className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider no-text-shadow"
-              style={{ color: "#FFCB05" }}
+              style={{ color: "#D4AF37" }}
             >
               Designed for permanence &middot; Made in Kent
             </p>
@@ -175,7 +175,7 @@ export default function TechnologyV2() {
                 <div
                   className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
                   style={{
-                    backgroundColor: "rgba(255,203,5,0.08)",
+                    backgroundColor: "rgba(212,175,55,0.08)",
                     color: "var(--v2-gold)",
                   }}
                 >

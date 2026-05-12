@@ -74,7 +74,7 @@ export default function ClaimPage() {
     <div className="min-h-screen py-12 px-4">
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
-          <Shield className="w-12 h-12 text-[#FFCB05] mx-auto mb-4" />
+          <Shield className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
           <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight" data-testid="text-claim-title">
             Claim Your Card
           </h1>
@@ -101,7 +101,7 @@ export default function ClaimPage() {
               {result.showBuyerInit && (
                 <a
                   href={`/transfer/claim-by-code${certId ? `?certId=${encodeURIComponent(certId)}` : ""}`}
-                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#FFCB05] hover:underline"
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#D4AF37] hover:underline"
                   data-testid="link-request-transfer"
                 >
                   Request transfer instead <ArrowRight size={14} />
@@ -111,8 +111,8 @@ export default function ClaimPage() {
           </div>
         )}
 
-        <div className="relative z-[3] border border-[#FFCB05]/30 bg-white rounded-2xl p-6">
-          <h2 className="text-[#FFCB05] text-lg font-semibold mb-6">First-Time Ownership Registration</h2>
+        <div className="relative z-[3] border border-[#D4AF37]/30 bg-white rounded-2xl p-6">
+          <h2 className="text-[#D4AF37] text-lg font-semibold mb-6">First-Time Ownership Registration</h2>
           <div>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
@@ -132,7 +132,7 @@ export default function ClaimPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="claimCode" className="text-[#444444] flex items-center gap-1.5">
-                  <Key size={13} className="text-[#FFCB05]" />
+                  <Key size={13} className="text-[#D4AF37]" />
                   Claim Code
                 </Label>
                 <Input
@@ -141,7 +141,7 @@ export default function ClaimPage() {
                   placeholder="e.g. A3K9X2M7PQ4R"
                   value={claimCode}
                   onChange={(e) => setClaimCode(e.target.value.toUpperCase())}
-                  className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono tracking-widest"
+                  className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999] font-mono tracking-widest"
                   autoComplete="off"
                   autoCorrect="off"
                   spellCheck={false}
@@ -160,7 +160,7 @@ export default function ClaimPage() {
                   placeholder="e.g. James Smith"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                  className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                   autoComplete="name"
                 />
                 <p className="text-xs text-[#999999]">
@@ -177,7 +177,7 @@ export default function ClaimPage() {
                   placeholder="your@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="bg-white border-[#FFCB05]/30 text-[#1A1A1A] placeholder:text-[#999999]"
+                  className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                 />
                 <p className="text-xs text-[#999999]">
                   We'll send a verification link to confirm your ownership.
@@ -191,7 +191,7 @@ export default function ClaimPage() {
                   type="checkbox"
                   checked={declaredNew}
                   onChange={(e) => setDeclaredNew(e.target.checked)}
-                  className="mt-1 w-4 h-4 accent-[#FFCB05] cursor-pointer"
+                  className="mt-1 w-4 h-4 accent-[#D4AF37] cursor-pointer"
                 />
                 <span className="text-sm text-[#444444] leading-snug">
                   I am the first keeper of this card since grading (no previous owners).
@@ -234,7 +234,7 @@ export default function ClaimPage() {
               </p>
               <p className="text-xs text-[#999999] mt-3">
                 Already own this card and want to transfer it to a new owner?{" "}
-                <a href="/transfer" className="text-[#FFCB05] hover:underline">Transfer Ownership →</a>
+                <a href="/transfer" className="text-[#D4AF37] hover:underline">Transfer Ownership →</a>
               </p>
             </div>
           </div>

@@ -69,13 +69,13 @@ export default function WhyMintVaultPage() {
 
       {/* ── Hero ─────────────────────────────────────────────────────── */}
       <section className="relative flex flex-col items-center justify-center px-6 pt-20 pb-16 overflow-hidden">
-        <div className="absolute top-0 -left-1/4 w-[500px] h-[400px] bg-[#FFCB05]/8 blur-[120px] rounded-full pointer-events-none" />
-        <div className="absolute bottom-0 -right-1/4 w-[400px] h-[300px] bg-[#ffcb05]/6 blur-[120px] rounded-full pointer-events-none" />
+        <div className="absolute top-0 -left-1/4 w-[500px] h-[400px] bg-[#D4AF37]/8 blur-[120px] rounded-full pointer-events-none" />
+        <div className="absolute bottom-0 -right-1/4 w-[400px] h-[300px] bg-[#d4af37]/6 blur-[120px] rounded-full pointer-events-none" />
 
         <div className="max-w-3xl w-full text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full border border-[#FFCB05]/20 bg-[#FFF9E6] mb-8">
-            <CheckCircle size={14} className="text-[#FFCB05]" />
-            <span className="text-[#FFCB05] text-[10px] uppercase tracking-[0.2em] font-bold">Our Standards</span>
+          <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full border border-[#D4AF37]/20 bg-[#FFF9E6] mb-8">
+            <CheckCircle size={14} className="text-[#D4AF37]" />
+            <span className="text-[#D4AF37] text-[10px] uppercase tracking-[0.2em] font-bold">Our Standards</span>
           </div>
 
           <h1
@@ -105,7 +105,7 @@ export default function WhyMintVaultPage() {
               <div className="flex items-start gap-5 mb-5">
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ background: "linear-gradient(135deg,#FFCB05 0%,#FFCB05 100%)" }}
+                  style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)" }}
                 >
                   {section.icon}
                 </div>
@@ -125,7 +125,7 @@ export default function WhyMintVaultPage() {
                 <ul className="space-y-2 mb-4 ml-16">
                   {section.bullets.map((bullet, i) => (
                     <li key={i} className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#FFCB05] flex-shrink-0" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] flex-shrink-0" />
                       <span className="text-[#1A1A1A] text-sm" data-testid={`text-bullet-${section.id}-${i}`}>
                         {bullet}
                       </span>
@@ -187,7 +187,7 @@ export default function WhyMintVaultPage() {
       {/* ── Meet the Founder ─────────────────────────────────────────── */}
       <section className="px-6 pb-16">
         <div className="max-w-3xl mx-auto">
-          <div className="border-l-4 border-[#FFCB05] pl-6 py-2 reveal-on-scroll" data-testid="section-founder">
+          <div className="border-l-4 border-[#D4AF37] pl-6 py-2 reveal-on-scroll" data-testid="section-founder">
             <h2 className="text-xl font-black tracking-tight text-[#1A1A1A] uppercase mb-4">Meet the Founder</h2>
             <p className="text-[#444444] text-sm leading-relaxed mb-3">
               <span className="font-semibold text-[#1A1A1A]">Cornelius Oliver</span> founded MintVault after years as a collector frustrated by slow, expensive, and US-centric grading options. His goal was simple: build the grading service he always wished existed — fast UK turnarounds, transparent pricing, and certificates collectors could actually trust.
@@ -197,7 +197,7 @@ export default function WhyMintVaultPage() {
             </p>
             <p className="text-[#666666] text-xs italic">
               "I built MintVault because collectors deserve a service that works for them — not against them."
-              <span className="not-italic font-semibold text-[#FFCB05] ml-1">— Cornelius Oliver, Founder</span>
+              <span className="not-italic font-semibold text-[#B8960C] ml-1">— Cornelius Oliver, Founder</span>
             </p>
           </div>
         </div>
@@ -207,14 +207,14 @@ export default function WhyMintVaultPage() {
       <section className="px-6 pb-24">
         <div
           className="max-w-3xl mx-auto rounded-3xl p-10 flex flex-col md:flex-row items-center justify-between gap-6"
-          style={{ background: "linear-gradient(135deg,#FFCB05 0%,#FFCB05 100%)" }}
+          style={{ background: "linear-gradient(135deg,#D4AF37 0%,#B8960C 100%)" }}
         >
           <div className="text-[#3c2f00] text-center md:text-left">
             <h3 className="text-2xl font-black tracking-tighter uppercase mb-1">Ready to Grade?</h3>
             <p className="font-medium opacity-80">Start your submission today. Fast UK turnaround.</p>
           </div>
           <Link href="/submit">
-            <button className="bg-[#3c2f00] text-[#FFCB05] px-8 py-4 rounded-xl font-black uppercase tracking-widest text-sm active:scale-95 transition-transform whitespace-nowrap">
+            <button className="bg-[#3c2f00] text-[#D4AF37] px-8 py-4 rounded-xl font-black uppercase tracking-widest text-sm active:scale-95 transition-transform whitespace-nowrap">
               Submit Cards
             </button>
           </Link>

@@ -18,9 +18,9 @@ const V = {
   paperSunk: "#F4F0E6",
   line: "#E8E1D0",
   lineSoft: "#EFE9DA",
-  gold: "#FFCB05",
-  goldSoft: "#FFCB05",
-  goldDark: "#D9A300",
+  gold: "#B8960C",
+  goldSoft: "#D4AF37",
+  goldDark: "#8A6F08",
   panelDark: "#1A1612",
   panelDarkSoft: "#2A241C",
   slabNavy: "hsl(220, 45%, 15%)",
@@ -111,7 +111,7 @@ function AmbientLayer() {
         left: `${x1 - 35}%`,
         width: "70%",
         height: "70%",
-        background: "radial-gradient(circle, rgba(255,203,5, 0.08) 0%, rgba(255,203,5, 0.03) 30%, transparent 60%)",
+        background: "radial-gradient(circle, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.03) 30%, transparent 60%)",
         filter: "blur(60px)",
         willChange: "transform",
       }} />
@@ -122,7 +122,7 @@ function AmbientLayer() {
         left: `${x2 - 30}%`,
         width: "60%",
         height: "60%",
-        background: "radial-gradient(circle, rgba(255,203,5, 0.06) 0%, rgba(255,203,5, 0.02) 30%, transparent 60%)",
+        background: "radial-gradient(circle, rgba(184, 150, 12, 0.06) 0%, rgba(184, 150, 12, 0.02) 30%, transparent 60%)",
         filter: "blur(50px)",
         willChange: "transform",
       }} />
@@ -168,7 +168,7 @@ function Slab3D({
           position: "absolute",
           inset: 0,
           borderRadius: 12,
-          border: "1px solid rgba(255,203,5, 0.4)",
+          border: "1px solid rgba(212, 175, 55, 0.4)",
           backgroundColor: V.paperRaised,
           overflow: "hidden",
           boxShadow: "0 30px 60px -20px rgba(15,14,11,0.35), 0 12px 24px -10px rgba(15,14,11,0.18)",
@@ -188,7 +188,7 @@ function Slab3D({
                 fontSize: width * 0.05,
                 letterSpacing: "0.1em",
                 padding: "1px 6px",
-                border: "1px solid rgba(255,203,5, 0.4)",
+                border: "1px solid rgba(212, 175, 55, 0.4)",
                 borderRadius: 999,
                 lineHeight: 1,
               }}>
@@ -234,7 +234,7 @@ function Slab3D({
             height: "25%",
             padding: "6px 10px",
             backgroundColor: V.paperRaised,
-            borderTop: "1px solid rgba(255,203,5, 0.3)",
+            borderTop: "1px solid rgba(212, 175, 55, 0.3)",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
@@ -296,7 +296,7 @@ function Slab3D({
           position: "absolute",
           inset: 0,
           borderRadius: 12,
-          border: "1px solid rgba(255,203,5, 0.4)",
+          border: "1px solid rgba(212, 175, 55, 0.4)",
           background: `linear-gradient(155deg, ${V.slabNavy} 0%, ${V.slabPetrol} 100%)`,
           overflow: "hidden",
           display: "flex",
@@ -308,7 +308,7 @@ function Slab3D({
             fontFamily: "'Geist', system-ui, sans-serif",
             fontStyle: "italic",
             fontSize: width * 0.18,
-            color: `rgba(255,203,5,0.55)`,
+            color: `rgba(212,175,55,0.55)`,
             fontWeight: 400,
             lineHeight: 1,
           }}>
@@ -318,7 +318,7 @@ function Slab3D({
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: width * 0.04,
             letterSpacing: "0.3em",
-            color: "rgba(255,203,5,0.5)",
+            color: "rgba(212,175,55,0.5)",
             marginTop: 14,
           }}>
             REGISTERED
@@ -743,7 +743,7 @@ function DarkSectionGlow() {
         top: "30%", left: "50%",
         width: "70%", height: "60%",
         transform: "translate(-50%, -50%)",
-        background: `radial-gradient(ellipse, rgba(255,203,5, ${0.06 + breathe * 0.04}) 0%, rgba(255,203,5, 0.02) 35%, transparent 70%)`,
+        background: `radial-gradient(ellipse, rgba(212, 175, 55, ${0.06 + breathe * 0.04}) 0%, rgba(212, 175, 55, 0.02) 35%, transparent 70%)`,
         filter: "blur(80px)",
         willChange: "opacity",
       }} />
@@ -808,8 +808,8 @@ function SectionC() {
               borderRadius: 12,
               backgroundColor: "transparent",
               border: tier.featured
-                ? `1px solid rgba(255,203,5, 0.6)`
-                : `1px solid rgba(255,203,5, 0.25)`,
+                ? `1px solid rgba(212, 175, 55, 0.6)`
+                : `1px solid rgba(212, 175, 55, 0.25)`,
               display: "flex", flexDirection: "column",
             }}>
               {tier.featured && (

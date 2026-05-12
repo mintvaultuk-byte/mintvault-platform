@@ -21,8 +21,8 @@ export default function Authentication({ status, notes, onChange }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Shield size={14} className="text-[#FFCB05]" />
-        <h3 className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Authentication</h3>
+        <Shield size={14} className="text-[#D4AF37]" />
+        <h3 className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Authentication</h3>
       </div>
 
       <div className="space-y-2">
@@ -34,10 +34,10 @@ export default function Authentication({ status, notes, onChange }: Props) {
               value={opt.value}
               checked={status === opt.value}
               onChange={() => onChange(opt.value, notes)}
-              className="mt-0.5 accent-[#FFCB05]"
+              className="mt-0.5 accent-[#D4AF37]"
             />
             <div>
-              <p className={`text-xs font-medium transition-colors ${status === opt.value ? "text-[#FFCB05]" : "text-[#888888] group-hover:text-[#1A1A1A]"}`}>
+              <p className={`text-xs font-medium transition-colors ${status === opt.value ? "text-[#D4AF37]" : "text-[#888888] group-hover:text-[#1A1A1A]"}`}>
                 {opt.label}
               </p>
               <p className="text-[9px] text-[#555555]">{opt.sub}</p>

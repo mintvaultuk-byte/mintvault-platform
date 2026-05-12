@@ -32,16 +32,14 @@ interface Props {
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
 function subgradeColor(g: number): string {
-  // Black Label tier accent — PR #88 swaps to Pikachu Yellow.
-  if (g >= 10) return "#FFCB05";
+  if (g >= 10) return "#D4AF37";
   if (g >= 8)   return "#16A34A";
   if (g >= 6)   return "#CA8A04";
   return "#DC2626";
 }
 
 function overallBg(g: number): string {
-  // Grade 9-10 premium-tier ramp — PR #88 swaps to Pikachu Yellow palette.
-  if (g >= 9)   return "from-[#FFCB05] to-[#D9A300]";
+  if (g >= 9)   return "from-[#D4AF37] to-[#B8960C]";
   if (g >= 7)   return "from-[#888888] to-[#555555]";
   if (g >= 5)   return "from-[#B87333] to-[#8B4513]";
   return "from-[#444444] to-[#222222]";
@@ -49,7 +47,7 @@ function overallBg(g: number): string {
 
 function strengthColor(s: number): string {
   if (s >= 80) return "#16A34A"; // green — strong
-  if (s >= 40) return "#FFCB05"; // gold — solid
+  if (s >= 40) return "#D4AF37"; // gold — solid
   return "#D97706"; // amber — weak
 }
 
@@ -97,11 +95,11 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Black Label candidate — PR #88 swaps to Pikachu Yellow. */}
+      {/* Black Label candidate */}
       {isBlack && (
-        <div className="flex items-center justify-center gap-2 border border-[#FFCB05]/50 rounded-lg px-3 py-2 bg-[#FFCB05]/10 animate-pulse">
-          <Star size={14} className="text-[#FFCB05] fill-[#FFCB05]" />
-          <span className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Black Label Candidate</span>
+        <div className="flex items-center justify-center gap-2 border border-[#D4AF37]/50 rounded-lg px-3 py-2 bg-[#D4AF37]/10 animate-pulse">
+          <Star size={14} className="text-[#D4AF37] fill-[#D4AF37]" />
+          <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Black Label Candidate</span>
         </div>
       )}
 
@@ -146,24 +144,24 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
               <div className="flex items-center justify-center gap-1 mt-0.5">
                 {onSubgradeChange && (
                   <button type="button" onClick={() => onSubgradeChange(key, Math.max(1, val - 1))}
-                    className="text-[#555555] hover:text-[#FFCB05] text-xs leading-none">▼</button>
+                    className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▼</button>
                 )}
                 <p className="text-sm font-black min-w-[1.5em]" style={{ color: val > 0 ? subgradeColor(val) : "#888888" }}>
                   {val > 0 ? val : "—"}
                 </p>
                 {onSubgradeChange && (
                   <button type="button" onClick={() => onSubgradeChange(key, Math.min(10, val + 1))}
-                    className="text-[#555555] hover:text-[#FFCB05] text-xs leading-none">▲</button>
+                    className="text-[#555555] hover:text-[#D4AF37] text-xs leading-none">▲</button>
                 )}
               </div>
               {aiOverridden && (
                 <p className="text-[#888888] text-[8px] uppercase tracking-wider leading-none mt-0.5">AI: {aiBaseline}</p>
               )}
               {aiMatched && !aiOverridden && (
-                <p className="text-[#FFCB05]/60 text-[8px] uppercase tracking-wider leading-none mt-0.5">AI</p>
+                <p className="text-[#D4AF37]/60 text-[8px] uppercase tracking-wider leading-none mt-0.5">AI</p>
               )}
               {isPartial && (
-                <p className="text-[#FFCB05] text-[8px] uppercase tracking-wider leading-none mt-0.5">(partial)</p>
+                <p className="text-[#B8960C] text-[8px] uppercase tracking-wider leading-none mt-0.5">(partial)</p>
               )}
               {tooltip && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-48 bg-[#F0EEE8] border border-[#D4D0C8] rounded p-2 text-[9px] text-[#333333] leading-relaxed hidden group-hover:block z-20">
@@ -176,7 +174,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
       </div>
 
       {/* Calculation details */}
-      <button type="button" onClick={() => setShowCalc(!showCalc)} className="text-[#FFCB05]/50 text-[10px] hover:text-[#FFCB05]">
+      <button type="button" onClick={() => setShowCalc(!showCalc)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">
         {showCalc ? "Hide" : "Show"} calculation details
       </button>
       {showCalc && (
@@ -192,7 +190,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
 
       {/* Override */}
       {!showOverride && (
-        <button type="button" onClick={() => setShowOverride(true)} className="text-[#FFCB05]/50 text-[10px] hover:text-[#FFCB05]">Override Grade</button>
+        <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override Grade</button>
       )}
       {showOverride && (
         <div className="flex items-center gap-2">

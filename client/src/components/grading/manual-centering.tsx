@@ -260,10 +260,10 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
       <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
         <div className="flex items-center gap-6">
           <div>
-            <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
+            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
             <p className="text-[#888888] text-[10px]">Drag the <span className="text-[#EF4444]">red outer</span> rect to card edges, <span className="text-[#16A34A]">green inner</span> rect to border interior</p>
             {rectSource === "ai" && (
-              <p className="text-[#FFCB05]/70 text-[10px] mt-0.5">
+              <p className="text-[#D4AF37]/70 text-[10px] mt-0.5">
                 Pre-loaded from AI centering ({aiRatios?.lr} L/R, {aiRatios?.tb} T/B) — drag to adjust
               </p>
             )}
@@ -284,14 +284,14 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
             </div>
             <div className="text-center">
               <p className="text-[#555555] text-[9px] uppercase">Grade</p>
-              <p className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[#FFCB05]" : result.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}>{result.subgrade}</p>
+              <p className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[#D4AF37]" : result.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}>{result.subgrade}</p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#FFCB05] disabled:text-[#555555]"><ZoomOut size={16} /></button>
+          <button type="button" onClick={zoomOut} disabled={zoom <= 1} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"><ZoomOut size={16} /></button>
           <span className="text-white text-xs font-mono w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={zoomIn} disabled={zoom >= 6} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#FFCB05] disabled:text-[#555555]"><ZoomIn size={16} /></button>
+          <button type="button" onClick={zoomIn} disabled={zoom >= 6} className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"><ZoomIn size={16} /></button>
           <button type="button" onClick={onCancel} className="ml-4 text-[#888888] hover:text-white"><X size={20} /></button>
         </div>
       </div>
@@ -306,10 +306,10 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
               {renderRect(outer, "outer", "#EF4444", true)}
               {renderRect(inner, "inner", "#16A34A", true)}
               {/* Measurement lines */}
-              <line x1={outer.left} y1={(inner.top + inner.bottom) / 2} x2={inner.left} y2={(inner.top + inner.bottom) / 2} stroke="#FFCB05" strokeWidth="0.15" opacity="0.5" />
-              <line x1={inner.right} y1={(inner.top + inner.bottom) / 2} x2={outer.right} y2={(inner.top + inner.bottom) / 2} stroke="#FFCB05" strokeWidth="0.15" opacity="0.5" />
-              <line x1={(inner.left + inner.right) / 2} y1={outer.top} x2={(inner.left + inner.right) / 2} y2={inner.top} stroke="#FFCB05" strokeWidth="0.15" opacity="0.5" />
-              <line x1={(inner.left + inner.right) / 2} y1={inner.bottom} x2={(inner.left + inner.right) / 2} y2={outer.bottom} stroke="#FFCB05" strokeWidth="0.15" opacity="0.5" />
+              <line x1={outer.left} y1={(inner.top + inner.bottom) / 2} x2={inner.left} y2={(inner.top + inner.bottom) / 2} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={inner.right} y1={(inner.top + inner.bottom) / 2} x2={outer.right} y2={(inner.top + inner.bottom) / 2} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={(inner.left + inner.right) / 2} y1={outer.top} x2={(inner.left + inner.right) / 2} y2={inner.top} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
+              <line x1={(inner.left + inner.right) / 2} y1={inner.bottom} x2={(inner.left + inner.right) / 2} y2={outer.bottom} stroke="#D4AF37" strokeWidth="0.15" opacity="0.5" />
             </svg>
           </div>
         </div>
@@ -324,7 +324,7 @@ export default function ManualCentering({ certId, side, imageUrl, onSave, onCanc
         <div className="flex items-center gap-2">
           <button type="button" onClick={onCancel} className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]">Cancel</button>
           <button type="button" onClick={save} disabled={saving}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#FFCB05] to-[#FFCB05] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
+            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
             <Save size={13} /> {saving ? "Saving…" : "Save Centering"}
           </button>
         </div>

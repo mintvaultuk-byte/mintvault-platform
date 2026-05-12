@@ -44,7 +44,7 @@ interface PopulationResponse {
 function CounterTile({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="bg-white border border-[#E8E4DC] rounded-xl p-6 text-center">
-      <p className="text-3xl md:text-4xl font-black text-[#FFCB05] mb-1">{value}</p>
+      <p className="text-3xl md:text-4xl font-black text-[#D4AF37] mb-1">{value}</p>
       <p className="text-[10px] font-bold uppercase tracking-widest text-[#888888]">{label}</p>
     </div>
   );
@@ -60,8 +60,8 @@ function titleCase(s: string | null): string {
 }
 
 const GRADE_COLS: { key: keyof PopRow; label: string; color: string }[] = [
-  { key: "gBL",  label: "BL",  color: "#FFCB05" },
-  { key: "g10",  label: "10",  color: "#FFCB05" },
+  { key: "gBL",  label: "BL",  color: "#D4AF37" },
+  { key: "g10",  label: "10",  color: "#B8960C" },
   { key: "g9",   label: "9",   color: "#555555" },
   { key: "g8",   label: "8",   color: "#777777" },
   { key: "g7",   label: "7",   color: "#888888" },
@@ -125,7 +125,7 @@ export default function PopulationPage() {
       {/* ── Section 1: Hero + Counters ── */}
       <section className="py-16 md:py-20 bg-[#FAFAF8] border-b border-[#E8E4DC]">
         <div className="max-w-6xl mx-auto px-6 text-center">
-          <p className="text-xs font-bold uppercase tracking-widest text-[#FFCB05] mb-3">Public Registry</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-3">Public Registry</p>
           <h1 className="text-4xl md:text-5xl font-black text-[#1A1A1A] tracking-tight mb-4">Population Report</h1>
           <p className="text-base text-[#555555] max-w-2xl mx-auto">
             Browse every card graded by MintVault. Tap any certificate to see its full ownership logbook.
@@ -149,7 +149,7 @@ export default function PopulationPage() {
       {recent.length > 0 && (
         <section className="py-16 md:py-20">
           <div className="max-w-6xl mx-auto px-6">
-            <p className="text-xs font-bold uppercase tracking-widest text-[#FFCB05] mb-3 text-center">Latest</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-3 text-center">Latest</p>
             <h2 className="text-2xl md:text-3xl font-black text-[#1A1A1A] tracking-tight text-center mb-10">
               Recently Graded
             </h2>
@@ -159,7 +159,7 @@ export default function PopulationPage() {
                 <Link
                   key={cert.certificate_number}
                   href={`/cert/${cert.certificate_number}`}
-                  className="group block bg-white border border-[#E8E4DC] rounded-xl overflow-hidden hover:border-[#FFCB05]/40 transition-colors"
+                  className="group block bg-white border border-[#E8E4DC] rounded-xl overflow-hidden hover:border-[#D4AF37]/40 transition-colors"
                 >
                   {/* Card image */}
                   <div className="relative aspect-[3/4] bg-[#F7F7F5]">
@@ -178,7 +178,7 @@ export default function PopulationPage() {
 
                     {/* Grade medallion */}
                     {cert.grade !== null && (
-                      <div className="absolute top-2 right-2 w-10 h-10 rounded-full bg-white border-2 border-[#FFCB05] flex items-center justify-center shadow-sm">
+                      <div className="absolute top-2 right-2 w-10 h-10 rounded-full bg-white border-2 border-[#D4AF37] flex items-center justify-center shadow-sm">
                         <span className="text-xs font-black text-[#1A1A1A]">{cert.grade}</span>
                       </div>
                     )}
@@ -186,7 +186,7 @@ export default function PopulationPage() {
 
                   {/* Info */}
                   <div className="p-3">
-                    <p className="text-sm font-bold text-[#1A1A1A] truncate group-hover:text-[#FFCB05] transition-colors">
+                    <p className="text-sm font-bold text-[#1A1A1A] truncate group-hover:text-[#B8960C] transition-colors">
                       {titleCase(cert.card_name)}
                     </p>
                     {cert.card_set && (
@@ -204,7 +204,7 @@ export default function PopulationPage() {
       {/* ── Section 3: Search + Population Table ── */}
       <section className="py-16 md:py-20 bg-[#FAFAF8] border-t border-[#E8E4DC]">
         <div className="max-w-4xl mx-auto px-6">
-          <p className="text-xs font-bold uppercase tracking-widest text-[#FFCB05] mb-3 text-center">Explore</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-3 text-center">Explore</p>
           <h2 className="text-2xl md:text-3xl font-black text-[#1A1A1A] tracking-tight text-center mb-10">
             Browse the Registry
           </h2>
@@ -212,28 +212,28 @@ export default function PopulationPage() {
           {/* Search form */}
           <form
             onSubmit={handleSearch}
-            className="border border-[#FFCB05]/20 rounded-lg p-5 mb-8 flex flex-col sm:flex-row gap-3"
+            className="border border-[#D4AF37]/20 rounded-lg p-5 mb-8 flex flex-col sm:flex-row gap-3"
           >
             <input
               type="text"
               placeholder="Game (e.g. Pokémon)"
               value={game}
               onChange={e => setGame(e.target.value)}
-              className="flex-1 bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/70"
+              className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
             <input
               type="text"
               placeholder="Set name"
               value={set}
               onChange={e => setSet(e.target.value)}
-              className="flex-1 bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/70"
+              className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
             <input
               type="text"
               placeholder="Card name"
               value={card}
               onChange={e => setCard(e.target.value)}
-              className="flex-1 bg-white border border-[#FFCB05]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#FFCB05]/70"
+              className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
             <button
               type="submit"
@@ -245,9 +245,9 @@ export default function PopulationPage() {
           </form>
 
           {/* How it works */}
-          <div className="border border-[#FFCB05]/20 rounded-lg p-6 mb-8">
+          <div className="border border-[#D4AF37]/20 rounded-lg p-6 mb-8">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 border border-[#FFCB05]/40 rounded-lg flex items-center justify-center text-[#FFCB05] shrink-0">
+              <div className="w-10 h-10 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] shrink-0">
                 <BarChart3 size={20} />
               </div>
               <h3 className="text-lg font-sans font-bold text-[#1A1A1A] tracking-tight">
@@ -263,7 +263,7 @@ export default function PopulationPage() {
                 "Click 'View certs' to see individual certificates for that card",
               ].map((item, i) => (
                 <li key={i} className="flex items-start gap-2">
-                  <span className="text-[#FFCB05] mt-0.5">•</span>
+                  <span className="text-[#D4AF37] mt-0.5">•</span>
                   <span className="text-[#555555] text-sm">{item}</span>
                 </li>
               ))}
@@ -272,7 +272,7 @@ export default function PopulationPage() {
 
           {/* Results */}
           {isLoading && (
-            <div className="flex items-center justify-center gap-3 py-16 text-[#FFCB05]/60">
+            <div className="flex items-center justify-center gap-3 py-16 text-[#D4AF37]/60">
               <Loader2 size={22} className="animate-spin" />
               <span className="text-sm">Loading population data…</span>
             </div>
@@ -294,16 +294,16 @@ export default function PopulationPage() {
             <div data-testid="table-population">
 
               {/* ── Desktop table (sm+) ── */}
-              <div className="hidden sm:block border border-[#FFCB05]/20 rounded-lg overflow-hidden">
+              <div className="hidden sm:block border border-[#D4AF37]/20 rounded-lg overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-[#FFCB05]/20 bg-[#FFF9E6]">
-                        <th className="text-left text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3">Card</th>
-                        <th className="text-left text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
-                        <th className="text-right text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3">Total</th>
+                      <tr className="border-b border-[#D4AF37]/20 bg-[#FFF9E6]">
+                        <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Card</th>
+                        <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
+                        <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Total</th>
                         {GRADE_COLS.map(col => (
-                          <th key={col.key} className="text-right text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3">
+                          <th key={col.key} className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
                             {col.label}
                           </th>
                         ))}
@@ -320,10 +320,10 @@ export default function PopulationPage() {
                           <td className="px-4 py-3">
                             <div className="text-[#1A1A1A] font-semibold text-sm">{row.cardName ?? "—"}</div>
                             {row.cardGame && (
-                              <div className="text-[#FFCB05]/40 text-xs">{row.cardGame}</div>
+                              <div className="text-[#D4AF37]/40 text-xs">{row.cardGame}</div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-[#FFCB05]/60 text-sm hidden md:table-cell">
+                          <td className="px-4 py-3 text-[#D4AF37]/60 text-sm hidden md:table-cell">
                             {row.setName ?? "—"}
                           </td>
                           <td className="px-4 py-3 text-[#1A1A1A] font-mono font-semibold text-right">{row.total}</td>
@@ -335,7 +335,7 @@ export default function PopulationPage() {
                           <td className="px-4 py-3 text-right">
                             <Link
                               href={certUrl(row)}
-                              className="text-[#FFCB05]/60 hover:text-[#FFCB05] text-xs underline-offset-2 hover:underline transition-colors"
+                              className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-xs underline-offset-2 hover:underline transition-colors"
                             >
                               View certs
                             </Link>
@@ -356,7 +356,7 @@ export default function PopulationPage() {
                 {population.map((row, i) => (
                   <div
                     key={i}
-                    className="border border-[#FFCB05]/20 rounded-lg p-4 bg-white"
+                    className="border border-[#D4AF37]/20 rounded-lg p-4 bg-white"
                     data-testid={`card-population-${i}`}
                   >
                     <div className="flex items-start justify-between gap-2 mb-3">
@@ -366,7 +366,7 @@ export default function PopulationPage() {
                           <div className="text-[#888888] text-xs mt-0.5">{row.setName}</div>
                         )}
                         {row.cardGame && (
-                          <div className="text-[#FFCB05]/50 text-xs">{row.cardGame}</div>
+                          <div className="text-[#D4AF37]/50 text-xs">{row.cardGame}</div>
                         )}
                       </div>
                       <div className="text-right shrink-0">
@@ -392,7 +392,7 @@ export default function PopulationPage() {
                     </div>
                     <Link
                       href={certUrl(row)}
-                      className="text-[#FFCB05] text-xs font-semibold hover:underline underline-offset-2"
+                      className="text-[#B8960C] text-xs font-semibold hover:underline underline-offset-2"
                     >
                       View certificates →
                     </Link>

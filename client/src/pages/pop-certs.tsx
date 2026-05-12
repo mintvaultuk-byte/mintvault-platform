@@ -15,8 +15,8 @@ interface PopCert {
 function gradeColor(grade: string | null): string {
   const n = parseFloat(grade ?? "");
   if (isNaN(n)) return "#888888";
-  if (n === 10) return "#FFCB05";
-  if (n >= 9)   return "#FFCB05";
+  if (n === 10) return "#D4AF37";
+  if (n >= 9)   return "#B8960C";
   if (n >= 8)   return "#555555";
   if (n >= 7)   return "#777777";
   return "#AAAAAA";
@@ -54,14 +54,14 @@ export default function PopCertsPage() {
       <div className="px-4 py-16 max-w-4xl mx-auto">
 
         {/* Back link */}
-        <Link href="/population" className="inline-flex items-center gap-1.5 text-[#FFCB05] text-sm font-semibold hover:underline underline-offset-2 mb-8">
+        <Link href="/population" className="inline-flex items-center gap-1.5 text-[#B8960C] text-sm font-semibold hover:underline underline-offset-2 mb-8">
           <ArrowLeft size={14} />
           Population Report
         </Link>
 
         {/* Header */}
         <div className="mb-8">
-          <p className="text-xs font-bold uppercase tracking-widest text-[#FFCB05] mb-2">Card Profile</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-[#D4AF37] mb-2">Card Profile</p>
           <h1 className="text-2xl md:text-3xl font-black text-[#1A1A1A] tracking-tight mb-1">
             {card || set || "All Certificates"}
           </h1>
@@ -72,7 +72,7 @@ export default function PopCertsPage() {
 
         {/* Loading */}
         {isLoading && (
-          <div className="flex items-center justify-center gap-3 py-16 text-[#FFCB05]/60">
+          <div className="flex items-center justify-center gap-3 py-16 text-[#D4AF37]/60">
             <Loader2 size={22} className="animate-spin" />
             <span className="text-sm">Loading certificates…</span>
           </div>
@@ -94,16 +94,16 @@ export default function PopCertsPage() {
 
         {/* Results */}
         {!isLoading && !isError && data && data.length > 0 && (
-          <div className="border border-[#FFCB05]/20 rounded-lg overflow-hidden">
+          <div className="border border-[#D4AF37]/20 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[#FFCB05]/20 bg-[#FFF9E6]">
-                    <th className="text-left text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3">Cert ID</th>
-                    <th className="text-left text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Card</th>
-                    <th className="text-left text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
-                    <th className="text-right text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3">Grade</th>
-                    <th className="text-right text-[#FFCB05]/70 text-xs uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Date</th>
+                  <tr className="border-b border-[#D4AF37]/20 bg-[#FFF9E6]">
+                    <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Cert ID</th>
+                    <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Card</th>
+                    <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
+                    <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Grade</th>
+                    <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden sm:table-cell">Date</th>
                     <th className="px-4 py-3"><span className="sr-only">Open Vault</span></th>
                   </tr>
                 </thead>
@@ -142,7 +142,7 @@ export default function PopCertsPage() {
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/vault/${cert.certId}`}
-                          className="inline-flex items-center gap-1 text-[#FFCB05]/60 hover:text-[#FFCB05] text-xs underline-offset-2 hover:underline transition-colors"
+                          className="inline-flex items-center gap-1 text-[#D4AF37]/60 hover:text-[#D4AF37] text-xs underline-offset-2 hover:underline transition-colors"
                         >
                           Vault
                           <ExternalLink size={11} />

@@ -118,7 +118,7 @@ export default function VaultClubV2() {
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-            style={{ color: "#FFCB05" }}
+            style={{ color: "#D4AF37" }}
           >
             Est. Kent &middot; Vault Club
           </p>
@@ -161,7 +161,7 @@ export default function VaultClubV2() {
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year (14-day free trial) &middot; Available now
+            {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year &middot; Available now
           </p>
         </div>
       </section>
@@ -294,7 +294,7 @@ export default function VaultClubV2() {
                 Save {poundsFromPence(ANNUAL_SAVINGS_PENCE)}
               </span>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-gold)" }}>
-                Annual &middot; 14-day free trial
+                Annual
               </p>
               <div className="flex items-baseline gap-2 mb-2">
                 <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
@@ -303,7 +303,7 @@ export default function VaultClubV2() {
                 <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ year</span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
-                Equivalent to two months free. 14-day free trial. Bill renews yearly.
+                Equivalent to two months free. Bill renews yearly.
               </p>
               <button
                 type="button"
@@ -314,7 +314,7 @@ export default function VaultClubV2() {
               >
                 {checkoutMutation.isPending
                   ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                  : <>Start free trial <ArrowRight size={14} /></>}
+                  : <>Subscribe annual <ArrowRight size={14} /></>}
               </button>
               <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-auto" style={{ color: "var(--v2-gold)" }}>
                 Best value for regular submitters.
@@ -390,7 +390,7 @@ export default function VaultClubV2() {
             Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
-            {poundsFromPence(SILVER.monthly_price_pence)}/month or {poundsFromPence(SILVER.annual_price_pence)}/year (14-day free trial). Cancel anytime.
+            {poundsFromPence(SILVER.monthly_price_pence)}/month or {poundsFromPence(SILVER.annual_price_pence)}/year. Cancel anytime.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <button
@@ -413,7 +413,7 @@ export default function VaultClubV2() {
             >
               {checkoutMutation.isPending
                 ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                : <>Annual + free trial <ArrowRight size={14} /></>}
+                : <>Subscribe annual <ArrowRight size={14} /></>}
             </button>
           </div>
         </div>

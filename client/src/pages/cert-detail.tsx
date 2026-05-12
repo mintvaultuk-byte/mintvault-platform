@@ -10,7 +10,7 @@ const CERT_URL_BASE = "https://mintvaultuk.com/cert/";
 
 function gradeColor(grade: number): string {
   if (grade >= 10) return "text-emerald-400";
-  if (grade >= 9) return "text-[#FFCB05]";
+  if (grade >= 9) return "text-[#D4AF37]";
   if (grade >= 8) return "text-blue-400";
   return "text-[#999999]";
 }
@@ -25,11 +25,11 @@ function gameGradient(game: string | null | undefined): string {
     return "radial-gradient(ellipse at top, rgba(26,111,181,0.08) 0%, transparent 70%)";
   if (g.includes("one piece"))
     return "radial-gradient(ellipse at top, rgba(232,65,24,0.07) 0%, transparent 70%)";
-  return "radial-gradient(ellipse at top, rgba(255,203,5,0.07) 0%, transparent 70%)";
+  return "radial-gradient(ellipse at top, rgba(212,175,55,0.07) 0%, transparent 70%)";
 }
 
 function spawnConfetti(container: HTMLElement) {
-  const colors = ["#FFCB05", "#FFD700", "#FFF8DC", "#FFCB05", "#FFFACD"];
+  const colors = ["#D4AF37", "#FFD700", "#FFF8DC", "#B8960C", "#FFFACD"];
   for (let i = 0; i < 60; i++) {
     const el = document.createElement("div");
     const size = 6 + Math.random() * 8;
@@ -109,25 +109,25 @@ function GradingReportPanel({
   ].filter((e) => e.val?.trim());
 
   return (
-    <div className="mt-5 pt-4 border-t border-[#FFCB05]/15" data-testid="section-grading-report">
+    <div className="mt-5 pt-4 border-t border-[#D4AF37]/15" data-testid="section-grading-report">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex items-center justify-between w-full text-left group"
         aria-expanded={open}
       >
         <div className="flex items-center gap-2">
-          <ClipboardList size={14} className="text-[#FFCB05]/60 shrink-0" />
-          <p className="text-[#FFCB05]/60 text-xs uppercase tracking-widest">Grading Report</p>
+          <ClipboardList size={14} className="text-[#D4AF37]/60 shrink-0" />
+          <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grading Report</p>
         </div>
         {open
-          ? <ChevronUp size={14} className="text-[#FFCB05]/40 group-hover:text-[#FFCB05]/70 transition-colors" />
-          : <ChevronDown size={14} className="text-[#FFCB05]/40 group-hover:text-[#FFCB05]/70 transition-colors" />}
+          ? <ChevronUp size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />
+          : <ChevronDown size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />}
       </button>
       {open && (
         <div className="mt-3 space-y-3" data-testid="grading-report-body">
           {entries.map(({ key, label, val }) => (
             <div key={key}>
-              <p className="text-[#FFCB05]/50 text-[10px] uppercase tracking-wider mb-0.5">{label}</p>
+              <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-wider mb-0.5">{label}</p>
               <p className="text-[#444444] text-sm leading-relaxed" data-testid={`text-report-${key}`}>{val}</p>
             </div>
           ))}
@@ -175,8 +175,8 @@ export default function CertDetailPage() {
   if (error || !cert) {
     return (
       <div className="px-4 py-12 max-w-2xl mx-auto text-center">
-        <Shield className="mx-auto text-[#FFCB05]/30 mb-4" size={48} />
-        <h2 className="text-2xl font-bold text-[#FFCB05] mb-2 glow-gold-sm" data-testid="text-cert-not-found">
+        <Shield className="mx-auto text-[#D4AF37]/30 mb-4" size={48} />
+        <h2 className="text-2xl font-bold text-[#D4AF37] mb-2 glow-gold-sm" data-testid="text-cert-not-found">
           Certificate Not Found
         </h2>
         <p className="text-[#666666] mb-6" data-testid="text-cert-not-found-desc">
@@ -184,7 +184,7 @@ export default function CertDetailPage() {
         </p>
         <Link href="/verify">
           <button
-            className="border border-[#FFCB05] bg-white text-[#FFCB05] px-6 py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#FFCB05]/10"
+            className="border border-[#D4AF37] bg-white text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#D4AF37]/10"
             data-testid="button-back-to-lookup"
           >
             Back to Lookup
@@ -227,7 +227,7 @@ export default function CertDetailPage() {
 
         {/* Back link + action buttons row */}
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <Link href="/verify" className="inline-flex items-center gap-1.5 text-[#FFCB05]/60 hover:text-[#FFCB05] transition-colors text-sm" data-testid="link-back-lookup">
+          <Link href="/verify" className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm" data-testid="link-back-lookup">
             <ArrowLeft size={16} />
             Back to Lookup
           </Link>
@@ -243,40 +243,40 @@ export default function CertDetailPage() {
           </div>
         )}
 
-        <div className={`border rounded-lg overflow-hidden ${cert.status === "voided" ? "border-red-500/20 opacity-70" : "border-[#FFCB05]/30"}`}>
-          <div className={`p-6 border-b ${cert.status === "voided" ? "bg-gradient-to-r from-red-500/10 to-transparent border-red-500/20" : "bg-gradient-to-r from-[#FFCB05]/10 to-transparent border-[#FFCB05]/20"}`}>
+        <div className={`border rounded-lg overflow-hidden ${cert.status === "voided" ? "border-red-500/20 opacity-70" : "border-[#D4AF37]/30"}`}>
+          <div className={`p-6 border-b ${cert.status === "voided" ? "bg-gradient-to-r from-red-500/10 to-transparent border-red-500/20" : "bg-gradient-to-r from-[#D4AF37]/10 to-transparent border-[#D4AF37]/20"}`}>
             <div className="flex items-center gap-2 mb-1">
-              <Shield className={cert.status === "voided" ? "text-red-400" : "text-[#FFCB05]"} size={20} />
-              <span className={`text-xs uppercase tracking-widest ${cert.status === "voided" ? "text-red-400/60" : "text-[#FFCB05]/60"}`}>
+              <Shield className={cert.status === "voided" ? "text-red-400" : "text-[#D4AF37]"} size={20} />
+              <span className={`text-xs uppercase tracking-widest ${cert.status === "voided" ? "text-red-400/60" : "text-[#D4AF37]/60"}`}>
                 {cert.status === "voided" ? "Voided Certificate" : "Verified Certificate"}
               </span>
             </div>
-            <h1 className={`font-mono text-xl font-bold tracking-wider ${cert.status === "voided" ? "text-red-400 line-through" : "text-[#FFCB05] glow-gold-sm"}`} data-testid="text-cert-id">
+            <h1 className={`font-mono text-xl font-bold tracking-wider ${cert.status === "voided" ? "text-red-400 line-through" : "text-[#D4AF37] glow-gold-sm"}`} data-testid="text-cert-id">
               {cert.certId}
             </h1>
           </div>
 
           {(cert.frontImageUrl || cert.backImageUrl) && (
-            <div className="p-6 border-b border-[#FFCB05]/20">
+            <div className="p-6 border-b border-[#D4AF37]/20">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {cert.frontImageUrl && (
                   <div className="text-center">
-                    <p className="text-[#FFCB05]/40 text-xs uppercase tracking-wider mb-2">Front</p>
+                    <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Front</p>
                     <img
                       src={cert.frontImageUrl}
                       alt={`${cert.cardName} front`}
-                      className="max-h-80 mx-auto rounded border border-[#FFCB05]/20 object-contain bg-[#FAFAF8]"
+                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
                       data-testid="img-card-front"
                     />
                   </div>
                 )}
                 {cert.backImageUrl && (
                   <div className="text-center">
-                    <p className="text-[#FFCB05]/40 text-xs uppercase tracking-wider mb-2">Back</p>
+                    <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Back</p>
                     <img
                       src={cert.backImageUrl}
                       alt={`${cert.cardName} back`}
-                      className="max-h-80 mx-auto rounded border border-[#FFCB05]/20 object-contain bg-[#FAFAF8]"
+                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
                       data-testid="img-card-back"
                     />
                   </div>
@@ -292,9 +292,9 @@ export default function CertDetailPage() {
             {isNonNum ? (
               <div className="text-center mb-8">
                 <div className="flex items-center justify-center gap-2 mb-2">
-                  <CheckCircle className="text-[#FFCB05]" size={28} />
+                  <CheckCircle className="text-[#D4AF37]" size={28} />
                 </div>
-                <div className="text-3xl font-bold text-[#FFCB05] mb-1" data-testid="text-grade-label">
+                <div className="text-3xl font-bold text-[#D4AF37] mb-1" data-testid="text-grade-label">
                   {cert.grade}
                 </div>
                 {cert.gradeType === "AA" && (
@@ -314,7 +314,7 @@ export default function CertDetailPage() {
                   <p className="text-[#999999] text-xs mt-0.5">{cert.cardSet} · {cert.cardYear}</p>
                 </div>
                 {displayedGrade == null ? (
-                  <div className="text-6xl font-bold text-[#FFCB05]/20 mb-1 select-none" aria-hidden="true">—</div>
+                  <div className="text-6xl font-bold text-[#D4AF37]/20 mb-1 select-none" aria-hidden="true">—</div>
                 ) : (
                   <div
                     key={displayedGrade}
@@ -324,7 +324,7 @@ export default function CertDetailPage() {
                     {displayedGrade}
                   </div>
                 )}
-                <div className="text-[#FFCB05] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
+                <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
                   {displayedGrade != null ? cert.grade : "\u00a0"}
                 </div>
 
@@ -337,8 +337,8 @@ export default function CertDetailPage() {
                       { label: "Edges", val: cert.gradeEdges },
                       { label: "Surface", val: cert.gradeSurface },
                     ].map(({ label, val }) => val != null && (
-                      <div key={label} className="border border-[#FFCB05]/20 rounded p-2 text-center">
-                        <div className="text-[#FFCB05] text-sm font-bold" data-testid={`text-subgrade-${label.toLowerCase()}`}>{val}</div>
+                      <div key={label} className="border border-[#D4AF37]/20 rounded p-2 text-center">
+                        <div className="text-[#D4AF37] text-sm font-bold" data-testid={`text-subgrade-${label.toLowerCase()}`}>{val}</div>
                         <div className="text-[#999999] text-[10px] mt-0.5">{label}</div>
                       </div>
                     ))}
@@ -363,10 +363,10 @@ export default function CertDetailPage() {
             </div>
 
             {cert.notes && cert.notes.trim() && (
-              <div className="mt-5 pt-4 border-t border-[#FFCB05]/15" data-testid="section-grader-notes">
+              <div className="mt-5 pt-4 border-t border-[#D4AF37]/15" data-testid="section-grader-notes">
                 <div className="flex items-center gap-2 mb-3">
-                  <FileText size={14} className="text-[#FFCB05]/60 shrink-0" />
-                  <p className="text-[#FFCB05]/60 text-xs uppercase tracking-widest">Grader Notes</p>
+                  <FileText size={14} className="text-[#D4AF37]/60 shrink-0" />
+                  <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grader Notes</p>
                 </div>
                 <div className="space-y-1.5">
                   {cert.notes.split("\n").filter((l) => l.trim()).map((line, i) => (
@@ -385,27 +385,27 @@ export default function CertDetailPage() {
 
             {/* View Full Grading Report — shown when certificate has a grade */}
             {(cert.gradeNumeric > 0 || isNonNumericGrade(cert.gradeType)) && (
-              <div className="mt-5 pt-4 border-t border-[#FFCB05]/15">
+              <div className="mt-5 pt-4 border-t border-[#D4AF37]/15">
                 <Link
                   href={`/cert/${cert.certId}/report`}
-                  className="flex items-center justify-between w-full rounded-xl border border-[#FFCB05]/30 bg-[#FFCB05]/5 px-4 py-3 hover:bg-[#FFCB05]/10 transition-all group"
+                  className="flex items-center justify-between w-full rounded-xl border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-4 py-3 hover:bg-[#D4AF37]/10 transition-all group"
                   data-testid="link-view-report"
                 >
                   <div className="flex items-center gap-3">
-                    <FileText size={16} className="text-[#FFCB05]" />
+                    <FileText size={16} className="text-[#D4AF37]" />
                     <div>
-                      <p className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">View Full Grading Report</p>
+                      <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">View Full Grading Report</p>
                       <p className="text-[#999999] text-[10px] mt-0.5">Images, subgrades, defects & authentication</p>
                     </div>
                   </div>
-                  <ExternalLink size={14} className="text-[#FFCB05]/50 group-hover:text-[#FFCB05] transition-colors" />
+                  <ExternalLink size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37] transition-colors" />
                 </Link>
               </div>
             )}
 
             {/* QR verification widget */}
-            <div className="mt-6 pt-5 border-t border-[#FFCB05]/15 flex flex-col items-center gap-3" data-testid="section-qr-verify">
-              <p className="text-[#FFCB05]/50 text-xs uppercase tracking-widest">Verify Online</p>
+            <div className="mt-6 pt-5 border-t border-[#D4AF37]/15 flex flex-col items-center gap-3" data-testid="section-qr-verify">
+              <p className="text-[#D4AF37]/50 text-xs uppercase tracking-widest">Verify Online</p>
               <div className="qr-wrapper">
                 <div className="qr-frame">
                   {screenQrDataUrl ? (
@@ -421,7 +421,7 @@ export default function CertDetailPage() {
                 <p className="qr-id font-mono tracking-widest" data-testid="text-qr-cert-id">{cert.certId}</p>
               </div>
               {cert.nfcEnabled && cert.nfcScanCount != null && (
-                <div className="flex items-center gap-1.5 text-[#FFCB05]/40 text-xs" data-testid="text-nfc-scan-count">
+                <div className="flex items-center gap-1.5 text-[#D4AF37]/40 text-xs" data-testid="text-nfc-scan-count">
                   <Wifi size={11} />
                   <span>
                     NFC scanned {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
@@ -453,9 +453,9 @@ function PopulationSection({ certId }: { certId: string }) {
 
   if (isLoading) {
     return (
-      <div className="mt-6 border border-[#FFCB05]/20 rounded-lg p-6 animate-pulse">
-        <div className="h-6 bg-[#FFCB05]/10 rounded w-48 mb-4" />
-        <div className="h-32 bg-[#FFCB05]/5 rounded" />
+      <div className="mt-6 border border-[#D4AF37]/20 rounded-lg p-6 animate-pulse">
+        <div className="h-6 bg-[#D4AF37]/10 rounded w-48 mb-4" />
+        <div className="h-32 bg-[#D4AF37]/5 rounded" />
       </div>
     );
   }
@@ -463,11 +463,11 @@ function PopulationSection({ certId }: { certId: string }) {
   if (!pop) return null;
 
   return (
-    <div className="mt-6 border border-[#FFCB05]/30 rounded-lg overflow-hidden" data-testid="section-population">
-      <div className="bg-gradient-to-r from-[#FFCB05]/10 to-transparent p-4 border-b border-[#FFCB05]/20">
+    <div className="mt-6 border border-[#D4AF37]/30 rounded-lg overflow-hidden" data-testid="section-population">
+      <div className="bg-gradient-to-r from-[#D4AF37]/10 to-transparent p-4 border-b border-[#D4AF37]/20">
         <div className="flex items-center gap-2">
-          <Layers size={18} className="text-[#FFCB05]" />
-          <h2 className="text-[#FFCB05] font-bold tracking-widest text-sm" data-testid="text-pop-title">POPULATION HIGHLIGHTS</h2>
+          <Layers size={18} className="text-[#D4AF37]" />
+          <h2 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-pop-title">POPULATION HIGHLIGHTS</h2>
         </div>
       </div>
 
@@ -488,7 +488,7 @@ function PopulationSection({ certId }: { certId: string }) {
 
         {pop.gradeDistribution && pop.totalCount > 0 && (
           <div>
-            <p className="text-[#FFCB05]/50 text-xs uppercase tracking-wider mb-3">Grade Distribution (1–10)</p>
+            <p className="text-[#D4AF37]/50 text-xs uppercase tracking-wider mb-3">Grade Distribution (1–10)</p>
             <PopGradeChart data={pop.gradeDistribution} />
           </div>
         )}
@@ -499,8 +499,8 @@ function PopulationSection({ certId }: { certId: string }) {
 
 function PopStat({ label, value, testId }: { label: string; value: number; testId: string }) {
   return (
-    <div className="text-center border border-[#FFCB05]/15 rounded-lg p-3">
-      <p className="text-2xl font-bold text-[#FFCB05]" data-testid={testId}>{value}</p>
+    <div className="text-center border border-[#D4AF37]/15 rounded-lg p-3">
+      <p className="text-2xl font-bold text-[#D4AF37]" data-testid={testId}>{value}</p>
       <p className="text-[#999999] text-xs uppercase tracking-wider mt-1">{label}</p>
     </div>
   );
@@ -513,9 +513,9 @@ function PopGradeChart({ data }: { data: { grade: number; count: number }[] }) {
     <div className="flex items-end gap-2 h-32" data-testid="chart-pop-grades">
       {data.map((d) => (
         <div key={d.grade} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
-          <span className="text-[#FFCB05] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
+          <span className="text-[#D4AF37] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
           <div
-            className="w-full bg-[#FFCB05]/30 rounded-t transition-all"
+            className="w-full bg-[#D4AF37]/30 rounded-t transition-all"
             style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
           />
           <span className="text-[#999999] text-xs">{d.grade}</span>
@@ -538,7 +538,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between border-b border-[#E8E4DC] pb-3">
-      <div className="flex items-center gap-2 text-[#FFCB05]/60">
+      <div className="flex items-center gap-2 text-[#D4AF37]/60">
         {icon}
         <span className="text-sm uppercase tracking-wider">{label}</span>
       </div>

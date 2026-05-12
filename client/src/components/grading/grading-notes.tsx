@@ -10,8 +10,8 @@ export default function GradingNotes({ privateNotes, gradeExplanation, onChange 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <FileText size={14} className="text-[#FFCB05]" />
-        <h3 className="text-[#FFCB05] text-xs font-bold uppercase tracking-widest">Grading Notes</h3>
+        <FileText size={14} className="text-[#D4AF37]" />
+        <h3 className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Grading Notes</h3>
       </div>
 
       <div>

@@ -68,7 +68,7 @@ const TIPS = [
 // Mono confidence-pill palette. Colours chosen to read as accents on paper backgrounds.
 const CONF_COLOURS: Record<string, { fg: string; bg: string; border: string }> = {
   high:   { fg: "#1a7a3c", bg: "rgba(26, 122, 60, 0.08)",   border: "rgba(26, 122, 60, 0.35)" },
-  medium: { fg: "#d9a300", bg: "rgba(184, 134, 11, 0.08)",  border: "rgba(184, 134, 11, 0.35)" },
+  medium: { fg: "#b8860b", bg: "rgba(184, 134, 11, 0.08)",  border: "rgba(184, 134, 11, 0.35)" },
   low:    { fg: "var(--v2-ink-mute)", bg: "rgba(107, 100, 84, 0.08)", border: "var(--v2-line)" },
 };
 
@@ -308,7 +308,7 @@ export default function ToolsEstimateV2() {
             {credits !== null && (
               <span
                 className="absolute top-4 right-4 font-mono-v2 text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-full"
-                style={{ color: "var(--v2-gold)", borderColor: "var(--v2-gold-soft)", backgroundColor: "rgba(255,203,5,0.06)" }}
+                style={{ color: "var(--v2-gold)", borderColor: "var(--v2-gold-soft)", backgroundColor: "rgba(212,175,55,0.06)" }}
               >
                 {credits} credits left
               </span>
@@ -570,7 +570,7 @@ export default function ToolsEstimateV2() {
                   <div
                     className="mt-8 p-4 rounded-lg"
                     style={{
-                      backgroundColor: "rgba(255,203,5,0.05)",
+                      backgroundColor: "rgba(212,175,55,0.05)",
                       border: "1px solid var(--v2-gold-soft)",
                     }}
                   >
@@ -610,12 +610,12 @@ export default function ToolsEstimateV2() {
                 <div
                   className="inline-flex items-center gap-2 px-3 py-2 rounded border text-sm"
                   style={{
-                    backgroundColor: "rgba(255,203,5,0.08)",
+                    backgroundColor: "rgba(212,175,55,0.08)",
                     borderColor: "var(--v2-gold-soft)",
                     color: "var(--v2-ink)",
                   }}
                 >
-                  <AlertTriangle size={14} style={{ color: "#d9a300" }} />
+                  <AlertTriangle size={14} style={{ color: "#b8860b" }} />
                   <span className="font-body">Free estimate used for today</span>
                 </div>
 
@@ -644,7 +644,7 @@ export default function ToolsEstimateV2() {
                             : isSelected
                               ? "var(--v2-gold)"
                               : "var(--v2-line)",
-                          backgroundColor: isSelected ? "rgba(255,203,5,0.04)" : "var(--v2-paper)",
+                          backgroundColor: isSelected ? "rgba(212,175,55,0.04)" : "var(--v2-paper)",
                           borderWidth: isSelected ? "2px" : "1px",
                         }}
                       >

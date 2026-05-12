@@ -31,14 +31,14 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md bg-white rounded-2xl border border-[#E8E4DC] shadow-lg p-8 md:p-10">
           {done ? (
             <div className="text-center">
-              <div className="w-14 h-14 rounded-full bg-[#FFCB05]/10 border border-[#FFCB05]/30 flex items-center justify-center mx-auto mb-5">
-                <CheckCircle size={24} className="text-[#FFCB05]" />
+              <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
+                <CheckCircle size={24} className="text-[#D4AF37]" />
               </div>
               <h1 className="text-xl font-black text-[#1A1A1A] mb-3">Check Your Inbox</h1>
               <p className="text-sm text-[#666666] mb-6">
                 If an account exists for <strong>{email}</strong>, a password reset link has been sent. Check your spam folder if you don't see it within a minute.
               </p>
-              <Link href="/login" className="text-sm text-[#FFCB05] font-semibold hover:text-[#FFCB05] transition-colors">← Back to sign in</Link>
+              <Link href="/login" className="text-sm text-[#B8960C] font-semibold hover:text-[#D4AF37] transition-colors">← Back to sign in</Link>
             </div>
           ) : (
             <>
@@ -52,7 +52,7 @@ export default function ForgotPasswordPage() {
                     <input
                       type="email" required value={email} onChange={e => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#FFCB05] transition-colors"
+                      className="w-full pl-9 pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                     />
                   </div>
                 </div>
@@ -61,13 +61,13 @@ export default function ForgotPasswordPage() {
                   type="submit"
                   disabled={mutation.isPending}
                   className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] flex items-center justify-center gap-2 disabled:opacity-60 transition-all"
-                  style={{ background: "linear-gradient(135deg,#FFCB05,#FFCB05)" }}
+                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
                 >
                   {mutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : "Send Reset Link"}
                 </button>
               </form>
               <p className="text-xs text-center text-[#888888] mt-6">
-                <Link href="/login" className="text-[#FFCB05] font-semibold hover:text-[#FFCB05]">← Back to sign in</Link>
+                <Link href="/login" className="text-[#B8960C] font-semibold hover:text-[#D4AF37]">← Back to sign in</Link>
               </p>
             </>
           )}
