@@ -110,6 +110,7 @@ import TrackPage from "@/pages/track";
 import TermsPage from "@/pages/terms";
 import LiabilityPage from "@/pages/liability";
 import AdminPage from "@/pages/admin";
+import AdminInstagramPage from "@/pages/admin-instagram";
 import CustomerLoginPage from "@/pages/customer-login";
 import PinSetupPage from "@/pages/auth/pin-setup";
 import PinForgotPage from "@/pages/auth/pin-forgot";
@@ -211,6 +212,9 @@ function Router() {
         </Route>
         <Route path="/admin">
           <AdminPage />
+        </Route>
+        <Route path="/admin/instagram">
+          <AdminInstagramPage />
         </Route>
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />

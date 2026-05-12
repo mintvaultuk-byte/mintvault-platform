@@ -1311,3 +1311,63 @@ export const marketplaceDac7Quarterly = pgTable("marketplace_dac7_quarterly", {
 });
 
 export type MarketplaceDac7Quarterly = typeof marketplaceDac7Quarterly.$inferSelect;
+
+// ── Instagram automation ─────────────────────────────────────────────────────
+// Daily IG post queue + a single-row toggle table. Runs as a setInterval
+// cron in server/index.ts that fires once per day around 10:00 Europe/London.
+// Soft-delete via deletedAt; never hard-deleted. Audit-log entry on every
+// status change (entity_type='ig_post').
+
+export const IG_POST_TYPES = [
+  "card_reveal",
+  "grade_breakdown",
+  "service_explainer",
+  "vault_club",
+  "market_insight",
+] as const;
+export type IgPostType = typeof IG_POST_TYPES[number];
+
+export const IG_POST_STATUSES = [
+  "pending",
+  "generating",
+  "ready",
+  "posted",
+  "failed",
+  "skipped",
+] as const;
+export type IgPostStatus = typeof IG_POST_STATUSES[number];
+
+export const igPostQueue = pgTable("ig_post_queue", {
+  id: serial("id").primaryKey(),
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+  postType: text("post_type").notNull(),                 // one of IG_POST_TYPES
+  certId: integer("cert_id"),                            // certificates.id, nullable
+  imageR2Key: text("image_r2_key"),
+  caption: text("caption"),
+  hashtags: text("hashtags"),
+  status: text("status").notNull().default("pending"),   // one of IG_POST_STATUSES
+  metaPostId: text("meta_post_id"),
+  errorDetail: text("error_detail"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  postedAt: timestamp("posted_at", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (t) => ({
+  scheduledIdx: index("ig_post_queue_scheduled_for_idx").on(t.scheduledFor),
+  statusIdx:    index("ig_post_queue_status_idx").on(t.status),
+}));
+
+export const insertIgPostQueueSchema = createInsertSchema(igPostQueue).omit({
+  id: true, createdAt: true,
+});
+export type IgPostQueueRow = typeof igPostQueue.$inferSelect;
+export type InsertIgPostQueue = z.infer<typeof insertIgPostQueueSchema>;
+
+// Single-row toggle table. Row id=1 always exists after seed.
+export const igSettings = pgTable("ig_settings", {
+  id: serial("id").primaryKey(),
+  postEnabled: boolean("post_enabled").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+});
+
+export type IgSettingsRow = typeof igSettings.$inferSelect;
