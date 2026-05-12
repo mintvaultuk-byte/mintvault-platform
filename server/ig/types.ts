@@ -34,12 +34,13 @@ export interface IgPostData {
   insight?: string;           // from cert.gradingReport.overall
 
   // ── service_explainer ──────────────────────────────────────────────────
+  tierId?: string;            // raw tier_id ("standard" / "priority" / "express" / "gold") — used by svg-builder to look up TIER_BENEFIT
   tierName?: string;          // "Vault Queue", "Standard", "Express", "Black Label Review"
   tierTagline?: string;
   tierPricePence?: number;
   tierTurnaroundDays?: number;
   tierTurnaroundLabel?: string;
-  tierBenefit?: string;       // one-line distilled benefit
+  tierBenefit?: string;       // one-line distilled benefit (legacy — svg-builder uses tierId + TIER_BENEFIT map now)
 
   // ── vault_club ─────────────────────────────────────────────────────────
   vaultClubMonthly?: string;  // "£9.99/mo"

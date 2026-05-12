@@ -234,6 +234,7 @@ export async function fetchServiceExplainerData(tierId: string = "standard"): Pr
 
   return {
     postType:             "service_explainer",
+    tierId:               tierId,                // raw id ("standard" / "priority" / "express" / "gold") for TIER_BENEFIT lookup
     tierName:             TIER_DISPLAY_NAMES[tierId] ?? tierRow?.name ?? "—",
     tierTagline:          tierRow?.turnaroundLabel ?? "",
     tierPricePence:       tierRow?.pricePerCard ?? undefined,
@@ -258,9 +259,13 @@ export function fetchVaultClubData(): IgPostData {
   };
 }
 
-export async function fetchMarketInsightData(): Promise<IgPostData> {
-  // Lightweight aggregate over certificates. SQL count of graded certs in the
-  // last 7 days. Failure-tolerant — falls back to a generic stat string.
+// Minimum weekly graded-card count to publish a market_insight post.
+// Below this the post type returns null and the caller falls through to
+// vault_club so we never publish a "0 cards graded" stat that undersells
+// the registry. Tunable here without touching the dispatch.
+export const MARKET_INSIGHT_MIN_COUNT = 5;
+
+export async function fetchMarketInsightData(): Promise<IgPostData | null> {
   let weeklyCount = 0;
   try {
     const rows = await db.execute<{ n: number }>(sql`
@@ -276,18 +281,28 @@ export async function fetchMarketInsightData(): Promise<IgPostData> {
     console.warn(`[ig-data] market_insight count failed: ${err?.message ?? err}`);
   }
 
+  if (weeklyCount < MARKET_INSIGHT_MIN_COUNT) {
+    console.warn(`[ig-data] market_insight: weekly count ${weeklyCount} < ${MARKET_INSIGHT_MIN_COUNT} — skipping post type, caller should fall through.`);
+    return null;
+  }
+
+  // Split rendering: big number "N" stays the headline (110px); the rest of
+  // the phrase ("cards graded this week") becomes the sub-text below. The
+  // full phrase reads as one continuous "N cards graded this week" visually
+  // without trying to cram all of it into the 110px line.
   return {
-    postType:        "market_insight",
-    insightStat:     `${weeklyCount} cards graded`,
-    insightContext:  weeklyCount > 0
-      ? "This week through the MintVault registry."
-      : "Stats are quiet this week — more graded cards landing soon.",
+    postType:       "market_insight",
+    insightStat:    String(weeklyCount),
+    insightContext: "cards graded this week",
   };
 }
 
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
-export async function fetchPostData(postType: IgPostType, opts: { tierId?: string } = {}): Promise<IgPostData> {
+// Returns IgPostData OR null. The latter only happens for market_insight
+// when the weekly graded count is below MARKET_INSIGHT_MIN_COUNT. Callers
+// are expected to skip the post type and fall through; see runIgDailyPost().
+export async function fetchPostData(postType: IgPostType, opts: { tierId?: string } = {}): Promise<IgPostData | null> {
   switch (postType) {
     case "card_reveal":        return fetchCardRevealData();
     case "grade_breakdown":    return fetchGradeBreakdownData();

@@ -131,13 +131,34 @@ export async function runIgDailyPost(
     console.log(`[ig-cron] Selected post type: ${postType}${tierId ? ` (tier=${tierId})` : ""}`);
   }
 
-  // 1. Fetch data
+  // 1. Fetch data. Most post types always return data; market_insight is the
+  // exception — it returns null when the weekly graded-card count is below
+  // the publish floor. In that case the cron falls through to vault_club
+  // (Saturday's other rotation pick) so we never publish an empty stat. The
+  // admin-override path also benefits: an admin who clicks "market_insight"
+  // on a quiet week sees the auto-fallback instead of a 0-cards post.
   let data;
   try {
     data = await fetchPostData(postType, { tierId });
   } catch (err: any) {
     console.error(`[ig-cron] fetchPostData failed: ${err?.message ?? err}`);
     return { status: "failed", reason: `fetch-data: ${err?.message ?? err}` };
+  }
+
+  if (data === null && postType === "market_insight") {
+    console.warn("[ig-cron] market_insight unavailable (weekly count < floor) — falling through to vault_club");
+    postType = "vault_club";
+    tierId = undefined;
+    try {
+      data = await fetchPostData(postType);
+    } catch (err: any) {
+      console.error(`[ig-cron] vault_club fallback fetch failed: ${err?.message ?? err}`);
+      return { status: "failed", reason: `fetch-data: ${err?.message ?? err}` };
+    }
+  }
+
+  if (!data) {
+    return { status: "failed", postType, reason: "no-data" };
   }
 
   // 2. Generate image

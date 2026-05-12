@@ -39,8 +39,15 @@ async function main() {
 
   console.log(`\n[DRY RUN] post type: ${postType}${postType === "service_explainer" ? ` (tier=${tierArg})` : ""}\n`);
 
-  // 1. Data
+  // 1. Data — may be null for market_insight when weekly count is below
+  // MARKET_INSIGHT_MIN_COUNT. The cron falls through to vault_club in that
+  // case; for a dry-run we report the skip and exit cleanly.
   const data = await fetchPostData(postType, { tierId: tierArg });
+  if (data === null) {
+    console.log(`\n[DRY RUN] ${postType} returned null — post type unavailable right now (e.g. market_insight weekly count below floor).`);
+    console.log(`In the cron, this would fall through to the next post type. Exiting.`);
+    process.exit(0);
+  }
   console.log("--- POST DATA ---");
   console.log(JSON.stringify(
     Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith("_"))),

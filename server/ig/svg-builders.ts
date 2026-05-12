@@ -36,6 +36,19 @@ export const BRAND = {
   mutedOnDark: "#A8A8A8",
 } as const;
 
+// One-line benefit copy per service tier — drives the body of the
+// service_explainer post type. Keyed by service_tiers.tier_id (the raw
+// canonical id, not the display name). Falls back to a generic line if a
+// tier_id isn't in the map (e.g. reholder / crossover / authentication
+// don't currently get IG explainer posts but the cron rotation only picks
+// from standard/priority/express/gold, see selectPostType()).
+export const TIER_BENEFIT: Record<string, string> = {
+  standard: "Affordable grading for high-volume submissions.",
+  priority: "Our default service — reliable and consistent.",
+  express:  "Skip the queue when you need it fast.",
+  gold:     "Premium handling for your highest-value cards.",
+};
+
 // Lazy-load Bodoni Moda 900 as base64, cached at module scope. The font file
 // lives at public/brand/BodoniModa-Black.ttf (~120KB). Inlining it into every
 // SVG is wasteful per render but the buffer is held once in memory.
@@ -136,7 +149,12 @@ export function svgCardReveal(d: IgPostData): string {
 
   const cardName = (d.cardName ?? "Unknown").toUpperCase();
   const cardNameLines = wrapText(cardName, 18, 2);
-  const cardNameStartY = 760 - (cardNameLines.length - 1) * 36;
+  // Top-anchored: first line baseline at y=844. With 56px font (alphabetic
+  // baseline), glyph cap-line lands ~y=800. Disc bottom is at y=740, so the
+  // gap between disc and card-name top is ≥60px. Additional lines stack
+  // downward at +60px each; the layout shifts DOWN for multi-line names but
+  // never crashes into the disc.
+  const cardNameStartY = 844;
 
   const setLine = [d.year, d.setName].filter(Boolean).join(" • ").toUpperCase();
 
@@ -165,8 +183,8 @@ ${cardNameLines.map((line, i) =>
     `<text x="${DIMS.W / 2}" y="${cardNameStartY + i * 60}" class="display" font-size="56" fill="${BRAND.gold}" text-anchor="middle">${line}</text>`
   ).join("\n")}
 
-<!-- Set / year line -->
-<text x="${DIMS.W / 2}" y="${cardNameStartY + cardNameLines.length * 60 + 20}" class="label" font-size="22" fill="${BRAND.mutedOnDark}" text-anchor="middle">${esc(setLine)}</text>
+<!-- Set / year line — 30px below the LAST card-name baseline (top-anchored) -->
+<text x="${DIMS.W / 2}" y="${cardNameStartY + (cardNameLines.length - 1) * 60 + 30}" class="label" font-size="22" fill="${BRAND.mutedOnDark}" text-anchor="middle">${esc(setLine)}</text>
 
 <!-- Bottom strip: subgrades + cert ID -->
 ${divider(960)}
@@ -233,8 +251,11 @@ ${url(DIMS.W / 2, 1030, 22)}
 
 export function svgServiceExplainer(d: IgPostData): string {
   const tierName = (d.tierName ?? "Standard").toUpperCase();
-  const tagline = d.tierTagline ?? "";
-  const taglineLines = wrapText(tagline, 36, 3);
+  // One-line benefit drives the body. Falls back to a generic catch-all when
+  // the tier_id isn't in the map (defensive — selectPostType() only rotates
+  // through standard/priority/express/gold, all of which are mapped).
+  const benefit = (d.tierId && TIER_BENEFIT[d.tierId]) ?? "Choose the right tier for your collection.";
+  const benefitLines = wrapText(benefit, 36, 3);
   const price = d.tierPricePence != null ? `£${(d.tierPricePence / 100).toFixed(2)}` : "—";
   const turnaround = d.tierTurnaroundLabel ?? (d.tierTurnaroundDays ? `${d.tierTurnaroundDays} days` : "—");
 
@@ -248,9 +269,10 @@ ${divider(180)}
 <text x="${DIMS.W / 2}" y="320" class="label" font-size="22" fill="${BRAND.mutedOnDark}" text-anchor="middle">SERVICE TIER</text>
 <text x="${DIMS.W / 2}" y="430" class="display" font-size="92" fill="${BRAND.gold}" text-anchor="middle">${esc(tierName)}</text>
 
-${taglineLines.length ? `
+<!-- One-line benefit (no duplication with the bottom turnaround/price row) -->
+${benefitLines.length ? `
 <text x="${DIMS.W / 2}" y="540" class="body" font-size="28" fill="${BRAND.white}" text-anchor="middle">
-  ${taglineLines.map((line, i) => `<tspan x="${DIMS.W / 2}" dy="${i === 0 ? 0 : 38}">${line}</tspan>`).join("")}
+  ${benefitLines.map((line, i) => `<tspan x="${DIMS.W / 2}" dy="${i === 0 ? 0 : 38}">${line}</tspan>`).join("")}
 </text>` : ""}
 
 <!-- Two-column stat row: turnaround / price -->
