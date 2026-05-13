@@ -63,17 +63,24 @@ export async function uploadImagesToCert(
   const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as any;
   const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
 
-  // Resize raw scans (scanner output can be very large)
+  // Resize raw scans (scanner output can be very large). Front + back run in
+  // parallel — Sharp releases the JS thread during the native encode so a
+  // single-core Fly box still benefits despite both calls being CPU-bound.
   const resizeBuf = async (buf: Buffer) =>
     sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
-  const frontResized = await resizeBuf(frontBuffer);
-  const backResized = backBuffer ? await resizeBuf(backBuffer) : null;
+  const [frontResized, backResized] = await Promise.all([
+    resizeBuf(frontBuffer),
+    backBuffer ? resizeBuf(backBuffer) : Promise.resolve(null),
+  ]);
 
   // Generate variants via the unified pipeline (deskew + autoCrop + reCentre).
   // Pass certNumber so card-detect logs are traceable per cert (Fix 0).
-  const frontVariants = await generateImageVariants(frontResized, certNumber);
-  const backVariants = backResized ? await generateImageVariants(backResized, certNumber) : null;
+  // Parallelised across sides — same rationale as the resize step above.
+  const [frontVariants, backVariants] = await Promise.all([
+    generateImageVariants(frontResized, certNumber),
+    backResized ? generateImageVariants(backResized, certNumber) : Promise.resolve(null),
+  ]);
 
   // Derive display-ready JPEGs. Order matters: mask the un-padded centred
   // buffer (so the rounded-corner alpha mask sits on the actual card

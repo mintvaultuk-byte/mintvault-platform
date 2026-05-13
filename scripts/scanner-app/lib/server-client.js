@@ -105,7 +105,11 @@ async function uploadPair(frontPath, backPath) {
   const form = new FormData();
   form.append("front", fs.createReadStream(frontPath));
   if (backPath) form.append("back", fs.createReadStream(backPath));
-  form.append("client_source", "scanner_app");
+  // Intentionally omit client_source — server defaults to "admin_ui" which
+  // routes to the async AI branch. The sync branch (client_source="scanner_app")
+  // blocked the response on AI completion (~20 s added). The renderer doesn't
+  // consume aiStatus/aiResult anyway, so the async response is shape-compatible
+  // for the desktop app. ~48 s → ~23 s scan-ingest response.
   const res = await fetch(`${API_BASE}/api/admin/scan-ingest`, {
     method: "POST",
     headers: { ...authHeaders(), ...form.getHeaders() },
