@@ -5,7 +5,7 @@
 import sharp from "sharp";
 
 // Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
-export const CARD_CORNER_RADIUS_PCT = 0.04;
+const CARD_CORNER_RADIUS_PCT = 0.04;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
