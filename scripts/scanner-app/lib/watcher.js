@@ -3,7 +3,7 @@
  * old watcher.mjs into a single Electron process.
  *
  * Responsibilities:
- *   - chokidar watch on ~/mintvault-scans/inbox/*.tif (size-stable detection)
+ *   - chokidar watch on ~/mintvault-scans/inbox/ scan files (size-stable detection)
  *   - AUTO mode: front → back → uploadPair → state.success → idle
  *   - MANUAL mode: emit "scan-detected" on every .tif; wait for renderer to
  *     reply with attach instructions via attachManualScan(); upload via
@@ -29,8 +29,13 @@ const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
 
-const ACCEPTED = new Set([".tif", ".tiff"]);
-const IGNORED  = new Set([".jpg", ".jpeg", ".png", ".bmp", ".gif"]);
+// Accept any image format SilverFast might output. The server-side
+// scan-ingest endpoint runs everything through Sharp, which auto-detects
+// the input format from buffer magic bytes — so all five are equivalent
+// downstream. .bmp/.gif stay ignored because SilverFast never produces
+// them and they could mask other artefacts.
+const ACCEPTED = new Set([".tif", ".tiff", ".png", ".jpg", ".jpeg"]);
+const IGNORED  = new Set([".bmp", ".gif"]);
 
 const STABLE_MS  = 2_000;   // file size unchanged for this long → ready
 const STABLE_POLL_MS = 500;
@@ -207,7 +212,7 @@ class Watcher extends EventEmitter {
       }
     }
 
-    // Wait for size to stabilise — SilverFast streams the .tif.
+    // Wait for size to stabilise — SilverFast streams the scan file.
     const ok = await this.waitForStable(filePath);
     if (!ok) {
       this.log(`file disappeared/unstable: ${filename}`, "warn");
