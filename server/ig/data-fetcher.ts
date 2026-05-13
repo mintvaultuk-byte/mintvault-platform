@@ -114,6 +114,13 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
     throw new Error("[ig-data] No approved certs available for card_reveal");
   }
 
+  return certRowToCardRevealData(cert);
+}
+
+// Shared mapper: cert row → IgPostData for card_reveal. Extracted so the
+// regenerate-image / regenerate-caption admin routes can reuse the exact
+// same field projection when pulling a specific cert by PK.
+export function certRowToCardRevealData(cert: any): IgPostData {
   const tierLabel =
     (cert.serviceTierId && TIER_DISPLAY_NAMES[cert.serviceTierId])
     ?? (cert.labelType === "black" ? "Black Label" : "Standard");
@@ -137,11 +144,51 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
     gradeSurface:     cert.gradeSurface   ? String(cert.gradeSurface)   : undefined,
     labelType:        cert.labelType ?? undefined,
     serviceTierLabel: tierLabel,
-    // The grader's overall note doubles as the caption-prompt insight.
     insight:          cert.gradingReport?.overall ?? undefined,
-    // Cert.id is the numeric PK — exposed so the cron can write it
-    // into ig_post_queue.cert_id. Not part of the documented IgPostData
-    // interface; cast through.
+    ...({ _certPk: cert.id } as any),
+  };
+}
+
+// Pull a single approved cert by primary key and project as card_reveal
+// IgPostData. Used by the regenerate-image / regenerate-caption admin
+// routes so regen sticks to the cert pinned to the queue row.
+export async function fetchCardRevealDataForCertPk(certPk: number): Promise<IgPostData | null> {
+  const rows = await db
+    .select()
+    .from(certificates)
+    .where(and(
+      eq(certificates.id, certPk),
+      isNull(certificates.deletedAt),
+    ))
+    .limit(1);
+  const cert = rows[0];
+  if (!cert) return null;
+  return certRowToCardRevealData(cert);
+}
+
+// Same idea for grade_breakdown — re-project the SAME cert with the
+// subgrades present, even if subgrades got updated since the queue row
+// was first written.
+export async function fetchGradeBreakdownDataForCertPk(certPk: number): Promise<IgPostData | null> {
+  const rows = await db
+    .select()
+    .from(certificates)
+    .where(and(
+      eq(certificates.id, certPk),
+      isNull(certificates.deletedAt),
+    ))
+    .limit(1);
+  const cert = rows[0];
+  if (!cert) return null;
+  return {
+    postType:       "grade_breakdown",
+    cardName:       cert.cardName ?? "—",
+    gradeOverall:   cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : "—",
+    gradeCentering: cert.gradeCentering ? String(cert.gradeCentering) : "0",
+    gradeCorners:   cert.gradeCorners   ? String(cert.gradeCorners)   : "0",
+    gradeEdges:     cert.gradeEdges     ? String(cert.gradeEdges)     : "0",
+    gradeSurface:   cert.gradeSurface   ? String(cert.gradeSurface)   : "0",
+    insight:        (cert.gradingReport as any)?.overall ?? "",
     ...({ _certPk: cert.id } as any),
   };
 }

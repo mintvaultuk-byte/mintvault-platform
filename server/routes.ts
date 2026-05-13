@@ -12075,6 +12075,235 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── IG queue row edits (caption, hashtags, scheduled_for) ─────────────────
+  // Combined PATCH endpoint — accept any subset of editable fields and only
+  // update what was supplied. Server-side validation per field. Audit log
+  // records which fields changed so the trail is greppable later.
+  app.patch("/api/admin/ig/queue/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const body = req.body ?? {};
+      const updates: Record<string, any> = {};
+      const fieldsChanged: string[] = [];
+
+      // Caption — IG hard cap is 2200 chars.
+      if (typeof body.caption === "string") {
+        if (body.caption.length > 2200) {
+          return res.status(400).json({ error: `Caption too long — ${body.caption.length}/2200 chars` });
+        }
+        updates.caption = body.caption;
+        fieldsChanged.push("caption");
+      }
+
+      // Hashtags — trim each token, dedupe, max 30 tags.
+      if (typeof body.hashtags === "string") {
+        const tags = body.hashtags.split(/\s+/).map((t: string) => t.trim()).filter(Boolean);
+        if (tags.length > 30) {
+          return res.status(400).json({ error: `Too many hashtags — ${tags.length} (max 30)` });
+        }
+        updates.hashtags = tags.join(" ");
+        fieldsChanged.push("hashtags");
+      }
+
+      // Scheduled time — ISO 8601, must parse + be in the future.
+      if (typeof body.scheduled_for === "string") {
+        const dt = new Date(body.scheduled_for);
+        if (isNaN(dt.getTime())) {
+          return res.status(400).json({ error: "scheduled_for must be a valid ISO 8601 datetime" });
+        }
+        if (dt.getTime() <= Date.now()) {
+          return res.status(400).json({ error: "scheduled_for must be in the future" });
+        }
+        updates.scheduledFor = dt;
+        fieldsChanged.push("scheduled_for");
+      }
+
+      if (fieldsChanged.length === 0) {
+        return res.status(400).json({ error: "No editable fields supplied (caption, hashtags, scheduled_for)" });
+      }
+
+      await db.update(igPostQueue).set(updates).where(eq(igPostQueue.id, id));
+      try { await storage.writeAuditLog("ig_post", String(id), "manual_edit", adminEmail, { fields_changed: fieldsChanged }); } catch {}
+      res.json({ ok: true, fieldsChanged });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Replace queue row image (manual upload, overrides generated render) ──
+  // Multer in-memory; 8 MB cap; JPEG or PNG only. Stored at a fresh R2 key
+  // so the old object lives on for later cleanup — never overwrite in place.
+  const igImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits:  { fileSize: 8 * 1024 * 1024 },
+    fileFilter(_req, file, cb) {
+      if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") return cb(null, true);
+      cb(new Error("Only JPEG or PNG accepted"));
+    },
+  });
+  app.post(
+    "/api/admin/ig/queue/:id/replace-image",
+    requireAdmin,
+    igImageUpload.single("image"),
+    async (req, res) => {
+      try {
+        const id = parseInt(String(req.params.id), 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+        if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
+        const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+        const { igPostQueue } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+        const row = rows[0];
+        if (!row) return res.status(404).json({ error: "Queue row not found" });
+
+        const ext = req.file.mimetype === "image/png" ? "png" : "jpg";
+        const newKey = `ig/manual-upload/${id}-${Date.now()}.${ext}`;
+        const { uploadToR2 } = await import("./r2");
+        await uploadToR2(newKey, req.file.buffer, req.file.mimetype);
+
+        await db.update(igPostQueue)
+          .set({ imageR2Key: newKey })
+          .where(eq(igPostQueue.id, id));
+
+        // Non-square warning — surfaced in the response so the admin UI can show a toast.
+        let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
+        try {
+          const sharp = (await import("sharp")).default;
+          const meta = await sharp(req.file.buffer).metadata();
+          dimensions = {
+            width: meta.width,
+            height: meta.height,
+            squareWarning: meta.width !== meta.height,
+          };
+        } catch { /* metadata extraction is best-effort */ }
+
+        try {
+          await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
+            old_key: row.imageR2Key,
+            new_key: newKey,
+            mime:    req.file.mimetype,
+            size:    req.file.size,
+            ...dimensions,
+          });
+        } catch {}
+        res.json({ ok: true, r2Key: newKey, ...dimensions });
+      } catch (err: any) {
+        // Multer errors land here (file too big, wrong mimetype)
+        res.status(400).json({ error: err.message });
+      }
+    },
+  );
+
+  // ── Regenerate caption — re-run the Anthropic call (or fallback) with the
+  // same data the queue row was originally built from. For card_reveal /
+  // grade_breakdown rows we re-pull the pinned cert by PK so regen sticks
+  // to the same card. Non-card post types refetch from the live data source.
+  app.post("/api/admin/ig/queue/:id/regenerate-caption", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+      const row = rows[0];
+      if (!row) return res.status(404).json({ error: "Queue row not found" });
+
+      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } = await import("./ig/data-fetcher");
+      let data;
+      if (row.certId != null && row.postType === "card_reveal") {
+        data = await fetchCardRevealDataForCertPk(row.certId);
+      } else if (row.certId != null && row.postType === "grade_breakdown") {
+        data = await fetchGradeBreakdownDataForCertPk(row.certId);
+      } else {
+        data = await fetchPostData(row.postType as any);
+      }
+      if (!data) return res.status(409).json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
+
+      const { generateCaption } = await import("./ig/caption-generator");
+      const { caption, hashtags, fromFallback } = await generateCaption(data);
+
+      await db.update(igPostQueue)
+        .set({ caption, hashtags })
+        .where(eq(igPostQueue.id, id));
+      try { await storage.writeAuditLog("ig_post", String(id), "regenerate_caption", adminEmail, { fromFallback }); } catch {}
+      res.json({ ok: true, caption, hashtags, fromFallback });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Regenerate image — re-render the SVG composite. Always uploads to a
+  // NEW R2 key (ig/regen/...), never overwrites the previous one. Works even
+  // if a manual upload had replaced the prior image — regen always pulls
+  // fresh data from the cert PK / post-type fetcher.
+  app.post("/api/admin/ig/queue/:id/regenerate-image", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+      const row = rows[0];
+      if (!row) return res.status(404).json({ error: "Queue row not found" });
+
+      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } = await import("./ig/data-fetcher");
+      let data;
+      if (row.certId != null && row.postType === "card_reveal") {
+        data = await fetchCardRevealDataForCertPk(row.certId);
+      } else if (row.certId != null && row.postType === "grade_breakdown") {
+        data = await fetchGradeBreakdownDataForCertPk(row.certId);
+      } else {
+        data = await fetchPostData(row.postType as any);
+      }
+      if (!data) return res.status(409).json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
+
+      const { generateIgImage } = await import("./ig/image-generator");
+      const imageBuffer = await generateIgImage(data);
+
+      const newKey = `ig/regen/${id}-${Date.now()}.png`;
+      const { uploadToR2 } = await import("./r2");
+      await uploadToR2(newKey, imageBuffer, "image/png");
+
+      await db.update(igPostQueue)
+        .set({ imageR2Key: newKey })
+        .where(eq(igPostQueue.id, id));
+
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "image_regenerate", adminEmail, {
+          old_key: row.imageR2Key,
+          new_key: newKey,
+        });
+      } catch {}
+      res.json({ ok: true, r2Key: newKey });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Hashtag preset bundles ────────────────────────────────────────────────
+  // Served read-only — bundles defined in shared/ig-hashtag-presets.ts so
+  // editing copy is a single-file change, no API restart needed if the bundle
+  // is re-imported on each request.
+  app.get("/api/admin/ig/hashtag-presets", requireAdmin, async (_req, res) => {
+    try {
+      const { IG_HASHTAG_PRESETS } = await import("@shared/ig-hashtag-presets");
+      res.json(IG_HASHTAG_PRESETS);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Showroom routes ──────────────────────────────────────────────────────────
   registerShowroomRoutes(app);
 
