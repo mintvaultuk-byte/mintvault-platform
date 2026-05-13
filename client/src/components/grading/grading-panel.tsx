@@ -160,6 +160,23 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [approved, setApproved]   = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Post-approval edit-mode gate. Pre-approval is unchanged (auto-save still
+  // runs as a draft mechanism). Post-approval, edits to the live record
+  // require explicit Save — see saveEditedGrade() and cancelEdit() below.
+  const [editMode, setEditMode]       = useState(false);
+  const [editSaving, setEditSaving]   = useState(false);
+  type EditSnapshot = {
+    frontLR: string; frontTB: string; backLR: string; backTB: string;
+    corners: CornerValues; edges: EdgeValues; surface: SurfaceValues;
+    defects: Defect[]; defectCandidates: DefectCandidate[];
+    authStatus: AuthStatus; authNotes: string;
+    privateNotes: string; gradeExplanation: string;
+    centeringOverride: number | null; cornersOverride: number | null;
+    edgesOverride: number | null;     surfaceOverride: number | null;
+    overallOverride: number | null;
+  };
+  const editSnapshotRef = useRef<EditSnapshot | null>(null);
+
   /**
    * Clear overallOverride if currently set, toasting once so the grader sees
    * what happened. Called from every sub-grade / centering value edit: the
@@ -302,6 +319,81 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
+  // ── Post-approval explicit-save flow ──────────────────────────────────
+  function captureEditSnapshot(): EditSnapshot {
+    return {
+      frontLR, frontTB, backLR, backTB,
+      corners, edges, surface,
+      defects: [...defects], defectCandidates: [...defectCandidates],
+      authStatus, authNotes,
+      privateNotes, gradeExplanation,
+      centeringOverride, cornersOverride, edgesOverride, surfaceOverride,
+      overallOverride,
+    };
+  }
+
+  function restoreEditSnapshot(s: EditSnapshot) {
+    setFrontLR(s.frontLR); setFrontTB(s.frontTB);
+    setBackLR(s.backLR);   setBackTB(s.backTB);
+    setCorners(s.corners); setEdges(s.edges); setSurface(s.surface);
+    setDefects(s.defects); setDefectCandidates(s.defectCandidates);
+    setAuthStatus(s.authStatus); setAuthNotes(s.authNotes);
+    setPrivateNotes(s.privateNotes); setGradeExplanation(s.gradeExplanation);
+    setCenteringOverride(s.centeringOverride);
+    setCornersOverride(s.cornersOverride);
+    setEdgesOverride(s.edgesOverride);
+    setSurfaceOverride(s.surfaceOverride);
+    setOverallOverride(s.overallOverride);
+  }
+
+  function enterEditMode() {
+    editSnapshotRef.current = captureEditSnapshot();
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    if (editSnapshotRef.current) restoreEditSnapshot(editSnapshotRef.current);
+    editSnapshotRef.current = null;
+    setEditMode(false);
+  }
+
+  async function saveEditedGrade(): Promise<void> {
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      // Cache invalidation — everything that reads from certificates.grade or
+      // its subgrades. RQ will refetch on next access; not forcing immediate
+      // refetch so we don't thrash. Keys mirror the existing approveGrade()
+      // invalidation set plus public logbook + verify endpoints.
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
+      if (certIdStr) {
+        queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}/report`] });
+        queryClient.invalidateQueries({ queryKey: [`/api/v1/verify/${certIdStr}`] });
+      }
+      toast({ title: "Grade updated · audit logged" });
+      editSnapshotRef.current = null;
+      setEditMode(false);
+    } catch (e: any) {
+      // Keep edit mode open so the admin doesn't lose their changes.
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function autoSaveNow(): Promise<boolean> {
     const seq = ++autoSaveSeqRef.current;
     setAutoSaveStatus("saving");
@@ -334,8 +426,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // Schedule a debounced auto-save whenever any persisted state changes.
   // First render skips (hydratedOnceRef false → set to true) so we don't
   // pointlessly POST back what we just GET'd.
+  //
+  // POST-APPROVAL GATE: once the cert is live, auto-save is DISABLED. Edits
+  // require entering edit mode and clicking Save. This kills the previous
+  // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
     if (!certId) return;
+    if (gradeApprovedAt) return;  // auto-save is pre-approval only
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -996,20 +1093,77 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
         {/* RIGHT — Grading inputs */}
         <div className="space-y-5 overflow-y-auto">
-          {/* v413 post-approve banner — appears once the cert is live, reminds
-              the admin that further edits go directly to the live record. */}
-          {gradeApprovedAt && (
-            <div className="bg-[#16A34A]/10 border border-[#16A34A]/40 rounded-lg p-3 space-y-1">
-              <p className="text-[#16A34A] text-xs font-bold uppercase tracking-widest">
-                ✓ Approved &amp; Live · {certIdStr || ""}
-              </p>
-              <p className="text-[#16A34A]/80 text-[10px] leading-relaxed">
-                Approved {gradeApprovedAt ? new Date(gradeApprovedAt).toLocaleString() : ""}
-                {gradeApprovedBy ? ` by ${gradeApprovedBy}` : ""}.
-                Edits below save automatically to the live record and are recorded in the audit log.
-              </p>
+          {/* Post-approval banner — read-only by default, with an EDIT GRADE
+              button that flips into explicit-save edit mode. Auto-save is
+              disabled post-approval (see autoSave useEffect gate) so any
+              edit-mode change requires the SAVE CHANGES button below. */}
+          {gradeApprovedAt && !editMode && (
+            <div className="bg-[#16A34A]/10 border border-[#16A34A]/40 rounded-lg p-3 flex items-start justify-between gap-3">
+              <div className="space-y-1 min-w-0">
+                <p className="text-[#16A34A] text-xs font-bold uppercase tracking-widest">
+                  ✓ Approved &amp; Live · {certIdStr || ""}
+                </p>
+                <p className="text-[#16A34A]/80 text-[10px] leading-relaxed">
+                  Approved {gradeApprovedAt ? new Date(gradeApprovedAt).toLocaleString() : ""}
+                  {gradeApprovedBy ? ` by ${gradeApprovedBy}` : ""}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={enterEditMode}
+                className="shrink-0 border border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-colors"
+                data-testid="btn-edit-grade"
+              >
+                ✏️ Edit Grade
+              </button>
             </div>
           )}
+          {gradeApprovedAt && editMode && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1 min-w-0">
+                  <p className="text-amber-800 text-xs font-bold uppercase tracking-widest">
+                    ✏️ Edit mode · {certIdStr || ""}
+                  </p>
+                  <p className="text-amber-700/90 text-[10px] leading-relaxed">
+                    Changes are not saved until you click Save · all saves recorded in audit log.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={saveEditedGrade}
+                  disabled={editSaving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                  data-testid="btn-save-edit"
+                >
+                  {editSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                  {editSaving ? "Saving…" : "Save changes"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  disabled={editSaving}
+                  className="border border-zinc-300 text-zinc-600 hover:bg-zinc-100 text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-colors disabled:opacity-40"
+                  data-testid="btn-cancel-edit"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Editable block — wrapped in <fieldset disabled> so that, post-
+              approval, every form control inside (subgrade steppers, override
+              dropdown, centering inputs, defect annotation buttons, auth
+              select, notes textareas, approve button) is non-interactive
+              until the admin clicks EDIT GRADE in the banner above. Pre-
+              approval (gradeApprovedAt null) the fieldset is enabled and
+              auto-save handles persistence as before. */}
+          <fieldset
+            disabled={gradeApprovedAt != null && !editMode}
+            className="min-w-0 border-none p-0 m-0 space-y-5 disabled:opacity-70"
+          >
           {/* AI source badges */}
           {aiAnalysis && (
             <div className="flex gap-1 flex-wrap">
@@ -1222,10 +1376,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             ) : (
               <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">
                 <CheckCircle2 size={13} />
-                Approved & Live · {certIdStr || ""} · edits below save automatically
+                Approved & Live · {certIdStr || ""}
               </div>
             )}
           </div>
+          </fieldset>
         </div>
       </div>
 

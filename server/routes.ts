@@ -8002,18 +8002,55 @@ Defects (admin-confirmed): ${defectLines}`;
       // Audit — distinguish draft saves from post-approve live-record edits.
       // Both fire the same SQL above, but the audit trail captures the
       // semantic difference: pre-launch we want to know what % of certs
-      // get edited after publication, and which fields. Field list is the
-      // payload's top-level keys (not deep-diff — keeps the audit cheap).
+      // get edited after publication, and which fields.
+      //
+      // Diff capture: compare payload values against the cert state read at
+      // the top of this handler. Only fields the payload actually carries
+      // (and that differ from the prior DB value) appear in `changed`. JSONB
+      // columns (corners/edges/surface/defects/ai_defect_candidates) are
+      // compared by JSON.stringify so a no-op re-submit doesn't pollute the
+      // log.
       try {
         const fieldsChanged = Object.keys(b || {});
+        // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
+        const fieldMap: Array<[string, string]> = [
+          ["overall_grade",       "gradeOverall"],
+          ["grade_centering",     "gradeCentering"],
+          ["grade_corners",       "gradeCorners"],
+          ["grade_edges",         "gradeEdges"],
+          ["grade_surface",       "gradeSurface"],
+          ["centering_front_lr",  "centeringFrontLr"],
+          ["centering_front_tb",  "centeringFrontTb"],
+          ["centering_back_lr",   "centeringBackLr"],
+          ["centering_back_tb",   "centeringBackTb"],
+          ["auth_status",         "authStatus"],
+          ["auth_notes",          "authNotes"],
+          ["grade_explanation",   "gradeExplanation"],
+          ["private_notes",       "privateNotes"],
+          ["corners",             "cornerValues"],
+          ["edges",               "edgeValues"],
+          ["surface",             "surfaceValues"],
+          ["defects",             "defects"],
+          ["ai_defect_candidates", "aiDefectCandidates"],
+        ];
+        const norm = (v: unknown) => v == null ? null : (typeof v === "object" ? JSON.stringify(v) : String(v));
+        const changed: Record<string, { from: unknown; to: unknown }> = {};
+        for (const [pKey, cKey] of fieldMap) {
+          if (!(pKey in (b || {}))) continue;
+          const before = norm((cert as any)[cKey]);
+          const after  = norm((b as any)[pKey]);
+          if (before !== after) {
+            changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
+          }
+        }
         await db.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
           VALUES (
             'certificate',
             ${String(id)},
-            ${wasApproved ? "post_approve_edit" : "draft_save"},
+            ${wasApproved ? "cert_live_record_edit" : "draft_save"},
             ${(req.session as any)?.adminEmail || "admin"},
-            ${JSON.stringify({ fields_changed: fieldsChanged, was_approved: wasApproved })}::jsonb,
+            ${JSON.stringify({ fields_changed: fieldsChanged, changed, was_approved: wasApproved })}::jsonb,
             NOW()
           )
         `);
