@@ -87,26 +87,49 @@ export async function uploadImagesToCert(
     backResized ? generateImageVariants(backResized, certNumber) : Promise.resolve(null),
   ]);
 
-  // Derive display-ready JPEGs. The pipeline is:
-  //   centredUnpadded → maskRoundedCorners → toDisplayJpeg(flatten→white + jpeg)
+  // Derive display-ready artefacts. The pipeline is:
+  //   centredUnpadded → trimForDisplay (10px inset)
+  //                   → maskRoundedCorners
+  //                   → {toDisplayPng, toDisplayJpeg}
   //
-  // No mat-coloured frame around the card. maskRoundedCorners produces a PNG
-  // with transparent rounded corners AND white RGB baked into the transparent
-  // pixels (image-processing.ts:40-44). The flatten step then collapses the
-  // alpha against white, so the corners render as clean white in the final
-  // JPEG. Net visual: bare rounded-corner card on a white background.
+  // Two encodings from a single masked buffer:
+  //   - PNG with alpha-transparent rounded corners → canonical display key
+  //     (front_image_path). Renders cleanly on both light and dark page bg.
+  //   - JPEG with flatten-to-white rounded corners → front_cropped.jpg key
+  //     (compatibility — DGR PDF and other consumers that expect a JPEG).
   //
-  // Previously this chain ran padWithMat between mask and flatten, which
-  // surrounded the card with a 2% mat-coloured strip. Removed per UX call —
-  // downstream consumers all use object-contain / fit-preserving layouts, so
-  // the card displays at native aspect (~0.716) inside the same containers.
+  // Trim BEFORE mask: the SVG mask is computed against the bitmap's current
+  // dimensions with rx = 4% of width. Trimming AFTER mask shifts the curve
+  // inward and exposes transparent stripes along the 4 outer edges. Trim
+  // first so the mask is recomputed against the tighter canvas and the
+  // corner curves sit cleanly at the new bitmap corners.
+  //
+  // DISPLAY_TRIM_PX = 10 hugs the card without eating into the v590 8px
+  // safety pad (which scales to ~16–26 px at full res depending on input
+  // dimensions). ~6–16 px of safety margin always remains.
   //
   // NOTE (rev 3b29948 → reverted): a previous attempt collapsed mask+flatten
-  // into a single inline sharp() pipeline (ensureAlpha → composite → flatten
-  // → jpeg). That clipped the right edge of cards on prod (v587). Keep the
-  // two-stage split below — materialising between mask and flatten sidesteps
-  // a libvips pipeline-reordering bug. Don't re-collapse without a visual
-  // diff harness.
+  // into a single inline sharp() pipeline. That clipped the right edge of
+  // cards on prod (v587). Keep the two-stage split — materialising between
+  // mask and encode sidesteps a libvips pipeline-reordering bug. Don't
+  // re-collapse without a visual diff harness.
+  const DISPLAY_TRIM_PX = 10;
+  async function trimForDisplay(buf: Buffer): Promise<Buffer> {
+    const meta = await sharp(buf).metadata();
+    if (!meta.width || !meta.height) return buf;
+    const w = meta.width, h = meta.height, t = DISPLAY_TRIM_PX;
+    if (w <= 2 * t + 50 || h <= 2 * t + 50) return buf; // tiny image — skip
+    return sharp(buf)
+      .extract({ left: t, top: t, width: w - 2 * t, height: h - 2 * t })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  }
+  async function toDisplayPng(buf: Buffer): Promise<Buffer> {
+    // No flatten — maskRoundedCorners already produced alpha=0 at the
+    // rounded corners (image-processing.ts:38-50). Encode as PNG to keep
+    // transparency.
+    return sharp(buf).png({ compressionLevel: 9 }).toBuffer();
+  }
   async function toDisplayJpeg(buf: Buffer): Promise<Buffer> {
     return sharp(buf)
       .flatten({ background: { r: 255, g: 255, b: 255 } })
@@ -115,13 +138,15 @@ export async function uploadImagesToCert(
   }
 
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontMaskedPng = await maskRoundedCorners(frontUnpadded ?? frontVariants.cropped);
+  const frontTrimmed = await trimForDisplay(frontUnpadded ?? frontVariants.cropped);
+  const frontMaskedPng = await maskRoundedCorners(frontTrimmed);
+  const frontDisplayPng = await toDisplayPng(frontMaskedPng);
   const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
-  const backMaskedPng = backVariants
-    ? await maskRoundedCorners(backUnpadded ?? backVariants.cropped)
-    : null;
+  const backTrimmed = backVariants ? await trimForDisplay(backUnpadded ?? backVariants.cropped) : null;
+  const backMaskedPng = backTrimmed ? await maskRoundedCorners(backTrimmed) : null;
+  const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
   // Upload all to R2 — explicit extension map per variant kind
@@ -148,24 +173,24 @@ export async function uploadImagesToCert(
     }
   }
 
-  // Flattened display JPEG (rounded corners baked into white; mat-coloured
-  // outer ring preserved) + canonical display key. Both keys use .jpg
-  // extension and image/jpeg content-type. Historical certs (pre-this-PR)
-  // keep their .png keys — front_image_path / back_image_path are
-  // extension-agnostic strings; consumers derive media-type from the key.
+  // Canonical display key → PNG with alpha-transparent rounded corners.
+  // front_cropped.jpg → flatten-white JPEG (kept for DGR PDF + any other
+  // consumer that expects a JPEG; same mask + trim as the PNG, just a
+  // different encoding). DB column front_image_path / back_image_path are
+  // extension-agnostic text — consumers derive media-type from the key.
   const frontJpegKey = `${prefix}/front_cropped.jpg`;
-  const frontDisplayKey = `images/${certNumber}/front.jpg`;
+  const frontDisplayKey = `images/${certNumber}/front.png`;
   uploadKeys["front_cropped_display"] = frontJpegKey;
   uploadKeys["front_display"] = frontDisplayKey;
   uploads.push(uploadToR2(frontJpegKey, frontDisplayJpeg, "image/jpeg").then(() => {}));
-  uploads.push(uploadToR2(frontDisplayKey, frontDisplayJpeg, "image/jpeg").then(() => {}));
-  if (backDisplayJpeg) {
+  uploads.push(uploadToR2(frontDisplayKey, frontDisplayPng, "image/png").then(() => {}));
+  if (backDisplayJpeg && backDisplayPng) {
     const backJpegKey = `${prefix}/back_cropped.jpg`;
-    const backDisplayKey = `images/${certNumber}/back.jpg`;
+    const backDisplayKey = `images/${certNumber}/back.png`;
     uploadKeys["back_cropped_display"] = backJpegKey;
     uploadKeys["back_display"] = backDisplayKey;
     uploads.push(uploadToR2(backJpegKey, backDisplayJpeg, "image/jpeg").then(() => {}));
-    uploads.push(uploadToR2(backDisplayKey, backDisplayJpeg, "image/jpeg").then(() => {}));
+    uploads.push(uploadToR2(backDisplayKey, backDisplayPng, "image/png").then(() => {}));
   }
 
   await Promise.all(uploads);
