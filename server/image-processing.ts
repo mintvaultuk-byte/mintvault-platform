@@ -299,12 +299,33 @@ function detectBoundaryWithTest(
 
 const POKEMON_ASPECT = 0.716;
 const ASPECT_TOL = 0.005;
-// Reduced from 2 → 0.2 after MV133/Oddish prod scans (v587/v588) showed the
-// safeguard firing AFTER ~50k fg pixels (54-66 px width) had already been
-// trimmed off tilted cards. 0.2% caps loss at ~5000 fg pixels (≈2-3 px on a
-// 2100-tall card) — enough for true mat-strip cleanup, never enough to shave
-// visible card edges on a residually-tilted scan.
-const MAX_ASPECT_TRIM_LOSS_PCT = 0.2;
+const MAX_ASPECT_TRIM_LOSS_PCT = 2;
+
+// Outward-pad the detected card bounds by this many pixels on every side
+// before returning. Guarantees aspect-tighten can never produce a bounds
+// rect that's tight against real card edges — there's always a small buffer
+// of mat (or mat-coloured rotation-fill from deskewCard) on every side.
+// The strip is invisible downstream: padWithMat covers it with the
+// mat-coloured passport frame, so the visual effect is "thicker mat
+// padding" not "extra mat strip visible inside the card". Tuneable.
+const CARD_DETECT_SAFETY_PAD_PX = 8;
+
+// Expand bounds outward by CARD_DETECT_SAFETY_PAD_PX, clamped to the image
+// frame so we never index past the bitmap. Applied at every return path of
+// tightenToPokemonAspect so it kicks in regardless of which branch ran
+// (in-range, successful trim, pixel-loss bail, zero-trim bail).
+function applySafetyPad(
+  b: { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number },
+  w: number, h: number,
+): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } {
+  return {
+    minX: Math.max(0,     b.minX - CARD_DETECT_SAFETY_PAD_PX),
+    maxX: Math.min(w - 1, b.maxX + CARD_DETECT_SAFETY_PAD_PX),
+    minY: Math.max(0,     b.minY - CARD_DETECT_SAFETY_PAD_PX),
+    maxY: Math.min(h - 1, b.maxY + CARD_DETECT_SAFETY_PAD_PX),
+    nonBlackPct: b.nonBlackPct,
+  };
+}
 
 function tightenToPokemonAspect(
   pixels: Uint8Array, w: number, h: number, ch: number,
@@ -321,7 +342,7 @@ function tightenToPokemonAspect(
   // Already in range — nothing to do
   if (startRatio >= POKEMON_ASPECT - ASPECT_TOL && startRatio <= POKEMON_ASPECT + ASPECT_TOL) {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} in-range, no trim${certTag}`);
-    return bounds;
+    return applySafetyPad(bounds, w, h);
   }
 
   // Integral image of fg pixels over the WHOLE frame, built once. Lets us
@@ -382,7 +403,7 @@ function tightenToPokemonAspect(
 
   if (trimmedW === 0 && trimmedH === 0) {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} could not shrink (${aborted || "bounds"})${certTag}`);
-    return bounds;
+    return applySafetyPad(bounds, w, h);
   }
 
   // Discard partial trim on pixel-loss bail. Previous behaviour kept whatever
@@ -393,13 +414,13 @@ function tightenToPokemonAspect(
   // so the safest move is to return the original bounds untouched.
   if (aborted === "pixel-loss") {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} pixel-loss safeguard fired — discarding partial trim (${trimmedW}×${trimmedH}px), returning original bounds${certTag}`);
-    return bounds;
+    return applySafetyPad(bounds, w, h);
   }
 
   const suffix = aborted ? ` [early-exit: ${aborted}]` : "";
   console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} → ${finalRatio.toFixed(3)} (trimmed ${trimmedW}px width, ${trimmedH}px height)${suffix}${certTag}`);
 
-  return { minX, maxX, minY, maxY, nonBlackPct: finalPct };
+  return applySafetyPad({ minX, maxX, minY, maxY, nonBlackPct: finalPct }, w, h);
 }
 
 /**
