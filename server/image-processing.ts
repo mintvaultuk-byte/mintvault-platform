@@ -299,7 +299,12 @@ function detectBoundaryWithTest(
 
 const POKEMON_ASPECT = 0.716;
 const ASPECT_TOL = 0.005;
-const MAX_ASPECT_TRIM_LOSS_PCT = 2;
+// Reduced from 2 → 0.2 after MV133/Oddish prod scans (v587/v588) showed the
+// safeguard firing AFTER ~50k fg pixels (54-66 px width) had already been
+// trimmed off tilted cards. 0.2% caps loss at ~5000 fg pixels (≈2-3 px on a
+// 2100-tall card) — enough for true mat-strip cleanup, never enough to shave
+// visible card edges on a residually-tilted scan.
+const MAX_ASPECT_TRIM_LOSS_PCT = 0.2;
 
 function tightenToPokemonAspect(
   pixels: Uint8Array, w: number, h: number, ch: number,
@@ -377,6 +382,17 @@ function tightenToPokemonAspect(
 
   if (trimmedW === 0 && trimmedH === 0) {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} could not shrink (${aborted || "bounds"})${certTag}`);
+    return bounds;
+  }
+
+  // Discard partial trim on pixel-loss bail. Previous behaviour kept whatever
+  // had been trimmed up to the safeguard, which clipped real card edges on
+  // tilted scans (MV133/Oddish — 54-66 px lost before the bail fired). With
+  // the tightened threshold above the partial trim is small (~2-3 px) but
+  // the safeguard firing is itself a signal that the ratio is too far off,
+  // so the safest move is to return the original bounds untouched.
+  if (aborted === "pixel-loss") {
+    console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} pixel-loss safeguard fired — discarding partial trim (${trimmedW}×${trimmedH}px), returning original bounds${certTag}`);
     return bounds;
   }
 
