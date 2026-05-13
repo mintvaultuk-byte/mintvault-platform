@@ -12136,14 +12136,26 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // ── Replace queue row image (manual upload, overrides generated render) ──
-  // Multer in-memory; 8 MB cap; JPEG or PNG only. Stored at a fresh R2 key
-  // so the old object lives on for later cleanup — never overwrite in place.
+  // Multer in-memory; 50 MB cap (TIFFs from the scanner are large).
+  // Accepts JPEG, PNG, TIFF, WebP. Server-side converts EVERYTHING to JPEG
+  // before R2 upload because the Meta Graph API only accepts JPEG for IG
+  // posts — uniform output format means the publish path doesn't have to
+  // branch by source type. R2 object is always .jpg with image/jpeg
+  // content-type regardless of what the admin uploaded.
+  const ACCEPTED_UPLOAD_MIMES = new Set([
+    "image/jpeg",
+    "image/jpg",     // less standard but seen from some clients
+    "image/png",
+    "image/tiff",
+    "image/x-tiff",  // alternate TIFF mime
+    "image/webp",
+  ]);
   const igImageUpload = multer({
     storage: multer.memoryStorage(),
-    limits:  { fileSize: 8 * 1024 * 1024 },
+    limits:  { fileSize: 50 * 1024 * 1024 },
     fileFilter(_req, file, cb) {
-      if (file.mimetype === "image/jpeg" || file.mimetype === "image/png") return cb(null, true);
-      cb(new Error("Only JPEG or PNG accepted"));
+      if (ACCEPTED_UPLOAD_MIMES.has(file.mimetype)) return cb(null, true);
+      cb(new Error(`Unsupported format ${file.mimetype} — accepted: JPEG, PNG, TIFF, WebP`));
     },
   });
   app.post(
@@ -12163,19 +12175,11 @@ Defects (admin-confirmed): ${defectLines}`;
         const row = rows[0];
         if (!row) return res.status(404).json({ error: "Queue row not found" });
 
-        const ext = req.file.mimetype === "image/png" ? "png" : "jpg";
-        const newKey = `ig/manual-upload/${id}-${Date.now()}.${ext}`;
-        const { uploadToR2 } = await import("./r2");
-        await uploadToR2(newKey, req.file.buffer, req.file.mimetype);
-
-        await db.update(igPostQueue)
-          .set({ imageR2Key: newKey })
-          .where(eq(igPostQueue.id, id));
-
-        // Non-square warning — surfaced in the response so the admin UI can show a toast.
+        const sharp = (await import("sharp")).default;
+        // Read metadata from the original buffer (sharp understands all 4
+        // input formats). Reused for the squareWarning + the converted JPEG.
         let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
         try {
-          const sharp = (await import("sharp")).default;
           const meta = await sharp(req.file.buffer).metadata();
           dimensions = {
             width: meta.width,
@@ -12184,18 +12188,37 @@ Defects (admin-confirmed): ${defectLines}`;
           };
         } catch { /* metadata extraction is best-effort */ }
 
+        // Always convert to JPEG @ q=92. Meta Graph API only accepts JPEG
+        // for IG posts, so doing it here means the publish path stays format-
+        // agnostic. JPEG @ 92 is a sensible quality/size trade-off — file
+        // bytes drop ~70% vs PNG/TIFF for the same visual fidelity.
+        const jpegBuffer = await sharp(req.file.buffer)
+          .jpeg({ quality: 92 })
+          .toBuffer();
+
+        const newKey = `ig/manual-upload/${id}-${Date.now()}.jpg`;
+        const { uploadToR2 } = await import("./r2");
+        await uploadToR2(newKey, jpegBuffer, "image/jpeg");
+
+        await db.update(igPostQueue)
+          .set({ imageR2Key: newKey })
+          .where(eq(igPostQueue.id, id));
+
         try {
           await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
-            old_key: row.imageR2Key,
-            new_key: newKey,
-            mime:    req.file.mimetype,
-            size:    req.file.size,
+            old_key:        row.imageR2Key,
+            new_key:        newKey,
+            uploaded_mime:  req.file.mimetype,
+            uploaded_size:  req.file.size,
+            stored_mime:    "image/jpeg",
+            stored_size:    jpegBuffer.length,
+            converted:      req.file.mimetype !== "image/jpeg",
             ...dimensions,
           });
         } catch {}
-        res.json({ ok: true, r2Key: newKey, ...dimensions });
+        res.json({ ok: true, r2Key: newKey, ...dimensions, converted: req.file.mimetype !== "image/jpeg" });
       } catch (err: any) {
-        // Multer errors land here (file too big, wrong mimetype)
+        // Multer errors land here (file too big, unsupported format)
         res.status(400).json({ error: err.message });
       }
     },

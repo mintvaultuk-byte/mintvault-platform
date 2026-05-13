@@ -180,12 +180,12 @@ function QueuedPostPanel({ row }: { row: IgQueueRow }) {
       return data;
     },
     onSuccess: (data) => {
-      toast({
-        title: "Image uploaded",
-        description: data.squareWarning
-          ? `Image is ${data.width}×${data.height} — non-square uploads may crop on IG`
-          : `${data.width}×${data.height} accepted`,
-      });
+      const dimMsg = `${data.width}×${data.height}`;
+      const convMsg = data.converted ? " (converted to JPEG)" : "";
+      const description = data.squareWarning
+        ? `${dimMsg}${convMsg} — non-square uploads may crop on IG`
+        : `${dimMsg}${convMsg} accepted`;
+      toast({ title: "Image uploaded", description });
       setPreviewToken((n) => n + 1);
       invalidateQueueQueries();
     },
@@ -251,12 +251,15 @@ function QueuedPostPanel({ row }: { row: IgQueueRow }) {
               {replaceImageM.isPending ? (
                 <span className="text-zinc-600"><Loader2 className="w-4 h-4 inline-block mr-2 animate-spin" /> Uploading…</span>
               ) : (
-                <span className="text-zinc-600"><Upload className="w-4 h-4 inline-block mr-2" /> Drag PNG/JPG or click to replace (≤ 8 MB)</span>
+                <>
+                  <span className="text-zinc-600"><Upload className="w-4 h-4 inline-block mr-2" /> Drag JPEG / PNG / TIFF / WebP or click to replace (≤ 50 MB)</span>
+                  <div className="text-xs text-zinc-400 mt-1">TIFF / PNG / WebP converted to JPEG server-side (Meta Graph API requirement).</div>
+                </>
               )}
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/jpeg,image/png"
+                accept="image/jpeg,image/png,image/tiff,image/webp"
                 className="hidden"
                 onChange={(e) => handleFiles(e.target.files)}
               />
