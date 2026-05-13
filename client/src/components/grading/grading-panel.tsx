@@ -941,6 +941,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                 urls={urls}
                 defects={defects}
                 onDefectAdded={d => setDefects(prev => [...prev, d])}
+                onDefectsChange={setDefects}
+                readOnly={gradeApprovedAt != null && !editMode}
                 highlightId={highlightDefect}
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}

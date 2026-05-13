@@ -41,6 +41,10 @@ interface Props {
   urls: ImageUrls;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
+  /** Required for the click-marker-to-edit popover. Receives the full new
+   *  defects array (after edit or delete). Optional for backward compat —
+   *  marker clicks become no-ops if absent. */
+  onDefectsChange?: (defects: Defect[]) => void;
   highlightId: number | null;
   referenceImageUrl?: string | null;
   centeringFront?: CenteringOverlayData | null;
@@ -50,6 +54,11 @@ interface Props {
   onSideChange?: (side: string) => void;
   onZoomChange?: (zoom: number) => void;
   onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
+  /** When true, defect markers render but clicks are inert (tooltip explains
+   *  why). Used by the post-approval read-only state in the parent's edit-mode
+   *  gate so admins can still SEE the defects but can't edit until they click
+   *  EDIT GRADE. */
+  readOnly?: boolean;
   /** Optional controlled side. When provided, the parent owns the side state
    *  and ImageViewer becomes a controlled component for this prop. Falls back
    *  to internal state if undefined (preserves backward compat). */
@@ -60,6 +69,8 @@ interface Props {
    *  fullscreen-mode renderTabs is unaffected. */
   omitSideTabs?: boolean;
 }
+
+const SEVERITY_VALUES: Defect["severity"][] = ["minor", "moderate", "significant"];
 
 const SIDES: Side[] = ["front", "back"];
 const VARIANTS: { key: Variant; label: string }[] = [
@@ -100,7 +111,34 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange, side: controlledSide, omitSideTabs }: Props) {
+export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsChange, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange, readOnly, side: controlledSide, omitSideTabs }: Props) {
+  // Inline defect-edit popover anchored to a clicked marker. Null = closed.
+  // Stores the defect id rather than the whole defect so we always read fresh
+  // values from the live `defects` array (avoids stale closures during edit).
+  const [editingDefectId, setEditingDefectId] = useState<number | null>(null);
+  // Close popover on ESC. Plus a no-op cleanup when popover is closed —
+  // the listener bind/unbind is cheap.
+  useEffect(() => {
+    if (editingDefectId == null) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setEditingDefectId(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [editingDefectId]);
+  // Mutator helpers — both go through onDefectsChange. If not wired, marker
+  // clicks degrade to no-op (and we'd never have opened the popover anyway
+  // because `clickable` falls through to false).
+  function updateDefectField<K extends keyof Defect>(id: number, key: K, value: Defect[K]) {
+    if (!onDefectsChange) return;
+    onDefectsChange(defects.map(d => d.id === id ? { ...d, [key]: value } : d));
+  }
+  function deleteDefect(id: number) {
+    if (!onDefectsChange) return;
+    onDefectsChange(defects.filter(d => d.id !== id));
+    setEditingDefectId(null);
+  }
+
   const [internalSide, setSideRaw] = useState<Side>("front");
   // Controlled when `side` prop supplied; otherwise falls back to internal state.
   const side: Side = controlledSide ?? internalSide;
@@ -403,22 +441,59 @@ export default function ImageViewer({ urls, defects, onDefectAdded, highlightId,
               );
             })()}
 
-            {/* Defect ring markers */}
+            {/* Defect ring markers — clickable when not readOnly and an
+                onDefectsChange handler exists. Click opens an inline popover
+                anchored to the marker for edit / delete. AI markers are also
+                editable (they share the defects[] array with admin-placed). */}
             {showDefects && (() => {
               let humanIdx = 0;
+              const clickable = !readOnly && !!onDefectsChange;
               return sideDefects.map(d => {
                 const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
                 if (!isAi) humanIdx++;
                 const isHL = highlightId === d.id;
                 const col = isAi ? "#DC2626" : "#D4AF37";
                 const badge = isAi ? "AI" : String(humanIdx);
+                const isEditing = editingDefectId === d.id;
+                // Popover above marker when marker is in lower half; below
+                // when in upper half — keeps marker visible.
+                const popoverAbove = d.y_percent > 50;
                 return (
-                  <div key={d.id} className={`absolute pointer-events-none ${isHL ? "defect-ring-pulse" : ""}`}
+                  <div key={d.id} className={`absolute ${clickable ? "" : "pointer-events-none"} ${isHL ? "defect-ring-pulse" : ""}`}
                     style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                    <div className="w-full h-full rounded-full transition-all"
-                      style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }} />
-                    <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5"
+                    {/* Marker ring — a button when clickable so keyboard nav
+                        + role + aria-label come for free. Falls back to a
+                        decorative div when read-only / handler missing. */}
+                    {clickable ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setEditingDefectId(isEditing ? null : d.id); }}
+                        title={`Defect ${badge}: ${d.type}, ${d.severity}`}
+                        aria-label={`Defect ${badge}: ${d.type}, ${d.severity}. Click to edit or delete.`}
+                        className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
+                        style={{ border: `${isHL || isEditing ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none" }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full rounded-full transition-all"
+                        title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
+                        style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }}
+                      />
+                    )}
+                    <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
                       style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{badge}</span>
+
+                    {/* Inline edit/delete popover */}
+                    {isEditing && (
+                      <DefectEditPopover
+                        defect={d}
+                        badge={badge}
+                        anchorAbove={popoverAbove}
+                        onChangeField={(k, v) => updateDefectField(d.id, k, v)}
+                        onDelete={() => deleteDefect(d.id)}
+                        onClose={() => setEditingDefectId(null)}
+                      />
+                    )}
                   </div>
                 );
               });
@@ -714,4 +789,112 @@ function locationFromPercent(x: number, y: number, side: string): string {
   const hLabel = x < 33 ? "left" : x > 66 ? "right" : "centre";
   const vLabel = y < 33 ? "top" : y > 66 ? "bottom" : "middle";
   return `${side.charAt(0).toUpperCase() + side.slice(1)}, ${vLabel}-${hLabel}`;
+}
+
+// ── Inline defect edit popover ─────────────────────────────────────────────
+// Anchored to the marker via absolute positioning. anchorAbove flips it to
+// sit above (when marker is in lower image half) vs below (upper half) so
+// the marker stays visible. Click-outside closes via a capture-phase mousedown
+// listener; ESC handled by the parent.
+function DefectEditPopover({
+  defect, badge, anchorAbove, onChangeField, onDelete, onClose,
+}: {
+  defect: Defect;
+  badge: string;
+  anchorAbove: boolean;
+  onChangeField: <K extends keyof Defect>(key: K, value: Defect[K]) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Click outside closes. mousedown (not click) on capture phase so we beat
+  // any synthetic React click that would re-open / interfere.
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (!ref.current) return;
+      if (e.target instanceof Node && !ref.current.contains(e.target)) onClose();
+    }
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [onClose]);
+
+  // Position: anchored so the marker sits at one edge. Marker is 32px so
+  // 20px gap clears it cleanly.
+  const verticalCss = anchorAbove
+    ? { bottom: "calc(100% + 20px)" }
+    : { top:    "calc(100% + 20px)" };
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={`Edit defect ${badge}`}
+      className="absolute left-1/2 -translate-x-1/2 z-50 w-64 bg-white border border-[#D4AF37]/60 rounded-lg shadow-xl p-3 space-y-2 text-left"
+      style={verticalCss}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect #{badge}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="text-[#888888] hover:text-[#1A1A1A] transition-colors"
+        >
+          <X size={12} />
+        </button>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Type</label>
+        <select
+          value={defect.type}
+          onChange={(e) => onChangeField("type", e.target.value)}
+          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+          autoFocus
+        >
+          {DEFECT_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Severity</label>
+        <select
+          value={defect.severity}
+          onChange={(e) => onChangeField("severity", e.target.value as Defect["severity"])}
+          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+        >
+          {SEVERITY_VALUES.map((s) => (<option key={s} value={s}>{s}</option>))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Notes</label>
+        <input
+          type="text"
+          value={defect.description ?? ""}
+          onChange={(e) => onChangeField("description", e.target.value)}
+          placeholder="Optional"
+          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+        />
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors"
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded hover:opacity-90 transition-opacity"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
 }
