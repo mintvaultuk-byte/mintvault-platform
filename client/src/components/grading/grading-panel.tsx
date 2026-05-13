@@ -18,7 +18,7 @@ import ManualCentering, { type CenteringResult } from "./manual-centering";
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
-import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade } from "./grade-logic";
+import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade, psaCenteringSubgrade } from "./grade-logic";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -1251,7 +1251,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             )}
           </div>
 
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
+          <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-2">
             <CenteringInput
               frontLR={frontLR} frontTB={frontTB} backLR={backLR} backTB={backTB}
               subgrade={centeringCalc}
@@ -1265,6 +1265,48 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               overrideGrade={centeringOverride}
               onOverride={v => { setCenteringOverride(v); }}
             />
+            {/* PSA-standard centering calculator — separate from MintVault's
+                lenient mapping (getCenteringGrade) shown alongside the inputs
+                above. Calls psaCenteringSubgrade and writes the result into
+                centeringOverride (same state path as the manual subgrade
+                stepper), which buildPayload() then ships via grade_centering. */}
+            {(() => {
+              const allFilled = !!(frontLR.trim() && frontTB.trim() && backLR.trim() && backTB.trim());
+              const ratioRe   = /^\s*\d+\s*\/\s*\d+\s*$/;
+              const allValid  = allFilled
+                && ratioRe.test(frontLR) && ratioRe.test(frontTB)
+                && ratioRe.test(backLR)  && ratioRe.test(backTB);
+              const isDisabled = !allValid;
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const result = psaCenteringSubgrade(frontLR, frontTB, backLR, backTB);
+                    if (!result) {
+                      toast({
+                        title: "PSA calc unavailable",
+                        description: "PSA calc needs all 4 ratios in X/Y format (e.g. 53/47)",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    setCenteringOverride(result.subgrade);
+                    toast({
+                      title: `Centering set to ${result.subgrade}/10`,
+                      description: `PSA chart — worst axis: ${result.worstAxisName} ${result.worstAxisRatio} → ${result.worstAxisValue}/10`,
+                    });
+                  }}
+                  disabled={isDisabled}
+                  title={isDisabled
+                    ? "Fill all 4 ratios in X/Y format to enable"
+                    : "Compute centering subgrade from the four ratios using the PSA chart"}
+                  data-testid="btn-psa-calc"
+                  className="text-[10px] font-bold uppercase tracking-widest border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                >
+                  PSA Calc
+                </button>
+              );
+            })()}
           </div>
 
           {/* Corners */}
