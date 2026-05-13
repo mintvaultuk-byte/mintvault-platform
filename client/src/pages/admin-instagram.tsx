@@ -31,6 +31,8 @@ type IgQueueRow = {
   deletedAt: string | null;
   /** 1h signed URL for the cert's front image (Batch 7 — null for non-cert posts) */
   certThumbnailUrl?: string | null;
+  /** Canonical MV-prefixed cert id string (Batch 7 follow-up — LogbookPage looks up by this, not the PK). */
+  certIdString?: string | null;
 };
 
 type IgSettings = {
@@ -653,24 +655,27 @@ export default function AdminInstagramPage() {
                       >
                         <td className="py-2 pr-4 font-mono text-xs text-zinc-600">{fmt(row.scheduledFor)}</td>
                         <td className="py-2 pr-4 font-mono text-xs text-zinc-700">{row.postType}</td>
-                        {/* Cert column with optional thumbnail */}
+                        {/* Cert column with optional thumbnail.
+                            Both display and href use certIdString (the canonical
+                            MV-prefixed string the admin browser shows), since
+                            LogbookPage looks up by that — not the integer PK. */}
                         <td className="py-2 pr-4">
                           {row.certId != null ? (
                             <div className="flex items-center gap-2">
                               {row.certThumbnailUrl ? (
                                 <a
-                                  href={`/admin/cert/${row.certId}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="block w-8 h-8 rounded border border-amber-400/50 overflow-hidden bg-zinc-100 shrink-0 hover:ring-2 hover:ring-amber-400 transition"
-                                  title={`Open cert ${row.certId} in new tab`}
+                                  href={row.certIdString ? `/admin/cert/${encodeURIComponent(row.certIdString)}` : undefined}
+                                  target={row.certIdString ? "_blank" : undefined}
+                                  rel={row.certIdString ? "noopener noreferrer" : undefined}
+                                  className={`block w-8 h-8 rounded border border-amber-400/50 overflow-hidden bg-zinc-100 shrink-0 transition ${row.certIdString ? "hover:ring-2 hover:ring-amber-400" : "opacity-60"}`}
+                                  title={row.certIdString ? `Open ${row.certIdString} in new tab` : "Cert id missing"}
                                 >
                                   <img src={row.certThumbnailUrl} alt="" className="w-full h-full object-cover" />
                                 </a>
                               ) : (
                                 <div className="w-8 h-8 rounded border border-zinc-200 bg-zinc-50 shrink-0" />
                               )}
-                              <span className="font-mono text-xs text-zinc-600">#{row.certId}</span>
+                              <span className="font-mono text-xs text-zinc-600">{row.certIdString ?? `#${row.certId}`}</span>
                             </div>
                           ) : (
                             <span className="font-mono text-xs text-zinc-400">—</span>

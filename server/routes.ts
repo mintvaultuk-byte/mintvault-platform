@@ -11943,25 +11943,26 @@ Defects (admin-confirmed): ${defectLines}`;
         .orderBy(desc(igPostQueue.scheduledFor))
         .limit(1);
 
-      // Enrich nextPost with cert thumbnail URL (mirrors GET /queue).
+      // Enrich nextPost with cert thumbnail URL + the canonical MV-prefixed
+      // certIdString (LogbookPage looks up by the string, not the PK).
       let nextPost: any = next[0] ?? null;
       if (nextPost && nextPost.certId != null) {
         const certRows = await db
-          .select({ frontImagePath: certificates.frontImagePath })
+          .select({ certIdString: certificates.certId, frontImagePath: certificates.frontImagePath })
           .from(certificates)
           .where(eq(certificates.id, nextPost.certId))
           .limit(1);
-        const path = certRows[0]?.frontImagePath;
+        const row = certRows[0];
+        nextPost = { ...nextPost, certIdString: row?.certIdString ?? null, certThumbnailUrl: null };
+        const path = row?.frontImagePath;
         if (path) {
           try {
             const { getR2SignedUrl } = await import("./r2");
-            nextPost = { ...nextPost, certThumbnailUrl: await getR2SignedUrl(path, 3600) };
-          } catch { nextPost = { ...nextPost, certThumbnailUrl: null }; }
-        } else {
-          nextPost = { ...nextPost, certThumbnailUrl: null };
+            nextPost.certThumbnailUrl = await getR2SignedUrl(path, 3600);
+          } catch { /* keep certThumbnailUrl = null */ }
         }
       } else if (nextPost) {
-        nextPost = { ...nextPost, certThumbnailUrl: null };
+        nextPost = { ...nextPost, certIdString: null, certThumbnailUrl: null };
       }
 
       res.json({
@@ -12023,27 +12024,29 @@ Defects (admin-confirmed): ${defectLines}`;
       // Batch-fetch cert thumbnails for all rows with cert_id in this page.
       // One DB round-trip + N R2 signs; signs happen in parallel.
       const certPks = Array.from(new Set(rows.map((r) => r.certId).filter((id): id is number => id != null)));
-      const certMap = new Map<number, { frontImagePath: string | null }>();
+      const certMap = new Map<number, { certIdString: string | null; frontImagePath: string | null }>();
       if (certPks.length > 0) {
         const certRows = await db
-          .select({ id: certificates.id, frontImagePath: certificates.frontImagePath })
+          .select({ id: certificates.id, certIdString: certificates.certId, frontImagePath: certificates.frontImagePath })
           .from(certificates)
           .where(inArray(certificates.id, certPks));
         for (const c of certRows) {
-          certMap.set(c.id, { frontImagePath: c.frontImagePath });
+          certMap.set(c.id, { certIdString: c.certIdString, frontImagePath: c.frontImagePath });
         }
       }
 
       const { getR2SignedUrl } = await import("./r2");
       const enriched = await Promise.all(rows.map(async (r) => {
         let certThumbnailUrl: string | null = null;
+        let certIdString: string | null = null;
         if (r.certId != null) {
           const meta = certMap.get(r.certId);
+          certIdString = meta?.certIdString ?? null;
           if (meta?.frontImagePath) {
             try { certThumbnailUrl = await getR2SignedUrl(meta.frontImagePath, 3600); } catch { certThumbnailUrl = null; }
           }
         }
-        return { ...r, certThumbnailUrl };
+        return { ...r, certIdString, certThumbnailUrl };
       }));
 
       res.json({ rows: enriched, page, limit, total });
