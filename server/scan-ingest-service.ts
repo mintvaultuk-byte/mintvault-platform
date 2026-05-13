@@ -54,7 +54,7 @@ export async function uploadImagesToCert(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { maskRoundedCorners, padWithMat } = await import("./image-processing");
+  const { maskRoundedCorners, padWithMat, CARD_CORNER_RADIUS_PCT, CARD_MAT_PADDING_PCT } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -66,8 +66,13 @@ export async function uploadImagesToCert(
   // Resize raw scans (scanner output can be very large). Front + back run in
   // parallel — Sharp releases the JS thread during the native encode so a
   // single-core Fly box still benefits despite both calls being CPU-bound.
+  //
+  // Encoder is plain libjpeg-turbo baseline (no mozjpeg, no progressive).
+  // This output is INTERMEDIATE — it's decoded immediately by
+  // generateImageVariants, so the mozjpeg encode work was wasted. Baseline
+  // saves ~30-40% per encode at no visual cost (the bytes are never served).
   const resizeBuf = async (buf: Buffer) =>
-    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
+    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
 
   const [frontResized, backResized] = await Promise.all([
     resizeBuf(frontBuffer),
@@ -82,41 +87,56 @@ export async function uploadImagesToCert(
     backResized ? generateImageVariants(backResized, certNumber) : Promise.resolve(null),
   ]);
 
-  // Derive display-ready JPEGs. Order matters: mask the un-padded centred
-  // buffer (so the rounded-corner alpha mask sits on the actual card
-  // corners, not pushed out to the bitmap corners after padding), THEN pad
-  // the masked PNG with mat. Without this order, the rounded corners would
-  // be invisible in the final image because the bitmap edges are now far
-  // from the card.
+  // Build the display JPEG inline — one decode, one encode. Replaces the
+  // previous three-stage chain (maskRoundedCorners → padWithMat → flatten),
+  // which round-tripped through two intermediate PNG encodes that the next
+  // stage immediately decoded.
   //
-  // FINAL flatten: composite alpha against white and JPEG-encode at q85
-  // mozjpeg progressive. The rounded-corner alpha already has white RGB
-  // baked in by maskRoundedCorners step 2 (image-processing.ts:40-44),
-  // so flatten-against-white is a no-op visually for the corners; the
-  // mat-padded outer ring stays the mat colour. Saves ~74% per image
-  // vs the prior PNG output (2.1MB → ~550KB per side).
-  async function toDisplayJpeg(buf: Buffer): Promise<Buffer> {
+  // Pipeline order matches the prior split (same visual output):
+  //   1. ensureAlpha + composite SVG-rounded-corner mask in dest-in mode
+  //      → corners go transparent
+  //   2. flatten against white → transparent corner pixels become #FFFFFF
+  //      (replaces the JS pixel-loop in maskRoundedCorners step 2)
+  //   3. extend by CARD_MAT_PADDING_PCT × min(w,h) with mat-coloured fill
+  //      → passport-style frame
+  //   4. mozjpeg progressive q85 → final JPEG served to clients
+  //
+  // The existing maskRoundedCorners + padWithMat stay untouched — they're
+  // still consumed by generateImageVariants in ai-grading-service.ts.
+  async function buildDisplayJpeg(buf: Buffer, matRgb: { r: number; g: number; b: number }): Promise<Buffer> {
+    const meta = await sharp(buf).metadata();
+    if (!meta.width || !meta.height) {
+      // Degraded fallback: route through the legacy chain so we still
+      // produce SOMETHING, just slower. Should never fire in practice.
+      const masked = await maskRoundedCorners(buf);
+      const padded = await padWithMat(masked, matRgb);
+      return sharp(padded).flatten({ background: { r: 255, g: 255, b: 255 } }).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
+    }
+    const w = meta.width;
+    const h = meta.height;
+    const r = Math.round(w * CARD_CORNER_RADIUS_PCT);
+    const padPx = Math.max(0, Math.round(Math.min(w, h) * CARD_MAT_PADDING_PCT));
+    const svgMask = Buffer.from(
+      `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="white"/></svg>`,
+    );
     return sharp(buf)
+      .ensureAlpha()
+      .composite([{ input: svgMask, blend: "dest-in" }])
       .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .extend({ top: padPx, bottom: padPx, left: padPx, right: padPx, background: { r: matRgb.r, g: matRgb.g, b: matRgb.b } })
       .jpeg({ quality: 85, progressive: true, mozjpeg: true })
       .toBuffer();
   }
 
   const frontMatRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontMaskedPng = frontUnpadded
-    ? await padWithMat(await maskRoundedCorners(frontUnpadded), frontMatRgb)
-    : await maskRoundedCorners(frontVariants.cropped); // fallback: pre-padding buffer absent (shouldn't happen on Option B path)
-  const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
+  const frontDisplayJpeg = await buildDisplayJpeg(frontUnpadded ?? frontVariants.cropped, frontMatRgb);
 
   const backMatRgb = backVariants ? ((backVariants as any).matRgb || { r: 255, g: 255, b: 255 }) : null;
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
-  const backMaskedPng = backVariants
-    ? (backUnpadded
-        ? await padWithMat(await maskRoundedCorners(backUnpadded), backMatRgb!)
-        : await maskRoundedCorners(backVariants.cropped))
+  const backDisplayJpeg = backVariants
+    ? await buildDisplayJpeg(backUnpadded ?? backVariants.cropped, backMatRgb!)
     : null;
-  const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
   // Upload all to R2 — explicit extension map per variant kind
   const prefix = `images/grading/${certId}`;
