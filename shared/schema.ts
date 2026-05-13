@@ -1354,6 +1354,9 @@ export const igPostQueue = pgTable("ig_post_queue", {
 }, (t) => ({
   scheduledIdx: index("ig_post_queue_scheduled_for_idx").on(t.scheduledFor),
   statusIdx:    index("ig_post_queue_status_idx").on(t.status),
+  // (deleted_at, scheduled_for) covers the canonical queue-list query
+  // `WHERE deleted_at IS NULL ORDER BY scheduled_for DESC`.
+  deletedScheduledIdx: index("ig_post_queue_deleted_at_scheduled_for_idx").on(t.deletedAt, t.scheduledFor),
 }));
 
 export const insertIgPostQueueSchema = createInsertSchema(igPostQueue).omit({

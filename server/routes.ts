@@ -11933,8 +11933,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // 'ig_settings'). Soft-delete only — skipped rows get deleted_at, never DROP.
   app.get("/api/admin/ig/settings", requireAdmin, async (_req, res) => {
     try {
-      const { igSettings, igPostQueue } = await import("@shared/schema");
-      const { desc, isNull } = await import("drizzle-orm");
+      const { igSettings, igPostQueue, certificates } = await import("@shared/schema");
+      const { desc, eq, isNull } = await import("drizzle-orm");
       const settings = await db.select().from(igSettings).limit(1);
       const next = await db
         .select()
@@ -11942,11 +11942,33 @@ Defects (admin-confirmed): ${defectLines}`;
         .where(isNull(igPostQueue.deletedAt))
         .orderBy(desc(igPostQueue.scheduledFor))
         .limit(1);
+
+      // Enrich nextPost with cert thumbnail URL (mirrors GET /queue).
+      let nextPost: any = next[0] ?? null;
+      if (nextPost && nextPost.certId != null) {
+        const certRows = await db
+          .select({ frontImagePath: certificates.frontImagePath })
+          .from(certificates)
+          .where(eq(certificates.id, nextPost.certId))
+          .limit(1);
+        const path = certRows[0]?.frontImagePath;
+        if (path) {
+          try {
+            const { getR2SignedUrl } = await import("./r2");
+            nextPost = { ...nextPost, certThumbnailUrl: await getR2SignedUrl(path, 3600) };
+          } catch { nextPost = { ...nextPost, certThumbnailUrl: null }; }
+        } else {
+          nextPost = { ...nextPost, certThumbnailUrl: null };
+        }
+      } else if (nextPost) {
+        nextPost = { ...nextPost, certThumbnailUrl: null };
+      }
+
       res.json({
         postEnabled:  settings[0]?.postEnabled ?? false,
         envGate:      process.env.IG_POST_ENABLED === "true",
         dryRunEnvVar: process.env.IG_DRY_RUN === "true",
-        nextPost:     next[0] ?? null,
+        nextPost,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -11977,21 +11999,54 @@ Defects (admin-confirmed): ${defectLines}`;
 
   app.get("/api/admin/ig/queue", requireAdmin, async (req, res) => {
     try {
-      const { igPostQueue } = await import("@shared/schema");
-      const { desc, isNull, sql: drizzleSql } = await import("drizzle-orm");
+      const { igPostQueue, certificates } = await import("@shared/schema");
+      const { desc, isNull, inArray, sql: drizzleSql } = await import("drizzle-orm");
       const page  = Math.max(1, parseInt(String(req.query.page  ?? "1"), 10) || 1);
       const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit ?? "20"), 10) || 20));
       const offset = (page - 1) * limit;
-      const rows = await db
-        .select()
-        .from(igPostQueue)
-        .where(isNull(igPostQueue.deletedAt))
+      // includeDeleted=true is a debugging hook — not surfaced in UI yet.
+      // Default filters soft-deleted rows out of every list response.
+      const includeDeleted = String(req.query.includeDeleted ?? "").toLowerCase() === "true";
+
+      const baseQuery = db.select().from(igPostQueue);
+      const rows = await (includeDeleted
+        ? baseQuery
+        : baseQuery.where(isNull(igPostQueue.deletedAt)))
         .orderBy(desc(igPostQueue.scheduledFor))
         .limit(limit)
         .offset(offset);
-      const countRes = await db.execute<{ n: number }>(drizzleSql`SELECT COUNT(*)::int AS n FROM ig_post_queue WHERE deleted_at IS NULL`);
+
+      const countWhere = includeDeleted ? drizzleSql`1=1` : drizzleSql`deleted_at IS NULL`;
+      const countRes = await db.execute<{ n: number }>(drizzleSql`SELECT COUNT(*)::int AS n FROM ig_post_queue WHERE ${countWhere}`);
       const total = (countRes as any).rows?.[0]?.n ?? 0;
-      res.json({ rows, page, limit, total });
+
+      // Batch-fetch cert thumbnails for all rows with cert_id in this page.
+      // One DB round-trip + N R2 signs; signs happen in parallel.
+      const certPks = Array.from(new Set(rows.map((r) => r.certId).filter((id): id is number => id != null)));
+      const certMap = new Map<number, { frontImagePath: string | null }>();
+      if (certPks.length > 0) {
+        const certRows = await db
+          .select({ id: certificates.id, frontImagePath: certificates.frontImagePath })
+          .from(certificates)
+          .where(inArray(certificates.id, certPks));
+        for (const c of certRows) {
+          certMap.set(c.id, { frontImagePath: c.frontImagePath });
+        }
+      }
+
+      const { getR2SignedUrl } = await import("./r2");
+      const enriched = await Promise.all(rows.map(async (r) => {
+        let certThumbnailUrl: string | null = null;
+        if (r.certId != null) {
+          const meta = certMap.get(r.certId);
+          if (meta?.frontImagePath) {
+            try { certThumbnailUrl = await getR2SignedUrl(meta.frontImagePath, 3600); } catch { certThumbnailUrl = null; }
+          }
+        }
+        return { ...r, certThumbnailUrl };
+      }));
+
+      res.json({ rows: enriched, page, limit, total });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -12323,6 +12378,134 @@ Defects (admin-confirmed): ${defectLines}`;
       const { IG_HASHTAG_PRESETS } = await import("@shared/ig-hashtag-presets");
       res.json(IG_HASHTAG_PRESETS);
     } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Soft-delete a queue row ───────────────────────────────────────────────
+  // Distinct from PATCH /skip (which marks status='skipped' and soft-deletes
+  // as one combined action). DELETE preserves the prior status but hides the
+  // row from queue lists. Posted rows are protected — preserves the Meta
+  // post-ID audit trail.
+  app.delete("/api/admin/ig/queue/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+      const { igPostQueue } = await import("@shared/schema");
+      const { and, eq, isNull } = await import("drizzle-orm");
+      const rows = await db.select().from(igPostQueue).where(and(
+        eq(igPostQueue.id, id),
+        isNull(igPostQueue.deletedAt),
+      )).limit(1);
+      const row = rows[0];
+      if (!row) return res.status(404).json({ error: "Queue row not found or already deleted" });
+
+      if (row.status === "posted") {
+        return res.status(409).json({ error: "Cannot delete a published post (preserves Meta post-ID audit trail)" });
+      }
+
+      await db.update(igPostQueue)
+        .set({ deletedAt: new Date() })
+        .where(eq(igPostQueue.id, id));
+
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 500) : null;
+      try {
+        await storage.writeAuditLog("ig_post_queue", String(id), "admin_delete", adminEmail, {
+          prior_status:        row.status,
+          prior_scheduled_for: row.scheduledFor,
+          post_type:           row.postType,
+          cert_id:             row.certId,
+          reason,
+        });
+      } catch {}
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Queue an IG post pinned to a specific cert ────────────────────────────
+  // Admin dashboard "Post to IG" flow. Body: { certId, postType: 'auto' |
+  // 'card_reveal' | 'grade_breakdown' }. 'auto' picks card_reveal if grade
+  // ≥ 8 (matches the cron's bias), grade_breakdown otherwise. Inserts a
+  // fully-baked queue row (image + caption ready), status='ready'.
+  app.post("/api/admin/ig/queue/from-cert", requireAdmin, async (req, res) => {
+    try {
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+      const certId = Number(req.body?.certId);
+      const requestedType = String(req.body?.postType ?? "");
+      if (!Number.isFinite(certId) || certId <= 0) {
+        return res.status(400).json({ error: "certId must be a positive integer" });
+      }
+      if (!["auto", "card_reveal", "grade_breakdown"].includes(requestedType)) {
+        return res.status(400).json({ error: "postType must be 'auto', 'card_reveal' or 'grade_breakdown'" });
+      }
+
+      const { certificates, igPostQueue } = await import("@shared/schema");
+      const { and, eq, isNull } = await import("drizzle-orm");
+      const certRows = await db.select().from(certificates).where(and(
+        eq(certificates.id, certId),
+        isNull(certificates.deletedAt),
+      )).limit(1);
+      const cert = certRows[0];
+      if (!cert) return res.status(404).json({ error: "Cert not found or deleted" });
+
+      // Resolve post type. 'auto' uses the same grade-bias logic as the cron.
+      let postType: "card_reveal" | "grade_breakdown";
+      if (requestedType === "auto") {
+        const overall = parseFloat(String(cert.gradeOverall ?? "0"));
+        postType = overall >= 8 ? "card_reveal" : "grade_breakdown";
+      } else {
+        postType = requestedType as "card_reveal" | "grade_breakdown";
+      }
+
+      // grade_breakdown requires an overall grade present. Admin is explicitly
+      // overriding the grade-floor — no min on the floor here, just non-null.
+      if (postType === "grade_breakdown" && (cert.gradeOverall == null || cert.gradeOverall === "")) {
+        return res.status(422).json({ error: "Cert has no overall grade — cannot build grade_breakdown" });
+      }
+
+      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk } = await import("./ig/data-fetcher");
+      const data = postType === "card_reveal"
+        ? await fetchCardRevealDataForCertPk(certId)
+        : await fetchGradeBreakdownDataForCertPk(certId);
+      if (!data) return res.status(422).json({ error: "Could not build post data for this cert" });
+
+      const { generateIgImage } = await import("./ig/image-generator");
+      const imageBuffer = await generateIgImage(data);
+
+      const r2Key = `ig/admin-dashboard/${certId}-${Date.now()}.png`;
+      const { uploadToR2 } = await import("./r2");
+      await uploadToR2(r2Key, imageBuffer, "image/png");
+
+      const { generateCaption } = await import("./ig/caption-generator");
+      const { caption, hashtags, fromFallback } = await generateCaption(data);
+
+      const [inserted] = await db.insert(igPostQueue).values({
+        scheduledFor: new Date(),
+        postType,
+        certId,
+        imageR2Key:   r2Key,
+        caption,
+        hashtags,
+        status:       "ready",
+      }).returning();
+
+      try {
+        await storage.writeAuditLog("ig_post_queue", String(inserted.id), "admin_queue_from_cert", adminEmail, {
+          cert_id:         certId,
+          post_type:       postType,
+          requested_type:  requestedType,
+          source:          "admin_dashboard",
+          caption_fallback: fromFallback,
+        });
+      } catch {}
+
+      res.status(201).json({ ok: true, row: inserted, fromFallback });
+    } catch (err: any) {
+      console.error("[ig/queue/from-cert] failed:", err);
       res.status(500).json({ error: err.message });
     }
   });

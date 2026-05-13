@@ -11,7 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield, ClipboardList,
+  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield, ClipboardList, Instagram,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -335,6 +335,7 @@ function BrowserRow({
   onReprint,
   onEdit,
   onReport,
+  onIgPost,
   reprintPending,
 }: {
   cert: BrowserCert;
@@ -342,6 +343,7 @@ function BrowserRow({
   onReprint: () => void;
   onEdit: () => void;
   onReport: () => void;
+  onIgPost: () => void;
   reprintPending: boolean;
 }) {
   return (
@@ -423,7 +425,99 @@ function BrowserRow({
       >
         <ClipboardList className="h-4 w-4" />
       </button>
+      <button
+        onClick={onIgPost}
+        className="text-[#999999] hover:text-pink-400 transition-colors p-1 rounded"
+        title="Post to Instagram"
+        data-testid={`btn-ig-post-${cert.certId}`}
+      >
+        <Instagram className="h-4 w-4" />
+      </button>
     </div>
+  );
+}
+
+// ── Post-to-IG modal ─────────────────────────────────────────────────────────
+function PostToIgModal({ cert, onClose }: { cert: BrowserCert; onClose: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [postType, setPostType] = useState<"auto" | "card_reveal" | "grade_breakdown">("auto");
+
+  const queueM = useMutation({
+    mutationFn: async () => {
+      // certId here is the numeric PK (cert.id), NOT the MV string (cert.certId).
+      const res = await apiRequest("POST", "/api/admin/ig/queue/from-cert", {
+        certId:   (cert as any).id,
+        postType,
+      });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const newId = data?.row?.id;
+      qc.invalidateQueries({ queryKey: ["/api/admin/ig/queue"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ig/settings"] });
+      toast({
+        title: `Queued — post #${newId}`,
+        description: `Click to open /admin/instagram${newId ? ` (post #${newId} highlighted)` : ""}`,
+      });
+      // Brief delay so the toast is seen before nav.
+      setTimeout(() => {
+        if (newId) window.location.href = `/admin/instagram?focusId=${newId}`;
+        else        window.location.href = "/admin/instagram";
+      }, 400);
+      onClose();
+    },
+    onError: (err: any) => {
+      toast({ title: "Queue failed", description: err?.message ?? "unknown error", variant: "destructive" });
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md bg-white text-[#1A1A1A] border-[#E8E4DC]" data-testid="ig-post-modal">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Instagram className="h-4 w-4" /> Post to Instagram
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* Cert summary — confirm right cert before queuing */}
+        <div className="bg-[#FAF8F3] border border-[#E8E4DC] rounded p-3 mb-3 text-sm">
+          <div className="font-mono text-xs text-yellow-700 mb-1">{cert.certId}</div>
+          <div className="font-semibold">{cert.cardName ?? "—"}</div>
+          {cert.setName && <div className="text-xs text-[#666666]">{cert.setName}</div>}
+          <div className="text-xs text-[#666666] mt-1">
+            Grade <span className="font-semibold">{gradeDisplay(cert)}</span> · slabbed {fmtDate(cert.createdAt)}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs uppercase tracking-wide text-[#666666]">Post type</Label>
+          <select
+            value={postType}
+            onChange={(e) => setPostType(e.target.value as any)}
+            className="w-full h-9 px-2 text-sm border border-[#E8E4DC] rounded bg-white"
+            data-testid="ig-post-type-select"
+          >
+            <option value="auto">Auto (grade ≥ 8 → card_reveal, else grade_breakdown)</option>
+            <option value="card_reveal">card_reveal</option>
+            <option value="grade_breakdown">grade_breakdown</option>
+          </select>
+        </div>
+
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={() => queueM.mutate()}
+            disabled={queueM.isPending}
+            data-testid="ig-post-submit"
+          >
+            {queueM.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Instagram className="w-4 h-4 mr-2" />}
+            Queue post
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -435,6 +529,7 @@ export default function AdminCertBrowser() {
   const [previewCert, setPreviewCert] = useState<BrowserCert | null>(null);
   const [editCert, setEditCert] = useState<BrowserCert | null>(null);
   const [reportCert, setReportCert] = useState<BrowserCert | null>(null);
+  const [igPostCert, setIgPostCert] = useState<BrowserCert | null>(null);
   const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   const { data: certs = [], isLoading, refetch } = useQuery<BrowserCert[]>({
@@ -541,6 +636,7 @@ export default function AdminCertBrowser() {
               onReprint={() => handleReprint(cert)}
               onEdit={() => setEditCert(cert)}
               onReport={() => setReportCert(cert)}
+              onIgPost={() => setIgPostCert(cert)}
               reprintPending={reprintingId === cert.certId}
             />
           ))}
@@ -556,6 +652,9 @@ export default function AdminCertBrowser() {
       )}
       {reportCert && (
         <GradingReportModal cert={reportCert} onClose={() => setReportCert(null)} />
+      )}
+      {igPostCert && (
+        <PostToIgModal cert={igPostCert} onClose={() => setIgPostCert(null)} />
       )}
     </div>
   );

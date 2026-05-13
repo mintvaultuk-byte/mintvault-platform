@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Loader2, RefreshCw, SkipForward, RotateCcw, Send, ImageIcon,
-  CheckCircle2, AlertCircle, Clock, Ban, Upload, Wand2, Save, Calendar,
+  CheckCircle2, AlertCircle, Clock, Ban, Upload, Wand2, Save, Calendar, Trash2,
 } from "lucide-react";
 import { IG_POST_TYPES, type IgPostStatus, type IgPostType } from "@shared/schema";
 
@@ -29,6 +29,8 @@ type IgQueueRow = {
   createdAt: string;
   postedAt: string | null;
   deletedAt: string | null;
+  /** 1h signed URL for the cert's front image (Batch 7 — null for non-cert posts) */
+  certThumbnailUrl?: string | null;
 };
 
 type IgSettings = {
@@ -407,6 +409,28 @@ export default function AdminInstagramPage() {
   const [imagePreview, setImagePreview] = useState<{ id: number; url: string } | null>(null);
   // "" = auto (today's rotation). Specific value pins to that post type.
   const [postTypeOverride, setPostTypeOverride] = useState<"" | IgPostType>("");
+  // Delete-confirmation modal target. null = closed.
+  const [deleteTarget, setDeleteTarget] = useState<IgQueueRow | null>(null);
+  const [deleteReason, setDeleteReason]  = useState("");
+
+  // Deep-link focus: /admin/instagram?focusId=<id> scrolls + highlights the row.
+  // Read once on mount, strip the param so refreshes don't keep highlighting.
+  const [focusId, setFocusId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const p = new URLSearchParams(window.location.search).get("focusId");
+    const n = p ? parseInt(p, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  });
+  useEffect(() => {
+    if (focusId == null) return;
+    // Strip the param so a page refresh doesn't repeat the highlight.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("focusId");
+    window.history.replaceState({}, "", url.toString());
+    // Auto-clear after 2s so the highlight fades.
+    const t = setTimeout(() => setFocusId(null), 2000);
+    return () => clearTimeout(t);
+  }, [focusId]);
 
   // ── Settings + next post
   const settingsQ = useQuery<IgSettings>({
@@ -466,6 +490,23 @@ export default function AdminInstagramPage() {
       toast({ title: "Queue row skipped" });
     },
     onError: (err: any) => toast({ title: "Skip failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Hard-distinct from skipM: DELETE soft-removes the row but preserves the
+  // prior status (skip flips status → 'skipped' in addition to soft-deleting).
+  const deleteM = useMutation({
+    mutationFn: async (args: { id: number; reason: string }) => {
+      const res = await apiRequest("DELETE", `/api/admin/ig/queue/${args.id}`, { reason: args.reason });
+      // 204 — no body
+      return args.id;
+    },
+    onSuccess: (id) => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/ig/queue"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/ig/settings"] });
+      toast({ title: `Post #${id} deleted`, description: "Soft-delete — recoverable via DB." });
+      setDeleteTarget(null);
+    },
+    onError: (err: any) => toast({ title: "Delete failed", description: err.message, variant: "destructive" }),
   });
 
   const retryM = useMutation({
@@ -603,11 +644,38 @@ export default function AdminInstagramPage() {
                 <tbody>
                   {queueQ.data?.rows.map((row) => {
                     const SS = STATUS_STYLES[row.status];
+                    const isFocused = focusId === row.id;
                     return (
-                      <tr key={row.id} className="border-b border-zinc-100 last:border-0">
+                      <tr
+                        key={row.id}
+                        ref={isFocused ? (el) => el?.scrollIntoView({ behavior: "smooth", block: "center" }) : undefined}
+                        className={`border-b border-zinc-100 last:border-0 transition-colors ${isFocused ? "bg-amber-50" : ""}`}
+                      >
                         <td className="py-2 pr-4 font-mono text-xs text-zinc-600">{fmt(row.scheduledFor)}</td>
                         <td className="py-2 pr-4 font-mono text-xs text-zinc-700">{row.postType}</td>
-                        <td className="py-2 pr-4 font-mono text-xs text-zinc-600">{row.certId ?? "—"}</td>
+                        {/* Cert column with optional thumbnail */}
+                        <td className="py-2 pr-4">
+                          {row.certId != null ? (
+                            <div className="flex items-center gap-2">
+                              {row.certThumbnailUrl ? (
+                                <a
+                                  href={`/admin/cert/${row.certId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block w-8 h-8 rounded border border-amber-400/50 overflow-hidden bg-zinc-100 shrink-0 hover:ring-2 hover:ring-amber-400 transition"
+                                  title={`Open cert ${row.certId} in new tab`}
+                                >
+                                  <img src={row.certThumbnailUrl} alt="" className="w-full h-full object-cover" />
+                                </a>
+                              ) : (
+                                <div className="w-8 h-8 rounded border border-zinc-200 bg-zinc-50 shrink-0" />
+                              )}
+                              <span className="font-mono text-xs text-zinc-600">#{row.certId}</span>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-xs text-zinc-400">—</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-4">
                           <Badge className={SS.cls}>
                             <SS.icon className="w-3 h-3 mr-1" /> {SS.label}
@@ -619,20 +687,31 @@ export default function AdminInstagramPage() {
                         <td className="py-2 pr-4 font-mono text-xs text-zinc-600 break-all">{row.metaPostId ?? "—"}</td>
                         <td className="py-2 pr-4 text-right space-x-1">
                           {row.imageR2Key && (
-                            <Button size="sm" variant="ghost" onClick={() => loadImagePreview(row.id)}>
+                            <Button size="sm" variant="ghost" onClick={() => loadImagePreview(row.id)} title="Preview image">
                               <ImageIcon className="w-3 h-3" />
                             </Button>
                           )}
                           {row.status === "failed" && (
-                            <Button size="sm" variant="ghost" onClick={() => retryM.mutate(row.id)} disabled={retryM.isPending}>
+                            <Button size="sm" variant="ghost" onClick={() => retryM.mutate(row.id)} disabled={retryM.isPending} title="Retry">
                               <RotateCcw className="w-3 h-3" />
                             </Button>
                           )}
                           {row.status !== "posted" && (
-                            <Button size="sm" variant="ghost" onClick={() => skipM.mutate(row.id)} disabled={skipM.isPending}>
+                            <Button size="sm" variant="ghost" onClick={() => skipM.mutate(row.id)} disabled={skipM.isPending} title="Skip">
                               <SkipForward className="w-3 h-3" />
                             </Button>
                           )}
+                          {/* Trash: posted rows are protected (preserves Meta audit trail). */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => { setDeleteTarget(row); setDeleteReason(""); }}
+                            disabled={row.status === "posted" || deleteM.isPending}
+                            title={row.status === "posted" ? "Cannot delete published posts" : "Delete"}
+                            className={row.status !== "posted" ? "text-red-500 hover:text-red-700 hover:bg-red-50" : ""}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
                         </td>
                       </tr>
                     );
@@ -665,6 +744,49 @@ export default function AdminInstagramPage() {
             className="max-w-[600px] max-h-[600px] border-4 border-amber-400 rounded shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-2xl border border-zinc-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-zinc-900 mb-2">Delete IG post?</h3>
+            <p className="text-sm text-zinc-600 mb-4">
+              Delete this <span className="font-mono">{deleteTarget.postType}</span> post scheduled for{" "}
+              <strong>{fmt(deleteTarget.scheduledFor)}</strong>? This will hide it from the queue.
+              <br />
+              <span className="text-xs text-zinc-500">Soft delete — recoverable via DB.</span>
+            </p>
+            <label className="block text-xs font-bold uppercase tracking-wide text-zinc-500 mb-1">
+              Reason (optional)
+            </label>
+            <textarea
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="e.g. wrong cert picked, duplicate, low quality…"
+              className="w-full text-sm border border-zinc-300 rounded p-2 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteM.mutate({ id: deleteTarget.id, reason: deleteReason })}
+                disabled={deleteM.isPending}
+              >
+                {deleteM.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                Delete
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
