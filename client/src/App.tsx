@@ -216,6 +216,12 @@ function Router() {
         <Route path="/admin/instagram">
           <AdminInstagramPage />
         </Route>
+        {/* Admin alias to LogbookPage — same component the public /cert/:id route
+            renders. Added in batch 7 follow-up so the IG admin's thumbnail
+            click + focusId nav doesn't 404. Server-side admin auth applies the
+            same as the rest of /admin/* (the page itself doesn't gate UX — the
+            APIs it calls do). */}
+        <Route path="/admin/cert/:id" component={LogbookPage} />
         <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
         <Route path="/nfc/:certId" component={NfcRedirectPage} />
         <Route path="/cert/:id/report" component={GradingReportPage} />
