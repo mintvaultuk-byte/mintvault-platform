@@ -54,7 +54,7 @@ export async function uploadImagesToCert(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { maskRoundedCorners, padWithMat } = await import("./image-processing");
+  const { maskRoundedCorners } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -87,28 +87,26 @@ export async function uploadImagesToCert(
     backResized ? generateImageVariants(backResized, certNumber) : Promise.resolve(null),
   ]);
 
-  // Derive display-ready JPEGs. Order matters: mask the un-padded centred
-  // buffer (so the rounded-corner alpha mask sits on the actual card
-  // corners, not pushed out to the bitmap corners after padding), THEN pad
-  // the masked PNG with mat. Without this order, the rounded corners would
-  // be invisible in the final image because the bitmap edges are now far
-  // from the card.
+  // Derive display-ready JPEGs. The pipeline is:
+  //   centredUnpadded → maskRoundedCorners → toDisplayJpeg(flatten→white + jpeg)
   //
-  // FINAL flatten: composite alpha against white and JPEG-encode at q85
-  // mozjpeg progressive. The rounded-corner alpha already has white RGB
-  // baked in by maskRoundedCorners step 2 (image-processing.ts:40-44),
-  // so flatten-against-white is a no-op visually for the corners; the
-  // mat-padded outer ring stays the mat colour. Saves ~74% per image
-  // vs the prior PNG output (2.1MB → ~550KB per side).
+  // No mat-coloured frame around the card. maskRoundedCorners produces a PNG
+  // with transparent rounded corners AND white RGB baked into the transparent
+  // pixels (image-processing.ts:40-44). The flatten step then collapses the
+  // alpha against white, so the corners render as clean white in the final
+  // JPEG. Net visual: bare rounded-corner card on a white background.
   //
-  // NOTE (rev 3b29948 → reverted): a previous attempt collapsed this into a
-  // single inline sharp() pipeline (ensureAlpha → composite mask → flatten →
-  // extend → jpeg). That clipped the right edge of cards on prod (v587).
-  // Most plausible cause: libvips's pipeline optimiser reorders composite
-  // and extend within one chain in a way that lands the (w × h) SVG mask
-  // off-centre on the post-extend (w+2p × h+2p) canvas. The three-stage
-  // split below enforces materialisation between mask and extend, which
-  // sidesteps the issue. Don't re-attempt without a visual diff harness.
+  // Previously this chain ran padWithMat between mask and flatten, which
+  // surrounded the card with a 2% mat-coloured strip. Removed per UX call —
+  // downstream consumers all use object-contain / fit-preserving layouts, so
+  // the card displays at native aspect (~0.716) inside the same containers.
+  //
+  // NOTE (rev 3b29948 → reverted): a previous attempt collapsed mask+flatten
+  // into a single inline sharp() pipeline (ensureAlpha → composite → flatten
+  // → jpeg). That clipped the right edge of cards on prod (v587). Keep the
+  // two-stage split below — materialising between mask and flatten sidesteps
+  // a libvips pipeline-reordering bug. Don't re-collapse without a visual
+  // diff harness.
   async function toDisplayJpeg(buf: Buffer): Promise<Buffer> {
     return sharp(buf)
       .flatten({ background: { r: 255, g: 255, b: 255 } })
@@ -116,19 +114,13 @@ export async function uploadImagesToCert(
       .toBuffer();
   }
 
-  const frontMatRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontMaskedPng = frontUnpadded
-    ? await padWithMat(await maskRoundedCorners(frontUnpadded), frontMatRgb)
-    : await maskRoundedCorners(frontVariants.cropped); // fallback: pre-padding buffer absent (shouldn't happen on Option B path)
+  const frontMaskedPng = await maskRoundedCorners(frontUnpadded ?? frontVariants.cropped);
   const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
-  const backMatRgb = backVariants ? ((backVariants as any).matRgb || { r: 255, g: 255, b: 255 }) : null;
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
   const backMaskedPng = backVariants
-    ? (backUnpadded
-        ? await padWithMat(await maskRoundedCorners(backUnpadded), backMatRgb!)
-        : await maskRoundedCorners(backVariants.cropped))
+    ? await maskRoundedCorners(backUnpadded ?? backVariants.cropped)
     : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
