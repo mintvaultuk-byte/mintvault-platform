@@ -34,23 +34,11 @@ export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // Step 2: flatten RGB under FULLY-transparent pixels to white (255).
-    // Originally `α < 128` to catch the whole AA fringe, but that destroyed
-    // the AA fringe RGB on the OUTER edge of the rounded-mask curve: those
-    // partial-alpha pixels (α≈83) render against the public page's near-
-    // white background as page-bg-coloured instead of card-coloured, which
-    // shows as a thin "white halo" 1 px outside the solid card on dark-
-    // bordered cards (Pokémon backs etc.). Narrowing to α === 0 preserves
-    // the fringe's original card RGB, so AA composites as a smooth blue→
-    // white gradient — proper anti-aliasing instead of a halo.
-    //
-    // α=0 pixels still get RGB=255 so non-alpha-aware viewers (PDF export
-    // when alpha is dropped, old email clients, etc.) render the corner
-    // triangles as clean white.
+    // Step 2: flatten RGB under transparent pixels to white (255) for consistency
     const px = new Uint8Array(masked.data);
     let flattenedCount = 0;
     for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3] === 0) {
+      if (px[i + 3] < 128) {
         px[i] = 255; px[i + 1] = 255; px[i + 2] = 255;
         flattenedCount++;
       }
