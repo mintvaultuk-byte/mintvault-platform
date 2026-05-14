@@ -54,6 +54,36 @@ import { uploadImagesToCert } from "../server/scan-ingest-service";
 import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { takeSnapshot } from "./_backfill-display-images-snapshot";
 
+// ── DB host guard ──────────────────────────────────────────────────────────
+// The MintVault Neon project has asymmetric branches with diverged data:
+//   prod    = ep-wispy-morning-ab6f4o08
+//   staging = ep-purple-voice-abfez796
+// Local .env points at staging. This script MUST run against prod —
+// running against staging would mutate the wrong data (likely a different
+// set of MV-numbered rows entirely). Don't trust NODE_ENV; inspect the
+// real hostname from MINTVAULT_DATABASE_URL and abort if it isn't prod.
+async function assertProdConnection(): Promise<void> {
+  const url = process.env.MINTVAULT_DATABASE_URL || "";
+  const host = url.match(/@([^/?]+)/)?.[1] ?? "(unknown)";
+  const dbInfo = (await db.execute(sql`SELECT current_database() AS db`)).rows[0] as { db: string };
+
+  let verdict: string;
+  if (host.includes("wispy-morning")) verdict = "✓ PROD";
+  else if (host.includes("purple-voice")) verdict = "⚠ STAGING — ABORTING";
+  else verdict = "? unknown branch — ABORTING";
+
+  console.log(`Connected:  db=${dbInfo.db}  host=${host}  [${verdict}]`);
+
+  if (!host.includes("wispy-morning")) {
+    console.error("");
+    console.error("ERROR: backfill is prod-only. Connected host does not match the prod branch.");
+    console.error("       Re-run with the prod MINTVAULT_DATABASE_URL set explicitly, e.g.:");
+    console.error("         MINTVAULT_DATABASE_URL='postgresql://...wispy-morning...' \\");
+    console.error("           npx tsx scripts/_backfill-display-images.ts <args>");
+    process.exit(2);
+  }
+}
+
 // ── CLI parsing ────────────────────────────────────────────────────────────
 interface Args {
   fromNum?: number;
@@ -213,7 +243,12 @@ interface RunSummary {
 }
 
 async function run(args: Args): Promise<RunSummary> {
-  // Safety: real run requires explicit range OR --all
+  // Guard #1 (unconditional, applies to dry-run too): require prod branch.
+  // Even a dry-run against staging would generate misleading output, so we
+  // fail fast before any other work.
+  await assertProdConnection();
+
+  // Guard #2: real run requires explicit range OR --all
   if (!args.dryRun) {
     const hasRange = args.fromNum !== undefined && args.toNum !== undefined;
     if (!hasRange && !args.all) {
