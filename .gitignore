@@ -41,5 +41,8 @@ sold_cache_simple.json
 # Logs
 *.log
 
+# Local script outputs (snapshots, dumps, etc.)
+scripts/_snapshots/
+
 # OS
 Thumbs.db
