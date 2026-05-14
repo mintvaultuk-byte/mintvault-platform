@@ -4,16 +4,8 @@
  */
 import sharp from "sharp";
 
-// Trading card corner radius as percentage of width. Pokémon's real-world
-// ratio is ~3.0–3.5 mm on a 63 mm card = 4.76–5.55%. The previous 0.04 was
-// undersized: on a 1483 px output it produced a 59 px mask curve, leaving
-// ~10 px of mat-coloured pixels exposed near each corner that the
-// per-edge coverage scan couldn't reach (it operates on linear bounds, not
-// curve radius). Bumping to 0.05 → 74 px curve on the same input, covers
-// the observed 8–12 px corner strips with ~3 px headroom. Slight over-
-// clip risk on extreme-corner card content is negligible for Pokémon
-// (outer corners are uniform yellow border, no design content).
-const CARD_CORNER_RADIUS_PCT = 0.05;
+// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
+const CARD_CORNER_RADIUS_PCT = 0.04;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
@@ -614,7 +606,13 @@ export const cropToYellowBorder = cropToCardBoundary;
  * Returns null if any edge can't find a 70%-coverage row/col, or if the
  * resulting bounds collapse (minX≥maxX or minY≥maxY).
  */
-const CARD_EDGE_COVERAGE_THRESHOLD = 0.70;
+// Coverage threshold for the second-pass detect. 0.70 was too permissive
+// — transitional pixels (yellow-tinted mat near the card edge) passed the
+// mat-distance test and pushed the bound 10+ px outside the card body,
+// leaving residual mat near the rounded corners. 0.90 requires the row
+// to be almost-entirely card-content before counting toward the bound,
+// landing it on the actual card body.
+const CARD_EDGE_COVERAGE_THRESHOLD = 0.90;
 
 function detectCardEdgesByCoverage(
   pixels: Uint8Array, w: number, h: number, ch: number,
@@ -622,9 +620,17 @@ function detectCardEdgesByCoverage(
 ): { minX: number; maxX: number; minY: number; maxY: number } | null {
   const certTag = certId != null ? ` cert=${certId}` : "";
   const mat = computeMatProfile(pixels, w, h, ch);
+  // Stricter mat-distance threshold for the second pass. The default 45 was
+  // letting transitional pixels (yellow-tinted mat near a Pokémon card's
+  // outer border) count as card — so the bound landed in the transition
+  // zone, ~10 px outside the card body. Threshold 80 requires the pixel to
+  // be strongly non-mat (e.g. solid card-yellow/blue/etc) before counting.
+  // Mutating the local mat copy doesn't affect callers — the object is
+  // freshly returned from computeMatProfile in this scope.
+  mat.threshold = 80;
   console.log(
     `[edge-coverage] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB})` +
-    ` distance threshold=${mat.threshold}${certTag}`,
+    ` distance threshold=${mat.threshold} (overridden for second-pass)${certTag}`,
   );
 
   // Single-pass tally: count non-mat pixels per row AND per column.
