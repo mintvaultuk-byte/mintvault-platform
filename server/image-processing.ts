@@ -34,11 +34,32 @@ export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    // Step 2: flatten RGB under transparent pixels to white (255) for consistency
+    // Step 2: flatten RGB under FULLY-transparent pixels to white (255).
+    //
+    // Originally `α < 128` to catch the whole AA fringe, but that interacts
+    // badly with sharp's PNG quantization (.png({quality:90}) below uses
+    // palette mode and crushes alpha to ~3-5 buckets per image, chosen
+    // per-image by the quantizer). When the quantizer picks a bucket like
+    // α=83 for the outer AA fringe, the original `α<128` rewrote those
+    // pixels' RGB to white. The α=83 bucket then composited against the
+    // public page's near-white bg as page-bg-coloured pixels — creating
+    // a visible "thin white halo" 1px outside the solid card on dark-
+    // bordered scans (MV101/back, MV109/back screenshot-confirmed
+    // 2026-05-14). Cases where the quantizer happened to pick α=2 + α=255
+    // (MV105/back, MV105/front, etc.) didn't show the halo — α=2
+    // contributes <1% to composited visible colour regardless of RGB.
+    //
+    // Narrowing to α === 0 preserves the partial-alpha fringe's underlying
+    // card RGB so AA composites smoothly: solid card → light-card → page-bg.
+    // No white-jump in the middle of the gradient.
+    //
+    // α=0 pixels still get RGB=(255,255,255) so non-alpha-aware viewers
+    // (rare — PDFKit supports alpha; web/<img>/IG OG all support alpha)
+    // render the corner triangles as clean white.
     const px = new Uint8Array(masked.data);
     let flattenedCount = 0;
     for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3] < 128) {
+      if (px[i + 3] === 0) {
         px[i] = 255; px[i + 1] = 255; px[i + 2] = 255;
         flattenedCount++;
       }
