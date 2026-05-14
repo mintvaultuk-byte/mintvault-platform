@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
@@ -11,7 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield, ClipboardList, Instagram,
+  Loader2, Eye, Printer, Pencil, CheckCircle2, Clock, X, RefreshCw, Search, RotateCcw, Shield, ClipboardList, Instagram, Paperclip, Upload,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -336,6 +336,7 @@ function BrowserRow({
   onEdit,
   onReport,
   onIgPost,
+  onAttachImages,
   reprintPending,
 }: {
   cert: BrowserCert;
@@ -344,11 +345,15 @@ function BrowserRow({
   onEdit: () => void;
   onReport: () => void;
   onIgPost: () => void;
+  onAttachImages: () => void;
   reprintPending: boolean;
 }) {
+  const missingFront = !((cert as any).frontImagePath);
+  const missingBack  = !((cert as any).backImagePath);
+  const needsImages  = missingFront || missingBack;
   return (
     <div
-      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-[#E8E4DC] hover:border-[#D4AF37]/30 transition-colors text-sm"
+      className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] items-center gap-3 px-3 py-2 rounded-lg border border-[#E8E4DC] hover:border-[#D4AF37]/30 transition-colors text-sm"
       data-testid={`browser-row-${cert.certId}`}
     >
       {/* Printed status */}
@@ -433,6 +438,18 @@ function BrowserRow({
       >
         <Instagram className="h-4 w-4" />
       </button>
+      {needsImages ? (
+        <button
+          onClick={onAttachImages}
+          className="text-amber-500 hover:text-amber-400 transition-colors p-1 rounded"
+          title={`Attach images${missingFront && missingBack ? " (front + back missing)" : missingFront ? " (front missing)" : " (back missing)"}`}
+          data-testid={`btn-attach-${cert.certId}`}
+        >
+          <Paperclip className="h-4 w-4" />
+        </button>
+      ) : (
+        <div className="w-4 h-4 p-1" aria-hidden="true" />
+      )}
     </div>
   );
 }
@@ -521,6 +538,136 @@ function PostToIgModal({ cert, onClose }: { cert: BrowserCert; onClose: () => vo
   );
 }
 
+// ── Attach Images Modal ──────────────────────────────────────────────────────
+// Used to attach front/back images to a blank cert (or one missing a side).
+// Calls PUT /api/admin/certificates/:id/attach-images, which runs the same
+// pipeline as scan-ingest so attached images look identical to native scans.
+function AttachImagesModal({ cert, onClose }: { cert: BrowserCert; onClose: () => void }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [front, setFront] = useState<File | null>(null);
+  const [back, setBack] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const frontInputRef = useRef<HTMLInputElement>(null);
+  const backInputRef = useRef<HTMLInputElement>(null);
+
+  const certNumericId = (cert as any).id as number;
+  const hadFront = !!(cert as any).frontImagePath;
+  const hadBack  = !!(cert as any).backImagePath;
+
+  async function submit() {
+    if (!front) {
+      toast({ title: "Front image required", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.append("front", front);
+      if (back) fd.append("back", back);
+      const res = await fetch(`/api/admin/certificates/${certNumericId}/attach-images`, {
+        method: "PUT",
+        credentials: "include",
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+      toast({
+        title: "Images attached",
+        description: `${cert.certId} — ${data.aiTriggered ? "AI grading running in background" : "processed"}`,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Attach failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function FilePicker({ side, file, onPick, alreadyPresent }: {
+    side: "front" | "back"; file: File | null; onPick: (f: File | null) => void; alreadyPresent: boolean;
+  }) {
+    const ref = side === "front" ? frontInputRef : backInputRef;
+    return (
+      <div className="space-y-1.5">
+        <Label className="text-xs uppercase tracking-wide text-[#666666] flex items-center gap-2">
+          {side}
+          {alreadyPresent && (
+            <span className="text-[10px] text-amber-600 normal-case tracking-normal">
+              (already has one — uploading will replace)
+            </span>
+          )}
+        </Label>
+        <div
+          onClick={() => !submitting && ref.current?.click()}
+          className={`h-24 rounded border-2 border-dashed cursor-pointer flex flex-col items-center justify-center gap-1 transition-colors
+            ${file ? "border-emerald-500/60 bg-emerald-50" : "border-[#D4D0C8] hover:border-[#D4AF37]/60"}
+            ${submitting ? "cursor-wait opacity-70" : ""}`}
+          data-testid={`attach-drop-${side}`}
+        >
+          <input
+            ref={ref}
+            type="file"
+            accept=".tif,.tiff,.png,.jpg,.jpeg,image/tiff,image/png,image/jpeg"
+            className="sr-only"
+            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          />
+          {file ? (
+            <>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <p className="text-xs text-[#1A1A1A]">{file.name}</p>
+              <p className="text-[10px] text-[#666666]">{(file.size / 1024 / 1024).toFixed(2)} MB · click to replace</p>
+            </>
+          ) : (
+            <>
+              <Upload className="h-4 w-4 text-[#999999]" />
+              <p className="text-xs text-[#666666]">Drop or click — TIFF / PNG / JPEG</p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
+      <DialogContent className="max-w-md bg-white text-[#1A1A1A] border-[#E8E4DC]" data-testid="attach-images-modal">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Paperclip className="h-4 w-4" /> Attach images
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="bg-[#FAF8F3] border border-[#E8E4DC] rounded p-3 mb-3 text-sm">
+          <div className="font-mono text-xs text-yellow-700 mb-1">{cert.certId}</div>
+          <div className="font-semibold">{cert.cardName ?? "—"}</div>
+          {cert.setName && <div className="text-xs text-[#666666]">{cert.setName}</div>}
+        </div>
+
+        <div className="space-y-3">
+          <FilePicker side="front" file={front} onPick={setFront} alreadyPresent={hadFront} />
+          <FilePicker side="back"  file={back}  onPick={setBack}  alreadyPresent={hadBack} />
+          <p className="text-[11px] text-[#666666]">
+            Uploaded files run through the same pipeline as a native scan (deskew, safety pad, mask, 10 px trim, PNG encode).
+            AI grading fires in the background once both sides are present.
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button size="sm" variant="outline" onClick={onClose} disabled={submitting} className="border-[#E8E4DC] text-[#666666] text-xs">
+            Cancel
+          </Button>
+          <Button size="sm" onClick={submit} disabled={!front || submitting} data-testid="attach-images-submit">
+            {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Paperclip className="w-4 h-4 mr-2" />}
+            Attach
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Export ───────────────────────────────────────────────────────────────
 export default function AdminCertBrowser() {
   const { toast } = useToast();
@@ -530,6 +677,7 @@ export default function AdminCertBrowser() {
   const [editCert, setEditCert] = useState<BrowserCert | null>(null);
   const [reportCert, setReportCert] = useState<BrowserCert | null>(null);
   const [igPostCert, setIgPostCert] = useState<BrowserCert | null>(null);
+  const [attachCert, setAttachCert] = useState<BrowserCert | null>(null);
   const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   const { data: certs = [], isLoading, refetch } = useQuery<BrowserCert[]>({
@@ -637,6 +785,7 @@ export default function AdminCertBrowser() {
               onEdit={() => setEditCert(cert)}
               onReport={() => setReportCert(cert)}
               onIgPost={() => setIgPostCert(cert)}
+              onAttachImages={() => setAttachCert(cert)}
               reprintPending={reprintingId === cert.certId}
             />
           ))}
@@ -655,6 +804,9 @@ export default function AdminCertBrowser() {
       )}
       {igPostCert && (
         <PostToIgModal cert={igPostCert} onClose={() => setIgPostCert(null)} />
+      )}
+      {attachCert && (
+        <AttachImagesModal cert={attachCert} onClose={() => setAttachCert(null)} />
       )}
     </div>
   );

@@ -7410,6 +7410,72 @@ export async function registerRoutes(
     }
   );
 
+  // ── Attach images to an existing (typically blank) cert. Reuses the
+  // scan-ingest pipeline (uploadImagesToCert) so attached images go through
+  // the same deskew → safety-pad → mask → 10px-trim → PNG path as a
+  // natively-scanned cert. Front required, back optional. AI fires async.
+  const attachImagesUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB, matches scan-ingest
+    fileFilter: (_req, file, cb) => {
+      if (/\.(jpg|jpeg|png|webp|tiff?)$/i.test(path.extname(file.originalname))) cb(null, true);
+      else cb(new Error("Unsupported image format"));
+    },
+  });
+
+  app.put(
+    "/api/admin/certificates/:id/attach-images",
+    requireAdmin,
+    attachImagesUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
+    async (req, res) => {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid certificate id" });
+
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+      const frontFile = files?.front?.[0];
+      const backFile  = files?.back?.[0];
+      if (!frontFile) return res.status(400).json({ error: "Front image is required" });
+
+      try {
+        const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
+        const { frontVariants, backVariants } =
+          await uploadImagesToCert(id, frontFile.buffer, backFile?.buffer ?? null);
+
+        const adminUser = req.session.adminEmail || "admin";
+        await storage.writeAuditLog(
+          "certificate",
+          String(cert.certId),
+          "cert_images_attached",
+          adminUser,
+          {
+            cert_id: id,
+            had_front_before: !!cert.frontImagePath,
+            had_back_before:  !!cert.backImagePath,
+            attached: {
+              front: { filename: frontFile.originalname, size: frontFile.size },
+              back:  backFile ? { filename: backFile.originalname, size: backFile.size } : null,
+            },
+          },
+        );
+
+        const aiPromise = runAiOnCertIfIdle(id, frontVariants.cropped, backVariants?.cropped || null);
+        if (aiPromise) {
+          aiPromise
+            .then(r => console.log(`[attach-images] AI done for cert ${id}: grade=${r?.grade}`))
+            .catch(e => console.warn(`[attach-images] AI failed for cert ${id}:`, e?.message || e));
+        }
+
+        res.json({ ok: true, certId: cert.certId, aiTriggered: !!aiPromise });
+      } catch (err: any) {
+        console.error(`[attach-images] cert=${id} failed:`, err?.message || err, err?.stack || "");
+        res.status(500).json({ error: err?.message || "Attach failed" });
+      }
+    },
+  );
+
   // ── Reprocess images: re-run deskew + crop + variants on existing originals
   app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
     try {
