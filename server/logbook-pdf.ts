@@ -15,6 +15,27 @@ const PAGE_H = 841.89;
 const M = 40;
 const CW = PAGE_W - M * 2;
 const HARD_MAX_Y = 815; // absolute limit — nothing renders below this
+
+// PDFKit's `doc.image(buf, x, y, { fit: [W,H], align: "center", valign: "center" })`
+// scales the image to fit the W×H box while preserving aspect, then centres it.
+// When the image aspect differs from the box aspect, the result is letterboxed
+// — empty space on either the sides (image taller than box ratio) or top/
+// bottom (image wider than box ratio). Defect markers need to map onto the
+// ACTUAL rendered image subrectangle, not the box bounds — otherwise xp=0%
+// lands in the letterbox / gutter instead of on the card edge.
+function renderedRectInBox(boxW: number, boxH: number, imageAspect: number) {
+  let rw: number, rh: number;
+  if (boxW / boxH > imageAspect) {
+    // Box wider than image aspect → height-limited
+    rh = boxH;
+    rw = boxH * imageAspect;
+  } else {
+    // Box taller (or equal) → width-limited
+    rw = boxW;
+    rh = boxW / imageAspect;
+  }
+  return { ox: (boxW - rw) / 2, oy: (boxH - rh) / 2, rw, rh };
+}
 const GOLD = "#D4AF37";
 const GOLD_DARK = "#B8960C";
 const CHARCOAL = "#1A1A1A";
@@ -210,14 +231,30 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           // Defect circles — overlay on each side at stored x/y%. Outline-only
           // (no fill) so card detail underneath stays visible. Severity
           // colour-codes the stroke; numbered label sits next to the circle.
+          //
+          // The card image is fit-scaled with align:center valign:center, so
+          // it occupies a CENTRED subrectangle of the W×H box (letterboxed on
+          // the sides when the box is wider than the card aspect — which is
+          // always true here: box ≈252×150 ratio 1.68, card ≈0.72). Compute
+          // the actual rendered rect per side and map xp/yp onto IT, not the
+          // box bounds. Default aspect 1488/2079 (Pokémon real-world) if
+          // metadata can't be read.
+          const fMeta = await sharp(fBuf).metadata().catch(() => null);
+          const bMeta = await sharp(bBuf).metadata().catch(() => null);
+          const frontAspect = (fMeta?.width ?? 1488) / (fMeta?.height ?? 2079);
+          const backAspect  = (bMeta?.width  ?? 1488) / (bMeta?.height  ?? 2079);
+          const frontRect = renderedRectInBox(imgBoxW, imgBoxH, frontAspect);
+          const backRect  = renderedRectInBox(imgBoxW, imgBoxH, backAspect);
+
           for (const d of defects) {
             const xp = (d as any).x_percent;
             const yp = (d as any).y_percent;
             if (typeof xp !== "number" || typeof yp !== "number") continue;
             const onFront = (d as any).image_side !== "back";
             const imgX = onFront ? frontImgX : backImgX;
-            const cx = imgX + (xp / 100) * imgBoxW;
-            const cy = y + (yp / 100) * imgBoxH;
+            const rect = onFront ? frontRect : backRect;
+            const cx = imgX + rect.ox + (xp / 100) * rect.rw;
+            const cy = y    + rect.oy + (yp / 100) * rect.rh;
             const r = 6;
             const colour = d.severity === "significant" ? "#DC2626"
                          : d.severity === "moderate"    ? "#EA580C"
@@ -230,19 +267,23 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           if (buf) try { doc.image(buf, M + CW * 0.2, y, { fit: [CW * 0.6, imgBoxH], align: "center", valign: "center" }); } catch {}
 
           // Single-image variant: only one side present. Filter defects to
-          // whichever side we rendered (assume front if fBuf present).
+          // whichever side we rendered (assume front if fBuf present). Same
+          // letterbox-aware mapping as the dual-image branch above.
           if (buf) {
             const renderedSide = fBuf ? "front" : "back";
             const singleX = M + CW * 0.2;
             const singleW = CW * 0.6;
+            const sMeta = await sharp(buf).metadata().catch(() => null);
+            const aspect = (sMeta?.width ?? 1488) / (sMeta?.height ?? 2079);
+            const rect = renderedRectInBox(singleW, imgBoxH, aspect);
             for (const d of defects) {
               const xp = (d as any).x_percent;
               const yp = (d as any).y_percent;
               if (typeof xp !== "number" || typeof yp !== "number") continue;
               const ds = (d as any).image_side === "back" ? "back" : "front";
               if (ds !== renderedSide) continue;
-              const cx = singleX + (xp / 100) * singleW;
-              const cy = y + (yp / 100) * imgBoxH;
+              const cx = singleX + rect.ox + (xp / 100) * rect.rw;
+              const cy = y       + rect.oy + (yp / 100) * rect.rh;
               const r = 6;
               const colour = d.severity === "significant" ? "#DC2626"
                            : d.severity === "moderate"    ? "#EA580C"
