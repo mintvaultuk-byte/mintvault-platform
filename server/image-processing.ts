@@ -582,6 +582,85 @@ export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | 
 export const cropToYellowBorder = cropToCardBoundary;
 
 /**
+ * Per-edge coverage scan for tightenForDisplay (Fix A, post-MV109-spur).
+ *
+ * Walks inward from each of the 4 bitmap edges and finds the first row
+ * (top/bottom) or column (left/right) where ≥70% of pixels are non-mat
+ * (per the mat-distance threshold). Bounds = the first such row/col on
+ * each side.
+ *
+ * Why this replaces detectCardBoundary's bounding-box approach for the
+ * SECOND detect pass:
+ *   - Bounding-box uses MIN/MAX of all non-mat pixels. A single noise
+ *     pixel inside the mat strip (deskew-rotation AA, JPEG artefact,
+ *     scanner glare) inflates bounds by however far inside-the-strip
+ *     that spur sits. MV109/front had a 44 px mat strip survive on the
+ *     top because a single noise pixel near the top of the mat got the
+ *     bounding-box detection to put minY just-below-the-spur, leaving
+ *     ~44 rows of mostly-mat content "inside" the bounds.
+ *   - Coverage scan requires the ROW (or column) to be ≥70% non-mat
+ *     before counting toward the bound. One noise pixel in an otherwise-
+ *     mat row contributes 1/w (~0.001) coverage — far below 0.70. The
+ *     row stays classified as mat.
+ *
+ * Returns null if any edge can't find a 70%-coverage row/col, or if the
+ * resulting bounds collapse (minX≥maxX or minY≥maxY).
+ */
+const CARD_EDGE_COVERAGE_THRESHOLD = 0.70;
+
+function detectCardEdgesByCoverage(
+  pixels: Uint8Array, w: number, h: number, ch: number,
+  certId?: string | number,
+): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  const certTag = certId != null ? ` cert=${certId}` : "";
+  const mat = computeMatProfile(pixels, w, h, ch);
+  console.log(
+    `[edge-coverage] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB})` +
+    ` distance threshold=${mat.threshold}${certTag}`,
+  );
+
+  // Single-pass tally: count non-mat pixels per row AND per column.
+  // O(w*h) total. Avoids the O(w*h^2) cost of scanning each row inside
+  // each iteration of the outer edge-finder.
+  const rowNonMat = new Int32Array(h);
+  const colNonMat = new Int32Array(w);
+  for (let y = 0; y < h; y++) {
+    let rowCount = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * ch;
+      if (isCardPixel(pixels[i], pixels[i + 1], pixels[i + 2], mat)) {
+        rowCount++;
+        colNonMat[x]++;
+      }
+    }
+    rowNonMat[y] = rowCount;
+  }
+
+  const rowOk = (y: number) => rowNonMat[y] / w >= CARD_EDGE_COVERAGE_THRESHOLD;
+  const colOk = (x: number) => colNonMat[x] / h >= CARD_EDGE_COVERAGE_THRESHOLD;
+
+  let minY = -1;
+  for (let y = 0; y < h; y++) if (rowOk(y)) { minY = y; break; }
+  let maxY = -1;
+  for (let y = h - 1; y >= 0; y--) if (rowOk(y)) { maxY = y; break; }
+  let minX = -1;
+  for (let x = 0; x < w; x++) if (colOk(x)) { minX = x; break; }
+  let maxX = -1;
+  for (let x = w - 1; x >= 0; x--) if (colOk(x)) { maxX = x; break; }
+
+  if (minX < 0 || maxX < 0 || minY < 0 || maxY < 0 || maxX <= minX || maxY <= minY) {
+    console.warn(`[edge-coverage] no edge met ${(CARD_EDGE_COVERAGE_THRESHOLD * 100).toFixed(0)}% threshold: L=${minX} R=${maxX} T=${minY} B=${maxY}${certTag}`);
+    return null;
+  }
+
+  console.log(
+    `[edge-coverage] bounds L:${minX} R:${w - 1 - maxX} T:${minY} B:${h - 1 - maxY}` +
+    ` (cover threshold ${(CARD_EDGE_COVERAGE_THRESHOLD * 100).toFixed(0)}%)${certTag}`,
+  );
+  return { minX, maxX, minY, maxY };
+}
+
+/**
  * Tight-detect crop for the DISPLAY pipeline only.
  *
  * Operates on a buffer that's already been through the standard pipeline
@@ -590,24 +669,20 @@ export const cropToYellowBorder = cropToCardBoundary;
  * That strip is uniform and tight on all four sides, which is easy to
  * detect away.
  *
- * Re-runs detectCardBoundary with safetyPadPx=0 to get bounds flush with
- * the actual card edge, then extracts to those bounds. The output buffer
- * has the card's edges at the bitmap edges — so when maskRoundedCorners
- * runs next, the rounded-rect mask's STRAIGHT sides naturally land on
- * card pixels (not mat-strip pixels). Net effect: bare rounded-corner
- * card on transparent, no visible "frame" of mat-coloured pixels.
+ * Uses per-edge coverage scan (detectCardEdgesByCoverage) rather than
+ * detectCardBoundary's bounding-box approach. Coverage is immune to spur
+ * pixels — a single noise/AA pixel inside the mat strip won't inflate
+ * bounds because it doesn't push the row's non-mat coverage above 70%.
  *
- * Why this is safe even though the first detect pass needs an 8 px pad:
- *   - The first pass detects against the scanner mat with mat-distance
- *     thresholding. A 1-px shave there can clip card edges on tilted scans.
- *   - This second pass detects against the 8 px safety strip + card-border
- *     transition (very strong colour contrast) on a CLEAN, deskewed,
- *     centred buffer. The strip is also uniform per side. Zero-pad is safe.
+ * Bounding-box detection (the first-pass approach) needs the safety pad
+ * to protect against shaving card edges on tilted scans. Coverage scan
+ * needs neither a pad nor an inward bias — it lands the bound on the
+ * first row that is meaningfully card-content, which is exactly the
+ * straight-edge of the card body.
  *
  * On any failure (detect returns null, bounds < 50% of input, anything
  * throws) we fall back to a uniform inset of `fallbackInsetPx` per side.
- * This matches the previous trimForDisplay behaviour (10–16 px) so the
- * worst case is "no improvement" rather than "broken pipeline".
+ * Worst case is "no improvement" rather than "broken pipeline".
  */
 export async function tightenForDisplay(
   inputBuffer: Buffer,
@@ -632,21 +707,11 @@ export async function tightenForDisplay(
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
-    // Negative pad pushes detected bounds INWARD into the card by 10 px in
-    // detect-space (scales to ~16–20 px at full-res depending on input).
-    // Zero-pad is too tight: the detected card edge has a ~10 px transition
-    // zone where pixels are visually mat-like but pass the threshold-45 mat
-    // distance test. Without an inward bias, the rounded mask's straight
-    // sides land on those transition pixels and the visible frame survives.
-    // Negative bias is safe here because the input has already been deskewed
-    // and centred, so the card edge is consistent across rows — there's no
-    // single-row anomaly to protect against (unlike the first detect pass).
-    const boundary = detectCardBoundary(
+    const boundary = detectCardEdgesByCoverage(
       pixels, info.width, info.height, info.channels, certId,
-      { safetyPadPx: -10 },
     );
     if (!boundary) {
-      console.warn(`[tightenForDisplay] detect returned null${certTag} — falling back to ${fallbackInsetPx}px inset`);
+      console.warn(`[tightenForDisplay] coverage detect failed${certTag} — falling back to ${fallbackInsetPx}px inset`);
       return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
     }
 
