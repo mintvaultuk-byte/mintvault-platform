@@ -221,19 +221,21 @@ export interface BoundaryDetection {
 }
 
 export function detectCardBoundary(
-  pixels: Uint8Array, w: number, h: number, ch: number, certId?: string | number
+  pixels: Uint8Array, w: number, h: number, ch: number, certId?: string | number,
+  options?: { safetyPadPx?: number },
 ): BoundaryDetection | null {
   const certTag = certId != null ? ` cert=${certId}` : "";
+  const safetyPadPx = options?.safetyPadPx ?? CARD_DETECT_SAFETY_PAD_PX;
 
   // Primary: mat-distance detector (works against any mat colour)
   const mat = computeMatProfile(pixels, w, h, ch);
   const matRgb = { r: mat.matR, g: mat.matG, b: mat.matB };
-  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold}${certTag}`);
+  console.log(`[card-detect] mat profile: rgb(${mat.matR},${mat.matG},${mat.matB}) distance threshold=${mat.threshold} pad=${safetyPadPx}${certTag}`);
   const matIsBg = (r: number, g: number, b: number) => !isCardPixel(r, g, b, mat);
   const matBased = detectBoundaryWithTest(pixels, w, h, ch, matIsBg);
   if (matBased) {
     console.log(`[card-detect] mat-distance detection: ${matBased.nonBlackPct.toFixed(1)}% card pixels${certTag}`);
-    return { ...tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag), matRgb };
+    return { ...tightenToPokemonAspect(pixels, w, h, ch, matBased, matIsBg, certTag, safetyPadPx), matRgb };
   }
 
   // Fallback 1: adaptive-luma (Fix 0 — mat-aware branching, uses isBackground closure)
@@ -246,14 +248,14 @@ export function detectCardBoundary(
   const adaptive = detectBoundaryWithTest(pixels, w, h, ch, bg.isBackground);
   if (adaptive) {
     console.log(`[card-detect] adaptive-luma detection: ${adaptive.nonBlackPct.toFixed(1)}% non-bg${certTag}`);
-    return { ...tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag), matRgb: bgRgb };
+    return { ...tightenToPokemonAspect(pixels, w, h, ch, adaptive, bg.isBackground, certTag, safetyPadPx), matRgb: bgRgb };
   }
 
   // Fallback 2: fixed black threshold
   console.log(`[card-detect] adaptive-luma failed, falling back to fixed black threshold${certTag}`);
   const fixed = detectBoundaryWithTest(pixels, w, h, ch, isBackground);
   if (!fixed) return null;
-  return { ...tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag), matRgb: { r: 0, g: 0, b: 0 } };
+  return { ...tightenToPokemonAspect(pixels, w, h, ch, fixed, isBackground, certTag, safetyPadPx), matRgb: { r: 0, g: 0, b: 0 } };
 }
 
 /** Core boundary detection with a pluggable background test */
@@ -310,19 +312,23 @@ const MAX_ASPECT_TRIM_LOSS_PCT = 2;
 // padding" not "extra mat strip visible inside the card". Tuneable.
 const CARD_DETECT_SAFETY_PAD_PX = 8;
 
-// Expand bounds outward by CARD_DETECT_SAFETY_PAD_PX, clamped to the image
-// frame so we never index past the bitmap. Applied at every return path of
+// Expand bounds outward by padPx, clamped to the image frame so we never
+// index past the bitmap. Applied at every return path of
 // tightenToPokemonAspect so it kicks in regardless of which branch ran
 // (in-range, successful trim, pixel-loss bail, zero-trim bail).
+// padPx defaults to CARD_DETECT_SAFETY_PAD_PX so existing callers keep
+// the v590 8 px behaviour; the display-pipeline tightenForDisplay overrides
+// to 0 because it needs bounds flush with the actual card edge.
 function applySafetyPad(
   b: { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number },
   w: number, h: number,
+  padPx: number = CARD_DETECT_SAFETY_PAD_PX,
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } {
   return {
-    minX: Math.max(0,     b.minX - CARD_DETECT_SAFETY_PAD_PX),
-    maxX: Math.min(w - 1, b.maxX + CARD_DETECT_SAFETY_PAD_PX),
-    minY: Math.max(0,     b.minY - CARD_DETECT_SAFETY_PAD_PX),
-    maxY: Math.min(h - 1, b.maxY + CARD_DETECT_SAFETY_PAD_PX),
+    minX: Math.max(0,     b.minX - padPx),
+    maxX: Math.min(w - 1, b.maxX + padPx),
+    minY: Math.max(0,     b.minY - padPx),
+    maxY: Math.min(h - 1, b.maxY + padPx),
     nonBlackPct: b.nonBlackPct,
   };
 }
@@ -332,6 +338,7 @@ function tightenToPokemonAspect(
   bounds: { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number },
   isBg: (r: number, g: number, b: number) => boolean,
   certTag: string,
+  safetyPadPx: number = CARD_DETECT_SAFETY_PAD_PX,
 ): { minX: number; maxX: number; minY: number; maxY: number; nonBlackPct: number } {
   const startMinX = bounds.minX, startMaxX = bounds.maxX;
   const startMinY = bounds.minY, startMaxY = bounds.maxY;
@@ -342,7 +349,7 @@ function tightenToPokemonAspect(
   // Already in range — nothing to do
   if (startRatio >= POKEMON_ASPECT - ASPECT_TOL && startRatio <= POKEMON_ASPECT + ASPECT_TOL) {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} in-range, no trim${certTag}`);
-    return applySafetyPad(bounds, w, h);
+    return applySafetyPad(bounds, w, h, safetyPadPx);
   }
 
   // Integral image of fg pixels over the WHOLE frame, built once. Lets us
@@ -403,7 +410,7 @@ function tightenToPokemonAspect(
 
   if (trimmedW === 0 && trimmedH === 0) {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} could not shrink (${aborted || "bounds"})${certTag}`);
-    return applySafetyPad(bounds, w, h);
+    return applySafetyPad(bounds, w, h, safetyPadPx);
   }
 
   // Discard partial trim on pixel-loss bail. Previous behaviour kept whatever
@@ -414,13 +421,13 @@ function tightenToPokemonAspect(
   // so the safest move is to return the original bounds untouched.
   if (aborted === "pixel-loss") {
     console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} pixel-loss safeguard fired — discarding partial trim (${trimmedW}×${trimmedH}px), returning original bounds${certTag}`);
-    return applySafetyPad(bounds, w, h);
+    return applySafetyPad(bounds, w, h, safetyPadPx);
   }
 
   const suffix = aborted ? ` [early-exit: ${aborted}]` : "";
   console.log(`[card-detect] aspect-tighten: ratio ${startRatio.toFixed(3)} → ${finalRatio.toFixed(3)} (trimmed ${trimmedW}px width, ${trimmedH}px height)${suffix}${certTag}`);
 
-  return applySafetyPad({ minX, maxX, minY, maxY, nonBlackPct: finalPct }, w, h);
+  return applySafetyPad({ minX, maxX, minY, maxY, nonBlackPct: finalPct }, w, h, safetyPadPx);
 }
 
 /**
@@ -573,6 +580,122 @@ export async function cropToCardBoundary(inputBuffer: Buffer, certId?: string | 
 
 // Keep cropToYellowBorder as alias for backward compat (routes.ts references it)
 export const cropToYellowBorder = cropToCardBoundary;
+
+/**
+ * Tight-detect crop for the DISPLAY pipeline only.
+ *
+ * Operates on a buffer that's already been through the standard pipeline
+ * (deskew + crop + reCentre), so the only background present is the 8 px
+ * safety-pad strip that cropToCardBoundary added on the FIRST detect pass.
+ * That strip is uniform and tight on all four sides, which is easy to
+ * detect away.
+ *
+ * Re-runs detectCardBoundary with safetyPadPx=0 to get bounds flush with
+ * the actual card edge, then extracts to those bounds. The output buffer
+ * has the card's edges at the bitmap edges — so when maskRoundedCorners
+ * runs next, the rounded-rect mask's STRAIGHT sides naturally land on
+ * card pixels (not mat-strip pixels). Net effect: bare rounded-corner
+ * card on transparent, no visible "frame" of mat-coloured pixels.
+ *
+ * Why this is safe even though the first detect pass needs an 8 px pad:
+ *   - The first pass detects against the scanner mat with mat-distance
+ *     thresholding. A 1-px shave there can clip card edges on tilted scans.
+ *   - This second pass detects against the 8 px safety strip + card-border
+ *     transition (very strong colour contrast) on a CLEAN, deskewed,
+ *     centred buffer. The strip is also uniform per side. Zero-pad is safe.
+ *
+ * On any failure (detect returns null, bounds < 50% of input, anything
+ * throws) we fall back to a uniform inset of `fallbackInsetPx` per side.
+ * This matches the previous trimForDisplay behaviour (10–16 px) so the
+ * worst case is "no improvement" rather than "broken pipeline".
+ */
+export async function tightenForDisplay(
+  inputBuffer: Buffer,
+  certId?: string | number,
+  fallbackInsetPx: number = 16,
+): Promise<Buffer> {
+  const certTag = certId != null ? ` cert=${certId}` : "";
+  let metaW = 0, metaH = 0;
+  try {
+    const meta = await sharp(inputBuffer).metadata();
+    if (!meta.width || !meta.height) return inputBuffer;
+    metaW = meta.width; metaH = meta.height;
+
+    // Detect on a downscaled copy (same pattern as cropToCardBoundary).
+    const scale = Math.min(1, 1500 / Math.max(metaW, metaH));
+    const workW = Math.round(metaW * scale);
+    const workH = Math.round(metaH * scale);
+    const { data, info } = await sharp(inputBuffer)
+      .resize(workW, workH, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const boundary = detectCardBoundary(
+      pixels, info.width, info.height, info.channels, certId,
+      { safetyPadPx: 0 },
+    );
+    if (!boundary) {
+      console.warn(`[tightenForDisplay] detect returned null${certTag} — falling back to ${fallbackInsetPx}px inset`);
+      return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
+    }
+
+    // Map bounds back to full-res, clamp defensively
+    let origMinX = Math.round(boundary.minX / scale);
+    let origMinY = Math.round(boundary.minY / scale);
+    let origMaxX = Math.round(boundary.maxX / scale);
+    let origMaxY = Math.round(boundary.maxY / scale);
+    const clamped =
+      origMinX < 0 || origMinY < 0 || origMaxX > metaW - 1 || origMaxY > metaH - 1;
+    origMinX = Math.max(0, origMinX);
+    origMinY = Math.max(0, origMinY);
+    origMaxX = Math.min(metaW - 1, origMaxX);
+    origMaxY = Math.min(metaH - 1, origMaxY);
+    if (clamped) {
+      console.warn(`[tightenForDisplay] mapped bounds extended past bitmap, clamped${certTag}`);
+    }
+
+    const cropW = origMaxX - origMinX + 1;
+    const cropH = origMaxY - origMinY + 1;
+
+    // Sanity: detected crop must be ≥50% of input on both axes
+    if (cropW < metaW * 0.5 || cropH < metaH * 0.5) {
+      console.warn(
+        `[tightenForDisplay] detected crop ${cropW}x${cropH} < 50% of input ${metaW}x${metaH}${certTag}` +
+        ` — falling back to ${fallbackInsetPx}px inset`,
+      );
+      return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
+    }
+
+    console.log(
+      `[tightenForDisplay] ${metaW}x${metaH} → ${cropW}x${cropH}` +
+      ` (trimmed L:${origMinX} R:${metaW - 1 - origMaxX} T:${origMinY} B:${metaH - 1 - origMaxY})${certTag}`,
+    );
+
+    return await sharp(inputBuffer)
+      .extract({ left: origMinX, top: origMinY, width: cropW, height: cropH })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (err: any) {
+    console.warn(`[tightenForDisplay] threw${certTag}: ${err.message} — falling back to ${fallbackInsetPx}px inset`);
+    try {
+      return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
+    } catch {
+      return inputBuffer;
+    }
+  }
+}
+
+async function applyInsetFallback(
+  inputBuffer: Buffer, w: number, h: number, insetPx: number,
+): Promise<Buffer> {
+  if (!w || !h || w <= 2 * insetPx + 50 || h <= 2 * insetPx + 50) return inputBuffer;
+  return await sharp(inputBuffer)
+    .extract({ left: insetPx, top: insetPx, width: w - 2 * insetPx, height: h - 2 * insetPx })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+}
 
 /**
  * Auto-crop: detect card in scan and crop tight to the actual card edges.

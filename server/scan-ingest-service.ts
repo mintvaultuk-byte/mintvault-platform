@@ -54,7 +54,7 @@ export async function uploadImagesToCert(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { maskRoundedCorners } = await import("./image-processing");
+  const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -88,7 +88,7 @@ export async function uploadImagesToCert(
   ]);
 
   // Derive display-ready artefacts. The pipeline is:
-  //   centredUnpadded → trimForDisplay (10px inset)
+  //   centredUnpadded → tightenForDisplay (second card-detect, no safety pad)
   //                   → maskRoundedCorners
   //                   → {toDisplayPng, toDisplayJpeg}
   //
@@ -98,32 +98,25 @@ export async function uploadImagesToCert(
   //   - JPEG with flatten-to-white rounded corners → front_cropped.jpg key
   //     (compatibility — DGR PDF and other consumers that expect a JPEG).
   //
-  // Trim BEFORE mask: the SVG mask is computed against the bitmap's current
-  // dimensions with rx = 4% of width. Trimming AFTER mask shifts the curve
-  // inward and exposes transparent stripes along the 4 outer edges. Trim
-  // first so the mask is recomputed against the tighter canvas and the
-  // corner curves sit cleanly at the new bitmap corners.
-  //
-  // DISPLAY_TRIM_PX = 10 hugs the card without eating into the v590 8px
-  // safety pad (which scales to ~16–26 px at full res depending on input
-  // dimensions). ~6–16 px of safety margin always remains.
+  // Why tightenForDisplay instead of the earlier 10 px uniform inset (which
+  // was the v592 trimForDisplay):
+  //   - centredUnpadded carries an 8 px safety-pad strip from the FIRST
+  //     card-detect pass (cropToCardBoundary). At full-res that scales to
+  //     ~16–26 px of mat-coloured pixels on every side.
+  //   - A uniform 10 px inset left a ~10 px visible strip of mat colour
+  //     on the straight sides of the rounded mask — Cornelius's "thin
+  //     frame around the card" report (v593 backfill).
+  //   - tightenForDisplay re-runs detectCardBoundary with safetyPadPx=0 on
+  //     this clean centred buffer. Card-edge contrast against the safety
+  //     strip is strong and uniform, so zero-pad detection is safe here
+  //     (unlike the first pass, which needs the pad against tilted scans).
+  //   - Falls back to a 16 px uniform inset if detection fails.
   //
   // NOTE (rev 3b29948 → reverted): a previous attempt collapsed mask+flatten
   // into a single inline sharp() pipeline. That clipped the right edge of
   // cards on prod (v587). Keep the two-stage split — materialising between
   // mask and encode sidesteps a libvips pipeline-reordering bug. Don't
   // re-collapse without a visual diff harness.
-  const DISPLAY_TRIM_PX = 10;
-  async function trimForDisplay(buf: Buffer): Promise<Buffer> {
-    const meta = await sharp(buf).metadata();
-    if (!meta.width || !meta.height) return buf;
-    const w = meta.width, h = meta.height, t = DISPLAY_TRIM_PX;
-    if (w <= 2 * t + 50 || h <= 2 * t + 50) return buf; // tiny image — skip
-    return sharp(buf)
-      .extract({ left: t, top: t, width: w - 2 * t, height: h - 2 * t })
-      .jpeg({ quality: 90 })
-      .toBuffer();
-  }
   async function toDisplayPng(buf: Buffer): Promise<Buffer> {
     // No flatten — maskRoundedCorners already produced alpha=0 at the
     // rounded corners (image-processing.ts:38-50). Encode as PNG to keep
@@ -138,14 +131,16 @@ export async function uploadImagesToCert(
   }
 
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontTrimmed = await trimForDisplay(frontUnpadded ?? frontVariants.cropped);
-  const frontMaskedPng = await maskRoundedCorners(frontTrimmed);
+  const frontTight = await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber);
+  const frontMaskedPng = await maskRoundedCorners(frontTight);
   const frontDisplayPng = await toDisplayPng(frontMaskedPng);
   const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
-  const backTrimmed = backVariants ? await trimForDisplay(backUnpadded ?? backVariants.cropped) : null;
-  const backMaskedPng = backTrimmed ? await maskRoundedCorners(backTrimmed) : null;
+  const backTight = backVariants
+    ? await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber)
+    : null;
+  const backMaskedPng = backTight ? await maskRoundedCorners(backTight) : null;
   const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
