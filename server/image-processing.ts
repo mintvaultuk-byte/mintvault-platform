@@ -4,8 +4,16 @@
  */
 import sharp from "sharp";
 
-// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
-const CARD_CORNER_RADIUS_PCT = 0.04;
+// Trading card corner radius as percentage of width. Pokémon's real-world
+// ratio is ~3.0–3.5 mm on a 63 mm card = 4.76–5.55%. The previous 0.04 was
+// undersized: on a 1483 px output it produced a 59 px mask curve, leaving
+// ~10 px of mat-coloured pixels exposed near each corner that the
+// per-edge coverage scan couldn't reach (it operates on linear bounds, not
+// curve radius). Bumping to 0.05 → 74 px curve on the same input, covers
+// the observed 8–12 px corner strips with ~3 px headroom. Slight over-
+// clip risk on extreme-corner card content is negligible for Pokémon
+// (outer corners are uniform yellow border, no design content).
+const CARD_CORNER_RADIUS_PCT = 0.05;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
