@@ -35,16 +35,27 @@
  *     stops referencing them.
  *
  * Run:
+ *   # SETUP (one-off, this session):
+ *   #   1. Get prod R2 write creds from Fly secrets:
+ *   #        fly ssh console -a mintvault -C 'printenv | grep ^R2_'
+ *   #   2. Paste the R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY values into .env as:
+ *   #        R2_PROD_WRITE_ACCESS_KEY_ID=...
+ *   #        R2_PROD_WRITE_SECRET_ACCESS_KEY=...
+ *   #   3. Remove both vars from .env after the backfill completes.
+ *   #
  *   # dry-run, narrow range
- *   npx tsx --env-file=.env scripts/_backfill-display-images.ts \
+ *   MINTVAULT_DATABASE_URL='postgresql://...wispy-morning...' \
+ *     npx tsx --env-file=.env scripts/_backfill-display-images.ts \
  *     --from=MV100 --to=MV110
  *
  *   # real run, narrow range
- *   npx tsx --env-file=.env scripts/_backfill-display-images.ts \
+ *   MINTVAULT_DATABASE_URL='...wispy-morning...' \
+ *     npx tsx --env-file=.env scripts/_backfill-display-images.ts \
  *     --from=MV100 --to=MV110 --no-dry-run
  *
  *   # real run, ALL certs
- *   npx tsx --env-file=.env scripts/_backfill-display-images.ts \
+ *   MINTVAULT_DATABASE_URL='...wispy-morning...' \
+ *     npx tsx --env-file=.env scripts/_backfill-display-images.ts \
  *     --all --no-dry-run
  */
 import { db } from "../server/db";
@@ -53,6 +64,52 @@ import { storage } from "../server/storage";
 import { uploadImagesToCert } from "../server/scan-ingest-service";
 import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { takeSnapshot } from "./_backfill-display-images-snapshot";
+
+// ── Prod R2 env binding ────────────────────────────────────────────────────
+// server/r2.ts's S3Client is a module-level singleton that lazily initialises
+// from process.env.R2_* on its first call. There's no injection hook. To
+// route the backfill's writes (uploadImagesToCert → uploadToR2) at prod R2
+// rather than whatever scope-limited token is in local .env, we mutate
+// process.env BEFORE the singleton initialises. The first uploadToR2 call
+// happens inside uploadImagesToCert (per-cert loop) — well after this
+// function runs at the top of run(), so the import-time / singleton order
+// is safe.
+//
+// Reads (this script's own makeR2Client + the sentinel HEAD probe) use the
+// same prod-write credentials. We don't split read vs write tokens — the
+// prod runtime token has all four perms (Head/Get/Put/Delete) on the bucket,
+// and a single-token path is simpler / fewer moving parts.
+function bindProdR2Env(): { credSource: string; bucket: string; endpoint: string } {
+  const writeAk  = process.env.R2_PROD_WRITE_ACCESS_KEY_ID;
+  const writeSec = process.env.R2_PROD_WRITE_SECRET_ACCESS_KEY;
+  const endpoint = process.env.R2_PROD_ENDPOINT
+    ?? "https://ef26a9eb2862c598eb8cc23f6b2e45bc.r2.cloudflarestorage.com";
+  const bucket   = process.env.R2_PROD_BUCKET ?? "mintvault-cards";
+
+  if (!writeAk || !writeSec) {
+    console.error("ERROR: backfill requires R2_PROD_WRITE_ACCESS_KEY_ID + R2_PROD_WRITE_SECRET_ACCESS_KEY in env.");
+    console.error("       Get them from Fly secrets:");
+    console.error("         fly ssh console -a mintvault -C 'printenv | grep ^R2_'");
+    console.error("       Paste the R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY values into .env as");
+    console.error("       R2_PROD_WRITE_ACCESS_KEY_ID + R2_PROD_WRITE_SECRET_ACCESS_KEY.");
+    console.error("       Remove both vars from .env after the backfill completes.");
+    process.exit(2);
+  }
+
+  // Override the singleton's env-var inputs BEFORE getClient() first fires.
+  // Endpoint + bucket are typically identical to local .env already (shared
+  // bucket), but explicit override defends against .env drift.
+  process.env.R2_ENDPOINT          = endpoint;
+  process.env.R2_BUCKET_NAME       = bucket;
+  process.env.R2_ACCESS_KEY_ID     = writeAk;
+  process.env.R2_SECRET_ACCESS_KEY = writeSec;
+
+  return {
+    credSource: "R2_PROD_WRITE_* (prod runtime token, shared reads+writes)",
+    bucket,
+    endpoint,
+  };
+}
 
 // ── DB host guard ──────────────────────────────────────────────────────────
 // The MintVault Neon project has asymmetric branches with diverged data:
@@ -134,14 +191,14 @@ function parseArgs(): Args {
 }
 
 // ── R2 helpers ─────────────────────────────────────────────────────────────
+// Reads prod R2 creds from process.env AFTER bindProdR2Env() has overridden
+// them. Same client is used for HEAD (skip-check + sentinel) and GET (source
+// fetch); writes go via server/r2.ts's singleton using the same env vars.
 function makeR2Client(): { client: S3Client; bucket: string } {
-  const endpoint = process.env.R2_ENDPOINT;
-  const bucket   = process.env.R2_BUCKET_NAME;
-  const akid     = process.env.R2_ACCESS_KEY_ID;
-  const secret   = process.env.R2_SECRET_ACCESS_KEY;
-  if (!endpoint || !bucket || !akid || !secret) {
-    throw new Error("Missing R2_ENDPOINT / R2_BUCKET_NAME / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY in env");
-  }
+  const endpoint = process.env.R2_ENDPOINT!;
+  const bucket   = process.env.R2_BUCKET_NAME!;
+  const akid     = process.env.R2_ACCESS_KEY_ID!;
+  const secret   = process.env.R2_SECRET_ACCESS_KEY!;
   return {
     client: new S3Client({
       region: "auto",
@@ -150,6 +207,29 @@ function makeR2Client(): { client: S3Client; bucket: string } {
     }),
     bucket,
   };
+}
+
+// ── R2 reach probe ─────────────────────────────────────────────────────────
+// Sentinel HEAD against a known-good prod object (MV109's display key,
+// confirmed reachable via the public verify page earlier). If HEAD returns
+// 401 / 403 / 404 the creds in scope cannot read prod source files and the
+// whole backfill would produce all-MISSING output. Fail fast instead.
+const R2_REACH_SENTINEL = "images/MV109/front.jpg";
+async function assertR2ReadAccess(client: S3Client, bucket: string): Promise<void> {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: R2_REACH_SENTINEL }));
+    console.log(`R2 access:   sentinel=${R2_REACH_SENTINEL} [✓ READABLE]`);
+  } catch (e: any) {
+    const code = e?.$metadata?.httpStatusCode ?? e?.name ?? "?";
+    console.error(`R2 access:   sentinel=${R2_REACH_SENTINEL} [✗ ${code} — ABORTING]`);
+    console.error("");
+    console.error("ERROR: prod R2 sentinel HEAD failed. The configured credentials cannot");
+    console.error("       read prod source objects. Check that R2_PROD_WRITE_* are the");
+    console.error("       actual values from `fly ssh console -a mintvault -C \"printenv | grep ^R2_\"`,");
+    console.error("       not stale or transcribed-incorrectly. Refusing to continue —");
+    console.error("       the backfill would otherwise produce all-MISSING output.");
+    process.exit(2);
+  }
 }
 
 async function r2Head(client: S3Client, bucket: string, key: string): Promise<boolean> {
@@ -243,12 +323,25 @@ interface RunSummary {
 }
 
 async function run(args: Args): Promise<RunSummary> {
-  // Guard #1 (unconditional, applies to dry-run too): require prod branch.
+  // Guard #1 (must run FIRST): bind prod R2 env vars before server/r2.ts's
+  // singleton lazily initialises. Without this, writes would go via the
+  // scope-limited token in local .env and reads would 401 on prod keys.
+  const r2bind = bindProdR2Env();
+
+  // Guard #2 (unconditional, applies to dry-run too): require prod DB branch.
   // Even a dry-run against staging would generate misleading output, so we
   // fail fast before any other work.
   await assertProdConnection();
 
-  // Guard #2: real run requires explicit range OR --all
+  // Guard #3 (R2 connectivity probe): build the read client now that env is
+  // bound, then HEAD the sentinel. Catches mistyped / stale R2_PROD_WRITE_*
+  // values before any per-cert work.
+  const { client: r2c, bucket } = makeR2Client();
+  console.log(`R2:          bucket=${r2bind.bucket}  endpoint=${r2bind.endpoint}`);
+  console.log(`             creds=${r2bind.credSource}`);
+  await assertR2ReadAccess(r2c, bucket);
+
+  // Guard #4: real run requires explicit range OR --all
   if (!args.dryRun) {
     const hasRange = args.fromNum !== undefined && args.toNum !== undefined;
     if (!hasRange && !args.all) {
@@ -272,7 +365,7 @@ async function run(args: Args): Promise<RunSummary> {
   const certs = await fetchCerts(args);
   console.log(`[backfill] fetched ${certs.length} cert(s) in range`);
 
-  const { client: r2c, bucket } = makeR2Client();
+  // r2c + bucket already built above for the reach probe — reuse here.
 
   const summary: RunSummary = {
     total: certs.length,
