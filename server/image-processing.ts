@@ -632,9 +632,18 @@ export async function tightenForDisplay(
       .toBuffer({ resolveWithObject: true });
 
     const pixels = new Uint8Array(data);
+    // Negative pad pushes detected bounds INWARD into the card by 10 px in
+    // detect-space (scales to ~16–20 px at full-res depending on input).
+    // Zero-pad is too tight: the detected card edge has a ~10 px transition
+    // zone where pixels are visually mat-like but pass the threshold-45 mat
+    // distance test. Without an inward bias, the rounded mask's straight
+    // sides land on those transition pixels and the visible frame survives.
+    // Negative bias is safe here because the input has already been deskewed
+    // and centred, so the card edge is consistent across rows — there's no
+    // single-row anomaly to protect against (unlike the first detect pass).
     const boundary = detectCardBoundary(
       pixels, info.width, info.height, info.channels, certId,
-      { safetyPadPx: 0 },
+      { safetyPadPx: -10 },
     );
     if (!boundary) {
       console.warn(`[tightenForDisplay] detect returned null${certTag} — falling back to ${fallbackInsetPx}px inset`);
