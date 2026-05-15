@@ -1482,6 +1482,33 @@ function CertRow({
   const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
   const label = gradeLabelFull(gradeType, cert.gradeOverall || "0");
 
+  // Embedding freshness — embeddedAt is null until the hourly job picks
+  // it up; stale when a cert mutation (image swap, grade edit, etc.) has
+  // bumped updatedAt since the last embed. cert.updatedAt fires on any
+  // row change so "stale" here means "embedding text may be out of date".
+  const embeddedAt = (cert as any).embeddedAt ? new Date((cert as any).embeddedAt) : null;
+  const updatedAt  = (cert as any).updatedAt  ? new Date((cert as any).updatedAt)  : null;
+  const isStaleEmbedding = !!(embeddedAt && updatedAt && updatedAt.getTime() > embeddedAt.getTime());
+
+  const [reembedBusy, setReembedBusy] = useState(false);
+  const [reembedMsg,  setReembedMsg]  = useState<string | null>(null);
+  async function handleReembed() {
+    setReembedBusy(true);
+    setReembedMsg(null);
+    try {
+      const res = await fetch(`/api/admin/embed-corpus/cert/${encodeURIComponent(cert.certId)}`, { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setReembedMsg(data.status === "embedded" ? "Embedded ✓" : (data.reason || data.status));
+      setTimeout(() => setReembedMsg(null), 4000);
+    } catch (e: any) {
+      setReembedMsg(`Error: ${e.message}`);
+      setTimeout(() => setReembedMsg(null), 6000);
+    } finally {
+      setReembedBusy(false);
+    }
+  }
+
   return (
     <div
       className="border border-[#D4AF37]/15 rounded-lg p-4 flex flex-col gap-3"
@@ -1543,7 +1570,18 @@ function CertRow({
             <p className="text-[#999999] text-xs truncate">
               {cert.cardGame} · {cert.setName} · {cert.cardNumber}
               {cert.variant ? ` · ${cert.variant}` : ""}
-              
+
+            </p>
+            <p className="text-[#999999] text-[10px] mt-1 flex items-center gap-1.5 flex-wrap" data-testid={`text-embed-status-${cert.id}`}>
+              <Database size={9} className="text-[#D4AF37]/60" />
+              <span>
+                Last embedded: {embeddedAt ? embeddedAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "never"}
+              </span>
+              {isStaleEmbedding && (
+                <span className="text-[9px] uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-200 px-1 py-px rounded font-bold" data-testid={`badge-embed-stale-${cert.id}`}>
+                  STALE
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1624,6 +1662,22 @@ function CertRow({
         >
           <Printer size={10} /> Both PDF
         </a>
+
+        <span className="text-[#D4AF37]/20">|</span>
+
+        <button
+          type="button"
+          onClick={handleReembed}
+          disabled={reembedBusy}
+          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors disabled:opacity-60"
+          title={isStaleEmbedding ? "Re-embed: cert has changed since last embed" : "Re-embed: force regenerate RAG vector"}
+          data-testid={`button-reembed-${cert.id}`}
+        >
+          <Database size={10} /> {reembedBusy ? "…" : "Re-embed"}
+        </button>
+        {reembedMsg && (
+          <span className="text-[10px] text-[#666666]" data-testid={`text-reembed-msg-${cert.id}`}>{reembedMsg}</span>
+        )}
       </div>
     </div>
   );

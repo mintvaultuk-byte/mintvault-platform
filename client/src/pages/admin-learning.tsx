@@ -203,6 +203,26 @@ export default function AdminLearningPage() {
   const { toast } = useToast();
   const [pendingFlag, setPendingFlag] = useState<{ flag: AiFeatureFlag; nextEnabled: boolean } | null>(null);
   const [submittingFlag, setSubmittingFlag] = useState<string | null>(null);
+  const [forceEmbedding, setForceEmbedding] = useState(false);
+
+  async function forceEmbedNow() {
+    setForceEmbedding(true);
+    try {
+      const res = await fetch("/api/admin/embed-corpus/run", { method: "POST", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.skipped) {
+        toast({ title: `Debounced — try again in ${data.waitSec}s`, description: "Force-run is rate-limited to one per 60s." });
+      } else {
+        toast({ title: `Embedded ${data.embedded ?? 0} cert${data.embedded === 1 ? "" : "s"}`, description: `Picked ${data.picked}, skipped ${data.skippedCount}, failed ${data.failed}.` });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/embedding-status"] });
+    } catch (e: any) {
+      toast({ title: "Force embed failed", description: e.message, variant: "destructive" });
+    } finally {
+      setForceEmbedding(false);
+    }
+  }
 
   async function applyFlagToggle(flag: AiFeatureFlag, nextEnabled: boolean) {
     setSubmittingFlag(flag.name);
@@ -527,6 +547,23 @@ export default function AdminLearningPage() {
                   {embedStatus.embedded_count === embedStatus.total_approved && embedStatus.total_approved > 0 && (
                     <p className="text-emerald-600 text-xs">All approved cards embedded ✓</p>
                   )}
+                  {/* Dormant-retrieval banner — vectors are being written but
+                      no grading pass consumes them yet. Wiring is a separate
+                      task; this line keeps the operator aware of that. */}
+                  <p className="text-[#B8960C] text-xs bg-[#FBF8EE] border border-[#D4AF37]/30 rounded px-2 py-1.5">
+                    ⓘ Embeddings are being generated but not yet consumed by any grading pass. Retrieval wiring is a separate task.
+                  </p>
+                  {/* Force embed now — bypasses the hourly cadence and runs
+                      the next batch immediately. 60s server-side debounce. */}
+                  <button
+                    type="button"
+                    onClick={forceEmbedNow}
+                    disabled={forceEmbedding}
+                    className="text-xs bg-[#D4AF37] text-[#1A1400] font-bold uppercase tracking-widest px-3 py-1.5 rounded hover:bg-[#B8960C] transition-colors disabled:opacity-60"
+                    data-testid="button-force-embed-now"
+                  >
+                    {forceEmbedding ? "Running…" : "Force embed now"}
+                  </button>
                 </>
               )}
             </div>
