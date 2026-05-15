@@ -86,6 +86,7 @@ async function resizeForPdf(buf: Buffer): Promise<Buffer> {
     return await sharp(buf)
       .rotate()
       .trim({ background: matColour, threshold: 15 })
+      .extend({ top: 8, bottom: 8, left: 8, right: 8, background: '#ffffff' })
       .resize({
         width: 1500,
         height: 1500,
