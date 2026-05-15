@@ -71,6 +71,7 @@ async function resizeForPdf(buf: Buffer): Promise<Buffer> {
   try {
     return await sharp(buf)
       .rotate() // respect EXIF orientation before strip
+      .trim()   // content-aware edge trim — strips white scanner mat + corner marks before resize
       .resize({
         width: 1500,
         height: 1500,
