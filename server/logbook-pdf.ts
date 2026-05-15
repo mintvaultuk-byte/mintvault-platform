@@ -228,7 +228,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         else {
           rw("Defects", `${defects.length} detected`);
           for (const d of defects.slice(0, 2)) { doc.font("Helvetica").fontSize(4.5).fillColor(TEXT).text(`\u2022 ${d.type} (${d.location}, ${d.severity})`, M + 6, y, { width: CW - 10, height: 7 }); y += 7; }
-          if (defects.length > 2) { doc.font("Helvetica").fontSize(4).fillColor(MUTED).text(`+ ${defects.length - 2} more`, M + 6, y, { height: 6 }); y += 6; }
+          if (defects.length > 2) { doc.font("Helvetica").fontSize(4).fillColor(MUTED).text(`Full defect report: mintvaultuk.com/cert/${certId}/report`, M + 6, y, { width: CW - 10, height: 6 }); y += 6; }
         }
       }
 
