@@ -225,20 +225,14 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         const backImgX  = M + imgBoxW + 10;
 
         if (fBuf && bBuf) {
-          try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
-          try { doc.image(bBuf, backImgX,  y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
-
-          // Defect circles — overlay on each side at stored x/y%. Outline-only
-          // (no fill) so card detail underneath stays visible. Severity
-          // colour-codes the stroke; numbered label sits next to the circle.
+          // Compute rendered rects first — needed for both clip path and
+          // defect-marker mapping. Default aspect 1488/2079 (Pokémon real-
+          // world) if metadata can't be read.
           //
           // The card image is fit-scaled with align:center valign:center, so
           // it occupies a CENTRED subrectangle of the W×H box (letterboxed on
           // the sides when the box is wider than the card aspect — which is
-          // always true here: box ≈252×150 ratio 1.68, card ≈0.72). Compute
-          // the actual rendered rect per side and map xp/yp onto IT, not the
-          // box bounds. Default aspect 1488/2079 (Pokémon real-world) if
-          // metadata can't be read.
+          // always true here: box ≈252×150 ratio 1.68, card ≈0.72).
           const fMeta = await sharp(fBuf).metadata().catch(() => null);
           const bMeta = await sharp(bBuf).metadata().catch(() => null);
           const frontAspect = (fMeta?.width ?? 1488) / (fMeta?.height ?? 2079);
@@ -246,6 +240,23 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           const frontRect = renderedRectInBox(imgBoxW, imgBoxH, frontAspect);
           const backRect  = renderedRectInBox(imgBoxW, imgBoxH, backAspect);
 
+          // Clip each image to a rounded-rect path sized to the actual
+          // rendered card boundary (NOT the box bounds). Any letterbox /
+          // residual-mat content outside the card rectangle is clipped away,
+          // and the corners are rounded to match the card's physical shape.
+          doc.save();
+          doc.roundedRect(frontImgX + frontRect.ox, y + frontRect.oy, frontRect.rw, frontRect.rh, 6).clip();
+          try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+          doc.restore();
+
+          doc.save();
+          doc.roundedRect(backImgX + backRect.ox, y + backRect.oy, backRect.rw, backRect.rh, 6).clip();
+          try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+          doc.restore();
+
+          // Defect circles — overlay on each side at stored x/y%. Outline-only
+          // (no fill) so card detail underneath stays visible. Severity
+          // colour-codes the stroke; numbered label sits next to the circle.
           for (const d of defects) {
             const xp = (d as any).x_percent;
             const yp = (d as any).y_percent;
@@ -264,11 +275,10 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           }
         } else {
           const buf = fBuf || bBuf;
-          if (buf) try { doc.image(buf, M + CW * 0.2, y, { fit: [CW * 0.6, imgBoxH], align: "center", valign: "center" }); } catch {}
-
           // Single-image variant: only one side present. Filter defects to
           // whichever side we rendered (assume front if fBuf present). Same
-          // letterbox-aware mapping as the dual-image branch above.
+          // letterbox-aware mapping + rounded-rect clip as the dual-image
+          // branch above.
           if (buf) {
             const renderedSide = fBuf ? "front" : "back";
             const singleX = M + CW * 0.2;
@@ -276,6 +286,13 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
             const sMeta = await sharp(buf).metadata().catch(() => null);
             const aspect = (sMeta?.width ?? 1488) / (sMeta?.height ?? 2079);
             const rect = renderedRectInBox(singleW, imgBoxH, aspect);
+
+            // Clip + image
+            doc.save();
+            doc.roundedRect(singleX + rect.ox, y + rect.oy, rect.rw, rect.rh, 6).clip();
+            try { doc.image(buf, singleX, y, { fit: [singleW, imgBoxH], align: "center", valign: "center" }); } catch {}
+            doc.restore();
+
             for (const d of defects) {
               const xp = (d as any).x_percent;
               const yp = (d as any).y_percent;
