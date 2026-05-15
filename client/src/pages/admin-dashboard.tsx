@@ -288,7 +288,7 @@ export default function AdminDashboard({ onLogout }: Props) {
             <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
               <GradingQueue
                 currentCertId={selectedGradingCertId}
-                onSelectCert={setSelectedGradingCertId}
+                onSelectCert={(id) => { setSelectedGradingCertId(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
                 approvedSignal={approvedSignal}
               />
               {gradingCert ? (
