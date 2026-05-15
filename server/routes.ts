@@ -871,6 +871,13 @@ export async function registerRoutes(
     console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
   }
 
+  // ── Health check — no auth, no DB, no shared state. First registered so
+  // it answers even if downstream middleware throws. Used by deploy smoke
+  // tests and by anything wanting a cheap liveness signal.
+  app.get("/api/healthz", (_req, res) => {
+    res.json({ ok: true, ts: Date.now() });
+  });
+
   // ── Public flags endpoint ──────────────────────────────────────────────────
   app.get("/api/config/public-flags", (_req, res) => {
     const { FEATURE_FLAGS } = require("./config/feature-flags");
