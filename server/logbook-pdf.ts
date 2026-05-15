@@ -245,12 +245,12 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           // residual-mat content outside the card rectangle is clipped away,
           // and the corners are rounded to match the card's physical shape.
           doc.save();
-          doc.roundedRect(frontImgX + frontRect.ox, y + frontRect.oy, frontRect.rw, frontRect.rh, 6).clip();
+          doc.roundedRect(frontImgX + frontRect.ox, y + frontRect.oy, frontRect.rw, frontRect.rh, 14).clip();
           try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
           doc.restore();
 
           doc.save();
-          doc.roundedRect(backImgX + backRect.ox, y + backRect.oy, backRect.rw, backRect.rh, 6).clip();
+          doc.roundedRect(backImgX + backRect.ox, y + backRect.oy, backRect.rw, backRect.rh, 14).clip();
           try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
           doc.restore();
 
@@ -289,7 +289,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
 
             // Clip + image
             doc.save();
-            doc.roundedRect(singleX + rect.ox, y + rect.oy, rect.rw, rect.rh, 6).clip();
+            doc.roundedRect(singleX + rect.ox, y + rect.oy, rect.rw, rect.rh, 14).clip();
             try { doc.image(buf, singleX, y, { fit: [singleW, imgBoxH], align: "center", valign: "center" }); } catch {}
             doc.restore();
 
