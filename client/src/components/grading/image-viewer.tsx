@@ -562,19 +562,6 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
             <p className="text-[#888888] text-xs">No image</p>
           </div>
         )}
-
-        {/* Done overlay — bottom-centre. Visible only in markMode with at
-            least one pending pin and the picker not yet open. Clicking
-            opens the type picker which commits the entire batch. */}
-        {markMode && pendingBatch.length > 0 && !pickerOpen && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); openTypePicker(); }}
-            className="absolute left-1/2 -translate-x-1/2 bottom-4 z-10 bg-[#D4AF37] text-[#1A1400] font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-lg shadow-2xl hover:bg-[#B8960C] transition-all border border-[#B8960C]"
-          >
-            Done — Assign Type ({pendingBatch.length})
-          </button>
-        )}
       </div>
 
       {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
@@ -637,6 +624,12 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
               <span className="text-[#555555] ml-3">Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit</span>
             </p>
             <div className="flex items-center gap-3">
+              {pendingBatch.length > 0 && !pickerOpen && (
+                <button type="button" onClick={openTypePicker}
+                  className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:bg-[#B8960C] transition-all border border-[#B8960C]">
+                  Done — Assign Type ({pendingBatch.length})
+                </button>
+              )}
               <button type="button" onClick={exitMarkMode}
                 className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all">
                 Done Marking
