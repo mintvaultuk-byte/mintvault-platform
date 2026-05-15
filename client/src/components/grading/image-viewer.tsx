@@ -183,19 +183,18 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
 
   useEffect(() => { onSideChange?.("front"); }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
-  // pendingXY: x/y are image-relative percents (drives the marker render and
-  // the 4-quadrant flip thresholds for the dropdown). pxX/pxY are
-  // viewport-absolute pixel coords from the click event — used by the
-  // dropdown anchor. Dropdown is rendered via a Portal into document.body
-  // so any ancestor transform on the image container doesn't break the
-  // viewport-pixel positioning (transform creates a fixed-position
-  // containing block).
-  const [pendingXY, setPendingXY] = useState<{ x: number; y: number; pxX: number; pxY: number } | null>(null);
-  const [pendingDefect, setPendingDefect] = useState({
-    type: "Scratch", severity: "moderate" as "minor" | "moderate" | "significant",
-    description: "", location: "", image_side: "front",
-    x_percent: 50, y_percent: 50,
-  });
+  // Batch defect placement: admin drops multiple pins (each click adds one),
+  // then assigns a defect type once for the whole batch via the picker.
+  // x/y are image-relative percents; pxX/pxY are viewport-absolute pixels
+  // captured at click-time (drive the picker portal anchor — viewport pixels
+  // because the image container has a scale() transform which would break
+  // position:fixed otherwise). localId is the 1..N display number; real
+  // defect ids are assigned in commitBatch.
+  type PendingPin = { x: number; y: number; pxX: number; pxY: number; location: string; image_side: string; localId: number };
+  const [pendingBatch, setPendingBatch] = useState<PendingPin[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState<{ pxX: number; pxY: number; xPct: number; yPct: number } | null>(null);
+  const lastClickTimeRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgElRef = useRef<HTMLImageElement>(null);
 
@@ -204,22 +203,30 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   const frontDefectCount = defects.filter(d => d.image_side === "front").length;
   const backDefectCount = defects.filter(d => d.image_side === "back").length;
 
-  // Keyboard shortcuts for fullscreen mode. Esc cancels the pending dropdown
-  // first, then exits mark mode on a second press. F/B switch sides.
+  // Keyboard shortcuts for fullscreen mode. Esc unwinds in order:
+  // picker → pending batch → exit. Enter on a non-empty batch opens
+  // the type picker. F/B switch sides (skipped while typing in a field).
   useEffect(() => {
     if (!fullscreen) return;
     function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      const inField = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || (t as any).isContentEditable);
       if (e.key === "Escape") {
-        if (pendingXY) { setPendingXY(null); return; }
+        if (pickerOpen) { setPickerOpen(false); setPickerAnchor(null); return; }
+        if (pendingBatch.length > 0) { setPendingBatch([]); return; }
         setFullscreen(false); setMarkMode(false);
       }
-      else if (e.key === "f" || e.key === "F") setSide("front");
-      else if (e.key === "b" || e.key === "B") setSide("back");
+      else if (e.key === "Enter" && !inField && pendingBatch.length > 0 && !pickerOpen) {
+        e.preventDefault();
+        openTypePicker();
+      }
+      else if (!inField && (e.key === "f" || e.key === "F")) setSide("front");
+      else if (!inField && (e.key === "b" || e.key === "B")) setSide("back");
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen, pendingXY]);
+  }, [fullscreen, pendingBatch, pickerOpen]);
 
   function enterMarkMode() {
     setMarkMode(true);
@@ -229,20 +236,31 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   function exitMarkMode() {
     setFullscreen(false);
     setMarkMode(false);
-    setPendingXY(null);
+    cancelBatch();
   }
 
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (dragging) return;
     if (markMode && imgElRef.current) {
+      // Double-click shortcut: two clicks within 280ms = "Done" — open the
+      // type picker on the current batch instead of dropping a 2nd pin.
+      const now = Date.now();
+      const isDoubleClick = now - lastClickTimeRef.current < 280;
+      lastClickTimeRef.current = now;
+      if (isDoubleClick) {
+        if (pendingBatch.length > 0) openTypePicker();
+        return;
+      }
       const imgRect = imgElRef.current.getBoundingClientRect();
       const xPct = ((e.clientX - imgRect.left) / imgRect.width) * 100;
       const yPct = ((e.clientY - imgRect.top) / imgRect.height) * 100;
       const cx = Math.max(0, Math.min(100, xPct));
       const cy = Math.max(0, Math.min(100, yPct));
-      setPendingXY({ x: cx, y: cy, pxX: e.clientX, pxY: e.clientY });
       const locDesc = locationFromPercent(cx, cy, side);
-      setPendingDefect(p => ({ ...p, image_side: side, x_percent: cx, y_percent: cy, location: locDesc }));
+      setPendingBatch(prev => [
+        ...prev,
+        { x: cx, y: cy, pxX: e.clientX, pxY: e.clientY, location: locDesc, image_side: side, localId: prev.length + 1 },
+      ]);
       return;
     }
     if (zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.01) {
@@ -276,12 +294,37 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
 
   function handleMouseUp() { setDragging(false); }
 
-  function saveNewDefect(typeOverride?: string) {
-    const nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
-    const type = typeOverride ?? pendingDefect.type;
-    onDefectAdded({ ...pendingDefect, type, id: nextId });
-    setPendingXY(null);
-    setPendingDefect({ type: "Scratch", severity: "moderate", description: "", location: "", image_side: side, x_percent: 50, y_percent: 50 });
+  function openTypePicker() {
+    const last = pendingBatch[pendingBatch.length - 1];
+    if (!last) return;
+    setPickerAnchor({ pxX: last.pxX, pxY: last.pxY, xPct: last.x, yPct: last.y });
+    setPickerOpen(true);
+  }
+
+  function commitBatch(typeName: string) {
+    let nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
+    for (const pin of pendingBatch) {
+      onDefectAdded({
+        id: nextId++,
+        type: typeName,
+        severity: "moderate",
+        description: "",
+        location: pin.location,
+        image_side: pin.image_side,
+        x_percent: pin.x,
+        y_percent: pin.y,
+      });
+    }
+    setPendingBatch([]);
+    setPickerOpen(false);
+    setPickerAnchor(null);
+    // Stay in markMode so admin can start the next batch immediately.
+  }
+
+  function cancelBatch() {
+    setPendingBatch([]);
+    setPickerOpen(false);
+    setPickerAnchor(null);
   }
 
   const transformStyle = zoom > 1
@@ -499,14 +542,17 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
               });
             })()}
 
-            {/* Pending marker */}
-            {pendingXY && (
-              <div className="absolute pointer-events-none animate-pulse"
-                style={{ left: `${pendingXY.x}%`, top: `${pendingXY.y}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                <div className="w-full h-full rounded-full border-2 border-yellow-400" style={{ background: "transparent" }} />
-                <span className="absolute -top-1 -right-1 text-[8px] font-black bg-yellow-400 text-black px-1 rounded-full leading-none py-0.5">?</span>
+            {/* Pending batch pins — grey numbered markers for the current
+                click-batch. Each click in markMode adds a pin here; the Done
+                button (or Enter / dbl-click) opens the picker which commits
+                all of them at once. Filtered to the visible side. */}
+            {pendingBatch.filter(p => p.image_side === side).map(p => (
+              <div key={p.localId} className="absolute pointer-events-none"
+                style={{ left: `${p.x}%`, top: `${p.y}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
+                <div className="w-full h-full rounded-full border-2 border-[#888888] bg-white/80" />
+                <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#555555] text-white px-1 rounded-full leading-none py-0.5">{p.localId}</span>
               </div>
-            )}
+            ))}
           </div>
         ) : certId ? (
           /* Inline drop zone for missing side */
@@ -515,6 +561,19 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
           <div className="absolute inset-0 flex items-center justify-center">
             <p className="text-[#888888] text-xs">No image</p>
           </div>
+        )}
+
+        {/* Done overlay — bottom-centre. Visible only in markMode with at
+            least one pending pin and the picker not yet open. Clicking
+            opens the type picker which commits the entire batch. */}
+        {markMode && pendingBatch.length > 0 && !pickerOpen && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); openTypePicker(); }}
+            className="absolute left-1/2 -translate-x-1/2 bottom-4 z-10 bg-[#D4AF37] text-[#1A1400] font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-lg shadow-2xl hover:bg-[#B8960C] transition-all border border-[#B8960C]"
+          >
+            Done — Assign Type ({pendingBatch.length})
+          </button>
         )}
       </div>
 
@@ -575,7 +634,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
             <p className="text-[#555555] text-xs">
               {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
-              <span className="text-[#555555] ml-3">Click on the card to mark a defect · F/B to switch sides · Esc to exit</span>
+              <span className="text-[#555555] ml-3">Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit</span>
             </p>
             <div className="flex items-center gap-3">
               <button type="button" onClick={exitMarkMode}
@@ -585,39 +644,30 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
             </div>
           </div>
         </div>
-        {pendingXY && (() => {
+        {pickerOpen && pickerAnchor && (() => {
           // Portal into document.body — bypasses any ancestor transform
           // (image container has transform: scale(...) for zoom which would
-          // otherwise break position: fixed positioning).
+          // otherwise break position: fixed positioning). Anchor is the LAST
+          // pin in the batch; flip logic uses its image-relative percent.
           const DROPDOWN_W = 180;
           const DROPDOWN_H = 360;
           const GAP = 6;
-          const flipLeft = pendingXY.x > 70;   // click in right ~30% of image
-          const flipUp   = pendingXY.y > 70;   // click in bottom ~30% of image
+          const flipLeft = pickerAnchor.xPct > 70;
+          const flipUp   = pickerAnchor.yPct > 70;
           const left = flipLeft
-            ? pendingXY.pxX - GAP - DROPDOWN_W
-            : pendingXY.pxX + GAP;
+            ? pickerAnchor.pxX - GAP - DROPDOWN_W
+            : pickerAnchor.pxX + GAP;
           const top = flipUp
-            ? pendingXY.pxY - GAP - DROPDOWN_H
-            : pendingXY.pxY + GAP;
-          // Final viewport-edge clamp (don't render off-screen):
+            ? pickerAnchor.pxY - GAP - DROPDOWN_H
+            : pickerAnchor.pxY + GAP;
           const clampedLeft = Math.max(8, Math.min(window.innerWidth - DROPDOWN_W - 8, left));
           const clampedTop  = Math.max(8, Math.min(window.innerHeight - DROPDOWN_H - 8, top));
-          // Diagnostic — leave in for now, easy to drop after one more click test.
-          // eslint-disable-next-line no-console
-          console.log("[defect-dropdown]", {
-            click: { pxX: pendingXY.pxX, pxY: pendingXY.pxY, x_pct: pendingXY.x, y_pct: pendingXY.y },
-            viewport: { w: window.innerWidth, h: window.innerHeight },
-            flips: { flipLeft, flipUp },
-            anchor: { left, top },
-            final: { left: clampedLeft, top: clampedTop },
-          });
           return createPortal(
             <>
               <div
                 className="fixed inset-0"
                 style={{ zIndex: 9998 }}
-                onClick={() => setPendingXY(null)}
+                onClick={cancelBatch}
               />
               <div
                 className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
@@ -631,10 +681,10 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                 onClick={e => e.stopPropagation()}
               >
                 <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type</span>
+                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type ({pendingBatch.length})</span>
                   <button
                     type="button"
-                    onClick={() => setPendingXY(null)}
+                    onClick={cancelBatch}
                     className="text-[#888888] hover:text-red-600 transition-colors"
                     aria-label="Cancel"
                   >
@@ -646,7 +696,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                     <button
                       key={t}
                       type="button"
-                      onClick={() => saveNewDefect(t)}
+                      onClick={() => commitBatch(t)}
                       className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors"
                     >
                       {t}
