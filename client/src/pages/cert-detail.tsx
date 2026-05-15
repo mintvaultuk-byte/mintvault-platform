@@ -216,6 +216,16 @@ export default function CertDetailPage() {
 
   return (
     <div className="px-4 py-8 max-w-3xl mx-auto" style={{ background: gameGradient(cert.cardGame) }}>
+        {/* Stolen banner — parity with vault-report.tsx. Shown when a
+            verified stolen report exists on this cert. */}
+        {cert.stolenStatus === "reported_stolen" && (
+          <div className="w-full bg-red-600 text-white text-center py-3 px-4 flex items-center justify-center gap-3 mb-4 -mx-4 rounded-none sm:rounded-lg sm:mx-0" role="alert">
+            <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span className="text-sm font-bold tracking-wide">
+              ⚠ This card has been reported stolen. If you have seen it for sale, please contact us at support@mintvaultuk.com
+            </span>
+          </div>
+        )}
         <SeoHead
           title={certTitle}
           description={certDesc}

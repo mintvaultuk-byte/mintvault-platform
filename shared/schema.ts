@@ -880,6 +880,9 @@ export interface PublicCertificate {
   ownershipRef: string | null;
   gradingReport: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string } | null;
   isOwnedByViewer: boolean;
+  // Stolen flag — null for unflagged certs, "reported_stolen" once a stolen
+  // report has been verified. Drives the red banner on cert-detail.tsx.
+  stolenStatus: string | null;
 }
 
 export interface PopulationData {

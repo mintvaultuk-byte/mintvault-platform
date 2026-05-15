@@ -52,6 +52,11 @@ export default function StolenCardProtectionPage() {
             <p className="text-sm text-amber-700">This report has already been verified.</p>
           </div>
         )}
+        {verified === "expired" && (
+          <div className="bg-red-50 border-b border-red-200 py-4 px-4 text-center">
+            <p className="text-sm text-red-700">This verification link has expired. Please submit a new report.</p>
+          </div>
+        )}
 
         <div className="max-w-3xl mx-auto px-4 py-16 space-y-16">
 
