@@ -419,7 +419,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
         onMouseLeave={handleMouseUp}
       >
         {currentUrl ? (
-          <div className="relative w-full h-full rounded-[4%]" style={{ transform: transformStyle, transition: transitionStyle }}>
+          <div className={`relative w-full h-full rounded-[6%] ${markMode ? '' : 'overflow-hidden'}`} style={{ transform: transformStyle, transition: transitionStyle }}>
             <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain rounded-[4%]" draggable={false} />
 
             {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
