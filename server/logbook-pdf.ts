@@ -245,7 +245,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           // residual-mat content outside the card rectangle is clipped away,
           // and the corners are rounded to match the card's physical shape.
           {
-            const inset = 5;
+            const inset = 2;
             doc.save();
             doc.roundedRect(frontImgX + frontRect.ox + inset, y + frontRect.oy + inset, frontRect.rw - inset * 2, frontRect.rh - inset * 2, 4).clip();
             try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
@@ -253,7 +253,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           }
 
           {
-            const inset = 5;
+            const inset = 2;
             doc.save();
             doc.roundedRect(backImgX + backRect.ox + inset, y + backRect.oy + inset, backRect.rw - inset * 2, backRect.rh - inset * 2, 4).clip();
             try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
@@ -294,7 +294,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
             const rect = renderedRectInBox(singleW, imgBoxH, aspect);
 
             // Clip + image
-            const inset = 5;
+            const inset = 2;
             doc.save();
             doc.roundedRect(singleX + rect.ox + inset, y + rect.oy + inset, rect.rw - inset * 2, rect.rh - inset * 2, 4).clip();
             try { doc.image(buf, singleX, y, { fit: [singleW, imgBoxH], align: "center", valign: "center" }); } catch {}
