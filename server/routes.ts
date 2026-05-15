@@ -11254,6 +11254,17 @@ Defects (admin-confirmed): ${defectLines}`;
   let lastForceRunAtMs = 0;
   const FORCE_RUN_DEBOUNCE_MS = 60_000;
 
+  // GET /api/admin/embed-corpus/last-run — drives the button countdown so
+  // the operator can see exactly how long until the next force-run is
+  // allowed. Reads the same closure variable as the POST handler. Null
+  // when the server has never run since boot (initial state).
+  app.get("/api/admin/embed-corpus/last-run", requireAdmin, (_req, res) => {
+    res.json({
+      lastRunAtMs: lastForceRunAtMs > 0 ? lastForceRunAtMs : null,
+      windowMs:    FORCE_RUN_DEBOUNCE_MS,
+    });
+  });
+
   app.post("/api/admin/embed-corpus/run", requireAdmin, async (req, res) => {
     try {
       const adminEmail = req.session.adminEmail || "admin";

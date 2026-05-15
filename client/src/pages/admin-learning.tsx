@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -205,6 +205,34 @@ export default function AdminLearningPage() {
   const [submittingFlag, setSubmittingFlag] = useState<string | null>(null);
   const [forceEmbedding, setForceEmbedding] = useState(false);
 
+  // Last-run timestamp for the Force embed button countdown. Polled on
+  // mount and refetched after every click so the countdown stays in sync
+  // with the server's closure variable (which is the source of truth for
+  // the debounce). `tick` bumps on a 1s setInterval while a countdown is
+  // active — it's the dependency that re-renders the button label.
+  const { data: lastRunData, refetch: refetchLastRun } = useQuery<{ lastRunAtMs: number | null; windowMs: number }>({
+    queryKey: ["/api/admin/embed-corpus/last-run"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/embed-corpus/last-run", { credentials: "include" });
+      if (!res.ok) return { lastRunAtMs: null, windowMs: 60000 };
+      return res.json();
+    },
+  });
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!lastRunData?.lastRunAtMs) return;
+    const expireMs = lastRunData.lastRunAtMs + lastRunData.windowMs;
+    if (expireMs <= Date.now()) return;
+    const id = setInterval(() => {
+      if (Date.now() >= expireMs) { clearInterval(id); }
+      setTick(t => t + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lastRunData?.lastRunAtMs, lastRunData?.windowMs]);
+  const secondsLeft = lastRunData?.lastRunAtMs
+    ? Math.max(0, Math.ceil((lastRunData.lastRunAtMs + lastRunData.windowMs - Date.now()) / 1000))
+    : 0;
+
   async function forceEmbedNow() {
     setForceEmbedding(true);
     try {
@@ -217,6 +245,7 @@ export default function AdminLearningPage() {
         toast({ title: `Embedded ${data.embedded ?? 0} cert${data.embedded === 1 ? "" : "s"}`, description: `Picked ${data.picked}, skipped ${data.skippedCount}, failed ${data.failed}.` });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/embedding-status"] });
+      refetchLastRun();
     } catch (e: any) {
       toast({ title: "Force embed failed", description: e.message, variant: "destructive" });
     } finally {
@@ -558,11 +587,11 @@ export default function AdminLearningPage() {
                   <button
                     type="button"
                     onClick={forceEmbedNow}
-                    disabled={forceEmbedding}
+                    disabled={forceEmbedding || secondsLeft > 0}
                     className="text-xs bg-[#D4AF37] text-[#1A1400] font-bold uppercase tracking-widest px-3 py-1.5 rounded hover:bg-[#B8960C] transition-colors disabled:opacity-60"
                     data-testid="button-force-embed-now"
                   >
-                    {forceEmbedding ? "Running…" : "Force embed now"}
+                    {forceEmbedding ? "Running…" : secondsLeft > 0 ? `Force embed (${secondsLeft}s)` : "Force embed now"}
                   </button>
                 </>
               )}
