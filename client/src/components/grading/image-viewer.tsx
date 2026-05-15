@@ -377,7 +377,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
       >
         {currentUrl ? (
           <div className="relative w-full h-full" style={{ transform: transformStyle, transition: transitionStyle }}>
-            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain" draggable={false} />
+            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain rounded-[4%]" draggable={false} />
 
             {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
             {showCentering && (() => {
