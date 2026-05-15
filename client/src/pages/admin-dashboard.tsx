@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
@@ -1201,8 +1201,38 @@ function CertsView({
   );
   const [dateFrom, setDateFrom] = useState(() => getInitialDateFrom(initialFilter.range));
   const [dateTo, setDateTo] = useState("");
-  const [ownershipFilter, setOwnershipFilter] = useState<"all" | "claimed" | "unclaimed">("all");
-  const [gradingStatusFilter, setGradingStatusFilter] = useState<"all" | GradingStatus>("all");
+  const [ownershipFilter, setOwnershipFilter] = useState<"all" | "claimed" | "unclaimed">(() => {
+    if (typeof window === "undefined") return "all";
+    const o = new URLSearchParams(window.location.search).get("ownership");
+    return o === "claimed" || o === "unclaimed" ? o : "all";
+  });
+  const [gradingStatusFilter, setGradingStatusFilter] = useState<"all" | GradingStatus>(() => {
+    if (typeof window === "undefined") return "all";
+    const g = new URLSearchParams(window.location.search).get("grading");
+    if (g === "awaiting-grade") return "awaiting_grade";
+    if (g === "awaiting-images") return "awaiting_images";
+    if (g === "in-progress") return "in_progress";
+    if (g === "graded") return "graded";
+    return "all";
+  });
+
+  // Persist both filters to the URL query string. replaceState (not pushState)
+  // so the back button isn't polluted with one history entry per click.
+  // Re-running this effect on the initial render is idempotent — if the URL
+  // already has the params we read on mount, we just write them back.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (gradingStatusFilter === "all") params.delete("grading");
+    else params.set("grading", gradingStatusFilter.replace(/_/g, "-"));
+    if (ownershipFilter === "all") params.delete("ownership");
+    else params.set("ownership", ownershipFilter);
+    const qs = params.toString();
+    const newUrl = qs
+      ? `${window.location.pathname}?${qs}${window.location.hash}`
+      : `${window.location.pathname}${window.location.hash}`;
+    window.history.replaceState(null, "", newUrl);
+  }, [gradingStatusFilter, ownershipFilter]);
 
   const filtered = certs.filter((c) => {
     if (statusFilter === "voided" && c.status !== "voided") return false;
