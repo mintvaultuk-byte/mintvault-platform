@@ -71,7 +71,12 @@ async function resizeForPdf(buf: Buffer): Promise<Buffer> {
   try {
     return await sharp(buf)
       .rotate() // respect EXIF orientation before strip
-      .trim()   // content-aware edge trim — strips white scanner mat + corner marks before resize
+      // V850-tuned trim: bare .trim() (threshold 10, top-left ref) was too
+      // conservative for the V850 Pro's photographic-white mat (RGB ~246-252
+      // with paper-texture ±3 variation), leaving a visible halo. Threshold
+      // 30 absorbs that variation without eating into the card border
+      // (card-edge ΔE from white is 80+, well outside the trim band).
+      .trim({ background: "#ffffff", threshold: 30 })
       .resize({
         width: 1500,
         height: 1500,
