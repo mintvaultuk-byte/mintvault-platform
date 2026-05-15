@@ -549,7 +549,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
             {pendingBatch.filter(p => p.image_side === side).map(p => (
               <div key={p.localId} className="absolute pointer-events-none"
                 style={{ left: `${p.x}%`, top: `${p.y}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                <div className="w-full h-full rounded-full border-2 border-[#888888] bg-white/80" />
+                <div className="w-full h-full rounded-full border-2 border-[#D4AF37] bg-transparent" />
                 <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#555555] text-white px-1 rounded-full leading-none py-0.5">{p.localId}</span>
               </div>
             ))}
