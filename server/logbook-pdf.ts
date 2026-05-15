@@ -244,15 +244,21 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           // rendered card boundary (NOT the box bounds). Any letterbox /
           // residual-mat content outside the card rectangle is clipped away,
           // and the corners are rounded to match the card's physical shape.
-          doc.save();
-          doc.roundedRect(frontImgX + frontRect.ox, y + frontRect.oy, frontRect.rw, frontRect.rh, 4).clip();
-          try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
-          doc.restore();
+          {
+            const inset = 5;
+            doc.save();
+            doc.roundedRect(frontImgX + frontRect.ox + inset, y + frontRect.oy + inset, frontRect.rw - inset * 2, frontRect.rh - inset * 2, 4).clip();
+            try { doc.image(fBuf, frontImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+            doc.restore();
+          }
 
-          doc.save();
-          doc.roundedRect(backImgX + backRect.ox, y + backRect.oy, backRect.rw, backRect.rh, 4).clip();
-          try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
-          doc.restore();
+          {
+            const inset = 5;
+            doc.save();
+            doc.roundedRect(backImgX + backRect.ox + inset, y + backRect.oy + inset, backRect.rw - inset * 2, backRect.rh - inset * 2, 4).clip();
+            try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
+            doc.restore();
+          }
 
           // Defect circles — overlay on each side at stored x/y%. Outline-only
           // (no fill) so card detail underneath stays visible. Severity
@@ -288,8 +294,9 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
             const rect = renderedRectInBox(singleW, imgBoxH, aspect);
 
             // Clip + image
+            const inset = 5;
             doc.save();
-            doc.roundedRect(singleX + rect.ox, y + rect.oy, rect.rw, rect.rh, 4).clip();
+            doc.roundedRect(singleX + rect.ox + inset, y + rect.oy + inset, rect.rw - inset * 2, rect.rh - inset * 2, 4).clip();
             try { doc.image(buf, singleX, y, { fit: [singleW, imgBoxH], align: "center", valign: "center" }); } catch {}
             doc.restore();
 
