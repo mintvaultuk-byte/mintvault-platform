@@ -258,6 +258,7 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
       : null,
     gradingReport: c.gradingReport && Object.keys(c.gradingReport).length > 0 ? c.gradingReport : null,
     isOwnedByViewer: !!(viewerUserId && c.currentOwnerUserId && viewerUserId === c.currentOwnerUserId),
+    stolenStatus: c.stolenStatus || null,
   };
 }
 
@@ -3326,7 +3327,9 @@ export async function registerRoutes(
     console.error("[stolen] startup migration error:", e.message);
   }
 
-  // POST /api/stolen/report — any visitor can file a report; sends verification email
+  // POST /api/stolen/report — only the current registered keeper can flag
+  // their own cert. Reporter email must match cert.ownerEmail; the verify
+  // link sent to that address closes the loop on email-control proof.
   app.post("/api/stolen/report", stolenReportRateLimit, async (req, res) => {
     try {
       const { certId, reporterName, reporterEmail, description } = req.body;
@@ -3340,11 +3343,28 @@ export async function registerRoutes(
       const cert = await findCertByIdFlex(normalCertId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
+      // Ownership gate — unclaimed certs have no keeper to authenticate.
+      if ((cert as any).ownershipStatus !== "claimed" || !(cert as any).ownerEmail) {
+        return res.status(403).json({ error: "This certificate has no registered keeper on file. Contact support@mintvaultuk.com." });
+      }
+      const reporterLc = String(reporterEmail).toLowerCase().trim();
+      if (String((cert as any).ownerEmail).toLowerCase().trim() !== reporterLc) {
+        return res.status(403).json({ error: "Only the current registered keeper can report a certificate as stolen." });
+      }
+
       const token = crypto.randomBytes(32).toString("hex");
-      await db.execute(sql`
+      const inserted = await db.execute(sql`
         INSERT INTO stolen_reports (cert_id, reporter_name, reporter_email, description, verify_token)
-        VALUES (${normalCertId}, ${String(reporterName).slice(0, 200)}, ${String(reporterEmail).toLowerCase()}, ${description ? String(description).slice(0, 1000) : null}, ${token})
+        VALUES (${normalCertId}, ${String(reporterName).slice(0, 200)}, ${reporterLc}, ${description ? String(description).slice(0, 1000) : null}, ${token})
+        RETURNING id
       `);
+      const reportId = (inserted.rows[0] as any)?.id ?? null;
+
+      await storage.writeAuditLog("certificate", normalCertId, "stolen_reported", reporterLc, {
+        reporterName: String(reporterName).slice(0, 200),
+        description: description ? String(description).slice(0, 1000) : null,
+        reportId,
+      });
 
       // Send verification email
       const verifyUrl = `${req.protocol}://${req.get("host")}/api/stolen/verify/${token}`;
@@ -3361,7 +3381,9 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/stolen/verify/:token — link clicked in email; marks report verified, flags cert
+  // GET /api/stolen/verify/:token — link clicked in email; marks report
+  // verified, flags cert. Tokens expire 24h after creation (matches email
+  // copy). JS-side TTL check on row.created_at avoids a second query.
   app.get("/api/stolen/verify/:token", async (req, res) => {
     try {
       const { token } = req.params;
@@ -3375,6 +3397,10 @@ export async function registerRoutes(
       if (report.verified_at) {
         return res.redirect("/stolen-card-protection?verified=already");
       }
+      const createdAtMs = new Date(report.created_at).getTime();
+      if (Date.now() - createdAtMs > 24 * 60 * 60 * 1000) {
+        return res.redirect("/stolen-card-protection?verified=expired");
+      }
       await db.execute(sql`
         UPDATE stolen_reports SET verified_at = NOW() WHERE verify_token = ${token}
       `);
@@ -3382,6 +3408,10 @@ export async function registerRoutes(
         UPDATE certificates SET stolen_status = 'reported_stolen', stolen_reported_at = NOW()
         WHERE certificate_number = ${report.cert_id}
       `);
+      await storage.writeAuditLog("certificate", report.cert_id, "stolen_verified", report.reporter_email || null, {
+        reportId: report.id,
+        verifyToken: token,
+      });
       return res.redirect(`/stolen-card-protection?verified=true&cert=${report.cert_id}`);
     } catch (err: any) {
       console.error("[stolen] GET verify error:", err.message);
@@ -3428,14 +3458,19 @@ export async function registerRoutes(
   app.post("/api/admin/stolen/:certId/clear", requireAdmin, async (req, res) => {
     try {
       const normalCertId = normalizeCertId(String(req.params.certId));
+      const adminEmail = req.session.adminEmail || "admin";
       await db.execute(sql`
         UPDATE certificates SET stolen_status = NULL, stolen_reported_at = NULL
         WHERE certificate_number = ${normalCertId}
       `);
-      await db.execute(sql`
-        UPDATE stolen_reports SET cleared_at = NOW(), cleared_by = 'admin'
+      const cleared = await db.execute(sql`
+        UPDATE stolen_reports SET cleared_at = NOW(), cleared_by = ${adminEmail}
         WHERE cert_id = ${normalCertId} AND cleared_at IS NULL
       `);
+      await storage.writeAuditLog("certificate", normalCertId, "stolen_cleared", adminEmail, {
+        clearedBy: adminEmail,
+        reportCount: (cleared as any).rowCount ?? null,
+      });
       return res.json({ ok: true });
     } catch (err: any) {
       console.error("[stolen] admin clear error:", err.message);
