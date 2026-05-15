@@ -83,7 +83,7 @@ async function resizeForPdf(buf: Buffer): Promise<Buffer> {
     const meta = await sharp(buf).rotate().metadata();
     const w = meta.width ?? 0;
     const h = meta.height ?? 0;
-    const INSET = 40;
+    const INSET = 80;
     // Tiny-image guard: skip the inset if the image is too small for it
     // (e.g. some edge cases where the card is partly cropped before this
     // function runs). Falls back to trim-only — equivalent to v601 behaviour.
@@ -92,10 +92,10 @@ async function resizeForPdf(buf: Buffer): Promise<Buffer> {
       ? sharp(buf)
           .rotate()
           .extract({ left: INSET, top: INSET, width: w - INSET * 2, height: h - INSET * 2 })
-          .trim({ background: "#ffffff", threshold: 30 })
+          .trim({ background: "#ffffff", threshold: 50 })
       : sharp(buf)
           .rotate()
-          .trim({ background: "#ffffff", threshold: 30 });
+          .trim({ background: "#ffffff", threshold: 50 });
     return await pipeline
       .resize({
         width: 1500,
