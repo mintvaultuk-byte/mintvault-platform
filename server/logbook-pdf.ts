@@ -69,34 +69,8 @@ async function qr(url: string): Promise<Buffer> {
  */
 async function resizeForPdf(buf: Buffer): Promise<Buffer> {
   try {
-    // V850 corner-mark workaround: the scanner stamps small dark
-    // alignment marks at the four extreme corners of the bed. Those marks
-    // are outside the white mat band, so the white-trim below stops at
-    // the FIRST non-white pixel from each edge — i.e. at the corner mark
-    // — and leaves the entire mat strip intact. Pre-crop a 40-pixel inset
-    // first to nuke the marks, THEN let the white-trim do its job on the
-    // now-clean mat-only border.
-    //
-    // Threshold 30 (delta-E vs explicit white) absorbs V850 mat paper-
-    // texture variation (RGB ~246-252) without eating into card content
-    // (card-edge ΔE from white is 80+, well outside the trim band).
-    const meta = await sharp(buf).rotate().metadata();
-    const w = meta.width ?? 0;
-    const h = meta.height ?? 0;
-    const INSET = 80;
-    // Tiny-image guard: skip the inset if the image is too small for it
-    // (e.g. some edge cases where the card is partly cropped before this
-    // function runs). Falls back to trim-only — equivalent to v601 behaviour.
-    const canInset = w > INSET * 2 + 50 && h > INSET * 2 + 50;
-    const pipeline = canInset
-      ? sharp(buf)
-          .rotate()
-          .extract({ left: INSET, top: INSET, width: w - INSET * 2, height: h - INSET * 2 })
-          .trim({ background: "#ffffff", threshold: 50 })
-      : sharp(buf)
-          .rotate()
-          .trim({ background: "#ffffff", threshold: 50 });
-    return await pipeline
+    return await sharp(buf)
+      .rotate() // respect EXIF orientation before strip
       .resize({
         width: 1500,
         height: 1500,
