@@ -69,6 +69,7 @@ interface CustomerCert {
   gradeEdges: string | null;
   gradeSurface: string | null;
   frontImageUrl: string | null;
+  stolenStatus: string | null;
 }
 
 // ── Graded-card list helpers ───────────────────────────────────────────────────
@@ -1023,6 +1024,16 @@ export default function DashboardPage() {
         description="Track your MintVault submissions, view your graded cards, and manage ownership."
         canonical="https://mintvaultuk.com/dashboard"
       />
+      {/* Stolen-card pulse glow — Tailwind's animate-pulse only fades opacity,
+          so we hand-roll a colour+shadow keyframe to make the red border
+          pulse outward. Applied via .stolen-card-glow on the cert card. */}
+      <style>{`
+        @keyframes stolen-card-glow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); border-color: #DC2626; }
+          50%      { box-shadow: 0 0 16px 6px rgba(220, 38, 38, 0.35); border-color: #991B1B; }
+        }
+        .stolen-card-glow { animation: stolen-card-glow 1.8s ease-in-out infinite; }
+      `}</style>
       <div
         className="dashboard-page bg-[#0a0e1a]"
         style={{
@@ -1120,15 +1131,20 @@ export default function DashboardPage() {
                 // but ownership has since transferred elsewhere.
                 const transferredAway =
                   !isOwnedByViewer && cert.ownershipStatus === "claimed";
+                const isStolen = cert.stolenStatus === "reported_stolen";
                 return (
                   <div
                     key={cert.certId}
                     onClick={() => setLocation(`/cert/${cert.certId}`)}
-                    className="block bg-[#FAFAF8] hover:bg-[#F5F1E8] transition-colors border border-[#E8E4DC] rounded-xl p-4 mb-3 group cursor-pointer"
+                    className={`block transition-colors rounded-xl p-4 mb-3 group cursor-pointer ${
+                      isStolen
+                        ? "bg-red-50 hover:bg-red-100 border-2 border-red-600 stolen-card-glow"
+                        : "bg-[#FAFAF8] hover:bg-[#F5F1E8] border border-[#E8E4DC]"
+                    }`}
                   >
                     <div className="flex gap-4">
                       {/* 90×124 card thumbnail */}
-                      <div className="flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
+                      <div className="relative flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
                         {cert.frontImageUrl ? (
                           <img
                             src={cert.frontImageUrl}
@@ -1140,6 +1156,11 @@ export default function DashboardPage() {
                           <div className="w-full h-full flex items-center justify-center text-[10px] text-[#888] tracking-wider">
                             NO IMAGE
                           </div>
+                        )}
+                        {isStolen && (
+                          <span className="absolute top-1 left-1 bg-red-600 text-white text-[8px] font-black tracking-widest px-1.5 py-0.5 rounded shadow" role="alert">
+                            STOLEN
+                          </span>
                         )}
                       </div>
 

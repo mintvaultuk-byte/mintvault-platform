@@ -27,6 +27,9 @@ interface VerifyResult {
   // the cert is claimed, and the owner has opted in via account settings.
   // Field omitted otherwise (anonymous = no owner row).
   ownerDisplayName?: string;
+  // null for unflagged certs, "reported_stolen" once a stolen report has
+  // been verified. Drives the red stolen state on the verify result card.
+  stolenStatus?: string | null;
 }
 
 type VerifyStatus =
@@ -101,23 +104,29 @@ function ResultCard({ result }: { result: VerifyResult }) {
     ? result.gradeNumeric.toString()
     : result.grade || "\u2014";
   const claimed = result.ownershipStatus === "claimed";
+  const isStolen = result.stolenStatus === "reported_stolen";
 
   return (
     <div
       className="mt-8 rounded-xl p-6 md:p-8 transition-opacity duration-300"
       style={{
         backgroundColor: "var(--v2-paper-raised)",
-        border: "1px solid var(--v2-gold-soft)",
+        border: isStolen ? "2px solid #DC2626" : "1px solid var(--v2-gold-soft)",
       }}
     >
       <div className="flex items-start justify-between gap-4 flex-wrap mb-6" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "16px" }}>
         <div>
-          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--v2-gold)" }}>
-            Verified &middot; {result.status}
+          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: isStolen ? "#DC2626" : "var(--v2-gold)" }}>
+            {isStolen ? "Reported Stolen" : <>Verified &middot; {result.status}</>}
           </p>
           <p className="font-mono-v2 text-2xl md:text-3xl font-semibold" style={{ color: "var(--v2-ink)" }}>
             {result.certId}
           </p>
+          {isStolen && (
+            <p className="font-body text-xs md:text-sm font-semibold mt-2 max-w-md" style={{ color: "#DC2626" }} role="alert">
+              \u26a0 This card has been reported stolen. Do not purchase. Contact support@mintvaultuk.com
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="font-mono-v2 text-[9px] uppercase tracking-widest mb-1" style={{ color: "var(--v2-ink-mute)" }}>

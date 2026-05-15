@@ -1402,6 +1402,7 @@ export async function registerRoutes(
         gradeNumeric,
         gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
         ownershipStatus: dbCert.ownershipStatus || "unclaimed",
+        stolenStatus: (dbCert as any).stolenStatus || null,
         verifyUrl: `${APP_BASE_URL}/cert/${normalizeCertId(dbCert.certId)}`,
       };
       if (ownerDisplayName) payload.ownerDisplayName = ownerDisplayName;
@@ -7199,6 +7200,7 @@ export async function registerRoutes(
         frontImageUrl: (c as any).frontImagePath
           ? await getR2SignedUrl((c as any).frontImagePath, 3600).catch(() => null)
           : null,
+        stolenStatus: (c as any).stolenStatus ?? null,
       })));
       res.json(safe);
     } catch (err) {
