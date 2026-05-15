@@ -113,7 +113,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
 
   return new Promise(async (resolve, reject) => {
     try {
-      const qrBuf = await qr(verification.verifyUrl + `?sig=${verification.signature}`);
+      const qrBuf = await qr(`https://mintvaultuk.com/cert/${certId}`);
       let fBuf: Buffer | null = null, bBuf: Buffer | null = null;
       if (images.front) {
         try {
@@ -224,12 +224,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         hr(); hd("Authentication & Condition");
         const al = data.authentication.status === "genuine" ? "Genuine" : data.authentication.status === "authentic_altered" ? "Authentic Altered" : "Not Original";
         rw("Auth Status", al);
-        if (defects.length === 0) { rw("Defects", "None recorded"); }
-        else {
-          rw("Defects", `${defects.length} detected`);
-          for (const d of defects.slice(0, 2)) { doc.font("Helvetica").fontSize(4.5).fillColor(TEXT).text(`\u2022 ${d.type} (${d.location}, ${d.severity})`, M + 6, y, { width: CW - 10, height: 7 }); y += 7; }
-          if (defects.length > 2) { doc.font("Helvetica").fontSize(4).fillColor(MUTED).text(`Full defect report: mintvaultuk.com/cert/${certId}/report`, M + 6, y, { width: CW - 10, height: 6 }); y += 6; }
-        }
+        rw("Defects", defects.length === 0 ? "None recorded" : `${defects.length} detected`);
       }
 
       // ── CARD IMAGES (budget: 165pt) ────────────────────────────────────────
@@ -240,14 +235,10 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         const backImgX  = M + imgBoxW + 10;
 
         if (fBuf && bBuf) {
-          // Compute rendered rects first — needed for both clip path and
-          // defect-marker mapping. Default aspect 1488/2079 (Pokémon real-
-          // world) if metadata can't be read.
-          //
-          // The card image is fit-scaled with align:center valign:center, so
-          // it occupies a CENTRED subrectangle of the W×H box (letterboxed on
-          // the sides when the box is wider than the card aspect — which is
-          // always true here: box ≈252×150 ratio 1.68, card ≈0.72).
+          // Card image is fit-scaled with align:center valign:center, so it
+          // occupies a CENTRED subrectangle of the box. Compute that rect so
+          // the rounded-rect clip path matches the actual card boundary, not
+          // the box bounds.
           const fMeta = await sharp(fBuf).metadata().catch(() => null);
           const bMeta = await sharp(bBuf).metadata().catch(() => null);
           const frontAspect = (fMeta?.width ?? 1488) / (fMeta?.height ?? 2079);
@@ -255,10 +246,6 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
           const frontRect = renderedRectInBox(imgBoxW, imgBoxH, frontAspect);
           const backRect  = renderedRectInBox(imgBoxW, imgBoxH, backAspect);
 
-          // Clip each image to a rounded-rect path sized to the actual
-          // rendered card boundary (NOT the box bounds). Any letterbox /
-          // residual-mat content outside the card rectangle is clipped away,
-          // and the corners are rounded to match the card's physical shape.
           {
             const inset = 3;
             doc.save();
@@ -274,62 +261,20 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
             try { doc.image(bBuf, backImgX, y, { fit: [imgBoxW, imgBoxH], align: "center", valign: "center" }); } catch {}
             doc.restore();
           }
-
-          // Defect circles — overlay on each side at stored x/y%. Outline-only
-          // (no fill) so card detail underneath stays visible. Severity
-          // colour-codes the stroke; numbered label sits next to the circle.
-          for (const d of defects) {
-            const xp = (d as any).x_percent;
-            const yp = (d as any).y_percent;
-            if (typeof xp !== "number" || typeof yp !== "number") continue;
-            const onFront = (d as any).image_side !== "back";
-            const imgX = onFront ? frontImgX : backImgX;
-            const rect = onFront ? frontRect : backRect;
-            const cx = imgX + rect.ox + (xp / 100) * rect.rw;
-            const cy = y    + rect.oy + (yp / 100) * rect.rh;
-            const r = 6;
-            const colour = d.severity === "significant" ? "#DC2626"
-                         : d.severity === "moderate"    ? "#EA580C"
-                         :                                "#D97706";
-            doc.save().lineWidth(1.5).strokeColor(colour).circle(cx, cy, r).stroke().restore();
-            doc.save().fontSize(7).fillColor(colour).text(String((d as any).id ?? "?"), cx - 2, cy - 3).restore();
-          }
         } else {
           const buf = fBuf || bBuf;
-          // Single-image variant: only one side present. Filter defects to
-          // whichever side we rendered (assume front if fBuf present). Same
-          // letterbox-aware mapping + rounded-rect clip as the dual-image
-          // branch above.
           if (buf) {
-            const renderedSide = fBuf ? "front" : "back";
             const singleX = M + CW * 0.2;
             const singleW = CW * 0.6;
             const sMeta = await sharp(buf).metadata().catch(() => null);
             const aspect = (sMeta?.width ?? 1488) / (sMeta?.height ?? 2079);
             const rect = renderedRectInBox(singleW, imgBoxH, aspect);
 
-            // Clip + image
             const inset = 3;
             doc.save();
             doc.roundedRect(singleX + rect.ox + inset, y + rect.oy + inset, rect.rw - inset * 2, rect.rh - inset * 2, 4).clip();
             try { doc.image(buf, singleX, y, { fit: [singleW, imgBoxH], align: "center", valign: "center" }); } catch {}
             doc.restore();
-
-            for (const d of defects) {
-              const xp = (d as any).x_percent;
-              const yp = (d as any).y_percent;
-              if (typeof xp !== "number" || typeof yp !== "number") continue;
-              const ds = (d as any).image_side === "back" ? "back" : "front";
-              if (ds !== renderedSide) continue;
-              const cx = singleX + rect.ox + (xp / 100) * rect.rw;
-              const cy = y       + rect.oy + (yp / 100) * rect.rh;
-              const r = 6;
-              const colour = d.severity === "significant" ? "#DC2626"
-                           : d.severity === "moderate"    ? "#EA580C"
-                           :                                "#D97706";
-              doc.save().lineWidth(1.5).strokeColor(colour).circle(cx, cy, r).stroke().restore();
-              doc.save().fontSize(7).fillColor(colour).text(String((d as any).id ?? "?"), cx - 2, cy - 3).restore();
-            }
           }
         }
         y += imgBoxH + 5;
@@ -410,7 +355,7 @@ export async function generateLogbookPdf(certIdInput: string, opts: LogbookPdfOp
         doc.font("Helvetica").fontSize(4).fillColor(MUTED).text("SIGNATURE", vx, y, { height: 6 });
         doc.font("Courier").fontSize(3.5).fillColor(TEXT).text(verification.signature || "\u2014", vx, y + 5, { width: CW - 55, height: 6 });
         doc.font("Helvetica").fontSize(4).fillColor(MUTED).text("VERIFY", vx, y + 13, { height: 6 });
-        doc.font("Courier").fontSize(3.5).fillColor(GOLD_DARK).text(verification.verifyUrl, vx, y + 18, { width: CW - 55, height: 6 });
+        doc.font("Courier").fontSize(3.5).fillColor(GOLD_DARK).text(`https://mintvaultuk.com/cert/${certId}`, vx, y + 18, { width: CW - 55, height: 6 });
         y += 42;
       }
 
