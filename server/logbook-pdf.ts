@@ -69,8 +69,23 @@ async function qr(url: string): Promise<Buffer> {
  */
 async function resizeForPdf(buf: Buffer): Promise<Buffer> {
   try {
+    // Pass 1: sample the per-image mat colour from a 10×10 downscale.
+    // The top-left pixel of that downscale is always inside the scanner
+    // mat strip (well outside any card content), so its RGB is a reliable
+    // anchor for the trim background. Per-image sampling beats hardcoded
+    // #ffffff because V850 mat varies subtly per scan (paper texture,
+    // lighting, age).
+    const { data } = await sharp(buf).resize(10, 10).raw()
+      .toBuffer({ resolveWithObject: true });
+    const r = data[0], g = data[1], b = data[2];
+    const matColour = `rgb(${r},${g},${b})`;
+
+    // Pass 2: trim against the sampled mat colour with threshold 15
+    // (absorbs paper-texture noise without eating into the card border),
+    // then resize for embedding.
     return await sharp(buf)
-      .rotate() // respect EXIF orientation before strip
+      .rotate()
+      .trim({ background: matColour, threshold: 15 })
       .resize({
         width: 1500,
         height: 1500,
