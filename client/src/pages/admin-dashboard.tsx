@@ -1269,6 +1269,23 @@ function CertsView({
   const claimedCount = certs.filter((c) => (c as any).ownershipStatus === "claimed").length;
   const hasActiveFilters = statusFilter !== "all" || gradeTypeFilter !== "all" || gradeFilter || dateFrom || dateTo || searchQuery || ownershipFilter !== "all" || gradingStatusFilter !== "all";
 
+  // Counts for the grading filter tabs — reflect statusFilter + gradeTypeFilter
+  // only (not the grading filter itself, not date/grade/ownership/search), so
+  // tab labels show how many certs would land in each bucket if the user
+  // switched to that tab.
+  const gradingCounts: Record<GradingStatus, number> = { graded: 0, in_progress: 0, awaiting_grade: 0, awaiting_images: 0 };
+  for (const c of certs) {
+    if (statusFilter === "voided" && c.status !== "voided") continue;
+    if (statusFilter === "active" && c.status === "voided") continue;
+    if (gradeTypeFilter !== "all") {
+      const gt: string = (c as any).gradeType || "numeric";
+      if (gradeTypeFilter === "authentic" && gt !== "NO") continue;
+      if (gradeTypeFilter === "altered"   && gt !== "AA") continue;
+      if (gradeTypeFilter === "numeric"   && isNonNumericGrade(gt)) continue;
+    }
+    gradingCounts[gradingStatus(c)]++;
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
@@ -1367,7 +1384,7 @@ function CertsView({
               }`}
               data-testid={`filter-grading-${g}`}
             >
-              {g === "all" ? "All" : GRADING_STATUS_LABEL[g]}
+              {g === "all" ? "All" : `${GRADING_STATUS_LABEL[g]} (${gradingCounts[g]})`}
             </button>
           ))}
         </div>
