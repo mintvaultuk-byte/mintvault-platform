@@ -1195,10 +1195,18 @@ export async function convertBackgroundToWhite(
   matRgb: { r: number; g: number; b: number },
 ): Promise<Buffer> {
   const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
-  if (matLuma >= 128) return inputBuffer; // white-mat scan — no-op
+  const isBlack = matLuma < 128;
+  console.log(`[convertBg] entry matRgb=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) matLuma=${matLuma.toFixed(1)} isBlack=${isBlack} bufSize=${inputBuffer.length}`);
+  if (!isBlack) {
+    console.log(`[convertBg] no-op (white-mat scan)`);
+    return inputBuffer;
+  }
 
   const meta = await sharp(inputBuffer).metadata();
-  if (!meta.width || !meta.height) return inputBuffer;
+  if (!meta.width || !meta.height) {
+    console.log(`[convertBg] no-op (zero-dim metadata)`);
+    return inputBuffer;
+  }
 
   const { data, info } = await sharp(inputBuffer)
     .removeAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -1259,7 +1267,7 @@ export async function convertBackgroundToWhite(
     ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
     : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
 
-  console.log(`[bg→white] mat=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) painted T${pT}/B${pB}/L${pL}/R${pR} (max ${BG_MAX_DEPTH}px, depth-banded sat stop)`);
+  console.log(`[convertBg] DONE painted T${pT}/B${pB}/L${pL}/R${pR} total=${pT+pB+pL+pR} (max ${BG_MAX_DEPTH}px, depth-banded sat stop) outBufSize=${out.length}`);
   return out;
 }
 

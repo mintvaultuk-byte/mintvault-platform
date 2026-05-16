@@ -230,6 +230,7 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // scans (matLuma >= 128).
   const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
   const isBlackBg = matLuma < 128;
+  console.log(`[ai/variants] step-3b matRgb=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) matLuma=${matLuma.toFixed(1)} isBlackBg=${isBlackBg} certId=${certId || "n/a"}`);
   const centredFinal = await convertBackgroundToWhite(centred, matRgb);
 
   // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
