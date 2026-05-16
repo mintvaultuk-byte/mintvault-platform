@@ -1221,44 +1221,71 @@ export async function convertBackgroundToWhite(
   const stopThreshAtDepth = (d: number) => d < BG_OUTER_RING ? BG_OUTER_STOP_SAT : BG_INNER_STOP_SAT;
 
   let pT = 0, pB = 0, pL = 0, pR = 0;
+  // Telemetry: how many walks crossed BG_MAX_DEPTH (asymmetric centring;
+  // expected on cards that sit off-centre in the bitmap) vs how many ran
+  // all the way to the opposite edge without hitting a sat-stop (would
+  // mean the saturation walk never found the card border — should be ~0
+  // for real cards, indicates a pipeline issue if it spikes).
+  let deepT = 0, deepB = 0, deepL = 0, deepR = 0;
+  let runawayT = 0, runawayB = 0, runawayL = 0, runawayR = 0;
+
+  // Black-bg scans uncap the walk depth — earlier BG_MAX_DEPTH=80 left a
+  // thin dark strip on the bottom edge of cards that sit high in the
+  // bitmap (asymmetric centring → bottom padding > 80 px). The depth-banded
+  // saturation thresholds (BG_OUTER_STOP_SAT=60 for outer 8 px, then
+  // BG_INNER_STOP_SAT=8) are the real stop condition; BG_MAX_DEPTH is kept
+  // only as a telemetry waypoint. White-mat scans never reach this loop
+  // (no-op short-circuit above), so removing the cap is safe.
 
   // Top — per column, walk down
   for (let x = 0; x < w; x++) {
-    for (let d = 0; d < Math.min(BG_MAX_DEPTH, h); d++) {
+    let stopped = false;
+    for (let d = 0; d < h; d++) {
       const off = (d * w + x) * ch;
       const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) break;
+      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
       if (s < BG_PAINT_THRESH) { paintWhite(off); pT++; }
+      if (d === BG_MAX_DEPTH) deepT++;
     }
+    if (!stopped) runawayT++;
   }
   // Bottom — per column, walk up
   for (let x = 0; x < w; x++) {
-    for (let d = 0; d < Math.min(BG_MAX_DEPTH, h); d++) {
+    let stopped = false;
+    for (let d = 0; d < h; d++) {
       const y = h - 1 - d;
       const off = (y * w + x) * ch;
       const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) break;
+      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
       if (s < BG_PAINT_THRESH) { paintWhite(off); pB++; }
+      if (d === BG_MAX_DEPTH) deepB++;
     }
+    if (!stopped) runawayB++;
   }
   // Left — per row, walk right
   for (let y = 0; y < h; y++) {
-    for (let d = 0; d < Math.min(BG_MAX_DEPTH, w); d++) {
+    let stopped = false;
+    for (let d = 0; d < w; d++) {
       const off = (y * w + d) * ch;
       const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) break;
+      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
       if (s < BG_PAINT_THRESH) { paintWhite(off); pL++; }
+      if (d === BG_MAX_DEPTH) deepL++;
     }
+    if (!stopped) runawayL++;
   }
   // Right — per row, walk left
   for (let y = 0; y < h; y++) {
-    for (let d = 0; d < Math.min(BG_MAX_DEPTH, w); d++) {
+    let stopped = false;
+    for (let d = 0; d < w; d++) {
       const x = w - 1 - d;
       const off = (y * w + x) * ch;
       const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) break;
+      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
       if (s < BG_PAINT_THRESH) { paintWhite(off); pR++; }
+      if (d === BG_MAX_DEPTH) deepR++;
     }
+    if (!stopped) runawayR++;
   }
 
   const isPng = meta.format === "png";
@@ -1267,7 +1294,11 @@ export async function convertBackgroundToWhite(
     ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
     : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
 
-  console.log(`[convertBg] DONE painted T${pT}/B${pB}/L${pL}/R${pR} total=${pT+pB+pL+pR} (max ${BG_MAX_DEPTH}px, depth-banded sat stop) outBufSize=${out.length}`);
+  console.log(`[convertBg] DONE painted T${pT}/B${pB}/L${pL}/R${pR} total=${pT+pB+pL+pR} (depth uncapped, sat-stop only) outBufSize=${out.length}`);
+  const deepTotal = deepT + deepB + deepL + deepR;
+  if (deepTotal > 0) console.log(`[convertBg] walks past BG_MAX_DEPTH=${BG_MAX_DEPTH}: T${deepT}/B${deepB}/L${deepL}/R${deepR} (asymmetric centring — expected)`);
+  const runawayTotal = runawayT + runawayB + runawayL + runawayR;
+  if (runawayTotal > 0) console.warn(`[convertBg] WARN ${runawayTotal} walks ran to opposite edge without hitting sat-stop: T${runawayT}/B${runawayB}/L${runawayL}/R${runawayR} — sat walk never found card border`);
   return out;
 }
 
