@@ -812,10 +812,11 @@ async function applyInsetFallback(
  * Falls back to softer trim if aggressive is too tight.
  */
 export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; cropped: boolean; matRgb: { r: number; g: number; b: number } }> {
-  // autoCrop's pass-1 trim assumes a near-white background ({255,255,255}
-  // threshold 80). Surface that as matRgb so reCentreBitmap fills extend
-  // padding with white rather than misdetecting the card border as mat.
-  const matRgb = { r: 255, g: 255, b: 255 };
+  // Background mode is detected per-scan: white mat (lid-down) vs black
+  // background (lid-up). matRgb is sampled from the work buffer's outer 2%
+  // strip and threaded through trim, retrim, and the return so downstream
+  // padWithMat / reCentreBitmap pad with the same colour the scan came in on.
+  let matRgb: { r: number; g: number; b: number } = { r: 255, g: 255, b: 255 };
   try {
     const meta = await sharp(inputBuffer).metadata();
     if (!meta.width || !meta.height) return { buffer: inputBuffer, cropped: false, matRgb };
@@ -829,19 +830,37 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
         .toBuffer();
     }
 
-    // Pass 1: Aggressive trim (threshold 80 — catches subtle yellow-on-white card borders)
+    // Sample mat colour from the work buffer's outer 2% strip. Same
+    // computeMatProfile() that cropToCardBoundary uses — adapts to white-
+    // mat AND black-background scans automatically.
+    try {
+      const w0 = meta.width || 1, h0 = meta.height || 1;
+      const sampleScale = Math.min(1, 1500 / Math.max(w0, h0));
+      const sw = Math.max(50, Math.round(w0 * sampleScale));
+      const sh = Math.max(50, Math.round(h0 * sampleScale));
+      const { data, info } = await sharp(workBuffer)
+        .resize(sw, sh, { fit: "fill" })
+        .removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const profile = computeMatProfile(new Uint8Array(data), info.width, info.height, info.channels);
+      matRgb = { r: profile.matR, g: profile.matG, b: profile.matB };
+      console.log(`[crop] autoCrop sampled mat rgb(${matRgb.r},${matRgb.g},${matRgb.b})`);
+    } catch (e: any) {
+      console.warn(`[crop] autoCrop mat sample failed (${e.message}) — defaulting to white`);
+    }
+
+    // Pass 1: trim against the sampled mat colour (threshold 80).
     let trimBuf: Buffer;
     let trimInfo: sharp.OutputInfo;
     try {
       const result = await sharp(workBuffer)
-        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 80 })
+        .trim({ background: matRgb, threshold: 80 })
         .toBuffer({ resolveWithObject: true });
       trimBuf = result.data;
       trimInfo = result.info;
     } catch {
       // Aggressive trim failed — try softer
       const result = await sharp(workBuffer)
-        .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 30 })
+        .trim({ background: matRgb, threshold: 30 })
         .toBuffer({ resolveWithObject: true });
       trimBuf = result.data;
       trimInfo = result.info;
@@ -867,7 +886,7 @@ export async function autoCrop(inputBuffer: Buffer): Promise<{ buffer: Buffer; c
       console.log(`[crop] first pass: border_ring_white=${borderRingWhitePct.toFixed(1)}%, attempting re-trim`);
       try {
         const tighter = await sharp(trimBuf)
-          .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 120 })
+          .trim({ background: matRgb, threshold: 120 })
           .toBuffer({ resolveWithObject: true });
         const shrunk = tighter.info.width < trimInfo.width || tighter.info.height < trimInfo.height;
         if (tighter.info.width > 100 && tighter.info.height > 100 && shrunk) {
@@ -1133,6 +1152,90 @@ export async function padWithMat(
   const out = isPng
     ? await pipeline.png().toBuffer()
     : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
+  return out;
+}
+
+/**
+ * Convert the (dark) scanner-background pixels to pure white via a flood-fill
+ * seeded from the image border. Only runs when the sampled mat colour is
+ * dark (luma < 128) — for white-mat scans it's a no-op.
+ *
+ * Why flood-fill (not blanket per-pixel replace): interior pixels that
+ * happen to be near-black (dark holos, black text, dark borders) would be
+ * misclassified by a simple distance test. Flood-fill starts from the four
+ * image edges and only converts pixels REACHABLE via similar-colour
+ * neighbours — so an interior black blob that is surrounded by card colour
+ * is preserved.
+ *
+ * Threshold: Euclidean distance 45 from matRgb (same as computeMatProfile's
+ * card-pixel classifier). 4-connected BFS.
+ */
+export async function convertBackgroundToWhite(
+  inputBuffer: Buffer,
+  matRgb: { r: number; g: number; b: number },
+): Promise<Buffer> {
+  const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
+  if (matLuma >= 128) return inputBuffer; // white-mat scan — no-op
+
+  const meta = await sharp(inputBuffer).metadata();
+  if (!meta.width || !meta.height) return inputBuffer;
+
+  const { data, info } = await sharp(inputBuffer)
+    .removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const px = Buffer.from(data);
+  const w = info.width, h = info.height, ch = info.channels;
+  const threshold = 45;
+  const t2 = threshold * threshold;
+
+  const isMat = (off: number): boolean => {
+    const dr = px[off] - matRgb.r;
+    const dg = px[off + 1] - matRgb.g;
+    const db = px[off + 2] - matRgb.b;
+    return dr * dr + dg * dg + db * db <= t2;
+  };
+
+  const visited = new Uint8Array(w * h);
+  const stack: number[] = [];
+
+  // Seed: every border pixel that classifies as mat.
+  const pushIfMat = (idx: number) => {
+    if (visited[idx]) return;
+    if (isMat(idx * ch)) {
+      visited[idx] = 1;
+      stack.push(idx);
+    }
+  };
+  for (let x = 0; x < w; x++) {
+    pushIfMat(x);
+    pushIfMat((h - 1) * w + x);
+  }
+  for (let y = 0; y < h; y++) {
+    pushIfMat(y * w);
+    pushIfMat(y * w + (w - 1));
+  }
+
+  // 4-connected BFS. On visit, paint pixel white. Expand to neighbours
+  // that are also mat-classified.
+  let painted = 0;
+  while (stack.length) {
+    const idx = stack.pop()!;
+    const off = idx * ch;
+    px[off] = 255; px[off + 1] = 255; px[off + 2] = 255;
+    painted++;
+    const x = idx % w, y = (idx / w) | 0;
+    if (y > 0)     { const n = idx - w; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
+    if (y < h - 1) { const n = idx + w; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
+    if (x > 0)     { const n = idx - 1; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
+    if (x < w - 1) { const n = idx + 1; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
+  }
+
+  const isPng = meta.format === "png";
+  const pipeline = sharp(px, { raw: { width: w, height: h, channels: ch } });
+  const out = isPng
+    ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
+    : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
+
+  console.log(`[bg→white] mat=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) painted ${painted}/${w * h} px (${(painted / (w * h) * 100).toFixed(1)}%)`);
   return out;
 }
 

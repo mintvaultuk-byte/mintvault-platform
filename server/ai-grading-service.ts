@@ -196,7 +196,7 @@ export interface ImageVariants {
  * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
 export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean }; matRgb?: { r: number; g: number; b: number } }> {
-  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap, padWithMat } = await import("./image-processing");
+  const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap, padWithMat, convertBackgroundToWhite } = await import("./image-processing");
 
   // Step 1: deskew small rotations before cropping
   const { buffer: deskewed, angle } = await deskewCard(buffer);
@@ -223,10 +223,19 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // strip below the card.
   const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId, matRgb });
 
+  // Step 3b: black-background mode (lid-up scanning). If the sampled mat
+  // colour is dark, flood-fill the now-black extensions and any black
+  // scanner-bleed pixels to pure white BEFORE encoding. Downstream padding
+  // and variants then inherit a clean white background. No-op for white-mat
+  // scans (matLuma >= 128).
+  const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
+  const isBlackBg = matLuma < 128;
+  const centredFinal = await convertBackgroundToWhite(centred, matRgb);
+
   // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
   // `centredUnpadded` so the caller can mask rounded corners on the actual
   // card (not on the bitmap corners after padding).
-  const centredUnpadded = await sharp(centred).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
+  const centredUnpadded = await sharp(centredFinal).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
 
   // Step 5: extend with mat-coloured padding so the final cropped output has
   // a passport-style frame around the card (CARD_MAT_PADDING_PCT). The AI
@@ -235,7 +244,11 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // doesn't degrade grading meaningfully (Claude handles framed photos
   // routinely). The display PNG flow lives in scan-ingest's
   // uploadImagesToCert: maskRoundedCorners(centredUnpadded) → padWithMat.
-  const cropped = await padWithMat(centredUnpadded, matRgb);
+  //
+  // For black-bg scans we pad with white (not the sampled black) so we
+  // don't reintroduce the dark border the step-3b flood-fill just removed.
+  const padColour = isBlackBg ? { r: 255, g: 255, b: 255 } : matRgb;
+  const cropped = await padWithMat(centredUnpadded, padColour);
 
   // Step 6: derive the four analysis variants from the padded flat image
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
