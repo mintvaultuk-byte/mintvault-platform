@@ -139,26 +139,38 @@ export async function uploadImagesToCert(
   // card-detect pass to remove the 16–26 px safety strip from
   // cropToCardBoundary (otherwise the rounded mask shows a mat-coloured
   // frame around the card — v593 backfill).
-  const matRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
-  const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
-  const isBlackBg = matLuma < 128;
-  console.log(`[scan-ingest] cert=${certNumber} matRgb=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) matLuma=${matLuma.toFixed(1)} isBlackBg=${isBlackBg} → tighten=${!isBlackBg}`);
+  //
+  // matRgb + isBlackBg are computed PER SIDE — front and back are
+  // independent scan passes and can sample different mat colours (different
+  // glare, exposure, scanner-bleed envelope). Earlier we used front's
+  // values for both sides; that short-circuited convertBg on the back when
+  // front sampled borderline-light, leaving a full black ring on the back.
+  const frontMatRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
+  const frontMatLuma = 0.299 * frontMatRgb.r + 0.587 * frontMatRgb.g + 0.114 * frontMatRgb.b;
+  const frontIsBlackBg = frontMatLuma < 128;
 
-  const frontTight = isBlackBg
+  const backMatRgb = backVariants ? ((backVariants as any).matRgb || frontMatRgb) : frontMatRgb;
+  const backMatLuma = 0.299 * backMatRgb.r + 0.587 * backMatRgb.g + 0.114 * backMatRgb.b;
+  const backIsBlackBg = backMatLuma < 128;
+
+  console.log(`[scan-ingest] cert=${certNumber} front matRgb=rgb(${frontMatRgb.r},${frontMatRgb.g},${frontMatRgb.b}) matLuma=${frontMatLuma.toFixed(1)} isBlackBg=${frontIsBlackBg} → tighten=${!frontIsBlackBg}`);
+  console.log(`[scan-ingest] cert=${certNumber} back  matRgb=rgb(${backMatRgb.r},${backMatRgb.g},${backMatRgb.b}) matLuma=${backMatLuma.toFixed(1)} isBlackBg=${backIsBlackBg} → tighten=${!backIsBlackBg}`);
+
+  const frontTight = frontIsBlackBg
     ? (frontUnpadded ?? frontVariants.cropped)
     : await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber);
 
   const backTight = backVariants
-    ? (isBlackBg
+    ? (backIsBlackBg
         ? (backUnpadded ?? backVariants.cropped)
         : await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber))
     : null;
 
-  // Convert dark scanner-bleed pixels to white. Runs on the post-tighten
-  // buffer for white-bg scans, or directly on centredUnpadded for black-bg
-  // scans (where tighten was skipped to avoid cropping the card border).
-  const frontFinal = await convertBackgroundToWhite(frontTight, matRgb);
-  const backFinal = backTight ? await convertBackgroundToWhite(backTight, matRgb) : null;
+  // Convert dark scanner-bleed pixels to white. Each side uses its own
+  // matRgb so a borderline-light front mat doesn't short-circuit convertBg
+  // on a genuinely dark back (or vice versa).
+  const frontFinal = await convertBackgroundToWhite(frontTight, frontMatRgb);
+  const backFinal = backTight ? await convertBackgroundToWhite(backTight, backMatRgb) : null;
 
   const frontMaskedPng = await maskRoundedCorners(frontFinal);
   const frontDisplayPng = await toDisplayPng(frontMaskedPng);
