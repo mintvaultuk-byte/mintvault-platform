@@ -54,7 +54,7 @@ export async function uploadImagesToCert(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
-  const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
+  const { maskRoundedCorners, tightenForDisplay, convertBackgroundToWhite } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -132,15 +132,26 @@ export async function uploadImagesToCert(
 
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
   const frontTight = await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber);
-  const frontMaskedPng = await maskRoundedCorners(frontTight);
-  const frontDisplayPng = await toDisplayPng(frontMaskedPng);
-  const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
   const backTight = backVariants
     ? await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber)
     : null;
-  const backMaskedPng = backTight ? await maskRoundedCorners(backTight) : null;
+
+  // Black-bg → white conversion runs AFTER tightenForDisplay so the
+  // saturation walk operates on the final card-cropped bitmap. Running it
+  // before tighten left an anti-aliased transition band (sat 22–27, between
+  // BG_PAINT_THRESH=8 and BG_OUTER_STOP_SAT=60) which tighten then mis-read
+  // as card content and exposed as a dark sliver / smudge on the display PNG.
+  const matRgb = (frontVariants as any).matRgb || { r: 255, g: 255, b: 255 };
+  const frontFinal = await convertBackgroundToWhite(frontTight, matRgb);
+  const backFinal = backTight ? await convertBackgroundToWhite(backTight, matRgb) : null;
+
+  const frontMaskedPng = await maskRoundedCorners(frontFinal);
+  const frontDisplayPng = await toDisplayPng(frontMaskedPng);
+  const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
+
+  const backMaskedPng = backFinal ? await maskRoundedCorners(backFinal) : null;
   const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
