@@ -1156,149 +1156,64 @@ export async function padWithMat(
 }
 
 /**
- * Convert the (dark) scanner-background pixels to pure white. Only runs
- * when the sampled mat colour is dark (luma < 128) — for white-mat scans
- * it's a no-op.
+ * Convert the (dark) scanner-background pixels to pure white. No-op for
+ * white-mat scans (matLuma >= 128).
  *
- * Algorithm: per-side edge-walk with depth-banded saturation thresholds.
- * Validated in the contour-detector prototype against 8 prod certs
- * (MV148/149/150/158/159/160/161/162) including MV162 (worst-case vinyl
- * bleed) and MV159 back (thin saturated outer ring + interior grey band).
- * Replaces the previous flood-fill which ate into dark card corners.
- *
- * For each of the 4 sides of the cropped image, walk inward 1 px at a
- * time per column (top/bottom) or per row (left/right). At each depth:
- *   - depth 0–7  (outer ring): paint if sat<8, STOP only if sat ≥ 60
- *     (lets the walk skip past the slightly-saturated outer slab/vinyl
- *      ring on some scans without false-stopping)
- *   - depth 8–29 (inner band): paint if sat<8, STOP if sat ≥ 8
- *     (once past the outer ring, any colour = real card content)
- *   - hard cap at 30 px
- *
- * Saturation = max(R,G,B) - min(R,G,B). Vinyl/mat/slab edge are grey
- * (low saturation). Card borders (yellow front, blue back, etc.) are
- * coloured (high saturation). The metric separates them cleanly without
- * needing per-card colour assumptions.
- *
- * Interior dark card content (holos, black text inside the artwork) is
- * untouched because the walk stops at the card border and never enters
- * the interior.
+ * Strategy: trim the dark border off the card using sharp's native trim
+ * (libvips-backed; uses the sampled matRgb as the colour to trim against
+ * with a tolerance that absorbs JPEG compression noise), then extend the
+ * trimmed card back to the original canvas size on a pure-white
+ * background, centred. Replaces the earlier hand-rolled per-side
+ * saturation walk — that approach left a thin dark strip on the bottom
+ * edge of cards centred asymmetrically (padding > BG_MAX_DEPTH), and the
+ * paint-vs-stop thresholds couldn't be tuned tight enough to handle JPEG
+ * compression noise without false-stopping on the card border itself.
  */
-const BG_MAX_DEPTH      = 80;
-const BG_OUTER_RING     = 8;
-const BG_OUTER_STOP_SAT = 60;
-const BG_INNER_STOP_SAT = 8;
-const BG_PAINT_THRESH   = 8;
-
 export async function convertBackgroundToWhite(
-  inputBuffer: Buffer,
+  buf: Buffer,
   matRgb: { r: number; g: number; b: number },
 ): Promise<Buffer> {
   const matLuma = 0.299 * matRgb.r + 0.587 * matRgb.g + 0.114 * matRgb.b;
-  const isBlack = matLuma < 128;
-  console.log(`[convertBg] entry matRgb=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) matLuma=${matLuma.toFixed(1)} isBlack=${isBlack} bufSize=${inputBuffer.length}`);
-  if (!isBlack) {
+  console.log(`[convertBg] entry matRgb=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) matLuma=${matLuma.toFixed(1)} bufSize=${buf.length}`);
+  if (matLuma >= 128) {
     console.log(`[convertBg] no-op (white-mat scan)`);
-    return inputBuffer;
+    return buf;
   }
 
-  const meta = await sharp(inputBuffer).metadata();
+  const meta = await sharp(buf).metadata();
   if (!meta.width || !meta.height) {
     console.log(`[convertBg] no-op (zero-dim metadata)`);
-    return inputBuffer;
+    return buf;
   }
+  const originalWidth = meta.width;
+  const originalHeight = meta.height;
 
-  const { data, info } = await sharp(inputBuffer)
-    .removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const px = Buffer.from(data);
-  const w = info.width, h = info.height, ch = info.channels;
+  // Trim the dark border. Threshold 40 absorbs JPEG-compression noise
+  // around the mat colour while still catching the card-edge transition.
+  const trimmed = await sharp(buf)
+    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 40 })
+    .toBuffer();
 
-  const saturation = (off: number): number => {
-    const r = px[off], g = px[off + 1], b = px[off + 2];
-    return Math.max(r, g, b) - Math.min(r, g, b);
-  };
-  const paintWhite = (off: number) => { px[off] = 255; px[off + 1] = 255; px[off + 2] = 255; };
-  const stopThreshAtDepth = (d: number) => d < BG_OUTER_RING ? BG_OUTER_STOP_SAT : BG_INNER_STOP_SAT;
+  // Re-canvas to original dimensions on white, centred. Mirrors the
+  // earlier reCentreBitmap output shape so downstream tightenForDisplay /
+  // maskRoundedCorners see the same canvas size they did before.
+  const trimMeta = await sharp(trimmed).metadata();
+  const tw = trimMeta.width ?? originalWidth;
+  const th = trimMeta.height ?? originalHeight;
+  const padLeft = Math.max(0, Math.floor((originalWidth - tw) / 2));
+  const padTop = Math.max(0, Math.floor((originalHeight - th) / 2));
+  const padRight = Math.max(0, originalWidth - tw - padLeft);
+  const padBottom = Math.max(0, originalHeight - th - padTop);
 
-  let pT = 0, pB = 0, pL = 0, pR = 0;
-  // Telemetry: how many walks crossed BG_MAX_DEPTH (asymmetric centring;
-  // expected on cards that sit off-centre in the bitmap) vs how many ran
-  // all the way to the opposite edge without hitting a sat-stop (would
-  // mean the saturation walk never found the card border — should be ~0
-  // for real cards, indicates a pipeline issue if it spikes).
-  let deepT = 0, deepB = 0, deepL = 0, deepR = 0;
-  let runawayT = 0, runawayB = 0, runawayL = 0, runawayR = 0;
+  const out = await sharp(trimmed)
+    .extend({
+      top: padTop, bottom: padBottom, left: padLeft, right: padRight,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+    .toBuffer();
 
-  // Black-bg scans uncap the walk depth — earlier BG_MAX_DEPTH=80 left a
-  // thin dark strip on the bottom edge of cards that sit high in the
-  // bitmap (asymmetric centring → bottom padding > 80 px). The depth-banded
-  // saturation thresholds (BG_OUTER_STOP_SAT=60 for outer 8 px, then
-  // BG_INNER_STOP_SAT=8) are the real stop condition; BG_MAX_DEPTH is kept
-  // only as a telemetry waypoint. White-mat scans never reach this loop
-  // (no-op short-circuit above), so removing the cap is safe.
-
-  // Top — per column, walk down
-  for (let x = 0; x < w; x++) {
-    let stopped = false;
-    for (let d = 0; d < h; d++) {
-      const off = (d * w + x) * ch;
-      const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
-      if (s < BG_PAINT_THRESH) { paintWhite(off); pT++; }
-      if (d === BG_MAX_DEPTH) deepT++;
-    }
-    if (!stopped) runawayT++;
-  }
-  // Bottom — per column, walk up
-  for (let x = 0; x < w; x++) {
-    let stopped = false;
-    for (let d = 0; d < h; d++) {
-      const y = h - 1 - d;
-      const off = (y * w + x) * ch;
-      const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
-      if (s < BG_PAINT_THRESH) { paintWhite(off); pB++; }
-      if (d === BG_MAX_DEPTH) deepB++;
-    }
-    if (!stopped) runawayB++;
-  }
-  // Left — per row, walk right
-  for (let y = 0; y < h; y++) {
-    let stopped = false;
-    for (let d = 0; d < w; d++) {
-      const off = (y * w + d) * ch;
-      const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
-      if (s < BG_PAINT_THRESH) { paintWhite(off); pL++; }
-      if (d === BG_MAX_DEPTH) deepL++;
-    }
-    if (!stopped) runawayL++;
-  }
-  // Right — per row, walk left
-  for (let y = 0; y < h; y++) {
-    let stopped = false;
-    for (let d = 0; d < w; d++) {
-      const x = w - 1 - d;
-      const off = (y * w + x) * ch;
-      const s = saturation(off);
-      if (s >= stopThreshAtDepth(d)) { stopped = true; break; }
-      if (s < BG_PAINT_THRESH) { paintWhite(off); pR++; }
-      if (d === BG_MAX_DEPTH) deepR++;
-    }
-    if (!stopped) runawayR++;
-  }
-
-  const isPng = meta.format === "png";
-  const pipeline = sharp(px, { raw: { width: w, height: h, channels: ch } });
-  const out = isPng
-    ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
-    : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
-
-  console.log(`[convertBg] DONE painted T${pT}/B${pB}/L${pL}/R${pR} total=${pT+pB+pL+pR} (depth uncapped, sat-stop only) outBufSize=${out.length}`);
-  const deepTotal = deepT + deepB + deepL + deepR;
-  if (deepTotal > 0) console.log(`[convertBg] walks past BG_MAX_DEPTH=${BG_MAX_DEPTH}: T${deepT}/B${deepB}/L${deepL}/R${deepR} (asymmetric centring — expected)`);
-  const runawayTotal = runawayT + runawayB + runawayL + runawayR;
-  if (runawayTotal > 0) console.warn(`[convertBg] WARN ${runawayTotal} walks ran to opposite edge without hitting sat-stop: T${runawayT}/B${runawayB}/L${runawayL}/R${runawayR} — sat walk never found card border`);
+  console.log(`[convertBg] DONE trim ${originalWidth}x${originalHeight} → ${tw}x${th}, re-canvased on white (pad T${padTop}/B${padBottom}/L${padLeft}/R${padRight}) outBufSize=${out.length}`);
   return out;
 }
 
