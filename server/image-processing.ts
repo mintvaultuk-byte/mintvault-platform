@@ -1184,7 +1184,7 @@ export async function padWithMat(
  * untouched because the walk stops at the card border and never enters
  * the interior.
  */
-const BG_MAX_DEPTH      = 30;
+const BG_MAX_DEPTH      = 80;
 const BG_OUTER_RING     = 8;
 const BG_OUTER_STOP_SAT = 60;
 const BG_INNER_STOP_SAT = 8;
