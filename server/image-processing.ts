@@ -1156,20 +1156,40 @@ export async function padWithMat(
 }
 
 /**
- * Convert the (dark) scanner-background pixels to pure white via a flood-fill
- * seeded from the image border. Only runs when the sampled mat colour is
- * dark (luma < 128) — for white-mat scans it's a no-op.
+ * Convert the (dark) scanner-background pixels to pure white. Only runs
+ * when the sampled mat colour is dark (luma < 128) — for white-mat scans
+ * it's a no-op.
  *
- * Why flood-fill (not blanket per-pixel replace): interior pixels that
- * happen to be near-black (dark holos, black text, dark borders) would be
- * misclassified by a simple distance test. Flood-fill starts from the four
- * image edges and only converts pixels REACHABLE via similar-colour
- * neighbours — so an interior black blob that is surrounded by card colour
- * is preserved.
+ * Algorithm: per-side edge-walk with depth-banded saturation thresholds.
+ * Validated in the contour-detector prototype against 8 prod certs
+ * (MV148/149/150/158/159/160/161/162) including MV162 (worst-case vinyl
+ * bleed) and MV159 back (thin saturated outer ring + interior grey band).
+ * Replaces the previous flood-fill which ate into dark card corners.
  *
- * Threshold: Euclidean distance 45 from matRgb (same as computeMatProfile's
- * card-pixel classifier). 4-connected BFS.
+ * For each of the 4 sides of the cropped image, walk inward 1 px at a
+ * time per column (top/bottom) or per row (left/right). At each depth:
+ *   - depth 0–7  (outer ring): paint if sat<8, STOP only if sat ≥ 60
+ *     (lets the walk skip past the slightly-saturated outer slab/vinyl
+ *      ring on some scans without false-stopping)
+ *   - depth 8–29 (inner band): paint if sat<8, STOP if sat ≥ 8
+ *     (once past the outer ring, any colour = real card content)
+ *   - hard cap at 30 px
+ *
+ * Saturation = max(R,G,B) - min(R,G,B). Vinyl/mat/slab edge are grey
+ * (low saturation). Card borders (yellow front, blue back, etc.) are
+ * coloured (high saturation). The metric separates them cleanly without
+ * needing per-card colour assumptions.
+ *
+ * Interior dark card content (holos, black text inside the artwork) is
+ * untouched because the walk stops at the card border and never enters
+ * the interior.
  */
+const BG_MAX_DEPTH      = 30;
+const BG_OUTER_RING     = 8;
+const BG_OUTER_STOP_SAT = 60;
+const BG_INNER_STOP_SAT = 8;
+const BG_PAINT_THRESH   = 8;
+
 export async function convertBackgroundToWhite(
   inputBuffer: Buffer,
   matRgb: { r: number; g: number; b: number },
@@ -1184,49 +1204,53 @@ export async function convertBackgroundToWhite(
     .removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const px = Buffer.from(data);
   const w = info.width, h = info.height, ch = info.channels;
-  const threshold = 45;
-  const t2 = threshold * threshold;
 
-  const isMat = (off: number): boolean => {
-    const dr = px[off] - matRgb.r;
-    const dg = px[off + 1] - matRgb.g;
-    const db = px[off + 2] - matRgb.b;
-    return dr * dr + dg * dg + db * db <= t2;
+  const saturation = (off: number): number => {
+    const r = px[off], g = px[off + 1], b = px[off + 2];
+    return Math.max(r, g, b) - Math.min(r, g, b);
   };
+  const paintWhite = (off: number) => { px[off] = 255; px[off + 1] = 255; px[off + 2] = 255; };
+  const stopThreshAtDepth = (d: number) => d < BG_OUTER_RING ? BG_OUTER_STOP_SAT : BG_INNER_STOP_SAT;
 
-  const visited = new Uint8Array(w * h);
-  const stack: number[] = [];
+  let pT = 0, pB = 0, pL = 0, pR = 0;
 
-  // Seed: every border pixel that classifies as mat.
-  const pushIfMat = (idx: number) => {
-    if (visited[idx]) return;
-    if (isMat(idx * ch)) {
-      visited[idx] = 1;
-      stack.push(idx);
-    }
-  };
+  // Top — per column, walk down
   for (let x = 0; x < w; x++) {
-    pushIfMat(x);
-    pushIfMat((h - 1) * w + x);
+    for (let d = 0; d < Math.min(BG_MAX_DEPTH, h); d++) {
+      const off = (d * w + x) * ch;
+      const s = saturation(off);
+      if (s >= stopThreshAtDepth(d)) break;
+      if (s < BG_PAINT_THRESH) { paintWhite(off); pT++; }
+    }
   }
+  // Bottom — per column, walk up
+  for (let x = 0; x < w; x++) {
+    for (let d = 0; d < Math.min(BG_MAX_DEPTH, h); d++) {
+      const y = h - 1 - d;
+      const off = (y * w + x) * ch;
+      const s = saturation(off);
+      if (s >= stopThreshAtDepth(d)) break;
+      if (s < BG_PAINT_THRESH) { paintWhite(off); pB++; }
+    }
+  }
+  // Left — per row, walk right
   for (let y = 0; y < h; y++) {
-    pushIfMat(y * w);
-    pushIfMat(y * w + (w - 1));
+    for (let d = 0; d < Math.min(BG_MAX_DEPTH, w); d++) {
+      const off = (y * w + d) * ch;
+      const s = saturation(off);
+      if (s >= stopThreshAtDepth(d)) break;
+      if (s < BG_PAINT_THRESH) { paintWhite(off); pL++; }
+    }
   }
-
-  // 4-connected BFS. On visit, paint pixel white. Expand to neighbours
-  // that are also mat-classified.
-  let painted = 0;
-  while (stack.length) {
-    const idx = stack.pop()!;
-    const off = idx * ch;
-    px[off] = 255; px[off + 1] = 255; px[off + 2] = 255;
-    painted++;
-    const x = idx % w, y = (idx / w) | 0;
-    if (y > 0)     { const n = idx - w; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
-    if (y < h - 1) { const n = idx + w; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
-    if (x > 0)     { const n = idx - 1; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
-    if (x < w - 1) { const n = idx + 1; if (!visited[n] && isMat(n * ch)) { visited[n] = 1; stack.push(n); } }
+  // Right — per row, walk left
+  for (let y = 0; y < h; y++) {
+    for (let d = 0; d < Math.min(BG_MAX_DEPTH, w); d++) {
+      const x = w - 1 - d;
+      const off = (y * w + x) * ch;
+      const s = saturation(off);
+      if (s >= stopThreshAtDepth(d)) break;
+      if (s < BG_PAINT_THRESH) { paintWhite(off); pR++; }
+    }
   }
 
   const isPng = meta.format === "png";
@@ -1235,7 +1259,7 @@ export async function convertBackgroundToWhite(
     ? await pipeline.png({ compressionLevel: 9 }).toBuffer()
     : await pipeline.jpeg({ quality: 90, progressive: true, mozjpeg: true }).toBuffer();
 
-  console.log(`[bg→white] mat=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) painted ${painted}/${w * h} px (${(painted / (w * h) * 100).toFixed(1)}%)`);
+  console.log(`[bg→white] mat=rgb(${matRgb.r},${matRgb.g},${matRgb.b}) painted T${pT}/B${pB}/L${pL}/R${pR} (max ${BG_MAX_DEPTH}px, depth-banded sat stop)`);
   return out;
 }
 
