@@ -131,14 +131,14 @@ export async function uploadImagesToCert(
   }
 
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontTight = await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber);
+  const frontTight = await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber, undefined, "front");
   const frontMaskedPng = await maskRoundedCorners(frontTight);
   const frontDisplayPng = await toDisplayPng(frontMaskedPng);
   const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
   const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
   const backTight = backVariants
-    ? await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber)
+    ? await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber, undefined, "back")
     : null;
   const backMaskedPng = backTight ? await maskRoundedCorners(backTight) : null;
   const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
