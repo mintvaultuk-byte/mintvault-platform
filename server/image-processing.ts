@@ -1191,7 +1191,7 @@ export async function convertBackgroundToWhite(
   // Trim the dark border. Threshold 40 absorbs JPEG-compression noise
   // around the mat colour while still catching the card-edge transition.
   const trimmed = await sharp(buf)
-    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 40 })
+    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 15 })
     .toBuffer();
 
   // Re-canvas to original dimensions on white, centred. Mirrors the
