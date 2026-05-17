@@ -1185,35 +1185,28 @@ export async function convertBackgroundToWhite(
     console.log(`[convertBg] no-op (zero-dim metadata)`);
     return buf;
   }
-  const originalWidth = meta.width;
-  const originalHeight = meta.height;
 
-  // Trim the dark border. Threshold 40 absorbs JPEG-compression noise
-  // around the mat colour while still catching the card-edge transition.
+  // Trim the dark border. Threshold 25 absorbs JPEG-compression noise
+  // around the mat colour while still catching the card-edge transition
+  // — earlier 15 left a residual vinyl black line on the bottom edge of
+  // some scans.
   const trimmed = await sharp(buf)
-    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 15 })
+    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 25 })
     .toBuffer();
 
-  // Re-canvas to original dimensions on white, centred. Mirrors the
-  // earlier reCentreBitmap output shape so downstream tightenForDisplay /
-  // maskRoundedCorners see the same canvas size they did before.
-  const trimMeta = await sharp(trimmed).metadata();
-  const tw = trimMeta.width ?? originalWidth;
-  const th = trimMeta.height ?? originalHeight;
-  const padLeft = Math.max(0, Math.floor((originalWidth - tw) / 2));
-  const padTop = Math.max(0, Math.floor((originalHeight - th) / 2));
-  const padRight = Math.max(0, originalWidth - tw - padLeft);
-  const padBottom = Math.max(0, originalHeight - th - padTop);
-
+  // Add a small uniform white frame around the trimmed card. Previously
+  // we re-canvased back to the original input dimensions and centred —
+  // that produced a double-border effect when the card sat asymmetrically
+  // in the source bitmap (one side of the white frame was much wider than
+  // the other). 8 px uniform keeps the rounded mask's corner curve clear
+  // of the card edge without visible asymmetry.
   const out = await sharp(trimmed)
-    .extend({
-      top: padTop, bottom: padBottom, left: padLeft, right: padRight,
-      background: { r: 255, g: 255, b: 255, alpha: 1 },
-    })
+    .extend({ top: 8, bottom: 8, left: 8, right: 8, background: { r: 255, g: 255, b: 255, alpha: 1 } })
     .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
-  console.log(`[convertBg] DONE trim ${originalWidth}x${originalHeight} → ${tw}x${th}, re-canvased on white (pad T${padTop}/B${padBottom}/L${padLeft}/R${padRight}) outBufSize=${out.length}`);
+  const trimMeta = await sharp(trimmed).metadata();
+  console.log(`[convertBg] DONE trim ${meta.width}x${meta.height} → ${trimMeta.width}x${trimMeta.height} + 8px white frame, outBufSize=${out.length}`);
   return out;
 }
 
