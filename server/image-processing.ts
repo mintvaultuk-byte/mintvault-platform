@@ -723,6 +723,7 @@ export async function tightenForDisplay(
   inputBuffer: Buffer,
   certId?: string | number,
   fallbackInsetPx: number = 16,
+  side?: "front" | "back",
 ): Promise<Buffer> {
   const certTag = certId != null ? ` cert=${certId}` : "";
   let metaW = 0, metaH = 0;
@@ -750,11 +751,25 @@ export async function tightenForDisplay(
       return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
     }
 
-    // Map bounds back to full-res, clamp defensively
+    // Map bounds back to full-res
     let origMinX = Math.round(boundary.minX / scale);
     let origMinY = Math.round(boundary.minY / scale);
     let origMaxX = Math.round(boundary.maxX / scale);
     let origMaxY = Math.round(boundary.maxY / scale);
+
+    // Outward expansion. The coverage detector lands bounds on the first
+    // meaningfully-card row/column, which shaves a sliver off the border
+    // on both sides of this scanner. Expand 12 px outward on each side for
+    // both front and back; the clamp below absorbs anything that would
+    // run past the bitmap.
+    const expandPx = side === "front" ? 12 : 12;
+    if (expandPx > 0) {
+      origMinX -= expandPx;
+      origMinY -= expandPx;
+      origMaxX += expandPx;
+      origMaxY += expandPx;
+    }
+
     const clamped =
       origMinX < 0 || origMinY < 0 || origMaxX > metaW - 1 || origMaxY > metaH - 1;
     origMinX = Math.max(0, origMinX);
@@ -762,7 +777,8 @@ export async function tightenForDisplay(
     origMaxX = Math.min(metaW - 1, origMaxX);
     origMaxY = Math.min(metaH - 1, origMaxY);
     if (clamped) {
-      console.warn(`[tightenForDisplay] mapped bounds extended past bitmap, clamped${certTag}`);
+      const expandNote = expandPx > 0 ? ` (after +${expandPx}px ${side} expansion)` : "";
+      console.warn(`[tightenForDisplay] mapped bounds extended past bitmap, clamped${certTag}${expandNote}`);
     }
 
     const cropW = origMaxX - origMinX + 1;
