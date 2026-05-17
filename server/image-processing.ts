@@ -519,8 +519,8 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 
     console.log(`[deskew] non-black edge: points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
 
-    if (Math.abs(angle) > 10) {
-      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±10°, skipping`);
+    if (Math.abs(angle) > 15) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±15°, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
     if (Math.abs(angle) < 0.05) {
