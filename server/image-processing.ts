@@ -717,7 +717,6 @@ function whitewashEdgesBySaturation(
   h: number,
   ch: number,
   maxDepth: number,
-  satStop: number,
   certTag: string = "",
   edgeKeepPx: number = 2,
 ): Buffer {
@@ -738,6 +737,38 @@ function whitewashEdgesBySaturation(
     return Math.max(r, g, b) - Math.min(r, g, b);
   };
   const paint = (off: number) => { px[off] = 255; px[off + 1] = 255; px[off + 2] = 255; };
+
+  // Adaptive satStop: sample mat-side saturation from the outer 2 px ring
+  // (guaranteed mat after the +30 px expansion) and card-border saturation
+  // from a 3 px band at inset 17-19 px from each edge (lands inside the
+  // card's coloured outer border for any card colour). Pick a threshold
+  // 30% of the way from mat-sat to border-sat. Clamp [6, 60] so degenerate
+  // inputs (all-grey scans, all-coloured scans) don't blow up the walk.
+  let matSatSum = 0, matSatN = 0;
+  for (let y = 0; y < Math.min(2, h); y++) {
+    for (let x = 0; x < w; x++) { matSatSum += sat((y * w + x) * ch); matSatN++; }
+  }
+  for (let y = Math.max(2, h - 2); y < h; y++) {
+    for (let x = 0; x < w; x++) { matSatSum += sat((y * w + x) * ch); matSatN++; }
+  }
+  for (let y = 2; y < h - 2; y++) {
+    for (let x = 0; x < Math.min(2, w); x++) { matSatSum += sat((y * w + x) * ch); matSatN++; }
+    for (let x = Math.max(2, w - 2); x < w; x++) { matSatSum += sat((y * w + x) * ch); matSatN++; }
+  }
+  const matSat = matSatN > 0 ? matSatSum / matSatN : 0;
+
+  let borderSatSum = 0, borderSatN = 0;
+  for (let d = 17; d <= 19; d++) {
+    if (d < h) for (let x = 0; x < w; x++) { borderSatSum += sat((d * w + x) * ch); borderSatN++; }
+    if (h - 1 - d >= 0) for (let x = 0; x < w; x++) { borderSatSum += sat(((h - 1 - d) * w + x) * ch); borderSatN++; }
+    if (d < w) for (let y = 0; y < h; y++) { borderSatSum += sat((y * w + d) * ch); borderSatN++; }
+    if (w - 1 - d >= 0) for (let y = 0; y < h; y++) { borderSatSum += sat((y * w + (w - 1 - d)) * ch); borderSatN++; }
+  }
+  const borderSat = borderSatN > 0 ? borderSatSum / borderSatN : 0;
+
+  const rawSatStop = matSat + (borderSat - matSat) * 0.3;
+  const satStop = Math.max(6, Math.min(60, Math.round(rawSatStop)));
+  console.log(`[whitewash] adaptive satStop=${satStop} (mat=${matSat.toFixed(1)} border=${borderSat.toFixed(1)})${certTag}`);
 
   // Two-pass edge walk: pass 1 locates the start of the card border using
   // a 3-consecutive-above-threshold rule (single high-sat pixels are
@@ -945,7 +976,7 @@ export async function tightenForDisplay(
       .toBuffer({ resolveWithObject: true });
 
     const edgeKeepPx = side === "back" ? 0 : 2;
-    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 8, certTag, edgeKeepPx);
+    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, certTag, edgeKeepPx);
 
     return await sharp(painted, { raw: { width: cropInfo.width, height: cropInfo.height, channels: cropInfo.channels } })
       .jpeg({ quality: 90 })
