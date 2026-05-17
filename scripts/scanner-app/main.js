@@ -168,7 +168,6 @@ function buildTrayMenu() {
     { label: "Restart watcher", click: async () => { await watcher.stop(); await watcher.start(); refreshTray(); } },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
-    { label: "Quit", click: () => { isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
 }
