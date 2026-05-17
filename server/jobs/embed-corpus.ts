@@ -19,10 +19,18 @@ import { generateEmbeddingForCert } from "./../embedding-service";
 
 const BATCH_SIZE = 50;
 
-export async function runEmbedCorpusJob(): Promise<void> {
+export interface EmbedCorpusTickStats {
+  picked:   number;  // rows pulled off the queue (0 when no work)
+  embedded: number;  // successfully embedded
+  skipped:  number;  // skipped (already embedded or no-data)
+  failed:   number;  // threw during embedding
+  reason?:  "no_api_key" | "query_failed" | "ok";
+}
+
+export async function runEmbedCorpusJob(): Promise<EmbedCorpusTickStats> {
   if (!process.env.OPENAI_API_KEY) {
     console.warn("[embed-corpus] OPENAI_API_KEY not set — skipping tick");
-    return;
+    return { picked: 0, embedded: 0, skipped: 0, failed: 0, reason: "no_api_key" };
   }
 
   let pending: { certId: string }[] = [];
@@ -42,12 +50,12 @@ export async function runEmbedCorpusJob(): Promise<void> {
     // exist yet (migration hasn't run). Fail-soft so the boot sequence
     // doesn't crash the whole server over a deferred RAG feature.
     console.warn(`[embed-corpus] could not query pending certs (migration may be pending): ${err?.message || err}`);
-    return;
+    return { picked: 0, embedded: 0, skipped: 0, failed: 0, reason: "query_failed" };
   }
 
   if (pending.length === 0) {
     console.log("[embed-corpus] no certs pending embedding");
-    return;
+    return { picked: 0, embedded: 0, skipped: 0, failed: 0, reason: "ok" };
   }
 
   console.log(`[embed-corpus] embedding ${pending.length} cert(s)…`);
@@ -65,4 +73,5 @@ export async function runEmbedCorpusJob(): Promise<void> {
     }
   }
   console.log(`[embed-corpus] tick complete — embedded=${embedded} skipped=${skipped} failed=${failed}`);
+  return { picked: pending.length, embedded, skipped, failed, reason: "ok" };
 }

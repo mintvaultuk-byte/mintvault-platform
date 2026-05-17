@@ -11246,6 +11246,89 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── RAG embed-corpus admin controls ──────────────────────────────────────
+  // Force-run + per-cert re-embed. Wire-protocol contract:
+  //   POST /api/admin/embed-corpus/run         — picks the next batch (up
+  //     to BATCH_SIZE from embed-corpus.ts) and runs it inline. Debounced
+  //     60s server-side so a fat-fingered re-click is a no-op rather than
+  //     a duplicate batch.
+  //   POST /api/admin/embed-corpus/cert/:certId — single-cert force
+  //     re-embed; bypasses the "already embedded" skip. One-shot, no
+  //     debounce — admin may need to re-embed several certs in a row.
+  // Both audit-logged. The /run endpoint stores `picked` and `skipped`
+  // (debounce-hit boolean) in details; the per-cert endpoint stores the
+  // service's status code.
+  let lastForceRunAtMs = 0;
+  const FORCE_RUN_DEBOUNCE_MS = 60_000;
+
+  // GET /api/admin/embed-corpus/last-run — drives the button countdown so
+  // the operator can see exactly how long until the next force-run is
+  // allowed. Reads the same closure variable as the POST handler. Null
+  // when the server has never run since boot (initial state).
+  app.get("/api/admin/embed-corpus/last-run", requireAdmin, (_req, res) => {
+    res.json({
+      lastRunAtMs: lastForceRunAtMs > 0 ? lastForceRunAtMs : null,
+      windowMs:    FORCE_RUN_DEBOUNCE_MS,
+    });
+  });
+
+  app.post("/api/admin/embed-corpus/run", requireAdmin, async (req, res) => {
+    try {
+      const adminEmail = req.session.adminEmail || "admin";
+      const now = Date.now();
+      if (now - lastForceRunAtMs < FORCE_RUN_DEBOUNCE_MS) {
+        const waitSec = Math.ceil((FORCE_RUN_DEBOUNCE_MS - (now - lastForceRunAtMs)) / 1000);
+        await storage.writeAuditLog("rag_corpus", "embed_corpus", "force_run", adminEmail, {
+          skipped: true,
+          picked: 0,
+          reason: "debounced",
+          waitSec,
+        });
+        return res.json({ ok: true, skipped: true, picked: 0, waitSec });
+      }
+      lastForceRunAtMs = now;
+      const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
+      const stats = await runEmbedCorpusJob();
+      await storage.writeAuditLog("rag_corpus", "embed_corpus", "force_run", adminEmail, {
+        skipped: false,
+        picked:   stats.picked,
+        embedded: stats.embedded,
+        skippedCount: stats.skipped,
+        failed:   stats.failed,
+        reason:   stats.reason || null,
+      });
+      return res.json({
+        ok: true,
+        skipped: false,
+        picked:       stats.picked,
+        embedded:     stats.embedded,
+        skippedCount: stats.skipped,
+        failed:       stats.failed,
+        reason:       stats.reason || null,
+      });
+    } catch (err: any) {
+      console.error("[embed-corpus/run] failed:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/embed-corpus/cert/:certId", requireAdmin, async (req, res) => {
+    try {
+      const adminEmail = req.session.adminEmail || "admin";
+      const normalCertId = normalizeCertId(String(req.params.certId));
+      const { generateEmbeddingForCert } = await import("./embedding-service");
+      const result = await generateEmbeddingForCert(normalCertId, { force: true });
+      await storage.writeAuditLog("certificate", normalCertId, "rag_force_reembed", adminEmail, {
+        status: result.status,
+        reason: result.reason || null,
+      });
+      return res.json({ ok: result.status !== "no-data", ...result });
+    } catch (err: any) {
+      console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── B2 cold-archive endpoints ───────────────────────────────────────────
   // Manual trigger + status surface for the R2 → B2 archival worker.
   // Worker runs daily via setInterval (server/index.ts); these endpoints
