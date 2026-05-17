@@ -727,8 +727,8 @@ function whitewashEdgesBySaturation(
   const CORNER_MAX_DEPTH = 60;
   // Preserve this many pixels of the card edge in the output — without it
   // the sat walk paints right up to the first coloured pixel, leaving zero
-  // visible yellow/blue/green card border. 4 px keeps the border readable.
-  const EDGE_BORDER_KEEP_PX = 4;
+  // visible yellow/blue/green card border. 2 px keeps the border readable.
+  const EDGE_BORDER_KEEP_PX = 2;
 
   const sat = (off: number) => {
     const r = px[off], g = px[off + 1], b = px[off + 2];
