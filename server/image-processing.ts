@@ -1205,22 +1205,15 @@ export async function convertBackgroundToWhite(
   const padRight = Math.max(0, originalWidth - tw - padLeft);
   const padBottom = Math.max(0, originalHeight - th - padTop);
 
-  const extended = await sharp(trimmed)
+  const out = await sharp(trimmed)
     .extend({
       top: padTop, bottom: padBottom, left: padLeft, right: padRight,
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
-    .toBuffer();
-
-  // Crop a 12px inset on all sides to strip the outer vinyl strip /
-  // residual dark fringe at the very edge of the original canvas without
-  // touching the card border itself. Width and height shrink by 24 px.
-  const out = await sharp(extended)
-    .extract({ left: 12, top: 12, width: originalWidth - 24, height: originalHeight - 24 })
     .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
-  console.log(`[convertBg] DONE trim ${originalWidth}x${originalHeight} → ${tw}x${th}, re-canvased (pad T${padTop}/B${padBottom}/L${padLeft}/R${padRight}), 12px inset → ${originalWidth - 24}x${originalHeight - 24} outBufSize=${out.length}`);
+  console.log(`[convertBg] DONE trim ${originalWidth}x${originalHeight} → ${tw}x${th}, re-canvased on white (pad T${padTop}/B${padBottom}/L${padLeft}/R${padRight}) outBufSize=${out.length}`);
   return out;
 }
 
