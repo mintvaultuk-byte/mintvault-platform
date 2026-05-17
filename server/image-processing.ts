@@ -1191,7 +1191,7 @@ export async function convertBackgroundToWhite(
   // — earlier 15 left a residual vinyl black line on the bottom edge of
   // some scans.
   const trimmed = await sharp(buf)
-    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 25 })
+    .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 15 })
     .toBuffer();
 
   // Add a small uniform white frame around the trimmed card. Previously
@@ -1201,7 +1201,7 @@ export async function convertBackgroundToWhite(
   // the other). 8 px uniform keeps the rounded mask's corner curve clear
   // of the card edge without visible asymmetry.
   const out = await sharp(trimmed)
-    .extend({ top: 8, bottom: 8, left: 8, right: 8, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+    .extend({ top: 20, bottom: 20, left: 20, right: 20, background: { r: 255, g: 255, b: 255, alpha: 1 } })
     .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
