@@ -1185,28 +1185,42 @@ export async function convertBackgroundToWhite(
     console.log(`[convertBg] no-op (zero-dim metadata)`);
     return buf;
   }
+  const originalWidth = meta.width;
+  const originalHeight = meta.height;
 
-  // Trim the dark border. Threshold 25 absorbs JPEG-compression noise
-  // around the mat colour while still catching the card-edge transition
-  // — earlier 15 left a residual vinyl black line on the bottom edge of
-  // some scans.
+  // Trim the dark border. Threshold 15 absorbs JPEG-compression noise
+  // around the mat colour while still catching the card-edge transition.
   const trimmed = await sharp(buf)
     .trim({ background: { r: matRgb.r, g: matRgb.g, b: matRgb.b }, threshold: 15 })
     .toBuffer();
 
-  // Add a small uniform white frame around the trimmed card. Previously
-  // we re-canvased back to the original input dimensions and centred —
-  // that produced a double-border effect when the card sat asymmetrically
-  // in the source bitmap (one side of the white frame was much wider than
-  // the other). 8 px uniform keeps the rounded mask's corner curve clear
-  // of the card edge without visible asymmetry.
-  const out = await sharp(trimmed)
-    .extend({ top: 20, bottom: 20, left: 20, right: 20, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+  // Re-canvas to original dimensions on white, centred. Mirrors the
+  // earlier reCentreBitmap output shape so downstream tightenForDisplay /
+  // maskRoundedCorners see the same canvas size they did before.
+  const trimMeta = await sharp(trimmed).metadata();
+  const tw = trimMeta.width ?? originalWidth;
+  const th = trimMeta.height ?? originalHeight;
+  const padLeft = Math.max(0, Math.floor((originalWidth - tw) / 2));
+  const padTop = Math.max(0, Math.floor((originalHeight - th) / 2));
+  const padRight = Math.max(0, originalWidth - tw - padLeft);
+  const padBottom = Math.max(0, originalHeight - th - padTop);
+
+  const extended = await sharp(trimmed)
+    .extend({
+      top: padTop, bottom: padBottom, left: padLeft, right: padRight,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .toBuffer();
+
+  // Crop a 12px inset on all sides to strip the outer vinyl strip /
+  // residual dark fringe at the very edge of the original canvas without
+  // touching the card border itself. Width and height shrink by 24 px.
+  const out = await sharp(extended)
+    .extract({ left: 12, top: 12, width: originalWidth - 24, height: originalHeight - 24 })
     .jpeg({ quality: 85, progressive: true, mozjpeg: true })
     .toBuffer();
 
-  const trimMeta = await sharp(trimmed).metadata();
-  console.log(`[convertBg] DONE trim ${meta.width}x${meta.height} → ${trimMeta.width}x${trimMeta.height} + 8px white frame, outBufSize=${out.length}`);
+  console.log(`[convertBg] DONE trim ${originalWidth}x${originalHeight} → ${tw}x${th}, re-canvased (pad T${padTop}/B${padBottom}/L${padLeft}/R${padRight}), 12px inset → ${originalWidth - 24}x${originalHeight - 24} outBufSize=${out.length}`);
   return out;
 }
 
