@@ -4,8 +4,8 @@
  */
 import sharp from "sharp";
 
-// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
-const CARD_CORNER_RADIUS_PCT = 0.04;
+// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.76%)
+const CARD_CORNER_RADIUS_PCT = 0.048;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
@@ -519,8 +519,8 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 
     console.log(`[deskew] non-black edge: points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
 
-    if (Math.abs(angle) > 5) {
-      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
+    if (Math.abs(angle) > 10) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±10°, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
     if (Math.abs(angle) < 0.05) {
@@ -759,10 +759,10 @@ export async function tightenForDisplay(
 
     // Outward expansion. The coverage detector lands bounds on the first
     // meaningfully-card row/column, which shaves a sliver off the border
-    // on both sides of this scanner. Expand 12 px outward on each side for
+    // on both sides of this scanner. Expand 14 px outward on each side for
     // both front and back; the clamp below absorbs anything that would
     // run past the bitmap.
-    const expandPx = side === "front" ? 12 : 12;
+    const expandPx = side === "front" ? 14 : 14;
     if (expandPx > 0) {
       origMinX -= expandPx;
       origMinY -= expandPx;
