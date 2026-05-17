@@ -66,6 +66,7 @@ const els = {
   autoOpenOnError: document.getElementById("autoOpenOnError"),
   soundEnabled:    document.getElementById("soundEnabled"),
   testScanBtn:     document.getElementById("testScanBtn"),
+  clearBufferedBtn:document.getElementById("clearBufferedBtn"),
 };
 
 // ── Modal helpers ────────────────────────────────────────────────────────
@@ -418,6 +419,29 @@ els.testScanBtn.addEventListener("click", async () => {
       els.testScanBtn.disabled = false;
     }, 4000);
   }
+});
+
+// Emergency reset — clear watcher state file + kickstart the scanner-watcher
+// LaunchAgent, then re-poll state after 2 s so the UI reflects whatever the
+// watcher comes back with.
+els.clearBufferedBtn.addEventListener("click", async () => {
+  if (!window.confirm("Emergency reset?\n\nThis deletes ~/mintvault-scans/watcher-state.json and kickstarts com.mintvault.scanner-watcher.")) return;
+  els.clearBufferedBtn.disabled = true;
+  const original = els.clearBufferedBtn.textContent;
+  els.clearBufferedBtn.textContent = "Resetting…";
+  const r = await window.scanner.clearBufferedState();
+  setTimeout(async () => {
+    const cur = await window.scanner.getState();
+    if (cur) renderState(cur);
+    els.clearBufferedBtn.disabled = false;
+    if (r.ok) {
+      els.clearBufferedBtn.textContent = "Reset OK";
+      setTimeout(() => { els.clearBufferedBtn.textContent = original; }, 1500);
+    } else {
+      els.clearBufferedBtn.textContent = `Failed: ${(r.error || "unknown").slice(0, 30)}`;
+      setTimeout(() => { els.clearBufferedBtn.textContent = original; }, 4000);
+    }
+  }, 2000);
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────
