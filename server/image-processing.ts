@@ -945,7 +945,7 @@ export async function tightenForDisplay(
       .toBuffer({ resolveWithObject: true });
 
     const edgeKeepPx = side === "back" ? 0 : 2;
-    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 12, certTag, edgeKeepPx);
+    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 8, certTag, edgeKeepPx);
 
     return await sharp(painted, { raw: { width: cropInfo.width, height: cropInfo.height, channels: cropInfo.channels } })
       .jpeg({ quality: 90 })
