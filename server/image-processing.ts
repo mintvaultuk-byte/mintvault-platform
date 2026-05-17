@@ -762,7 +762,7 @@ export async function tightenForDisplay(
     // on both sides of this scanner. Expand 14 px outward on each side for
     // both front and back; the clamp below absorbs anything that would
     // run past the bitmap.
-    const expandPx = side === "front" ? 12 : 10;
+    const expandPx = side === "front" ? 13 : 13;
     if (expandPx > 0) {
       origMinX -= expandPx;
       origMinY -= expandPx;
