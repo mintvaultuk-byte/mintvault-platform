@@ -167,7 +167,7 @@ function renderState(s) {
 els.hideBtn.addEventListener("click", () => window.scanner.hidePopover());
 els.restartBtn.addEventListener("click", async () => {
   els.restartBtn.disabled = true;
-  await window.scanner.restartWatcher();
+  await window.scanner.getState().then(renderState);
   els.restartBtn.disabled = false;
 });
 
