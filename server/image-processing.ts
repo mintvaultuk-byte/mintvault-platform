@@ -739,15 +739,26 @@ function whitewashEdgesBySaturation(
   };
   const paint = (off: number) => { px[off] = 255; px[off + 1] = 255; px[off + 2] = 255; };
 
-  // Two-pass edge walk: pass 1 locates the first coloured pixel (the card
-  // border); pass 2 paints up to (stopDepth - EDGE_BORDER_KEEP_PX), leaving
-  // a visible strip of card border. If no coloured pixel is found within
-  // `limit`, paint everything (card edge is beyond reach — nothing to
-  // preserve).
+  // Two-pass edge walk: pass 1 locates the start of the card border using
+  // a 3-consecutive-above-threshold rule (single high-sat pixels are
+  // treated as JPEG noise/dust and the walk continues past them); pass 2
+  // paints up to (stopDepth - EDGE_BORDER_KEEP_PX), leaving a visible
+  // strip of card border. If no coloured run is found within `limit`,
+  // paint everything (card edge is beyond reach — nothing to preserve).
+  const NOISE_TOLERANCE_RUN = 5;
   const walkEdge = (getOffset: (d: number) => number, limit: number): number => {
     let stopDepth = -1;
+    let run = 0;
     for (let d = 0; d < limit; d++) {
-      if (sat(getOffset(d)) >= satStop) { stopDepth = d; break; }
+      if (sat(getOffset(d)) >= satStop) {
+        run++;
+        if (run >= NOISE_TOLERANCE_RUN) {
+          stopDepth = d - (NOISE_TOLERANCE_RUN - 1); // first of the run
+          break;
+        }
+      } else {
+        run = 0;
+      }
     }
     const paintLimit = stopDepth >= 0 ? Math.max(0, stopDepth - EDGE_BORDER_KEEP_PX) : limit;
     for (let d = 0; d < paintLimit; d++) paint(getOffset(d));
@@ -934,7 +945,7 @@ export async function tightenForDisplay(
       .toBuffer({ resolveWithObject: true });
 
     const edgeKeepPx = side === "back" ? 0 : 2;
-    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 30, certTag, edgeKeepPx);
+    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 12, certTag, edgeKeepPx);
 
     return await sharp(painted, { raw: { width: cropInfo.width, height: cropInfo.height, channels: cropInfo.channels } })
       .jpeg({ quality: 90 })
