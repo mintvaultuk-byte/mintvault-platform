@@ -168,7 +168,6 @@ function buildTrayMenu() {
     { label: "Restart watcher", click: async () => { await watcher.stop(); await watcher.start(); refreshTray(); } },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
-    { label: "Quit", click: () => { isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
 }
@@ -345,6 +344,30 @@ function setupIpc() {
     await watcher.stop();
     await watcher.start();
     return { ok: true };
+  });
+
+  // Emergency reset for the separate scanner-watcher LaunchAgent (the
+  // legacy daemon at com.mintvault.scanner-watcher that still writes
+  // ~/mintvault-scans/watcher-state.json). Operator clicks this when the
+  // watcher gets stuck and won't process new scans. Deletes the state
+  // file then kickstarts the LaunchAgent so it comes back fresh.
+  ipcMain.handle("clear-buffered-state", async () => {
+    const statePath = path.join(os.homedir(), "mintvault-scans", "watcher-state.json");
+    try {
+      if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+    } catch (err) {
+      return { ok: false, step: "unlink", error: err.message };
+    }
+    return new Promise((resolve) => {
+      const proc = spawn("launchctl", ["kickstart", "-k", "gui/501/com.mintvault.scanner-watcher"]);
+      let stderr = "";
+      proc.stderr.on("data", (d) => { stderr += d.toString(); });
+      proc.on("error", (err) => resolve({ ok: false, step: "launchctl-spawn", error: err.message }));
+      proc.on("close", (code) => {
+        if (code === 0) resolve({ ok: true });
+        else resolve({ ok: false, step: "launchctl-exit", error: `exit ${code}: ${stderr.trim()}` });
+      });
+    });
   });
 
   ipcMain.handle("forward-to-cert", async (_e, certId) => {

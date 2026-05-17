@@ -4,8 +4,8 @@
  */
 import sharp from "sharp";
 
-// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.7%)
-const CARD_CORNER_RADIUS_PCT = 0.04;
+// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.76%)
+const CARD_CORNER_RADIUS_PCT = 0.048;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
@@ -519,8 +519,8 @@ export async function deskewCard(inputBuffer: Buffer): Promise<{ buffer: Buffer;
 
     console.log(`[deskew] non-black edge: points=${n} raw_rad=${radians.toFixed(6)} degrees=${angle.toFixed(4)}`);
 
-    if (Math.abs(angle) > 5) {
-      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±5°, skipping`);
+    if (Math.abs(angle) > 15) {
+      console.log(`[deskew] angle ${angle.toFixed(2)}° exceeds ±15°, skipping`);
       return { buffer: inputBuffer, angle: 0 };
     }
     if (Math.abs(angle) < 0.05) {
@@ -696,6 +696,125 @@ function detectCardEdgesByCoverage(
 }
 
 /**
+ * Per-edge inward saturation walk that paints near-grey pixels white.
+ *
+ * For each of the 4 edges (top/right/bottom/left), walks inward column-by-
+ * column (or row-by-row) up to `maxDepth` px. Each pixel: compute
+ *   sat = max(R,G,B) - min(R,G,B)
+ * If sat < `satStop` → paint white (mat/vinyl/scanner bleed/JPEG noise).
+ * If sat ≥ `satStop` → STOP this column/row (coloured card edge — leave
+ * untouched, do not advance further inward).
+ *
+ * Colour-agnostic: yellow, blue, green, red, black card borders all stop
+ * the walk. Mat/vinyl/scanner bleed are always near-grey regardless of
+ * the scanner's mat colour, so the walk paints them.
+ *
+ * Mutates `px` in place and returns the same buffer for chaining.
+ */
+function whitewashEdgesBySaturation(
+  px: Buffer,
+  w: number,
+  h: number,
+  ch: number,
+  maxDepth: number,
+  satStop: number,
+  certTag: string = "",
+): Buffer {
+  // Corner anti-diagonal sweeps walk by Manhattan distance from the corner,
+  // so they need a larger budget than the orthogonal edges to fully fill the
+  // triangular wedge before the card curve cuts in (typically ~30 perp px =
+  // up to 60 Manhattan px from the corner).
+  const CORNER_MAX_DEPTH = 60;
+  // Preserve this many pixels of the card edge in the output — without it
+  // the sat walk paints right up to the first coloured pixel, leaving zero
+  // visible yellow/blue/green card border. 4 px keeps the border readable.
+  const EDGE_BORDER_KEEP_PX = 4;
+
+  const sat = (off: number) => {
+    const r = px[off], g = px[off + 1], b = px[off + 2];
+    return Math.max(r, g, b) - Math.min(r, g, b);
+  };
+  const paint = (off: number) => { px[off] = 255; px[off + 1] = 255; px[off + 2] = 255; };
+
+  // Two-pass edge walk: pass 1 locates the first coloured pixel (the card
+  // border); pass 2 paints up to (stopDepth - EDGE_BORDER_KEEP_PX), leaving
+  // a visible strip of card border. If no coloured pixel is found within
+  // `limit`, paint everything (card edge is beyond reach — nothing to
+  // preserve).
+  const walkEdge = (getOffset: (d: number) => number, limit: number): number => {
+    let stopDepth = -1;
+    for (let d = 0; d < limit; d++) {
+      if (sat(getOffset(d)) >= satStop) { stopDepth = d; break; }
+    }
+    const paintLimit = stopDepth >= 0 ? Math.max(0, stopDepth - EDGE_BORDER_KEEP_PX) : limit;
+    for (let d = 0; d < paintLimit; d++) paint(getOffset(d));
+    return paintLimit;
+  };
+
+  let pT = 0, pB = 0, pL = 0, pR = 0;
+  const hLimit = Math.min(maxDepth, h);
+  const wLimit = Math.min(maxDepth, w);
+
+  for (let x = 0; x < w; x++) pT += walkEdge(d => (d * w + x) * ch, hLimit);                // Top
+  for (let x = 0; x < w; x++) pB += walkEdge(d => ((h - 1 - d) * w + x) * ch, hLimit);      // Bottom
+  for (let y = 0; y < h; y++) pL += walkEdge(d => (y * w + d) * ch, wLimit);                // Left
+  for (let y = 0; y < h; y++) pR += walkEdge(d => (y * w + (w - 1 - d)) * ch, wLimit);      // Right
+
+  // Corner anti-diagonal sweep — fills the triangular wedge of mat
+  // between where the orthogonal edge walks stopped. At each depth d, the
+  // anti-diagonal is the line of pixels at Manhattan distance d from the
+  // corner. Paint every pixel on that line where sat<satStop. The first
+  // time ANY pixel on the anti-diagonal hits sat>=satStop, the card-corner
+  // curve has reached this depth — break the depth loop entirely (do not
+  // walk further inward, where we'd be inside card content).
+  let pTL = 0, pTR = 0, pBL = 0, pBR = 0;
+
+  // TL — anti-diagonal pixels (k, d-k) for k in 0..d
+  tlSweep: for (let d = 0; d < CORNER_MAX_DEPTH; d++) {
+    for (let k = 0; k <= d; k++) {
+      const x = k, y = d - k;
+      if (x >= w || y >= h) continue;
+      const off = (y * w + x) * ch;
+      if (sat(off) >= satStop) break tlSweep;
+      paint(off); pTL++;
+    }
+  }
+  // TR — anti-diagonal pixels (w-1-k, d-k) for k in 0..d
+  trSweep: for (let d = 0; d < CORNER_MAX_DEPTH; d++) {
+    for (let k = 0; k <= d; k++) {
+      const x = w - 1 - k, y = d - k;
+      if (x < 0 || y >= h) continue;
+      const off = (y * w + x) * ch;
+      if (sat(off) >= satStop) break trSweep;
+      paint(off); pTR++;
+    }
+  }
+  // BL — anti-diagonal pixels (k, h-1-(d-k)) for k in 0..d
+  blSweep: for (let d = 0; d < CORNER_MAX_DEPTH; d++) {
+    for (let k = 0; k <= d; k++) {
+      const x = k, y = h - 1 - (d - k);
+      if (x >= w || y < 0) continue;
+      const off = (y * w + x) * ch;
+      if (sat(off) >= satStop) break blSweep;
+      paint(off); pBL++;
+    }
+  }
+  // BR — anti-diagonal pixels (w-1-k, h-1-(d-k)) for k in 0..d
+  brSweep: for (let d = 0; d < CORNER_MAX_DEPTH; d++) {
+    for (let k = 0; k <= d; k++) {
+      const x = w - 1 - k, y = h - 1 - (d - k);
+      if (x < 0 || y < 0) continue;
+      const off = (y * w + x) * ch;
+      if (sat(off) >= satStop) break brSweep;
+      paint(off); pBR++;
+    }
+  }
+
+  console.log(`[whitewash] painted edges T${pT}/B${pB}/L${pL}/R${pR} corners TL${pTL}/TR${pTR}/BL${pBL}/BR${pBR} (edgeMaxDepth=${maxDepth}, edgeKeepPx=${EDGE_BORDER_KEEP_PX}, cornerMaxDepth=${CORNER_MAX_DEPTH}, satStop=${satStop})${certTag}`);
+  return px;
+}
+
+/**
  * Tight-detect crop for the DISPLAY pipeline only.
  *
  * Operates on a buffer that's already been through the standard pipeline
@@ -723,6 +842,7 @@ export async function tightenForDisplay(
   inputBuffer: Buffer,
   certId?: string | number,
   fallbackInsetPx: number = 16,
+  side?: "front" | "back",
 ): Promise<Buffer> {
   const certTag = certId != null ? ` cert=${certId}` : "";
   let metaW = 0, metaH = 0;
@@ -750,11 +870,28 @@ export async function tightenForDisplay(
       return await applyInsetFallback(inputBuffer, metaW, metaH, fallbackInsetPx);
     }
 
-    // Map bounds back to full-res, clamp defensively
+    // Map bounds back to full-res
     let origMinX = Math.round(boundary.minX / scale);
     let origMinY = Math.round(boundary.minY / scale);
     let origMaxX = Math.round(boundary.maxX / scale);
     let origMaxY = Math.round(boundary.maxY / scale);
+
+    // Outward expansion (uniform, colour-agnostic). The coverage detector
+    // lands bounds on the first meaningfully-card row/column, which can
+    // shave a sliver off lower-contrast borders (yellow on white mat is
+    // worst — the outer fraction of yellow has weak mat-contrast and the
+    // 70%-coverage rule excludes it). A 30 px outward buffer guarantees
+    // mat/vinyl pixels are present in the crop for the saturation walk
+    // below to locate the actual coloured card edge. Same value for both
+    // sides — the per-side hardcoded numbers (front 18, back 13) were a
+    // workaround for the detector's colour-specific behaviour and never
+    // worked for green/red/black-bordered cards.
+    const EXPAND_PX = 30;
+    origMinX -= EXPAND_PX;
+    origMinY -= EXPAND_PX;
+    origMaxX += EXPAND_PX;
+    origMaxY += EXPAND_PX;
+
     const clamped =
       origMinX < 0 || origMinY < 0 || origMaxX > metaW - 1 || origMaxY > metaH - 1;
     origMinX = Math.max(0, origMinX);
@@ -762,7 +899,7 @@ export async function tightenForDisplay(
     origMaxX = Math.min(metaW - 1, origMaxX);
     origMaxY = Math.min(metaH - 1, origMaxY);
     if (clamped) {
-      console.warn(`[tightenForDisplay] mapped bounds extended past bitmap, clamped${certTag}`);
+      console.warn(`[tightenForDisplay] mapped bounds extended past bitmap, clamped${certTag} (after +${EXPAND_PX}px expansion)`);
     }
 
     const cropW = origMaxX - origMinX + 1;
@@ -782,8 +919,20 @@ export async function tightenForDisplay(
       ` (trimmed L:${origMinX} R:${metaW - 1 - origMaxX} T:${origMinY} B:${metaH - 1 - origMaxY})${certTag}`,
     );
 
-    return await sharp(inputBuffer)
+    // Extract to raw pixels for in-place per-edge saturation walk, then
+    // encode once at the end. See whitewashEdgesBySaturation for the
+    // algorithm; the walk paints mat/vinyl/scanner-bleed pixels (sat<30)
+    // white and stops at the first coloured pixel (sat≥30) per row/col,
+    // up to 30 px deep. Card borders of any colour stop the walk.
+    const { data: cropData, info: cropInfo } = await sharp(inputBuffer)
       .extract({ left: origMinX, top: origMinY, width: cropW, height: cropH })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 30, certTag);
+
+    return await sharp(painted, { raw: { width: cropInfo.width, height: cropInfo.height, channels: cropInfo.channels } })
       .jpeg({ quality: 90 })
       .toBuffer();
   } catch (err: any) {

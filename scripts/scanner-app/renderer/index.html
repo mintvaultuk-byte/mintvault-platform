@@ -68,6 +68,14 @@
           Use sparingly — soft-delete via Fix orphan after testing.
         </p>
       </div>
+      <div class="settings-test">
+        <button class="btn danger" id="clearBufferedBtn">Clear buffered state</button>
+        <p class="hint">
+          Emergency reset when the scanner-watcher daemon gets stuck.
+          Deletes ~/mintvault-scans/watcher-state.json and kickstarts
+          com.mintvault.scanner-watcher. UI refreshes after 2 s.
+        </p>
+      </div>
     </div>
   </section>
 
