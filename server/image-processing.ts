@@ -719,6 +719,7 @@ function whitewashEdgesBySaturation(
   maxDepth: number,
   satStop: number,
   certTag: string = "",
+  edgeKeepPx: number = 2,
 ): Buffer {
   // Corner anti-diagonal sweeps walk by Manhattan distance from the corner,
   // so they need a larger budget than the orthogonal edges to fully fill the
@@ -727,8 +728,10 @@ function whitewashEdgesBySaturation(
   const CORNER_MAX_DEPTH = 60;
   // Preserve this many pixels of the card edge in the output — without it
   // the sat walk paints right up to the first coloured pixel, leaving zero
-  // visible yellow/blue/green card border. 2 px keeps the border readable.
-  const EDGE_BORDER_KEEP_PX = 2;
+  // visible card border. Per-side: front cards have a coloured outer border
+  // (yellow) worth preserving 2 px of, back cards have a flat blue field
+  // where preserving any buffer just leaves a faint bleed strip.
+  const EDGE_BORDER_KEEP_PX = edgeKeepPx;
 
   const sat = (off: number) => {
     const r = px[off], g = px[off + 1], b = px[off + 2];
@@ -930,7 +933,8 @@ export async function tightenForDisplay(
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 30, certTag);
+    const edgeKeepPx = side === "back" ? 0 : 2;
+    const painted = whitewashEdgesBySaturation(Buffer.from(cropData), cropInfo.width, cropInfo.height, cropInfo.channels, 30, 30, certTag, edgeKeepPx);
 
     return await sharp(painted, { raw: { width: cropInfo.width, height: cropInfo.height, channels: cropInfo.channels } })
       .jpeg({ quality: 90 })
