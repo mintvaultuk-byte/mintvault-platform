@@ -47,46 +47,79 @@ function FilePicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const id = `file-${testId}`;
 
   const isTiff = !!file && /^image\/tiff?$/i.test(file.type);
 
-  // Object-URL lifecycle. Probe the file by loading it into an Image
-  // element first — if the browser can decode it (JPEG/PNG/WebP) we keep
-  // the object URL as the preview source. If it errors (TIFF in every
-  // major browser today), we revoke immediately and leave previewUrl
-  // null; the slab falls back to a filename-only "loaded" state.
-  //
-  // The spec also asked for a canvas → toDataURL fallback for TIFF, but
-  // canvas.drawImage requires a successfully-loaded image element — when
-  // the browser can't decode TIFF, there's nothing to draw, so the
-  // canvas approach can't actually produce a TIFF preview without a JS
-  // TIFF decoder library (e.g. utif). Honest fallback is filename-only.
+  // Object-URL lifecycle, two-stage:
+  //   1. Probe the file by loading into an HTMLImageElement. If the
+  //      browser can decode natively (JPEG/PNG/WebP) → use that URL.
+  //   2. On probe error (TIFF in every major browser) → POST the file
+  //      to /api/pre-grade/preview which sharp-transcodes to JPEG and
+  //      returns the bytes. We turn that into a blob URL.
+  // Loading state is true only during stage 2 (server fetch).
+  // previewUrlRef tracks whichever URL is currently surfaced so the
+  // cleanup path can revoke it regardless of which stage produced it.
+  const previewUrlRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const setUrl = (url: string | null) => {
+      if (previewUrlRef.current && previewUrlRef.current !== url) {
+        URL.revokeObjectURL(previewUrlRef.current);
+      }
+      previewUrlRef.current = url;
+      setPreviewUrl(url);
+    };
+
     if (!file) {
-      setPreviewUrl(null);
+      setUrl(null);
+      setPreviewLoading(false);
       return;
     }
-    const objectUrl = URL.createObjectURL(file);
+
     let canceled = false;
+    const nativeUrl = URL.createObjectURL(file);
     const probe = new Image();
     probe.onload = () => {
-      if (canceled) return;
-      setPreviewUrl(objectUrl);
+      if (canceled) { URL.revokeObjectURL(nativeUrl); return; }
+      setUrl(nativeUrl);
+      setPreviewLoading(false);
     };
-    probe.onerror = () => {
+    probe.onerror = async () => {
+      URL.revokeObjectURL(nativeUrl);
       if (canceled) return;
-      URL.revokeObjectURL(objectUrl);
-      setPreviewUrl(null);
+      setUrl(null);
+      setPreviewLoading(true);
+      try {
+        const fd = new FormData();
+        fd.append("image", file);
+        const r = await fetch("/api/pre-grade/preview", { method: "POST", body: fd });
+        if (canceled) return;
+        if (!r.ok) {
+          // 429 (rate-limited) or 5xx — fall through to filename-only.
+          setPreviewLoading(false);
+          return;
+        }
+        const blob = await r.blob();
+        if (canceled) return;
+        setUrl(URL.createObjectURL(blob));
+        setPreviewLoading(false);
+      } catch {
+        if (canceled) return;
+        setPreviewLoading(false);
+      }
     };
-    probe.src = objectUrl;
+    probe.src = nativeUrl;
+
     return () => {
       canceled = true;
-      URL.revokeObjectURL(objectUrl);
+      // Don't revoke previewUrlRef here — the next effect run (or the
+      // file=null branch) will swap and revoke at the right moment.
     };
   }, [file]);
 
-  const showImagePreview = !!previewUrl && !!file;
+  const showImagePreview = !!previewUrl && !!file && !previewLoading;
   const sizeMb = file ? (file.size / 1024 / 1024).toFixed(1) : "0";
 
   function onDrop(e: React.DragEvent<HTMLLabelElement>) {
@@ -160,7 +193,16 @@ function FilePicker({
           <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">SIDE &middot; {label.toUpperCase()}</span>
           <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
 
-          {showImagePreview ? (
+          {previewLoading ? (
+            // Stage 2: server transcoding (TIFF → JPEG). Native decode
+            // already errored. Spinner shown until the /preview endpoint
+            // returns or fails.
+            <div className="slab-scanner__content">
+              <Loader2 size={52} strokeWidth={1.5} color="#c9a96e" className="animate-spin" />
+              <p className="slab-scanner__title">Generating preview…</p>
+              <p className="slab-scanner__subtitle">{isTiff ? "TIFF" : (file?.type || "image")} · server transcoding</p>
+            </div>
+          ) : showImagePreview ? (
             // Image preview: hover-only overlay at bottom with replace
             // hint + size. pointer-events-none so it doesn't intercept the
             // click that opens the file dialog via the parent label.
@@ -175,7 +217,7 @@ function FilePicker({
               <p className="text-[9px] text-white/70 mt-0.5">{sizeMb} MB</p>
             </div>
           ) : (
-            // Empty state OR non-decodable file fallback (TIFF, etc).
+            // Empty state OR fallback (server preview failed / rate-limited).
             <div className="slab-scanner__content">
               <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
               <p className="slab-scanner__title">{file ? file.name : `Slot ${label.toLowerCase()}`}</p>

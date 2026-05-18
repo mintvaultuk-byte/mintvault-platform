@@ -1298,6 +1298,38 @@ export async function registerRoutes(
     }
   );
 
+  // POST /api/pre-grade/preview — converts any sharp-readable image
+  // (incl. TIFF) to a small JPEG preview for the client. In-memory only;
+  // nothing persisted. Shares preGradeRateLimit so each preview counts
+  // against the user's 3/hour /pre-grade quota — operators uploading
+  // TIFFs should be aware that previewing front + back spends 2 of their
+  // 3 hourly slots before submission.
+  app.post(
+    "/api/pre-grade/preview",
+    preGradeRateLimit,
+    preGradeUpload.single("image"),
+    async (req, res) => {
+      try {
+        const file = req.file;
+        if (!file) {
+          return res.status(400).json({ error: "Image required (multipart field: 'image')." });
+        }
+        const sharp = (await import("sharp")).default;
+        const jpeg = await sharp(file.buffer)
+          .rotate()
+          .resize(800, undefined, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 70, progressive: true })
+          .toBuffer();
+        res.set("Content-Type", "image/jpeg");
+        res.set("Cache-Control", "no-store");
+        res.send(jpeg);
+      } catch (err: any) {
+        console.error("[pre-grade/preview] failed:", err.message);
+        res.status(500).json({ error: err.message || "Preview generation failed." });
+      }
+    }
+  );
+
   // Rate limit for unauthenticated public lookup endpoints — protects against
   // enumeration scrapers (cert IDs are sequential MV1, MV2, ...).
   // Applied to /api/cert/:id, /api/cert/:id/population, /api/logbook/:certId,
