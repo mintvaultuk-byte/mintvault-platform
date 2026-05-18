@@ -442,13 +442,33 @@ export default function PreGradePage() {
 
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-12 sm:py-20">
         <header className="text-center mb-12">
-          <p className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+          {/* Gold mono eyebrow — matches the /tools/estimate hero. */}
+          <p
+            className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-4"
+            style={{ color: "#D4AF37" }}
+          >
             MintVault AI
           </p>
-          <h1 className="font-display italic font-medium leading-[0.95] mb-5" style={{ fontSize: "clamp(2.25rem, 5vw, 3.75rem)" }}>
+          {/* H1: index.css globally strips text-shadow from h1/h2/h3, so the
+              vault-page drop-shadow inheritance is killed. Set both color +
+              text-shadow explicitly to make the title readable on the dark
+              vault image. Mirrors the heading styling used in /tools/estimate
+              (font-display italic, fluid clamp, leading-[0.95]). */}
+          <h1
+            className="font-display italic font-medium leading-[0.95] mb-5"
+            style={{
+              fontSize: "clamp(2.25rem, 5vw, 3.75rem)",
+              color: "#FFFFFF",
+              textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+            }}
+          >
             Pre-Grade Tool
           </h1>
-          <p className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto">
+          {/* Subtitle — 70% white per spec for the muted-on-vault feel. */}
+          <p
+            className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto"
+            style={{ color: "rgba(255,255,255,0.7)" }}
+          >
             Upload front and back card images for an instant AI grade estimate. No account, no storage —
             images are analysed in memory and discarded.
           </p>
