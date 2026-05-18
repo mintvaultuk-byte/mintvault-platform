@@ -306,6 +306,11 @@ export default function LogbookPage() {
   const certId = params.certId || params.id || "";
   const [location] = useLocation();
   const isAdminView = location.startsWith("/admin/");
+  // Admin-only tab state — partitions the page into IMAGES / GRADING /
+  // POPULATION / ACTIONS in admin view. Public /cert/:id ignores this
+  // (no tab bar rendered, all sections stack vertically).
+  type AdminTab = "images" | "grading" | "population" | "actions";
+  const [adminTab, setAdminTab] = useState<AdminTab>("images");
   const [showDefects, setShowDefects] = useState(false);
   const [highlightDefectId, setHighlightDefectId] = useState<number | null>(null);
 
@@ -384,7 +389,34 @@ export default function LogbookPage() {
             </div>
           </>
         )}
-        {/* Cover Hero */}
+
+        {/* Admin tab bar — only rendered on /admin/cert/:id. Full-width
+            stacked on mobile (flex-col), inline on desktop (sm:flex-row).
+            Active tab indicator: gold bottom border + gold text. */}
+        {isAdminView && (
+          <nav className="border-b border-[#E8E4DC] bg-white">
+            <div className="max-w-3xl mx-auto px-4 flex flex-col sm:flex-row">
+              {(["images", "grading", "population", "actions"] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setAdminTab(t)}
+                  className={`flex-1 sm:flex-none sm:px-8 py-3 text-xs font-bold uppercase tracking-[0.15em] transition-all border-b-2 ${
+                    adminTab === t
+                      ? "text-[#D4AF37] border-[#D4AF37]"
+                      : "text-[#888888] border-transparent hover:text-[#1A1A1A]"
+                  }`}
+                  data-testid={`tab-${t}`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
+
+        {/* Cover Hero — IMAGES tab (admin) / always (public) */}
+        {(!isAdminView || adminTab === "images") && (
         <section className="pt-12 pb-8 px-4">
           <div className="max-w-3xl mx-auto text-center">
             <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-6">MintVault Ownership Logbook</p>
@@ -424,8 +456,10 @@ export default function LogbookPage() {
             )}
           </div>
         </section>
+        )}
 
-        {/* Verification strip */}
+        {/* Verification strip — IMAGES tab (admin) / always (public) */}
+        {(!isAdminView || adminTab === "images") && (
         <section className="bg-[#F7F7F5] border-y border-[#E8E4DC] py-4 px-4">
           <div className="max-w-3xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -435,10 +469,15 @@ export default function LogbookPage() {
             <span className="font-mono text-[10px] text-[#888888]">{verification.signature?.slice(0, 16)}...</span>
           </div>
         </section>
+        )}
 
         {/* Content sections */}
         <div className="max-w-3xl mx-auto px-4 py-12">
 
+          {/* GRADING tab (admin) / always (public) — Card Identity through
+              Ownership History stack together. */}
+          {(!isAdminView || adminTab === "grading") && (
+          <>
           {/* Card Identity */}
           <Section title="Card Identity">
             <div className="space-y-0">
@@ -627,8 +666,11 @@ export default function LogbookPage() {
               </>
             )}
           </Section>
+          </>
+          )}
 
-          {isAdminView && (
+          {/* ACTIONS tab (admin only) — admin operations on this cert */}
+          {isAdminView && adminTab === "actions" && (
             <Section title="Admin Actions">
               <AdminReprocessButton certId={data.certId} />
               <p className="mt-2 text-[10px] text-[#888888]">
@@ -639,8 +681,14 @@ export default function LogbookPage() {
             </Section>
           )}
 
-          {isAdminView && <AdminPopReportPanel certId={data.certId} />}
+          {/* POPULATION tab (admin only) — pop-report panel */}
+          {isAdminView && adminTab === "population" && <AdminPopReportPanel certId={data.certId} />}
 
+          {/* Footer — ACTIONS tab (admin) / always (public). The PDF
+              download buttons + signature block read as "actions" the
+              admin or owner can take. */}
+          {(!isAdminView || adminTab === "actions") && (
+          <>
           <GoldDivider />
 
           {/* Footer — Verification + Download */}
@@ -674,6 +722,8 @@ export default function LogbookPage() {
               This Ownership Logbook is an official record issued by Mint Vault UK Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification to the underlying data will invalidate the signature.
             </p>
           </div>
+          </>
+          )}
         </div>
       </div>
     </>
