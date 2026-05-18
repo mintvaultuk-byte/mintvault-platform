@@ -23,14 +23,14 @@ const NAV_ITEMS: NavItem[] = [
       { label: "Grading Glossary",   href: "/grading-glossary" },
       { label: "Eligible Cards",     href: "/grading/eligible-cards" },
       { label: "How Grading Works",  href: "/technology" },
-      { label: "AI Pre-Grade Tool",  href: "/pre-grade" },
     ],
   },
-  { label: "Vault Club", href: "/vault-club" },
-  { label: "Verify",     href: "/verify" },
-  { label: "Technology", href: "/technology" },
-  { label: "Registry",   href: "/registry" },
-  { label: "Journal",    href: "/journal" },
+  { label: "AI Pre-Grade", href: "/pre-grade" },
+  { label: "Vault Club",   href: "/vault-club" },
+  { label: "Verify",       href: "/verify" },
+  { label: "Technology",   href: "/technology" },
+  { label: "Registry",     href: "/registry" },
+  { label: "Journal",      href: "/journal" },
 ];
 
 const UTILITY_LINKS = [

@@ -485,10 +485,10 @@ export default function PreGradePage() {
             <button
               type="submit"
               disabled={!canSubmit}
-              className={`inline-flex items-center gap-2 font-body text-sm font-semibold px-8 py-3 rounded-full transition-all ${
+              className={`inline-flex items-center gap-2 font-body text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-full transition-all ${
                 canSubmit ? "hover:scale-[1.03]" : "opacity-50 cursor-not-allowed"
               }`}
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              style={{ backgroundColor: "#D4AF37", color: "#1A1400" }}
               data-testid="btn-submit"
             >
               {loading
@@ -554,7 +554,10 @@ export default function PreGradePage() {
           </section>
         )}
 
-        <p className="text-center text-[10px] text-[#888888] mt-12 max-w-md mx-auto leading-relaxed">
+        <p
+          className="text-center text-[10px] mt-12 max-w-md mx-auto leading-relaxed"
+          style={{ color: "rgba(255,255,255,0.5)" }}
+        >
           Limit 3 pre-grades per hour per IP. Single-photo AI grading is a sense-check, not a calibrated
           prediction — treat subgrades as directional. Images are not stored.
         </p>
