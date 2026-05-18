@@ -1222,6 +1222,16 @@ export async function registerRoutes(
     message: { error: "AI pre-grade is limited to 3 requests per hour per IP. Try again later." },
   });
 
+  // TIFF preview transcoding (/api/pre-grade/preview) — sharp resize +
+  // JPEG encode only, no AI cost. Higher cap so users uploading scanner
+  // TIFFs for front + back can preview both sides without spending
+  // grading quota. Still capped to deter abuse of the public endpoint.
+  const preGradePreviewRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, max: 20,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: "Too many preview requests. Try again later." },
+  });
+
   // Multer config for /api/pre-grade. In-memory storage (per spec — no
   // data stored on disk or R2), 20 MB per file, accepts JPEG/PNG/TIFF.
   const preGradeUpload = multer({
@@ -1300,13 +1310,13 @@ export async function registerRoutes(
 
   // POST /api/pre-grade/preview — converts any sharp-readable image
   // (incl. TIFF) to a small JPEG preview for the client. In-memory only;
-  // nothing persisted. Shares preGradeRateLimit so each preview counts
-  // against the user's 3/hour /pre-grade quota — operators uploading
-  // TIFFs should be aware that previewing front + back spends 2 of their
-  // 3 hourly slots before submission.
+  // nothing persisted. Uses preGradePreviewRateLimit (20/hour/IP) so
+  // previewing doesn't eat the user's 3/hour grading quota — sharp
+  // resize + JPEG encode is cheap and ~10× preview headroom matches
+  // realistic use (front + back × a few replacements).
   app.post(
     "/api/pre-grade/preview",
-    preGradeRateLimit,
+    preGradePreviewRateLimit,
     preGradeUpload.single("image"),
     async (req, res) => {
       try {
