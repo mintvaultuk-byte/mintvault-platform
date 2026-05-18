@@ -170,6 +170,7 @@ import Pricing from "@/pages/pricing";
 import VaultClub from "@/pages/vault-club";
 import Verify from "@/pages/verify";
 import AiPreGrade from "@/pages/ai-pre-grade";
+import PreGradePage from "@/pages/pre-grade";
 import ToolsEstimate from "@/pages/tools-estimate";
 import Journal from "@/pages/journal";
 import JournalDetail from "@/pages/journal-detail";
@@ -232,6 +233,7 @@ function Router() {
         <Route path="/vault-club" component={VaultClub} />
         <Route path="/verify" component={Verify} />
         <Route path="/ai-pre-grade" component={AiPreGrade} />
+        <Route path="/pre-grade" component={PreGradePage} />
         <Route path="/tools/estimate" component={ToolsEstimate} />
         <Route path="/journal" component={Journal} />
         <Route path="/journal/:slug" component={JournalDetail} />
