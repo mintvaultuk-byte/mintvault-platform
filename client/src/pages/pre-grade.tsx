@@ -46,7 +46,28 @@ function FilePicker({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const id = `file-${testId}`;
+
+  // TIFF can't be rendered by browsers natively — skip object-URL creation
+  // for it; the slab falls back to a filename-only "loaded" state instead
+  // of a broken-image bg.
+  const isTiff = !!file && /^image\/tiff?$/i.test(file.type);
+
+  // Manage the object URL lifecycle: create on file set, revoke on change
+  // or unmount. Skip for TIFF (no native browser support).
+  useEffect(() => {
+    if (!file || isTiff) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isTiff]);
+
+  const showImagePreview = !!previewUrl && !!file && !isTiff;
+  const sizeMb = file ? (file.size / 1024 / 1024).toFixed(1) : "0";
 
   function onDrop(e: React.DragEvent<HTMLLabelElement>) {
     e.preventDefault();
@@ -91,22 +112,51 @@ function FilePicker({
         </header>
 
         {/* Card-shaped scan bed with corner brackets, readouts, and the
-            animated gold sweep beam (from .slab-scanner__window::before). */}
-        <div className="slab-scanner__window">
+            animated gold sweep beam (from .slab-scanner__window::before).
+            When a previewable file is loaded, the window's background
+            becomes the image (cover-fit); brackets + readouts + sweep
+            beam still overlay since they're absolute-positioned. The
+            `group` class powers the hover overlay below. */}
+        <div
+          className="slab-scanner__window group"
+          style={showImagePreview ? {
+            backgroundImage: `url(${previewUrl})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+          } : undefined}
+        >
           <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
           <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
           <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 600DPI</span>
           <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">SIDE &middot; {label.toUpperCase()}</span>
           <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
-          <div className="slab-scanner__content">
-            <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
-            <p className="slab-scanner__title">{file ? file.name : `Slot ${label.toLowerCase()}`}</p>
-            <p className="slab-scanner__subtitle">
-              {file
-                ? `${(file.size / 1024 / 1024).toFixed(1)} MB · click to replace`
-                : "Drag & drop · or browse"}
-            </p>
-          </div>
+
+          {showImagePreview ? (
+            // Image preview: small hover-only overlay at bottom with replace
+            // hint + size. pointer-events-none so it doesn't intercept the
+            // click that opens the file dialog via the parent label.
+            <div
+              className="absolute inset-x-0 bottom-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+              style={{
+                background: "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0))",
+                zIndex: 2,
+              }}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white">Click to replace</p>
+              <p className="text-[9px] text-white/70 mt-0.5">{sizeMb} MB</p>
+            </div>
+          ) : (
+            // Empty state OR TIFF fallback (no native browser preview for TIFF).
+            <div className="slab-scanner__content">
+              <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
+              <p className="slab-scanner__title">{file ? file.name : `Slot ${label.toLowerCase()}`}</p>
+              <p className="slab-scanner__subtitle">
+                {file
+                  ? `${isTiff ? "TIFF · preview unavailable · " : `${sizeMb} MB · `}click to replace`
+                  : "Drag & drop · or browse"}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer bar — CERT · PENDING + status + QR placeholder dot grid. */}
