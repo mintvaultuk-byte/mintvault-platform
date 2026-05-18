@@ -1,4 +1,4 @@
-import { useParams } from "wouter";
+import { useParams, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import { useState } from "react";
@@ -158,9 +158,102 @@ function DefectOverlayPair({
   );
 }
 
+// Admin-only population report panel — fetches /api/admin/certs/:certId/
+// pop-report (requireAdmin) and renders a Grade | Count | % table with
+// the current cert's grade row highlighted in gold. Only shown when the
+// route path starts with /admin/ (LogbookPage is also the public cert
+// view, and this data is admin-only).
+type PopReportResponse = {
+  cert_id: string;
+  card: { name: string | null; set: string | null; number: string | null };
+  current_grade: string | null;
+  total: number;
+  distribution: Array<{ grade: string; count: number; percent: number }>;
+  note?: string;
+};
+
+function AdminPopReportPanel({ certId }: { certId: string }) {
+  const { data, isLoading, error } = useQuery<PopReportResponse>({
+    queryKey: ["/api/admin/certs", certId, "pop-report"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/certs/${certId}/pop-report`, { credentials: "include" });
+      if (!res.ok) throw new Error("pop-report fetch failed");
+      return res.json();
+    },
+    enabled: !!certId,
+  });
+
+  if (isLoading) {
+    return (
+      <Section title="Population Report (admin)">
+        <p className="text-xs text-[#888888]">Loading…</p>
+      </Section>
+    );
+  }
+  if (error || !data) {
+    return (
+      <Section title="Population Report (admin)">
+        <p className="text-xs text-[#888888]">Population report unavailable.</p>
+      </Section>
+    );
+  }
+  if (data.distribution.length === 0) {
+    return (
+      <Section title="Population Report (admin)">
+        <p className="text-xs text-[#888888]">
+          {data.note ?? `No other active graded certs match ${data.card.name ?? "this card"}${data.card.set ? ` (${data.card.set}` : ""}${data.card.number ? ` #${data.card.number})` : data.card.set ? ")" : ""}.`}
+        </p>
+      </Section>
+    );
+  }
+  return (
+    <Section title="Population Report (admin)">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left border-b border-[#E8E4DC]">
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Grade</th>
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888] text-right">Count</th>
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888] text-right">% of total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.distribution.map(row => {
+              const isCurrent = row.grade === data.current_grade;
+              const rowCls = isCurrent ? "bg-gradient-to-r from-[#D4AF37]/15 to-transparent" : "";
+              const txt = isCurrent ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]";
+              const muted = isCurrent ? "text-[#B8960C] font-bold" : "text-[#555555]";
+              return (
+                <tr key={row.grade} className={`border-b border-[#F0EDE5] ${rowCls}`}>
+                  <td className={`py-2 px-3 ${txt}`}>
+                    {row.grade}
+                    {isCurrent && <span className="ml-2 text-[10px] uppercase tracking-[0.15em] text-[#D4AF37]">This cert</span>}
+                  </td>
+                  <td className={`py-2 px-3 text-right ${txt}`}>{row.count}</td>
+                  <td className={`py-2 px-3 text-right ${muted}`}>{row.percent.toFixed(1)}%</td>
+                </tr>
+              );
+            })}
+            <tr className="border-t-2 border-[#D4AF37]/30">
+              <td className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Total graded</td>
+              <td className="py-2 px-3 text-right text-[#1A1A1A] font-bold">{data.total}</td>
+              <td className="py-2 px-3 text-right text-[#555555]">100.0%</td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="mt-3 text-[10px] text-[#888888]">
+          Matched on card_name + set_name + card_number_display. Active + published + graded certs only.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
 export default function LogbookPage() {
   const params = useParams<{ certId?: string; id?: string }>();
   const certId = params.certId || params.id || "";
+  const [location] = useLocation();
+  const isAdminView = location.startsWith("/admin/");
   const [showDefects, setShowDefects] = useState(false);
   const [highlightDefectId, setHighlightDefectId] = useState<number | null>(null);
 
@@ -482,6 +575,8 @@ export default function LogbookPage() {
               </>
             )}
           </Section>
+
+          {isAdminView && <AdminPopReportPanel certId={data.certId} />}
 
           <GoldDivider />
 

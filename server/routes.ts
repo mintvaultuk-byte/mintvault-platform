@@ -10505,6 +10505,97 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // GET /pop-report — population report for the current cert's card
+  // (matched by card_name + set_name + card_number_display). Aggregates
+  // all active, graded certs into a grade-frequency table for the admin
+  // cert detail panel. Admin-only — admin can view voided/deleted certs,
+  // but the AGGREGATE only includes active+published+graded so the
+  // distribution reflects what the public sees.
+  app.get("/api/admin/certs/:certId/pop-report", requireAdmin, async (req, res) => {
+    try {
+      const certIdRaw = String(req.params.certId);
+      const certId = normalizeCertId(certIdRaw);
+
+      const curRows = (await db.execute(sql`
+        SELECT card_name, set_name, card_number_display, grade_type, grade::text AS grade_text
+        FROM certificates
+        WHERE certificate_number = ${certId}
+        LIMIT 1
+      `)).rows;
+      if (curRows.length === 0) return res.status(404).json({ error: "cert not found", certId });
+      const cur = curRows[0] as any;
+
+      const cardName = cur.card_name as string | null;
+      const setName = cur.set_name as string | null;
+      const cardNumber = cur.card_number_display as string | null;
+
+      // Format the current cert's grade label the same way we format
+      // aggregated rows so the client can do a string match for highlight.
+      const formatNumeric = (raw: string | null | undefined): string | null => {
+        if (raw == null) return null;
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return null;
+        return n % 1 === 0 ? String(Math.trunc(n)) : String(n);
+      };
+      const currentGrade: string | null =
+        cur.grade_type === "numeric" ? formatNumeric(cur.grade_text) : (cur.grade_type ?? null);
+
+      if (!cardName || !setName || !cardNumber) {
+        return res.json({
+          cert_id: certId,
+          card: { name: cardName, set: setName, number: cardNumber },
+          current_grade: currentGrade,
+          total: 0,
+          distribution: [],
+          note: "cert is missing card_name / set_name / card_number_display — cannot aggregate",
+        });
+      }
+
+      // Aggregate. Numeric grades collapse trailing zeros so "9.0" → "9"
+      // and "10.0" → "10". Non-numeric grade_type values (NO/AA) flow
+      // straight through as their own labels.
+      const distRows = (await db.execute(sql`
+        SELECT
+          CASE
+            WHEN grade_type = 'numeric' AND grade IS NOT NULL
+              THEN trim(trailing '.' from rtrim(grade::text, '0'))
+            ELSE grade_type
+          END                                                       AS label,
+          CASE WHEN grade_type = 'numeric' AND grade IS NOT NULL THEN 0 ELSE 1 END
+                                                                    AS sort_class,
+          CASE WHEN grade_type = 'numeric' THEN grade ELSE NULL END AS sort_num,
+          COUNT(*)::int                                             AS count
+        FROM certificates
+        WHERE deleted_at IS NULL
+          AND status IN ('active', 'published')
+          AND grade_approved_at IS NOT NULL
+          AND card_name = ${cardName}
+          AND set_name = ${setName}
+          AND card_number_display = ${cardNumber}
+        GROUP BY label, sort_class, sort_num
+        ORDER BY sort_class ASC, sort_num DESC NULLS LAST, label ASC
+      `)).rows as Array<{ label: string; count: number }>;
+
+      const total = distRows.reduce((s, r) => s + r.count, 0);
+      const distribution = distRows.map(r => ({
+        grade: r.label,
+        count: r.count,
+        percent: total > 0 ? (r.count / total) * 100 : 0,
+      }));
+
+      res.json({
+        cert_id: certId,
+        card: { name: cardName, set: setName, number: cardNumber },
+        current_grade: currentGrade,
+        total,
+        distribution,
+      });
+    } catch (err: any) {
+      console.error("[pop-report] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /image — attach a single-side image to an existing cert. sharp
   // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
   // R2 key follows the existing scan-ingest convention so /reprocess-images
