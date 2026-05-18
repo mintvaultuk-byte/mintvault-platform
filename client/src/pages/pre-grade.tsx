@@ -45,52 +45,93 @@ function FilePicker({
   testId: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const id = `file-${testId}`;
+
+  function onDrop(e: React.DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) onChange(f);
+  }
+
   return (
-    <div className="flex-1">
-      <p className="text-[10px] uppercase tracking-[0.2em] text-[#888888] mb-2">{label}</p>
+    <div className="flex-1 min-w-0">
       <label
-        htmlFor={`file-${testId}`}
-        className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl p-8 cursor-pointer transition-all ${
-          file ? "border-[#D4AF37] bg-[#D4AF37]/5" : "border-[#E8E4DC] hover:border-[#D4AF37]/60 hover:bg-[#D4AF37]/5"
-        }`}
+        htmlFor={id}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        className={`slab-scanner${dragging ? " scanner-beam--dragover" : ""}`}
         data-testid={`zone-${testId}`}
       >
         <input
           ref={inputRef}
-          id={`file-${testId}`}
+          id={id}
           type="file"
           accept={ACCEPT}
           className="sr-only"
+          aria-label={`Upload ${label.toLowerCase()} card image`}
           onChange={e => onChange(e.target.files?.[0] ?? null)}
           data-testid={`input-${testId}`}
         />
-        {file ? (
-          <>
-            <div className="flex items-center gap-2 text-[#D4AF37]">
-              <Upload size={18} />
-              <span className="text-sm font-medium truncate max-w-[12rem]">{file.name}</span>
-            </div>
-            <p className="text-[10px] text-[#888888]">{(file.size / 1024 / 1024).toFixed(1)} MB</p>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                if (inputRef.current) inputRef.current.value = "";
-                onChange(null);
-              }}
-              className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#888888] hover:text-[#1A1A1A] mt-1"
-            >
-              <X size={11} /> Remove
-            </button>
-          </>
-        ) : (
-          <>
-            <Upload size={24} className="text-[#888888]" />
-            <p className="text-sm font-medium text-[#1A1A1A]">Click to upload {label.toLowerCase()}</p>
-            <p className="text-[10px] text-[#888888]">JPEG, PNG, TIFF — up to 20 MB</p>
-          </>
-        )}
+
+        {/* Header bar — Mint·Vault brand + PRE-AI GRADING status with
+            pulsing dot. */}
+        <header className="slab-scanner__header">
+          <span className="slab-scanner__brand">
+            <span className="slab-scanner__brand-mint">Mint</span>
+            <span className="slab-scanner__brand-sep">&middot;</span>
+            <span className="slab-scanner__brand-vault">Vault</span>
+          </span>
+          <span className="slab-scanner__status" aria-hidden="true">
+            <span className="slab-scanner__status-dot" />
+            PRE-AI GRADING
+          </span>
+        </header>
+
+        {/* Card-shaped scan bed with corner brackets, readouts, and the
+            animated gold sweep beam (from .slab-scanner__window::before). */}
+        <div className="slab-scanner__window">
+          <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
+          <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
+          <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 600DPI</span>
+          <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">SIDE &middot; {label.toUpperCase()}</span>
+          <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
+          <div className="slab-scanner__content">
+            <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
+            <p className="slab-scanner__title">{file ? file.name : `Slot ${label.toLowerCase()}`}</p>
+            <p className="slab-scanner__subtitle">
+              {file
+                ? `${(file.size / 1024 / 1024).toFixed(1)} MB · click to replace`
+                : "Drag & drop · or browse"}
+            </p>
+          </div>
+        </div>
+
+        {/* Footer bar — CERT · PENDING + status + QR placeholder dot grid. */}
+        <footer className="slab-scanner__footer">
+          <span className="slab-scanner__footer-left">CERT &middot; PENDING</span>
+          <span className="slab-scanner__footer-center">{file ? "Loaded" : "Awaiting"}</span>
+          <span className="slab-scanner__qr" aria-hidden="true">
+            {Array.from({ length: 25 }).map((_, i) => <span key={i} />)}
+          </span>
+        </footer>
       </label>
+
+      {file && (
+        <button
+          type="button"
+          onClick={() => {
+            if (inputRef.current) inputRef.current.value = "";
+            onChange(null);
+          }}
+          className="block mx-auto mt-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-white/70 hover:text-white"
+          data-testid={`btn-remove-${testId}`}
+        >
+          <X size={11} /> Remove
+        </button>
+      )}
     </div>
   );
 }
@@ -396,21 +437,26 @@ export default function PreGradePage() {
   }
 
   return (
-    <div className="min-h-screen bg-white text-[#1A1A1A]">
+    <div className="min-h-screen flex flex-col vault-page">
       <HeaderV2 />
 
-      <main className="max-w-3xl mx-auto px-4 py-12 sm:py-20">
+      <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-12 sm:py-20">
         <header className="text-center mb-12">
-          <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-3">MintVault AI</p>
-          <h1 className="text-4xl sm:text-5xl font-black mb-4">Pre-Grade Tool</h1>
-          <p className="text-[#555555] text-sm sm:text-base max-w-xl mx-auto">
+          <p className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.25em] mb-4" style={{ color: "var(--v2-gold)" }}>
+            MintVault AI
+          </p>
+          <h1 className="font-display italic font-medium leading-[0.95] mb-5" style={{ fontSize: "clamp(2.25rem, 5vw, 3.75rem)" }}>
+            Pre-Grade Tool
+          </h1>
+          <p className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto">
             Upload front and back card images for an instant AI grade estimate. No account, no storage —
             images are analysed in memory and discarded.
           </p>
         </header>
 
-        <form onSubmit={onSubmit} className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4">
+        <form onSubmit={onSubmit} className="space-y-8">
+          {/* Two slab-scanners side-by-side on desktop, stacked on mobile. */}
+          <div className="flex flex-col md:flex-row gap-6 md:gap-4 items-center md:items-start justify-center">
             <FilePicker label="Front" file={front} onChange={setFront} testId="front" />
             <FilePicker label="Back" file={back} onChange={setBack} testId="back" />
           </div>
@@ -419,11 +465,10 @@ export default function PreGradePage() {
             <button
               type="submit"
               disabled={!canSubmit}
-              className={`inline-flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all ${
-                canSubmit
-                  ? "bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] hover:opacity-90"
-                  : "bg-[#E8E4DC] text-[#888888] cursor-not-allowed"
+              className={`inline-flex items-center gap-2 font-body text-sm font-semibold px-8 py-3 rounded-full transition-all ${
+                canSubmit ? "hover:scale-[1.03]" : "opacity-50 cursor-not-allowed"
               }`}
+              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               data-testid="btn-submit"
             >
               {loading
@@ -433,7 +478,12 @@ export default function PreGradePage() {
           </div>
 
           {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-4" role="alert" data-testid="text-error">
+            <div
+              className="flex items-start gap-2 rounded-lg p-4"
+              style={{ backgroundColor: "rgba(220,38,38,0.15)", border: "1px solid rgba(220,38,38,0.4)", color: "#fecaca" }}
+              role="alert"
+              data-testid="text-error"
+            >
               <AlertTriangle size={16} className="shrink-0 mt-0.5" />
               <p className="text-sm">{error}</p>
             </div>
@@ -441,7 +491,11 @@ export default function PreGradePage() {
         </form>
 
         {result && (
-          <section className="mt-12 border border-[#E8E4DC] rounded-xl overflow-hidden" data-testid="section-result">
+          <section
+            className="mt-12 rounded-xl overflow-hidden"
+            style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}
+            data-testid="section-result"
+          >
             <div className="bg-gradient-to-br from-[#D4AF37]/10 to-transparent p-8 text-center border-b border-[#E8E4DC]">
               <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-3">Predicted Overall Grade</p>
               <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}>
