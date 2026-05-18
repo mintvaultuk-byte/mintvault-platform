@@ -5,7 +5,7 @@
 // backend processes in memory and discards. Rate-limited to 3/hour per
 // IP server-side; this page surfaces the 429 response if hit.
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link } from "wouter";
 import { Upload, X, ArrowRight, Loader2, AlertTriangle } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
@@ -141,6 +141,207 @@ function SubgradeBar({
   );
 }
 
+// ── Crossover comparison table ─────────────────────────────────────────────
+// Maps MintVault 1–10 to PSA / BGS / CGC equivalents. The 5–10 mappings are
+// the rubric Cornelius supplied; 1–4 follow the same MV ↔ BGS/CGC half-grade
+// shift (BGS/CGC ≈ MV × 0.5 + 5) with industry-standard labels.
+
+const CROSSOVER: Record<number, {
+  mv:  { grade: string; label: string };
+  psa: { grade: string; label: string };
+  bgs: { grade: string; label: string };
+  cgc: { grade: string; label: string };
+}> = {
+  10: { mv: { grade: "10",  label: "GEM MT" }, psa: { grade: "10",  label: "GEM MT" }, bgs: { grade: "10",  label: "Pristine" }, cgc: { grade: "10",  label: "Pristine" } },
+  9:  { mv: { grade: "9",   label: "MINT" },   psa: { grade: "9",   label: "MINT" },   bgs: { grade: "9.5", label: "GEM MT" },   cgc: { grade: "9.5", label: "GEM MT" } },
+  8:  { mv: { grade: "8",   label: "NM-MT" },  psa: { grade: "8",   label: "NM-MT" },  bgs: { grade: "9",   label: "MINT" },     cgc: { grade: "9",   label: "MINT" } },
+  7:  { mv: { grade: "7",   label: "NM" },     psa: { grade: "7",   label: "NM" },     bgs: { grade: "8.5", label: "NM-MT+" },   cgc: { grade: "8.5", label: "NM-MT+" } },
+  6:  { mv: { grade: "6",   label: "EX-MT" },  psa: { grade: "6",   label: "EX-MT" },  bgs: { grade: "8",   label: "NM-MT" },    cgc: { grade: "8",   label: "NM-MT" } },
+  5:  { mv: { grade: "5",   label: "EX" },     psa: { grade: "5",   label: "EX" },     bgs: { grade: "7.5", label: "NM" },       cgc: { grade: "7.5", label: "NM" } },
+  4:  { mv: { grade: "4",   label: "VG-EX" },  psa: { grade: "4",   label: "VG-EX" },  bgs: { grade: "7",   label: "EX" },       cgc: { grade: "7",   label: "EX" } },
+  3:  { mv: { grade: "3",   label: "VG" },     psa: { grade: "3",   label: "VG" },     bgs: { grade: "6.5", label: "EX" },       cgc: { grade: "6.5", label: "EX" } },
+  2:  { mv: { grade: "2",   label: "GOOD" },   psa: { grade: "2",   label: "GOOD" },   bgs: { grade: "6",   label: "VG-EX" },    cgc: { grade: "6",   label: "VG-EX" } },
+  1:  { mv: { grade: "1",   label: "PR" },     psa: { grade: "1",   label: "PR" },     bgs: { grade: "5.5", label: "VG" },       cgc: { grade: "5.5", label: "VG" } },
+};
+
+function CrossoverTable({ grade }: { grade: number }) {
+  const key = Math.max(1, Math.min(10, Math.round(grade)));
+  const row = CROSSOVER[key];
+  const companies: Array<{ key: string; name: string; data: { grade: string; label: string }; highlight: boolean }> = [
+    { key: "mv",  name: "MintVault", data: row.mv,  highlight: true  },
+    { key: "psa", name: "PSA",       data: row.psa, highlight: false },
+    { key: "bgs", name: "BGS",       data: row.bgs, highlight: false },
+    { key: "cgc", name: "CGC",       data: row.cgc, highlight: false },
+  ];
+  return (
+    <div className="px-6 sm:px-8 py-8 border-t border-[#E8E4DC]" data-testid="section-crossover">
+      <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] font-bold mb-1">How does this compare?</h3>
+      <p className="text-xs text-[#888888] mb-4">Approximate equivalents on the major grading scales.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left border-b border-[#E8E4DC]">
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Company</th>
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Equivalent Grade</th>
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Label</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.map(c => (
+              <tr
+                key={c.key}
+                className={`border-b border-[#F0EDE5] ${c.highlight ? "bg-gradient-to-r from-[#D4AF37]/15 to-transparent" : ""}`}
+                data-testid={`crossover-row-${c.key}`}
+              >
+                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]"}`}>{c.name}</td>
+                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]"}`}>{c.data.grade}</td>
+                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#555555]"}`}>{c.data.label}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[10px] text-[#888888]">
+        Equivalent grades are approximate. Different grading companies apply different standards.
+      </p>
+    </div>
+  );
+}
+
+// ── Value calculator ───────────────────────────────────────────────────────
+// Live calc — no submit. Multiplier follows the rubric Cornelius supplied;
+// fee follows the service dropdown. Grade is pre-filled from the AI result
+// but editable. All client-side.
+
+const GRADING_FEES = { mintvault: 25, psa: 22, cgc: 15 } as const;
+type Service = keyof typeof GRADING_FEES;
+
+function gradeMultiplier(grade: number): number {
+  if (grade >= 10) return 3;
+  if (grade >= 9)  return 2;
+  if (grade >= 8)  return 1.4;
+  if (grade >= 7)  return 1.1;
+  return 1;
+}
+
+function ValueCalculator({ initialGrade }: { initialGrade: number }) {
+  const [rawValue, setRawValue] = useState<string>("");
+  const [service, setService] = useState<Service>("mintvault");
+  const [grade, setGrade] = useState<number>(initialGrade);
+
+  // Reset grade if a new AI result comes in with a different overall.
+  useEffect(() => { setGrade(initialGrade); }, [initialGrade]);
+
+  const rawNum = parseFloat(rawValue);
+  const hasRaw = Number.isFinite(rawNum) && rawNum > 0;
+  const fee = GRADING_FEES[service];
+  const mult = gradeMultiplier(grade);
+  const expected = hasRaw ? rawNum * mult : 0;
+  const net = hasRaw ? expected - rawNum - fee : 0;
+  const worthIt = hasRaw && net > 0;
+
+  const fmt = (n: number) => `£${n.toFixed(2)}`;
+
+  return (
+    <div className="px-6 sm:px-8 py-8 border-t border-[#E8E4DC] bg-[#FAFAF7]" data-testid="section-value-calc">
+      <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] font-bold mb-1">Is it worth grading?</h3>
+      <p className="text-xs text-[#888888] mb-5">
+        Enter your raw card value below. Calculation updates live.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[#888888] block mb-1.5">Raw card value</span>
+          <div className="flex items-center border border-[#E8E4DC] rounded-lg overflow-hidden focus-within:border-[#D4AF37]">
+            <span className="px-3 py-2 text-[#888888] text-sm bg-[#F7F7F5] border-r border-[#E8E4DC]">£</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={rawValue}
+              onChange={e => setRawValue(e.target.value)}
+              placeholder="0.00"
+              className="w-full px-3 py-2 text-sm focus:outline-none"
+              data-testid="input-raw-value"
+            />
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[#888888] block mb-1.5">Grading service</span>
+          <select
+            value={service}
+            onChange={e => setService(e.target.value as Service)}
+            className="w-full px-3 py-2 text-sm border border-[#E8E4DC] rounded-lg focus:outline-none focus:border-[#D4AF37] bg-white"
+            data-testid="select-service"
+          >
+            <option value="mintvault">MintVault (£25)</option>
+            <option value="psa">PSA (£22)</option>
+            <option value="cgc">CGC (£15)</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.15em] text-[#888888] block mb-1.5">Grade</span>
+          <select
+            value={grade}
+            onChange={e => setGrade(parseInt(e.target.value, 10))}
+            className="w-full px-3 py-2 text-sm border border-[#E8E4DC] rounded-lg focus:outline-none focus:border-[#D4AF37] bg-white"
+            data-testid="select-grade"
+          >
+            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(g => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="bg-white border border-[#E8E4DC] rounded-lg overflow-hidden">
+        <dl className="divide-y divide-[#F0EDE5]">
+          <div className="flex justify-between items-baseline px-4 py-2.5">
+            <dt className="text-xs text-[#888888]">Grading fee</dt>
+            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-fee">{fmt(fee)}</dd>
+          </div>
+          <div className="flex justify-between items-baseline px-4 py-2.5">
+            <dt className="text-xs text-[#888888]">Grade premium multiplier</dt>
+            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-mult">{mult}×</dd>
+          </div>
+          <div className="flex justify-between items-baseline px-4 py-2.5">
+            <dt className="text-xs text-[#888888]">Expected graded value</dt>
+            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-expected">
+              {hasRaw ? fmt(expected) : "—"}
+            </dd>
+          </div>
+          <div className="flex justify-between items-baseline px-4 py-2.5 bg-[#FAFAF7]">
+            <dt className="text-xs text-[#888888] font-medium">Net gain</dt>
+            <dd
+              className={`text-sm font-bold ${
+                !hasRaw ? "text-[#888888]" : net > 0 ? "text-emerald-700" : "text-[#1A1A1A]"
+              }`}
+              data-testid="text-net"
+            >
+              {hasRaw ? `${net >= 0 ? "+" : ""}${fmt(net)}` : "—"}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {hasRaw && (
+        <div
+          className={`mt-5 text-center py-3 rounded-lg text-sm font-bold uppercase tracking-wider ${
+            worthIt
+              ? "bg-gradient-to-r from-[#D4AF37]/15 to-[#D4AF37]/5 text-[#B8960C] border border-[#D4AF37]/40"
+              : "bg-[#F7F7F5] text-[#888888] border border-[#E8E4DC]"
+          }`}
+          data-testid="text-verdict"
+        >
+          {worthIt ? "Worth grading ✓" : "Not worth grading"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function PreGradePage() {
@@ -259,6 +460,9 @@ export default function PreGradePage() {
               <SubgradeBar label="Edges"     value={result.edges.subgrade}     confidence={result.confidence.edges} />
               <SubgradeBar label="Surface"   value={result.surface.subgrade}   confidence={result.confidence.surface} />
             </div>
+
+            <CrossoverTable grade={result.overall_grade} />
+            <ValueCalculator initialGrade={result.overall_grade} />
 
             <div className="bg-[#F7F7F5] border-t border-[#E8E4DC] p-6 sm:p-8 text-center">
               <p className="text-sm text-[#555555] mb-5 max-w-xl mx-auto">
