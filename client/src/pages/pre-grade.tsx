@@ -49,24 +49,44 @@ function FilePicker({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const id = `file-${testId}`;
 
-  // TIFF can't be rendered by browsers natively — skip object-URL creation
-  // for it; the slab falls back to a filename-only "loaded" state instead
-  // of a broken-image bg.
   const isTiff = !!file && /^image\/tiff?$/i.test(file.type);
 
-  // Manage the object URL lifecycle: create on file set, revoke on change
-  // or unmount. Skip for TIFF (no native browser support).
+  // Object-URL lifecycle. Probe the file by loading it into an Image
+  // element first — if the browser can decode it (JPEG/PNG/WebP) we keep
+  // the object URL as the preview source. If it errors (TIFF in every
+  // major browser today), we revoke immediately and leave previewUrl
+  // null; the slab falls back to a filename-only "loaded" state.
+  //
+  // The spec also asked for a canvas → toDataURL fallback for TIFF, but
+  // canvas.drawImage requires a successfully-loaded image element — when
+  // the browser can't decode TIFF, there's nothing to draw, so the
+  // canvas approach can't actually produce a TIFF preview without a JS
+  // TIFF decoder library (e.g. utif). Honest fallback is filename-only.
   useEffect(() => {
-    if (!file || isTiff) {
+    if (!file) {
       setPreviewUrl(null);
       return;
     }
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file, isTiff]);
+    const objectUrl = URL.createObjectURL(file);
+    let canceled = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (canceled) return;
+      setPreviewUrl(objectUrl);
+    };
+    probe.onerror = () => {
+      if (canceled) return;
+      URL.revokeObjectURL(objectUrl);
+      setPreviewUrl(null);
+    };
+    probe.src = objectUrl;
+    return () => {
+      canceled = true;
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [file]);
 
-  const showImagePreview = !!previewUrl && !!file && !isTiff;
+  const showImagePreview = !!previewUrl && !!file;
   const sizeMb = file ? (file.size / 1024 / 1024).toFixed(1) : "0";
 
   function onDrop(e: React.DragEvent<HTMLLabelElement>) {
@@ -111,20 +131,29 @@ function FilePicker({
           </span>
         </header>
 
-        {/* Card-shaped scan bed with corner brackets, readouts, and the
-            animated gold sweep beam (from .slab-scanner__window::before).
-            When a previewable file is loaded, the window's background
-            becomes the image (cover-fit); brackets + readouts + sweep
-            beam still overlay since they're absolute-positioned. The
-            `group` class powers the hover overlay below. */}
-        <div
-          className="slab-scanner__window group"
-          style={showImagePreview ? {
-            backgroundImage: `url(${previewUrl})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          } : undefined}
-        >
+        {/* Card-shaped scan bed. The bg-image lives on an explicit
+            absolute inset-0 child div BELOW the brackets/readouts in
+            paint order, NOT on .slab-scanner__window itself — this
+            guarantees the image is strictly clipped to the window's
+            aspect-ratio area and cannot bleed into the surrounding
+            slab (header/footer/8px margins). Brackets + readouts +
+            sweep beam (::before) still overlay since they're absolute-
+            positioned at higher z-index. The `group` class powers the
+            hover overlay below. */}
+        <div className="slab-scanner__window group">
+          {showImagePreview && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                backgroundImage: `url(${previewUrl})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                zIndex: 0,
+              }}
+              data-testid={`preview-${testId}`}
+            />
+          )}
           <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
           <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
           <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 600DPI</span>
@@ -132,21 +161,21 @@ function FilePicker({
           <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
 
           {showImagePreview ? (
-            // Image preview: small hover-only overlay at bottom with replace
+            // Image preview: hover-only overlay at bottom with replace
             // hint + size. pointer-events-none so it doesn't intercept the
             // click that opens the file dialog via the parent label.
             <div
               className="absolute inset-x-0 bottom-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
               style={{
                 background: "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0))",
-                zIndex: 2,
+                zIndex: 3,
               }}
             >
               <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white">Click to replace</p>
               <p className="text-[9px] text-white/70 mt-0.5">{sizeMb} MB</p>
             </div>
           ) : (
-            // Empty state OR TIFF fallback (no native browser preview for TIFF).
+            // Empty state OR non-decodable file fallback (TIFF, etc).
             <div className="slab-scanner__content">
               <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
               <p className="slab-scanner__title">{file ? file.name : `Slot ${label.toLowerCase()}`}</p>
