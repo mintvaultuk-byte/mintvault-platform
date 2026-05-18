@@ -556,7 +556,7 @@ export default function PreGradePage() {
 
         <p
           className="text-center text-[10px] mt-12 max-w-md mx-auto leading-relaxed"
-          style={{ color: "rgba(255,255,255,0.5)" }}
+          style={{ color: "rgba(255,255,255,0.6)" }}
         >
           Limit 3 pre-grades per hour per IP. Single-photo AI grading is a sense-check, not a calibrated
           prediction — treat subgrades as directional. Images are not stored.
