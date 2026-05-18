@@ -1,6 +1,7 @@
 import { useParams, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft, Loader2 } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
 
@@ -159,58 +160,53 @@ function DefectOverlayPair({
 }
 
 // Admin-only "Reprocess Images" button — re-runs the full display
-// pipeline (deskew → detect → recentre → tightenForDisplay → whitewash
-// → maskRoundedCorners) on the cert's R2 originals and overwrites the
-// existing R2 images. On success, invalidates the logbook query so the
-// images viewer refetches with fresh presigned URLs — no full page
-// reload needed.
+// pipeline (deskew → detectCardEdgesByCoverage → reCentreBitmap →
+// tightenForDisplay → whitewashEdgesBySaturation → maskRoundedCorners)
+// on the cert's R2 originals and overwrites the existing R2 image
+// keys. On success, invalidates the logbook query so the images viewer
+// refetches with fresh presigned URLs — no full page reload.
 function AdminReprocessButton({ certId }: { certId: string }) {
   const qc = useQueryClient();
-  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
 
   return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        disabled={status === "loading"}
-        onClick={async () => {
-          setStatus("loading");
-          setErrMsg(null);
-          try {
-            const r = await fetch(`/api/admin/certs/${certId}/reprocess`, {
-              method: "POST",
-              credentials: "include",
-            });
-            const d = await r.json();
-            if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-            // Refetch logbook + any related image queries so the viewer
-            // picks up the new presigned URLs without a page reload.
-            await qc.invalidateQueries({ queryKey: ["/api/logbook", certId] });
-            setStatus("done");
-            setTimeout(() => setStatus("idle"), 4000);
-          } catch (e: any) {
-            setStatus("error");
-            setErrMsg(e.message || String(e));
-          }
-        }}
-        className={`inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all ${
-          status === "done"    ? "border border-emerald-600/40 text-emerald-700 bg-emerald-50" :
-          status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5 cursor-wait" :
-          status === "error"   ? "border border-red-600/40 text-red-700 bg-red-50" :
-                                 "border border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10"
-        }`}
-        data-testid="btn-reprocess-images"
-      >
-        {status === "loading" ? "Reprocessing…" :
-         status === "done"    ? "Reprocessed ✓ — images refreshed" :
-         status === "error"   ? "Reprocess failed" :
-                                "Reprocess Images"}
-      </button>
-      {status === "error" && errMsg && (
-        <span className="text-xs text-red-700 max-w-md truncate" title={errMsg}>{errMsg}</span>
-      )}
-    </div>
+    <button
+      type="button"
+      disabled={loading}
+      onClick={async () => {
+        setLoading(true);
+        try {
+          const r = await fetch(`/api/admin/certs/${certId}/reprocess-images`, {
+            method: "POST",
+            credentials: "include",
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+          // Refetch logbook so the viewer picks up the new presigned
+          // URLs without a page reload. The server also returns
+          // front_url / back_url in d for direct swap if needed.
+          await qc.invalidateQueries({ queryKey: ["/api/logbook", certId] });
+          toast({ title: "Images reprocessed ✓", description: "Image viewer refreshed." });
+        } catch (e: any) {
+          toast({
+            title: "Reprocess failed",
+            description: e.message || String(e),
+            variant: "destructive",
+          });
+        } finally {
+          setLoading(false);
+        }
+      }}
+      className={`inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all ${
+        loading
+          ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5 cursor-wait"
+          : "border border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+      }`}
+      data-testid="btn-reprocess-images"
+    >
+      {loading ? <><Loader2 size={12} className="animate-spin" /> Reprocessing…</> : "Reprocess Images"}
+    </button>
   );
 }
 

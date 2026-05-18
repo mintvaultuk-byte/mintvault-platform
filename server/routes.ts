@@ -10596,18 +10596,21 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // POST /reprocess — re-run the FULL display pipeline on the cert's R2
-  // originals. Distinct from the legacy /reprocess-images endpoint (which
-  // only regenerates the AI-grading variants via the old deskew+autoCrop
-  // pipeline). This one goes through uploadImagesToCert — the same scan-
-  // ingest flow new scans use — so it regenerates: deskew → cropToYellow/
-  // autoCrop → reCentre → tightenForDisplay → whitewashEdgesBySaturation
-  // → maskRoundedCorners → display PNG + JPEG + all 4 AI variants.
+  // POST /reprocess-images — re-run the FULL display pipeline on the
+  // cert's R2 originals. Distinct from the legacy
+  // /api/admin/certificates/:id/reprocess-images endpoint (which only
+  // regenerates AI-grading variants via the old deskew+autoCrop path).
+  // This one goes through uploadImagesToCert — the same scan-ingest flow
+  // new scans use — so the full chain runs: deskew → detectCardEdges-
+  // ByCoverage → reCentreBitmap → tightenForDisplay → whitewashEdgesBy-
+  // Saturation → maskRoundedCorners → display PNG + JPEG + 4 AI variants.
   //
-  // Source: grading_{front,back}_original keys in R2. The server has no
-  // access to the operator's local watcher inbox/processed folder (Fly
-  // box), so the R2 originals are the canonical re-process input.
-  app.post("/api/admin/certs/:certId/reprocess", requireAdmin, async (req, res) => {
+  // Source: grading_{front,back}_original — the RAW scan saved at first
+  // ingest. NOT frontImagePath/backImagePath (those are display keys —
+  // already-processed PNGs that would distort detection if re-fed). The
+  // Fly server has no access to the operator's local watcher folder, so
+  // the R2 originals are the canonical re-process input.
+  app.post("/api/admin/certs/:certId/reprocess-images", requireAdmin, async (req, res) => {
     try {
       const certIdRaw = String(req.params.certId);
       const certId = normalizeCertId(certIdRaw);
@@ -10640,10 +10643,27 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const frontBuf = await fetchR2Buf(frontKey);
       const backBuf = backKey ? await fetchR2Buf(backKey) : null;
-      console.log(`[reprocess] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`);
+      console.log(`[reprocess-images] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`);
 
       const { uploadImagesToCert } = await import("./scan-ingest-service");
-      const result = await uploadImagesToCert(dbId, frontBuf, backBuf);
+      await uploadImagesToCert(dbId, frontBuf, backBuf);
+
+      // Read back the post-reprocess display image paths and sign them
+      // for the response so the frontend can swap the viewer image src
+      // without going through /api/logbook again.
+      const afterRows = (await db.execute(sql`
+        SELECT front_image_path, back_image_path
+        FROM certificates
+        WHERE id = ${dbId}
+        LIMIT 1
+      `)).rows;
+      const after = (afterRows[0] ?? {}) as any;
+      const signIfPresent = async (key: string | null): Promise<string | null> => {
+        if (!key) return null;
+        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+      };
+      const front_url = await signIfPresent(after.front_image_path ?? null);
+      const back_url = await signIfPresent(after.back_image_path ?? null);
 
       const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
       await db.execute(sql`
@@ -10651,16 +10671,9 @@ Defects (admin-confirmed): ${defectLines}`;
         VALUES ('certificate', ${String(dbId)}, 'reprocess_images', ${adminUser}, ${JSON.stringify({ reason: "manual" })}::jsonb, NOW())
       `);
 
-      res.json({
-        success: true,
-        cert_id: certId,
-        db_id: dbId,
-        front_processed: true,
-        back_processed: !!backBuf,
-        processed_at: new Date().toISOString(),
-      });
+      res.json({ success: true, front_url, back_url });
     } catch (err: any) {
-      console.error("[reprocess] failed:", err);
+      console.error("[reprocess-images] failed:", err);
       res.status(500).json({ error: err.message });
     }
   });
