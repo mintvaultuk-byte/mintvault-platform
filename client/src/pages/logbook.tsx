@@ -1,5 +1,5 @@
 import { useParams, useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
@@ -154,6 +154,62 @@ function DefectOverlayPair({
     <div className="mt-4 flex justify-center gap-4">
       {images.front && <SidePanel url={images.front} label="Front" defects={frontDefects} />}
       {images.back  && <SidePanel url={images.back}  label="Back"  defects={backDefects} />}
+    </div>
+  );
+}
+
+// Admin-only "Reprocess Images" button — re-runs the full display
+// pipeline (deskew → detect → recentre → tightenForDisplay → whitewash
+// → maskRoundedCorners) on the cert's R2 originals and overwrites the
+// existing R2 images. On success, invalidates the logbook query so the
+// images viewer refetches with fresh presigned URLs — no full page
+// reload needed.
+function AdminReprocessButton({ certId }: { certId: string }) {
+  const qc = useQueryClient();
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        disabled={status === "loading"}
+        onClick={async () => {
+          setStatus("loading");
+          setErrMsg(null);
+          try {
+            const r = await fetch(`/api/admin/certs/${certId}/reprocess`, {
+              method: "POST",
+              credentials: "include",
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+            // Refetch logbook + any related image queries so the viewer
+            // picks up the new presigned URLs without a page reload.
+            await qc.invalidateQueries({ queryKey: ["/api/logbook", certId] });
+            setStatus("done");
+            setTimeout(() => setStatus("idle"), 4000);
+          } catch (e: any) {
+            setStatus("error");
+            setErrMsg(e.message || String(e));
+          }
+        }}
+        className={`inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all ${
+          status === "done"    ? "border border-emerald-600/40 text-emerald-700 bg-emerald-50" :
+          status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5 cursor-wait" :
+          status === "error"   ? "border border-red-600/40 text-red-700 bg-red-50" :
+                                 "border border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+        }`}
+        data-testid="btn-reprocess-images"
+      >
+        {status === "loading" ? "Reprocessing…" :
+         status === "done"    ? "Reprocessed ✓ — images refreshed" :
+         status === "error"   ? "Reprocess failed" :
+                                "Reprocess Images"}
+      </button>
+      {status === "error" && errMsg && (
+        <span className="text-xs text-red-700 max-w-md truncate" title={errMsg}>{errMsg}</span>
+      )}
     </div>
   );
 }
@@ -575,6 +631,17 @@ export default function LogbookPage() {
               </>
             )}
           </Section>
+
+          {isAdminView && (
+            <Section title="Admin Actions">
+              <AdminReprocessButton certId={data.certId} />
+              <p className="mt-2 text-[10px] text-[#888888]">
+                Re-runs deskew → detect → recentre → tightenForDisplay → whitewash → rounded mask
+                on the R2 originals (grading_{`{front,back}`}_original.jpg) and overwrites the
+                display image keys. Refreshes the image viewer in place.
+              </p>
+            </Section>
+          )}
 
           {isAdminView && <AdminPopReportPanel certId={data.certId} />}
 

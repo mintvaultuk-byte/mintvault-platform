@@ -10596,6 +10596,75 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // POST /reprocess — re-run the FULL display pipeline on the cert's R2
+  // originals. Distinct from the legacy /reprocess-images endpoint (which
+  // only regenerates the AI-grading variants via the old deskew+autoCrop
+  // pipeline). This one goes through uploadImagesToCert — the same scan-
+  // ingest flow new scans use — so it regenerates: deskew → cropToYellow/
+  // autoCrop → reCentre → tightenForDisplay → whitewashEdgesBySaturation
+  // → maskRoundedCorners → display PNG + JPEG + all 4 AI variants.
+  //
+  // Source: grading_{front,back}_original keys in R2. The server has no
+  // access to the operator's local watcher inbox/processed folder (Fly
+  // box), so the R2 originals are the canonical re-process input.
+  app.post("/api/admin/certs/:certId/reprocess", requireAdmin, async (req, res) => {
+    try {
+      const certIdRaw = String(req.params.certId);
+      const certId = normalizeCertId(certIdRaw);
+
+      const rows = (await db.execute(sql`
+        SELECT id, grading_front_original, grading_back_original
+        FROM certificates
+        WHERE certificate_number = ${certId}
+        LIMIT 1
+      `)).rows;
+      if (rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
+      const cur = rows[0] as any;
+      const dbId = Number(cur.id);
+      const frontKey = (cur.grading_front_original as string | null) ?? null;
+      const backKey = (cur.grading_back_original as string | null) ?? null;
+
+      if (!frontKey) {
+        return res.status(400).json({
+          error: "cannot reprocess — no grading_front_original on this cert",
+          cert_id: certId,
+        });
+      }
+
+      const fetchR2Buf = async (key: string): Promise<Buffer> => {
+        const url = await getR2SignedUrl(key, 300);
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
+        return Buffer.from(await resp.arrayBuffer());
+      };
+
+      const frontBuf = await fetchR2Buf(frontKey);
+      const backBuf = backKey ? await fetchR2Buf(backKey) : null;
+      console.log(`[reprocess] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`);
+
+      const { uploadImagesToCert } = await import("./scan-ingest-service");
+      const result = await uploadImagesToCert(dbId, frontBuf, backBuf);
+
+      const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('certificate', ${String(dbId)}, 'reprocess_images', ${adminUser}, ${JSON.stringify({ reason: "manual" })}::jsonb, NOW())
+      `);
+
+      res.json({
+        success: true,
+        cert_id: certId,
+        db_id: dbId,
+        front_processed: true,
+        back_processed: !!backBuf,
+        processed_at: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error("[reprocess] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /image — attach a single-side image to an existing cert. sharp
   // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
   // R2 key follows the existing scan-ingest convention so /reprocess-images
