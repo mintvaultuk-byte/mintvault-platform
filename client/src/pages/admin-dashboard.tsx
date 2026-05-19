@@ -822,6 +822,39 @@ function DashboardView({
     },
   });
 
+  // Bulk reprocess all active certs with grading_front_original. Server
+  // processes concurrency-10 batches; large runs (100+) will exceed the
+  // 60s Fly proxy timeout and the client fetch will report a network
+  // error even though the server keeps working — that's why we mention
+  // the audit log + fly logs in the confirm dialog.
+  const [bulkReprocessStatus, setBulkReprocessStatus] = useState<string | null>(null);
+  const bulkReprocessMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/bulk-reprocess-images", { all: true });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      setBulkReprocessStatus(`Bulk reprocess complete: ${data.processed}/${data.total} ok, ${data.failed} failed.`);
+      setTimeout(() => setBulkReprocessStatus(null), 20000);
+    },
+    onError: (err: any) => {
+      // A long-running call typically reaches here on timeout. The
+      // server may still be processing — direct the operator to logs.
+      setBulkReprocessStatus(`Request error: ${err?.message || "timeout — server may still be processing. Check fly logs / audit_log."}`);
+      setTimeout(() => setBulkReprocessStatus(null), 20000);
+    },
+  });
+
+  const handleBulkReprocess = () => {
+    if (!window.confirm(
+      "Reprocess images for ALL active certs?\n\n" +
+      "This re-runs the full image pipeline (deskew → detect → recentre → tightenForDisplay → whitewash → mask) " +
+      "on every cert that has an R2 original, concurrency 10. For 100+ certs the request will likely time out " +
+      "on the client side, but the server will keep processing — check fly logs for [bulk-reprocess] and audit_log for completion."
+    )) return;
+    bulkReprocessMutation.mutate();
+  };
+
   const handleCertSearch = () => {
     if (certSearch.trim()) {
       window.open(`/cert/${certSearch.trim().toUpperCase()}`, "_blank");
@@ -908,9 +941,21 @@ function DashboardView({
           {backfillClaimMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
           Backfill Claim Codes
         </button>
+        <button
+          onClick={handleBulkReprocess}
+          disabled={bulkReprocessMutation.isPending}
+          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
+          data-testid="button-bulk-reprocess"
+        >
+          {bulkReprocessMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+          Bulk Reprocess All
+        </button>
       </div>
       {backfillStatus && (
         <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-backfill-status">{backfillStatus}</p>
+      )}
+      {bulkReprocessStatus && (
+        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-bulk-reprocess-status">{bulkReprocessStatus}</p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

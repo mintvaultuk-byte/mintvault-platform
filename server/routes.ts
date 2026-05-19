@@ -10805,6 +10805,124 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // POST /api/admin/bulk-reprocess-images — bulk version of the above.
+  // Body: { certIds?: string[], all?: boolean }
+  //   - all=true → every cert with grading_front_original NOT NULL and
+  //     deleted_at IS NULL
+  //   - else certIds[] (normalized via normalizeCertId, filtered to active
+  //     + has-original)
+  //
+  // Concurrency 10 per batch, sequential between batches. For a typical
+  // ~15s/cert pipeline this means N/10 × 15s end-to-end — 100+ certs will
+  // exceed Fly's 60s proxy timeout. The Node process keeps running after
+  // the client disconnects, and audit_log records progress per cert, so a
+  // timed-out call still finishes server-side. Operators should re-poll
+  // /api/admin/stats or grep fly logs for [bulk-reprocess] to confirm
+  // completion when this happens.
+  app.post("/api/admin/bulk-reprocess-images", requireAdmin, async (req, res) => {
+    try {
+      const body = (req.body || {}) as { certIds?: string[]; all?: boolean };
+      const all = body.all === true;
+      const inputCertIds = Array.isArray(body.certIds) ? body.certIds.map(String) : [];
+
+      if (!all && inputCertIds.length === 0) {
+        return res.status(400).json({ error: "Body must include certIds: string[] OR all: true." });
+      }
+
+      // Build the worklist. all=true → every still-active cert that has
+      // an original to reprocess. Otherwise normalize the supplied list
+      // and filter to the same criteria so we never try to reprocess a
+      // voided cert or one without an R2 original.
+      let worklist: Array<{ id: number; certNumber: string }>;
+      if (all) {
+        const rows = (await db.execute(sql`
+          SELECT id, certificate_number
+          FROM certificates
+          WHERE deleted_at IS NULL
+            AND grading_front_original IS NOT NULL
+          ORDER BY id
+        `)).rows as Array<{ id: number; certificate_number: string }>;
+        worklist = rows.map(r => ({ id: r.id, certNumber: r.certificate_number }));
+      } else {
+        const normalized = inputCertIds.map(c => normalizeCertId(c));
+        const rows = (await db.execute(sql`
+          SELECT id, certificate_number
+          FROM certificates
+          WHERE certificate_number = ANY(${normalized}::text[])
+            AND deleted_at IS NULL
+            AND grading_front_original IS NOT NULL
+          ORDER BY id
+        `)).rows as Array<{ id: number; certificate_number: string }>;
+        worklist = rows.map(r => ({ id: r.id, certNumber: r.certificate_number }));
+      }
+
+      console.log(`[bulk-reprocess] starting: ${worklist.length} certs (all=${all})`);
+
+      const { uploadImagesToCert } = await import("./scan-ingest-service");
+      const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
+
+      const errors: Array<{ cert_id: string; error: string }> = [];
+      let processed = 0;
+      let failed = 0;
+      const BATCH = 10;
+
+      const fetchR2Buf = async (key: string): Promise<Buffer> => {
+        const url = await getR2SignedUrl(key, 300);
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`R2 fetch ${key} failed: ${resp.status}`);
+        return Buffer.from(await resp.arrayBuffer());
+      };
+
+      const processOne = async (item: { id: number; certNumber: string }) => {
+        try {
+          const r = (await db.execute(sql`
+            SELECT grading_front_original, grading_back_original
+            FROM certificates
+            WHERE id = ${item.id}
+            LIMIT 1
+          `)).rows[0] as any;
+          const frontKey: string | null = r?.grading_front_original ?? null;
+          const backKey: string | null = r?.grading_back_original ?? null;
+          if (!frontKey) throw new Error("no grading_front_original");
+
+          const frontBuf = await fetchR2Buf(frontKey);
+          const backBuf = backKey ? await fetchR2Buf(backKey) : null;
+
+          await uploadImagesToCert(item.id, frontBuf, backBuf);
+
+          await db.execute(sql`
+            INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+            VALUES ('certificate', ${String(item.id)}, 'reprocess_images', ${adminUser}, ${JSON.stringify({ reason: "bulk", source: "bulk-reprocess" })}::jsonb, NOW())
+          `);
+
+          processed++;
+          console.log(`[bulk-reprocess] ✓ ${item.certNumber} (id=${item.id}) ${processed}/${worklist.length}`);
+        } catch (err: any) {
+          failed++;
+          errors.push({ cert_id: item.certNumber, error: err.message || String(err) });
+          console.error(`[bulk-reprocess] ✗ ${item.certNumber} (id=${item.id}): ${err.message}`);
+        }
+      };
+
+      for (let i = 0; i < worklist.length; i += BATCH) {
+        const batch = worklist.slice(i, i + BATCH);
+        await Promise.all(batch.map(processOne));
+        console.log(`[bulk-reprocess] batch complete: ${processed + failed}/${worklist.length} (ok=${processed} fail=${failed})`);
+      }
+
+      console.log(`[bulk-reprocess] DONE total=${worklist.length} processed=${processed} failed=${failed}`);
+      res.json({
+        total: worklist.length,
+        processed,
+        failed,
+        errors,
+      });
+    } catch (err: any) {
+      console.error("[bulk-reprocess] fatal:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /image — attach a single-side image to an existing cert. sharp
   // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
   // R2 key follows the existing scan-ingest convention so /reprocess-images
