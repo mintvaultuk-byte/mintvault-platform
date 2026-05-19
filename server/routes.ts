@@ -10885,6 +10885,24 @@ Defects (admin-confirmed): ${defectLines}`;
           const backKey: string | null = r?.grading_back_original ?? null;
           if (!frontKey) throw new Error("no grading_front_original");
 
+          // HEAD-check BEFORE starting the sharp pipeline. headR2 returns
+          // null on any failure (404 / network / creds) — for this bulk
+          // path we treat any null as "missing" and skip the cert. Avoids
+          // spending memory + CPU on certs whose source isn't in R2
+          // (common on staging where older certs' originals were never
+          // back-filled). Back is optional — only HEAD-checked if a key
+          // is recorded.
+          const frontHead = await headR2(frontKey);
+          if (frontHead === null) {
+            throw new Error(`R2 original missing (front: ${frontKey})`);
+          }
+          if (backKey) {
+            const backHead = await headR2(backKey);
+            if (backHead === null) {
+              throw new Error(`R2 original missing (back: ${backKey})`);
+            }
+          }
+
           const frontBuf = await fetchR2Buf(frontKey);
           const backBuf = backKey ? await fetchR2Buf(backKey) : null;
 
