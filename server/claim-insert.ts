@@ -177,9 +177,9 @@ export async function generateClaimInsertPNG(
   ctx.fillText("Certificate No.", contentLeft, y);
   y += 28 + 10; // 10px gap between label and its value
 
-  // Certificate value (44px Courier) — pure black
-  ctx.font = "bold 44px 'Courier New', Courier, monospace";
-  ctx.fillStyle = "#000000";
+  // Certificate value — restored from PR #90: 28pt bold gold.
+  ctx.font = "bold 28px 'Courier New', Courier, monospace";
+  ctx.fillStyle = GOLD;
   ctx.fillText(normalCertId, contentLeft, y);
   y += 44 + 14;
 
@@ -189,9 +189,9 @@ export async function generateClaimInsertPNG(
   ctx.fillText("Claim Code", contentLeft, y);
   y += 28 + 10;
 
-  // Claim code value — 48px Courier, pure black
-  ctx.font = "bold 48px 'Courier New', Courier, monospace";
-  ctx.fillStyle = "#000000";
+  // Claim code value — restored from PR #90: 14pt Courier gold.
+  ctx.font = "bold 14px 'Courier New', Courier, monospace";
+  ctx.fillStyle = GOLD;
   ctx.fillText(formattedCode, contentLeft, y);
   y += 48 + 14;
 
