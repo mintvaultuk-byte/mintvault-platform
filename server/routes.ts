@@ -12859,6 +12859,29 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // POST /api/admin/weekly-reel/generate — manually trigger the Friday
+  // weekly grade-highlight reel job (server/jobs/weekly-reel.ts) for
+  // testing or re-running on demand. Honours the same scheduler
+  // pipeline: top-N consenting graded certs → Segmind hfai-dop-lite →
+  // R2 manifest at videos/weekly-reels/draft-{date}.json. Per spec the
+  // gate is requireAuth (any authenticated user), not requireAdmin —
+  // flag if you want this tightened.
+  //
+  // Long-running: 8 cards × ~30-60s Segmind each = ~4-8 minutes total.
+  // Fly proxy's 60s timeout will likely close the client connection
+  // before the job finishes; the Node process keeps running and the
+  // audit_log row (entity_type='weekly_reel') captures completion.
+  app.post("/api/admin/weekly-reel/generate", requireAuth, async (_req, res) => {
+    try {
+      const { runWeeklyReel } = await import("./jobs/weekly-reel");
+      const result = await runWeeklyReel({ force: true });
+      res.json(result);
+    } catch (err: any) {
+      console.error("[weekly-reel] manual trigger crashed:", err);
+      res.status(500).json({ error: err?.message ?? "weekly-reel failed" });
+    }
+  });
+
   app.patch("/api/admin/ig/queue/:id/skip", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);

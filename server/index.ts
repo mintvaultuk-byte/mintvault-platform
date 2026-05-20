@@ -429,6 +429,20 @@ async function runTransferV2Sweep() {
     }
   }, 60_000);
 
+  // startWeeklyReelScheduler() — fires on Fridays at 18:00 UTC. Builds the
+  // weekly grade-highlight manifest from consenting submissions; per-card
+  // failures are non-fatal. Soft-fails gracefully if SEGMIND_API_KEY is
+  // missing in env.
+  setTimeout(async () => {
+    try {
+      const { startWeeklyReelScheduler } = await import("./jobs/weekly-reel");
+      startWeeklyReelScheduler();
+      log("scheduler armed (Friday 18:00 UTC)", "weekly-reel");
+    } catch (err: any) {
+      log(`startup error: ${err?.message || err}`, "weekly-reel");
+    }
+  }, 60_000);
+
   // R2 → B2 cold-archive sweep. First run after 60s (let migrations finish
   // + B2 client lazy-init on first use), then daily. Idempotent at the
   // object level via existsInB2 — safe across both Fly machines without
