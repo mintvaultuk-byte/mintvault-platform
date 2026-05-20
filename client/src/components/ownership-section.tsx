@@ -74,7 +74,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
 
   const insertMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/admin/certificates/${cert.certId}/claim-insert?format=pdf`);
+      const res = await fetch(`/api/admin/certificates/${cert.certId}/claim-insert?format=pdf`);
       return res.blob();
     },
     onSuccess: (blob: Blob) => {
