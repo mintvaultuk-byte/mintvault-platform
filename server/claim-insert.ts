@@ -262,7 +262,7 @@ export async function generateClaimInsertPNG(
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText(
-    "mintvaultuk.com  \u00b7  MintVault UK",
+    "mintvaultuk.com",
     PX_W / 2,
     footerTextTop,
   );
