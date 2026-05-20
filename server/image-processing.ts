@@ -4,8 +4,15 @@
  */
 import sharp from "sharp";
 
-// Trading card corner radius as percentage of width (~3mm on 63mm card = 4.76%)
-const CARD_CORNER_RADIUS_PCT = 0.048;
+// Trading card corner radius as percentage of the SHORTER dimension.
+// 3% of min(width, height) — e.g. ~46 px on a 1520×2097 image. Spec
+// equivalence: ~3 mm on a 63 mm card is ~4.76%, but at full crop tightness
+// 4.8% × width was visibly eating into the yellow border on real scans
+// (the post-tighten card width is much closer to the actual card edge
+// than the print spec, so the proportion needs to shrink). The min-dim
+// basis also makes the radius behave consistently when the image
+// aspect deviates from the card aspect.
+const CARD_CORNER_RADIUS_PCT = 0.03;
 
 /**
  * Apply rounded-rectangle mask matching card corner radius.
@@ -21,7 +28,7 @@ export async function maskRoundedCorners(inputBuffer: Buffer): Promise<Buffer> {
 
     const w = meta.width;
     const h = meta.height;
-    const r = Math.round(w * CARD_CORNER_RADIUS_PCT);
+    const r = Math.round(Math.min(w, h) * CARD_CORNER_RADIUS_PCT);
 
     const svgMask = Buffer.from(
       `<svg width="${w}" height="${h}"><rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" fill="white"/></svg>`
@@ -766,8 +773,20 @@ function whitewashEdgesBySaturation(
   }
   const borderSat = borderSatN > 0 ? borderSatSum / borderSatN : 0;
 
+  // Floor + ceiling for the adaptive threshold. The floor was raised from
+  // 6 to 12 after MV161 (mat=2.5 border=10.0 → calculated=6) caused 63k
+  // left-edge pixels to be painted — when borderSat is low the gap rule
+  // gives a satStop that's barely above mat noise, and JPEG transition
+  // artefacts get classified as paintable. Below 12 we treat the
+  // calculation as unreliable and fall back to the floor.
+  const SAT_STOP_FLOOR = 12;
+  const SAT_STOP_CEIL = 60;
   const rawSatStop = matSat + (borderSat - matSat) * 0.3;
-  const satStop = Math.max(6, Math.min(60, Math.round(rawSatStop)));
+  const calculatedSatStop = Math.round(rawSatStop);
+  const satStop = Math.max(SAT_STOP_FLOOR, Math.min(SAT_STOP_CEIL, calculatedSatStop));
+  if (calculatedSatStop < SAT_STOP_FLOOR) {
+    console.log(`[whitewash] satStop floored to minimum (calculated=${calculatedSatStop}, floor=${SAT_STOP_FLOOR})${certTag}`);
+  }
   console.log(`[whitewash] adaptive satStop=${satStop} (mat=${matSat.toFixed(1)} border=${borderSat.toFixed(1)})${certTag}`);
 
   // Two-pass edge walk: pass 1 locates the start of the card border using
