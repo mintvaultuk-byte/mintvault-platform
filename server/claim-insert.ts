@@ -146,7 +146,7 @@ export async function generateClaimInsertPNG(
   ctx.font = "900 24px \"Arial Black\", Arial, sans-serif";
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
-  ctx.fillText("UK TRADING CARD AUTHENTICATION REGISTRY", PX_W / 2, subtitleY);
+  ctx.fillText("PROFESSIONAL TRADING CARD GRADING", PX_W / 2, subtitleY);
   ctx.textAlign = "left";
 
   // ── Header gold divider ───────────────────────────────────────────────────────
@@ -165,10 +165,10 @@ export async function generateClaimInsertPNG(
   let y = headerDivY + 22;
 
   // "CLAIM YOUR CARD" (28px) — dark text for inkjet print legibility on white
-  ctx.font = "bold 48px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 32px Arial, Helvetica, sans-serif";
   ctx.fillStyle = DARK;
   ctx.textAlign = "left";
-  ctx.fillText("CLAIM YOUR CARD", contentLeft, y);
+  ctx.fillText("CLAIM YOUR CERTIFICATE", contentLeft, y);
   y += 28 + 20; // 20px gap before next section
 
   // "Certificate No." label (28px Arial Black, pure black)
@@ -203,12 +203,12 @@ export async function generateClaimInsertPNG(
   y += 1 + 14;
 
   // Steps (bold 28px Arial, pure black)
-  ctx.font = "bold 28px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 20px Arial, Helvetica, sans-serif";
   ctx.fillStyle = "#000000";
   const steps = [
     "1. Visit mintvaultuk.com/claim",
-    "2. Enter cert no. & claim code",
-    "3. Verify email to claim ownership",
+    "2. Enter your cert ID and claim code",
+    "3. Verify your email to register ownership",
   ];
   for (const step of steps) {
     ctx.fillText(step, contentLeft, y);
@@ -262,7 +262,7 @@ export async function generateClaimInsertPNG(
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText(
-    "mintvaultuk.com  \u00b7  MintVault UK  \u00b7  UK Trading Card Authentication",
+    "mintvaultuk.com  \u00b7  MintVault UK  \u00b7  Est. 2026",
     PX_W / 2,
     footerTextTop,
   );
