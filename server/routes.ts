@@ -12871,7 +12871,7 @@ Defects (admin-confirmed): ${defectLines}`;
   // Fly proxy's 60s timeout will likely close the client connection
   // before the job finishes; the Node process keeps running and the
   // audit_log row (entity_type='weekly_reel') captures completion.
-  app.post("/api/admin/weekly-reel/generate", requireAuth, async (_req, res) => {
+  app.post("/api/admin/weekly-reel/generate", requireAdmin, async (_req, res) => {
     try {
       const { runWeeklyReel } = await import("./jobs/weekly-reel");
       const result = await runWeeklyReel({ force: true });
