@@ -165,7 +165,7 @@ export async function generateClaimInsertPNG(
   let y = headerDivY + 22;
 
   // "CLAIM YOUR CARD" (28px) — dark text for inkjet print legibility on white
-  ctx.font = "bold 28px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 48px Arial, Helvetica, sans-serif";
   ctx.fillStyle = DARK;
   ctx.textAlign = "left";
   ctx.fillText("CLAIM YOUR CARD", contentLeft, y);
@@ -178,7 +178,7 @@ export async function generateClaimInsertPNG(
   y += 28 + 10; // 10px gap between label and its value
 
   // Certificate value — restored from PR #90: 28pt bold gold.
-  ctx.font = "bold 28px 'Courier New', Courier, monospace";
+  ctx.font = "bold 48px 'Courier New', Courier, monospace";
   ctx.fillStyle = GOLD;
   ctx.fillText(normalCertId, contentLeft, y);
   y += 44 + 14;
@@ -190,7 +190,7 @@ export async function generateClaimInsertPNG(
   y += 28 + 10;
 
   // Claim code value — restored from PR #90: 14pt Courier gold.
-  ctx.font = "bold 14px 'Courier New', Courier, monospace";
+  ctx.font = "bold 36px 'Courier New', Courier, monospace";
   ctx.fillStyle = GOLD;
   ctx.fillText(formattedCode, contentLeft, y);
   y += 48 + 14;
