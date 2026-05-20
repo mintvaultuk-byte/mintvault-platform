@@ -407,7 +407,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
       <>
       <div
         ref={containerRef}
-        className={`relative overflow-hidden rounded-lg select-none ${
+        className={`relative overflow-hidden rounded-[5%] select-none ${
           markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
         }`}
         style={{ aspectRatio: "5/7", maxHeight: maxH }}
@@ -419,8 +419,8 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
         onMouseLeave={handleMouseUp}
       >
         {currentUrl ? (
-          <div className={`relative w-full h-full rounded-[6%] ${markMode ? '' : 'overflow-hidden'}`} style={{ transform: transformStyle, transition: transitionStyle }}>
-            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain rounded-[4%]" draggable={false} />
+          <div className={`relative w-full h-full ${markMode ? '' : 'overflow-hidden'}`} style={{ transform: transformStyle, transition: transitionStyle }}>
+            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain" draggable={false} />
 
             {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
             {showCentering && (() => {
