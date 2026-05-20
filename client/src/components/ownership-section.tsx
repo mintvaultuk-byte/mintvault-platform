@@ -79,7 +79,10 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
     },
     onSuccess: (blob: Blob) => {
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `claim-insert-${cert.certId}.pdf`;
+      a.click();
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates", cert.certId, "ownership"] });
       toast({ title: "Claim insert generated", description: "New claim code created and insert PDF opened." });
     },
