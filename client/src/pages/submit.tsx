@@ -1038,6 +1038,10 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
   const [error, setError] = useState("");
   const [liabilityAccepted, setLiabilityAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // Marketing-feature consent. NEVER pre-checked — strict opt-in only.
+  // Wired to submissions.marketing_feature_consent on POST; backend
+  // writes audit_log on opt-in.
+  const [marketingConsent, setMarketingConsent] = useState(false);
   const flags = useFeatureFlags();
 
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
@@ -1083,6 +1087,7 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
         authReason: state.type === "authentication" ? (state.authReason || undefined) : undefined,
         authConcerns: state.type === "authentication" ? (state.authConcerns || undefined) : undefined,
         revealWrap: state.revealWrap,
+        marketingFeatureConsent: marketingConsent,
       });
       return res.json();
     },
@@ -1222,6 +1227,25 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
             </div>
           </>
         )}
+
+        {/* Marketing-feature opt-in. STRICT opt-in — never pre-checked,
+            never coupled with terms acceptance, never disabled. Submitting
+            without it is allowed. Wired to submissions.marketing_feature_consent;
+            backend writes audit_log on opt-in. */}
+        <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3">
+          <input
+            type="checkbox"
+            id="marketing-consent"
+            checked={marketingConsent}
+            onChange={(e) => setMarketingConsent(e.target.checked)}
+            className="mt-1 accent-[#D4AF37]"
+            data-testid="checkbox-marketing-consent"
+          />
+          <label htmlFor="marketing-consent" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
+            Feature this card in MintVault marketing (social videos, weekly highlights).
+            Your cert ID and grade may be shown publicly. You can withdraw anytime from your account.
+          </label>
+        </div>
 
         <div>
           <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-2">Card Details *</label>

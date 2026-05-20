@@ -1704,6 +1704,7 @@ export async function registerRoutes(
         crossoverCompany, crossoverOriginalGrade, crossoverCertNumber,
         reholderCompany, reholderReason, reholderCondition,
         authReason, authConcerns, revealWrap,
+        marketingFeatureConsent,
         applyCredit, creditType: requestedCreditType,
       } = req.body;
 
@@ -1918,6 +1919,8 @@ export async function registerRoutes(
         authReason: authReason || null,
         authConcerns: authConcerns || null,
         revealWrap: revealWrap === true,
+        marketingFeatureConsent: marketingFeatureConsent === true,
+        marketingFeatureConsentAt: marketingFeatureConsent === true ? new Date() : null,
       });
 
       // Audit log for terms acceptance
@@ -1935,6 +1938,21 @@ export async function registerRoutes(
               userAgent: req.headers["user-agent"]?.slice(0, 200),
               ip: truncateIp(req.ip),
             },
+          });
+        } catch {}
+      }
+
+      // Audit log for marketing-feature consent. Only on opt-in — default
+      // (consent === false) doesn't write a row. Withdrawals are written
+      // by the /api/account/submissions/:id/marketing-consent endpoint.
+      if (marketingFeatureConsent === true) {
+        try {
+          await db.insert(auditLog).values({
+            entityType: "submission",
+            entityId: String(submission.id),
+            action: "marketing_consent_changed",
+            adminUser: null,
+            details: { before: false, after: true, reason: "submission_form" },
           });
         } catch {}
       }
@@ -7198,6 +7216,100 @@ export async function registerRoutes(
     } catch (err) {
       console.error("[customer] submissions error:", err);
       res.status(500).json({ error: "Failed to load submissions." });
+    }
+  });
+
+  // PATCH /api/customer/submissions/:id/marketing-consent — per-card toggle.
+  // Body: { consent: boolean }. Ownership-checked against the session email.
+  // Writes audit_log on every change (both grant + withdrawal), keyed by
+  // submission.id. No-op when consent state matches existing value.
+  app.patch("/api/customer/submissions/:id/marketing-consent", requireCustomer, async (req, res) => {
+    try {
+      const email = req.session.customerEmail!;
+      const subId = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(subId)) return res.status(400).json({ error: "Invalid submission id." });
+      const consent = req.body?.consent === true;
+
+      const rows = (await db.execute(sql`
+        SELECT id, customer_email, marketing_feature_consent, deleted_at
+        FROM submissions WHERE id = ${subId} LIMIT 1
+      `)).rows;
+      const sub = rows[0] as any;
+      if (!sub) return res.status(404).json({ error: "Submission not found." });
+      if (sub.deleted_at) return res.status(404).json({ error: "Submission not found." });
+      if ((sub.customer_email || "").toLowerCase() !== email.toLowerCase()) {
+        return res.status(403).json({ error: "Not your submission." });
+      }
+
+      const before = sub.marketing_feature_consent === true;
+      if (before === consent) {
+        return res.json({ ok: true, changed: false, consent });
+      }
+
+      await db.execute(sql`
+        UPDATE submissions
+        SET marketing_feature_consent = ${consent},
+            marketing_feature_consent_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ${subId}
+      `);
+      await db.insert(auditLog).values({
+        entityType: "submission",
+        entityId: String(subId),
+        action: "marketing_consent_changed",
+        // Spec: admin_user = <user id> — for a customer self-toggle the
+        // actor is the user themselves; we record the session userId if
+        // available, falling back to the email so the actor is traceable.
+        adminUser: (req.session as any).userId ?? email,
+        details: { before, after: consent, reason: consent ? "user_grant" : "user_withdrawal" },
+      });
+      res.json({ ok: true, changed: true, consent });
+    } catch (err: any) {
+      console.error("[marketing-consent] toggle error:", err);
+      res.status(500).json({ error: err?.message ?? "Failed to update consent." });
+    }
+  });
+
+  // POST /api/customer/marketing-consent/withdraw-all — global withdraw.
+  // Flips every active submission for this customer email from true → false
+  // and writes one audit_log row per affected submission. No-op when none
+  // were consented. Idempotent.
+  app.post("/api/customer/marketing-consent/withdraw-all", requireCustomer, async (req, res) => {
+    try {
+      const email = req.session.customerEmail!;
+      const actor = (req.session as any).userId ?? email;
+      const consented = (await db.execute(sql`
+        SELECT id FROM submissions
+        WHERE LOWER(customer_email) = ${email.toLowerCase()}
+          AND marketing_feature_consent = true
+          AND deleted_at IS NULL
+      `)).rows as Array<{ id: number }>;
+
+      if (consented.length === 0) {
+        return res.json({ ok: true, withdrew: 0 });
+      }
+
+      const ids = consented.map(r => r.id);
+      await db.execute(sql`
+        UPDATE submissions
+        SET marketing_feature_consent = false,
+            marketing_feature_consent_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ANY(${ids}::int[])
+      `);
+      for (const subId of ids) {
+        await db.insert(auditLog).values({
+          entityType: "submission",
+          entityId: String(subId),
+          action: "marketing_consent_changed",
+          adminUser: actor,
+          details: { before: true, after: false, reason: "user_withdrawal" },
+        });
+      }
+      res.json({ ok: true, withdrew: ids.length });
+    } catch (err: any) {
+      console.error("[marketing-consent] withdraw-all error:", err);
+      res.status(500).json({ error: err?.message ?? "Failed to withdraw consent." });
     }
   });
 

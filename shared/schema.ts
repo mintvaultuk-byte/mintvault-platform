@@ -191,6 +191,11 @@ export const submissions = pgTable("submissions", {
   termsAcceptedAt: timestamp("terms_accepted_at"),
   termsVersion: text("terms_version"),
   revealWrap: boolean("reveal_wrap").default(false),
+  // Marketing-feature consent — opt-in checkbox on the submit form. NEVER
+  // pre-checked. Withdraw is per-submission or global from /account-settings;
+  // every change writes an audit_log row.
+  marketingFeatureConsent: boolean("marketing_feature_consent").notNull().default(false),
+  marketingFeatureConsentAt: timestamp("marketing_feature_consent_at", { withTimezone: true }),
 });
 
 export const submissionItems = pgTable("submission_items", {

@@ -214,7 +214,8 @@ export class DatabaseStorage implements IStorage {
         terms_accepted, terms_accepted_at, terms_version,
         crossover_company, crossover_original_grade, crossover_cert_number,
         reholder_company, reholder_reason, reholder_condition,
-        auth_reason, auth_concerns, reveal_wrap
+        auth_reason, auth_concerns, reveal_wrap,
+        marketing_feature_consent, marketing_feature_consent_at
       )
       VALUES (
         COALESCE(${data.userId || null}, (SELECT id FROM users LIMIT 1), gen_random_uuid()::text),
@@ -259,7 +260,9 @@ export class DatabaseStorage implements IStorage {
         ${data.reholderCondition || null},
         ${data.authReason || null},
         ${data.authConcerns || null},
-        ${data.revealWrap || false}
+        ${data.revealWrap || false},
+        ${data.marketingFeatureConsent === true},
+        ${data.marketingFeatureConsentAt || null}
       )
       RETURNING *
     `);
@@ -1612,6 +1615,8 @@ export class DatabaseStorage implements IStorage {
       returnTrackingNumber: row.return_tracking_number,
       customerFirstName: row.customer_first_name,
       customerEmail: row.customer_email,
+      marketingFeatureConsent: row.marketing_feature_consent === true,
+      marketingFeatureConsentAt: row.marketing_feature_consent_at,
     }));
   }
 

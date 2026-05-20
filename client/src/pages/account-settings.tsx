@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Eye, EyeOff, Loader2, Lock, Mail, User, Trash2,
-  CheckCircle, AlertTriangle, Settings,
+  CheckCircle, AlertTriangle, Settings, Megaphone,
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 
@@ -27,7 +27,165 @@ function passwordStrength(pw: string): { level: "weak" | "medium" | "strong"; la
   return { level: "strong", label: "Strong", color: "#22c55e" };
 }
 
-type Tab = "profile" | "password" | "email" | "danger";
+type Tab = "profile" | "password" | "email" | "marketing" | "danger";
+
+// Marketing-feature consent — shape mirrors what /api/customer/submissions
+// returns (with the two new columns surfaced via storage.getSubmissionsByEmail).
+interface SubmissionRow {
+  id: number;
+  submissionId: string;
+  status: string;
+  cardCount: number;
+  customerFirstName?: string | null;
+  marketingFeatureConsent: boolean;
+  marketingFeatureConsentAt: string | null;
+  createdAt: string;
+}
+
+function MarketingTab() {
+  const queryClient = useQueryClient();
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [withdrawAllBusy, setWithdrawAllBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: submissions = [], isLoading } = useQuery<SubmissionRow[]>({
+    queryKey: ["/api/customer/submissions"],
+    queryFn: async () => {
+      const r = await fetch("/api/customer/submissions", { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, consent }: { id: number; consent: boolean }) => {
+      const r = await apiRequest(
+        "PATCH",
+        `/api/customer/submissions/${id}/marketing-consent`,
+        { consent },
+      );
+      return r.json();
+    },
+    onSuccess: () => {
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/customer/submissions"] });
+    },
+    onError: (err: any) => setError(err?.message ?? "Failed to update consent."),
+    onSettled: () => setBusyId(null),
+  });
+
+  const withdrawAllMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/customer/marketing-consent/withdraw-all");
+      return r.json();
+    },
+    onSuccess: () => {
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/customer/submissions"] });
+    },
+    onError: (err: any) => setError(err?.message ?? "Failed to withdraw consent."),
+    onSettled: () => setWithdrawAllBusy(false),
+  });
+
+  if (isLoading) {
+    return <div className="flex justify-center py-12"><Loader2 size={24} className="text-[#D4AF37] animate-spin" /></div>;
+  }
+
+  const consentedCount = submissions.filter(s => s.marketingFeatureConsent).length;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Marketing Feature Consent</h2>
+        <p className="text-xs text-[#666666]">
+          Control whether MintVault may feature your cards in marketing (social videos, weekly highlights).
+          Your cert ID and grade may be shown publicly when consent is granted.
+        </p>
+      </div>
+
+      {/* Global withdraw */}
+      <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold text-[#1A1A1A]">Withdraw consent on all submissions</p>
+            <p className="text-xs text-[#888888] mt-0.5">
+              {consentedCount === 0
+                ? "No submissions currently have marketing consent granted."
+                : `${consentedCount} submission${consentedCount === 1 ? "" : "s"} currently consented.`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (consentedCount === 0) return;
+              if (!window.confirm(`Withdraw marketing consent on all ${consentedCount} submission${consentedCount === 1 ? "" : "s"}?`)) return;
+              setWithdrawAllBusy(true);
+              withdrawAllMutation.mutate();
+            }}
+            disabled={consentedCount === 0 || withdrawAllBusy}
+            className="text-xs font-semibold px-4 py-2 rounded-lg border border-red-300 text-red-700 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="btn-withdraw-all"
+          >
+            {withdrawAllBusy ? <Loader2 size={14} className="animate-spin inline" /> : "Withdraw all"}
+          </button>
+        </div>
+      </div>
+
+      {/* Per-submission rows */}
+      <div>
+        <h3 className="text-xs uppercase tracking-wider text-[#888888] font-semibold mb-2">Per submission</h3>
+        {submissions.length === 0 ? (
+          <p className="text-sm text-[#888888]">No submissions yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {submissions.map(sub => {
+              const consented = !!sub.marketingFeatureConsent;
+              const busy = busyId === sub.id || toggleMutation.isPending;
+              return (
+                <li
+                  key={sub.id}
+                  className="flex items-center justify-between gap-3 bg-white border border-[#E8E4DC] rounded-lg px-4 py-3"
+                  data-testid={`marketing-row-${sub.id}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-[#1A1A1A] truncate">{sub.submissionId}</p>
+                    <p className="text-xs text-[#888888]">
+                      {sub.cardCount} card{sub.cardCount === 1 ? "" : "s"} · {sub.status}
+                      {consented && sub.marketingFeatureConsentAt && (
+                        <> · consented {new Date(sub.marketingFeatureConsentAt).toLocaleDateString("en-GB")}</>
+                      )}
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center cursor-pointer gap-2 shrink-0">
+                    <span className="text-xs text-[#666666]">{consented ? "Featured" : "Off"}</span>
+                    <input
+                      type="checkbox"
+                      checked={consented}
+                      disabled={busy}
+                      onChange={(e) => {
+                        setBusyId(sub.id);
+                        toggleMutation.mutate({ id: sub.id, consent: e.target.checked });
+                      }}
+                      className="accent-[#D4AF37] h-4 w-4"
+                      data-testid={`toggle-marketing-${sub.id}`}
+                    />
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Shared field wrapper ───────────────────────────────────────────────────────
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -462,10 +620,11 @@ export default function AccountSettingsPage() {
   }
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "profile",  label: "Profile",       icon: <User size={14} /> },
-    { key: "password", label: "Password",       icon: <Lock size={14} /> },
-    { key: "email",    label: "Email",          icon: <Mail size={14} /> },
-    { key: "danger",   label: "Delete Account", icon: <Trash2 size={14} /> },
+    { key: "profile",   label: "Profile",       icon: <User size={14} /> },
+    { key: "password",  label: "Password",      icon: <Lock size={14} /> },
+    { key: "email",     label: "Email",         icon: <Mail size={14} /> },
+    { key: "marketing", label: "Marketing",     icon: <Megaphone size={14} /> },
+    { key: "danger",    label: "Delete Account", icon: <Trash2 size={14} /> },
   ];
 
   return (
@@ -519,10 +678,11 @@ export default function AccountSettingsPage() {
 
             {/* Panel */}
             <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6 md:p-8">
-              {tab === "profile"  && <ProfileTab me={me} />}
-              {tab === "password" && <PasswordTab />}
-              {tab === "email"    && <EmailTab me={me} />}
-              {tab === "danger"   && <DangerTab />}
+              {tab === "profile"   && <ProfileTab me={me} />}
+              {tab === "password"  && <PasswordTab />}
+              {tab === "email"     && <EmailTab me={me} />}
+              {tab === "marketing" && <MarketingTab />}
+              {tab === "danger"    && <DangerTab />}
             </div>
           </div>
 
