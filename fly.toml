@@ -24,3 +24,7 @@ primary_region = "lhr"  # London — closest to your UK users
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+
+[deploy]
+  strategy = "rolling"
+  wait_timeout = "5m"
