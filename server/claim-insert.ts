@@ -62,16 +62,6 @@ function drawBorderFrame(ctx: any, w: number, h: number) {
   ctx.fillRect(w - bw, 0, bw, h);      // right
 
   // Corner ornaments
-  const cs = 12;
-  const co = bw + 1;
-  ctx.fillStyle = GOLD;
-  const corners = [
-    [co, co], [w - co - cs, co],
-    [co, h - co - cs], [w - co - cs, h - co - cs],
-  ] as [number, number][];
-  for (const [cx, cy] of corners) {
-    ctx.fillRect(cx, cy, cs, cs);
-  }
 }
 
 function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: number) {
