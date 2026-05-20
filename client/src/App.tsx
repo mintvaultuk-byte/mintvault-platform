@@ -111,6 +111,7 @@ import TermsPage from "@/pages/terms";
 import LiabilityPage from "@/pages/liability";
 import AdminPage from "@/pages/admin";
 import AdminInstagramPage from "@/pages/admin-instagram";
+import AdminWeeklyReelPage from "@/pages/admin-weekly-reel";
 import CustomerLoginPage from "@/pages/customer-login";
 import PinSetupPage from "@/pages/auth/pin-setup";
 import PinForgotPage from "@/pages/auth/pin-forgot";
@@ -216,6 +217,9 @@ function Router() {
         </Route>
         <Route path="/admin/instagram">
           <AdminInstagramPage />
+        </Route>
+        <Route path="/admin/weekly-reel">
+          <AdminWeeklyReelPage />
         </Route>
         {/* Admin alias to LogbookPage — same component the public /cert/:id route
             renders. Added in batch 7 follow-up so the IG admin's thumbnail

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
@@ -8,6 +9,7 @@ import {
   FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
   LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
   Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain, Activity, TrendingUp,
+  Film,
 } from "lucide-react";
 import StagingHarnessPanel from "@/components/staging-harness-panel";
 
@@ -446,6 +448,15 @@ function AdminHeader({
               >
                 <Printer size={12} /> Printing
               </button>
+              {/* Standalone nav — Weekly Reel lives at its own route, not as a
+                  dashboard tab, so this is a Link not a tab-switch button. */}
+              <Link
+                href="/admin/weekly-reel"
+                className="text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 text-[#D4AF37]/50 hover:text-[#D4AF37] no-underline"
+                data-testid="link-weekly-reel"
+              >
+                <Film size={12} /> Weekly Reel
+              </Link>
               <button
                 onClick={() => onTabChange("grading")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${

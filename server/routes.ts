@@ -12882,6 +12882,165 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // GET /api/admin/weekly-reel/key-status — does Fly have SEGMIND_API_KEY?
+  // Boolean only; never echoes the key value.
+  app.get("/api/admin/weekly-reel/key-status", requireAdmin, (_req, res) => {
+    res.json({ configured: !!process.env.SEGMIND_API_KEY });
+  });
+
+  // GET /api/admin/weekly-reel/status — last 10 reel runs from audit_log,
+  // joined with the JSON manifest persisted in R2 by the job. Derives a
+  // human status (ok / partial / failed / unknown) from successCount and
+  // failCount in the manifest.
+  //
+  // Coverage gap: the job only writes audit_log on completed runs. Pure
+  // skips (below-floor, segmind-key-missing) won't appear here. If we
+  // need that visibility, add a skip-side audit_log row in the job —
+  // separate task.
+  app.get("/api/admin/weekly-reel/status", requireAdmin, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, entity_id, created_at, details
+        FROM audit_log
+        WHERE entity_type = 'weekly_reel'
+          AND action = 'generated'
+        ORDER BY created_at DESC
+        LIMIT 10
+      `)).rows as Array<{ id: number; entity_id: string; created_at: Date; details: any }>;
+
+      const history = await Promise.all(rows.map(async (row) => {
+        const date = row.entity_id;
+        const manifestKey = `videos/weekly-reels/draft-${date}.json`;
+        let manifest: any = null;
+        try {
+          const url = await getR2SignedUrl(manifestKey, 60);
+          const resp = await fetch(url);
+          if (resp.ok) manifest = await resp.json();
+        } catch {
+          // best-effort — missing manifest doesn't fail the whole list
+        }
+        const cardCount = manifest?.cardCount ?? row.details?.cardCount ?? 0;
+        const successCount = manifest?.successCount ?? row.details?.successCount ?? 0;
+        const failCount = manifest?.failCount ?? row.details?.failCount ?? 0;
+        const status: "ok" | "partial" | "failed" | "unknown" =
+          manifest === null && cardCount === 0 ? "unknown" :
+          successCount > 0 && failCount === 0 ? "ok" :
+          successCount > 0 && failCount > 0 ? "partial" :
+          "failed";
+        return {
+          date,
+          createdAt: row.created_at,
+          status,
+          cardCount,
+          successCount,
+          failCount,
+          manifestKey,
+          manifestPresent: manifest !== null,
+          cards: Array.isArray(manifest?.cards) ? manifest.cards : [],
+        };
+      }));
+
+      res.json({ history });
+    } catch (err: any) {
+      console.error("[weekly-reel] status fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "status fetch failed" });
+    }
+  });
+
+  // GET /api/admin/weekly-reel/consenting-cards — every graded cert whose
+  // submission has marketing_feature_consent=true (no time window filter,
+  // unlike the weekly job's 7-day cutoff). Sorted grade DESC so the most
+  // reel-worthy cards surface first.
+  app.get("/api/admin/weekly-reel/consenting-cards", requireAdmin, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT
+          c.certificate_number       AS cert_number,
+          c.grade::text              AS grade,
+          c.card_name                AS card_name,
+          c.set_name                 AS set_name,
+          c.year_text                AS year_text,
+          s.marketing_feature_consent_at AS consented_at
+        FROM certificates c
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN submissions     s  ON s.id  = si.submission_id
+        WHERE s.marketing_feature_consent = true
+          AND s.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND c.grade_approved_at IS NOT NULL
+        ORDER BY c.grade DESC NULLS LAST, c.grade_approved_at DESC
+      `)).rows as Array<any>;
+      const cards = rows.map((r) => ({
+        certNumber: String(r.cert_number),
+        grade: r.grade != null ? Number(r.grade) : null,
+        cardName: r.card_name ?? null,
+        cardSet: r.set_name ?? null,
+        year: r.year_text ?? null,
+        consentedAt: r.consented_at ?? null,
+      }));
+      res.json({ cards });
+    } catch (err: any) {
+      console.error("[weekly-reel] consenting-cards fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "consenting-cards fetch failed" });
+    }
+  });
+
+  // PATCH /api/admin/weekly-reel/card/:certNumber/consent — admin override
+  // of the submission's marketing_feature_consent. Walks cert → submission
+  // _item → submission. Writes audit_log with before/after +
+  // reason='admin_override'. Idempotent — no-op + no audit row when the
+  // requested state already matches current.
+  app.patch("/api/admin/weekly-reel/card/:certNumber/consent", requireAdmin, async (req, res) => {
+    try {
+      const certNumberRaw = String(req.params.certNumber).trim();
+      if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
+      const consent = req.body?.consent === true;
+
+      const rows = (await db.execute(sql`
+        SELECT s.id AS submission_id, s.marketing_feature_consent
+        FROM certificates c
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN submissions     s  ON s.id  = si.submission_id
+        WHERE c.certificate_number = ${certNumberRaw}
+          AND c.deleted_at IS NULL
+          AND s.deleted_at IS NULL
+        LIMIT 1
+      `)).rows;
+      const cur = rows[0] as any;
+      if (!cur) {
+        return res.status(404).json({ error: "cert not found OR not linked to a submission" });
+      }
+      const submissionId = Number(cur.submission_id);
+      const before = cur.marketing_feature_consent === true;
+
+      if (before === consent) {
+        return res.json({ ok: true, changed: false, consent });
+      }
+
+      await db.execute(sql`
+        UPDATE submissions
+        SET marketing_feature_consent = ${consent},
+            marketing_feature_consent_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ${submissionId}
+      `);
+
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      await db.insert(auditLog).values({
+        entityType: "submission",
+        entityId: String(submissionId),
+        action: "marketing_consent_changed",
+        adminUser: actor,
+        details: { before, after: consent, reason: "admin_override", certNumber: certNumberRaw },
+      });
+
+      res.json({ ok: true, changed: true, consent, submissionId });
+    } catch (err: any) {
+      console.error("[weekly-reel] consent override failed:", err);
+      res.status(500).json({ error: err?.message ?? "consent update failed" });
+    }
+  });
+
   app.patch("/api/admin/ig/queue/:id/skip", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
