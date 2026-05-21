@@ -94,3 +94,11 @@ export function mapToExternalGrades(
 
   return { mintvault: grade, psa, bgs, bgsLabel, tag };
 }
+
+// MVGS scoring engine — peer of mapToExternalGrades. Pure implementation
+// lives in shared/mvgs-scoring.ts so both server (write path) and client
+// (live preview in the grading panel) share one source of truth. Re-
+// exported here so callers importing from this module see the full
+// grading-mapping surface in one place.
+export { computeMvgsScore, mvgsGradeLabel } from "@shared/mvgs-scoring";
+export type { MvgsInput, MvgsResult, MvgsDefect } from "@shared/mvgs-scoring";

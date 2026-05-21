@@ -44,5 +44,18 @@ sold_cache_simple.json
 # Local script outputs (snapshots, dumps, etc.)
 scripts/_snapshots/
 
+# One-off debug / probe / investigation scripts — convention is to prefix
+# the filename with `_` so they're easy to spot and easy to ignore.
+scripts/_*
+server/scripts/
+
+# Backup files
+*.bak
+
+# Local-only working files (per-developer)
+.claude/skills/cornelius-execution-style/
+client/public/images/vault-club-room.webp
+docs/v521-audit.md
+
 # OS
 Thumbs.db

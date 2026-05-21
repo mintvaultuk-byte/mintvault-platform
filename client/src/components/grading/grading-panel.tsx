@@ -19,6 +19,7 @@ import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade, psaCenteringSubgrade } from "./grade-logic";
+import { computeMvgsScore } from "@shared/mvgs-scoring";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -126,6 +127,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [surface, setSurface] = useState<SurfaceValues>(DEFAULT_SURFACE);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [defectCandidates, setDefectCandidates] = useState<DefectCandidate[]>([]);
+  // MVGS admin inputs — persisted on cert via buildPayload → /grade PUT.
+  // dark_border boosts edge-defect weight when whitening (WH) is on the edge.
+  // eye_appeal_modifier is a ±2 finishing tweak applied last in scoring.
+  const [darkBorder, setDarkBorder] = useState(false);
+  const [eyeAppealModifier, setEyeAppealModifier] = useState(0);
   const [authStatus, setAuthStatus]   = useState<AuthStatus>("genuine");
   const [authNotes, setAuthNotes]     = useState("");
   const [privateNotes, setPrivateNotes]         = useState("");
@@ -228,6 +234,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if ((gradingData as any).aiDefectCandidates && Array.isArray((gradingData as any).aiDefectCandidates)) {
       setDefectCandidates((gradingData as any).aiDefectCandidates as DefectCandidate[]);
     }
+    if (typeof (gradingData as any).darkBorder === "boolean") setDarkBorder((gradingData as any).darkBorder);
+    if (typeof (gradingData as any).eyeAppealModifier === "number") setEyeAppealModifier((gradingData as any).eyeAppealModifier);
     if (gradingData.authStatus) setAuthStatus(gradingData.authStatus);
     if (gradingData.authNotes)  setAuthNotes(gradingData.authNotes);
     if (gradingData.privateNotes)   setPrivateNotes(gradingData.privateNotes);
@@ -690,6 +698,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // the unconfirmed remainder is persisted. Sending an empty array clears
     // the column on server side.
     out.ai_defect_candidates = defectCandidates || [];
+
+    // MVGS inputs — boolean / integer, send unconditionally so toggling OFF
+    // actually persists (no false-as-default conflation).
+    out.dark_border = darkBorder;
+    out.eye_appeal_modifier = eyeAppealModifier;
 
     return out;
   }
@@ -1191,6 +1204,76 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               })}
             </div>
           )}
+
+          {/* MVGS controls + live score — visible whenever the panel is in
+              numeric-grade mode. The score updates as defects, centering,
+              dark_border, and eye_appeal_modifier change locally — same
+              pure function (shared/mvgs-scoring.ts) the server runs on
+              approve. */}
+          {!isNonNumeric && (() => {
+            const mvgs = computeMvgsScore({
+              centeringFrontLr: frontLR || null,
+              centeringFrontTb: frontTB || null,
+              centeringBackLr:  backLR  || null,
+              centeringBackTb:  backTB  || null,
+              defects: (defects || [])
+                .filter(d => d.mvgsCode && d.tier && d.zone)
+                .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+              darkBorder,
+              eyeAppealModifier,
+            });
+            return (
+              <div className="bg-[#FAF5E0] border border-[#D4AF37]/40 rounded-lg p-3 space-y-3" data-testid="mvgs-controls">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">MVGS</span>
+                  <span className="text-[#1A1400] text-sm font-bold" data-testid="text-mvgs-score">
+                    {mvgs.score}/100 · {mvgs.grade}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <span className="text-[10px] uppercase tracking-wider text-[#555]">Dark border</span>
+                    <input
+                      type="checkbox"
+                      checked={darkBorder}
+                      onChange={() => setDarkBorder(v => !v)}
+                      className="accent-[#D4AF37] h-4 w-4"
+                      data-testid="check-dark-border"
+                    />
+                  </label>
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-[#555] block mb-1">Eye appeal</span>
+                    <div className="flex gap-1">
+                      {[-2, -1, 0, 1, 2].map(n => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setEyeAppealModifier(n)}
+                          className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${
+                            eyeAppealModifier === n
+                              ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
+                              : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                          }`}
+                          data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
+                        >
+                          {n > 0 ? `+${n}` : n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {Object.keys(mvgs.deductions).length > 0 && (
+                  <div className="text-[10px] text-[#555] font-mono">
+                    {Object.entries(mvgs.deductions).map(([k, v]) => (
+                      <span key={k} className="inline-block mr-2 whitespace-nowrap">
+                        {k}: <span className={v > 0 ? "text-emerald-700" : "text-red-700"}>{v > 0 ? `+${v}` : v}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Grade summary — always visible at top */}
           {!isNonNumeric && (

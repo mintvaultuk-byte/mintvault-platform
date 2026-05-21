@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Shield, Award, Calendar, Layers, Hash, Globe, Tag, CheckCircle, XOctagon, FileText, Wifi, ChevronDown, ChevronUp, ClipboardList, ExternalLink } from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
 import { isNonNumericGrade } from "@shared/schema";
+import { mvgsGradeLabel } from "@shared/mvgs-scoring";
 import SeoHead, { SITE_URL } from "@/components/seo-head";
 
 const CERT_URL_BASE = "https://mintvaultuk.com/cert/";
@@ -352,6 +353,30 @@ export default function CertDetailPage() {
                         <div className="text-[#999999] text-[10px] mt-0.5">{label}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {/* MVGS Score — admin-computed during grading approval. Only
+                    rendered for numeric grades when a score has been written
+                    (so legacy approved certs without MVGS data stay clean). */}
+                {cert.gradeType === "numeric" && cert.gradeStrengthScore != null && (
+                  <div
+                    className="mt-3 max-w-xs mx-auto border border-[#D4AF37]/30 rounded p-2 text-center flex items-center justify-center gap-1.5"
+                    data-testid="mvgs-score-panel"
+                  >
+                    <span
+                      className="text-[#D4AF37] text-sm font-bold"
+                      data-testid="text-mvgs-score"
+                    >
+                      MVGS Score: {cert.gradeStrengthScore}/100 · {mvgsGradeLabel(cert.gradeStrengthScore)}
+                    </span>
+                    <span
+                      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] cursor-help"
+                      title="MVGS = MintVault Grading Standard. Score 0–100 derived from centering, defects, eye appeal, and dark-border modifier."
+                      data-testid="mvgs-tooltip"
+                    >
+                      ?
+                    </span>
                   </div>
                 )}
               </div>

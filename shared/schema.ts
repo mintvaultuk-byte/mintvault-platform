@@ -346,7 +346,29 @@ export const certificates = pgTable("certificates", {
     y_percent?: number;
   }>>().default([]),
   aiDefects: jsonb("ai_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
-  verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
+  // MVGS-classified defect array. Two write paths feed this column:
+  //   1. Legacy: server/routes.ts auto-promotes ai_defects on grade approval
+  //      (shape: {type, severity, x, y, description}) — MVGS fields absent.
+  //   2. New: admin grading UI writes the classified shape with
+  //      {id, mvgsCode, tier, zone, x_percent, y_percent} — MVGS fields present.
+  // MVGS fields are therefore typed optional so both shapes validate; the
+  // scoring engine only looks at pins where mvgsCode + tier + zone are all set.
+  verifiedDefects: jsonb("verified_defects").$type<Array<{
+    // Legacy fields (preserved for backwards compat — never remove).
+    type?: string;
+    severity?: string;
+    x?: number;
+    y?: number;
+    // MVGS fields — present on new classified pins.
+    id?: string;
+    mvgsCode?: "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS" | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
+    tier?: "D1" | "D2" | "D3";
+    zone?: "FA" | "FH" | "FB" | "FC1" | "FC2" | "FC3" | "FC4" | "FE1" | "FE2" | "FE3" | "FE4"
+         | "BA" | "BB" | "BC1" | "BC2" | "BC3" | "BC4" | "BE1" | "BE2" | "BE3" | "BE4";
+    x_percent?: number;
+    y_percent?: number;
+    description?: string;
+  }>>().default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
   // Admin-controlled marketing-pool flag. Distinct from
@@ -403,7 +425,15 @@ export const certificates = pgTable("certificates", {
   // Without these, raw-SQL writes succeed but Drizzle reads return undefined,
   // so the values never round-trip on cert load.
   gradeExplanation:        text("grade_explanation"),
+  // grade_strength_score doubles as the MVGS (MintVault Grading Standard)
+  // score 0–100. Written by the admin grading-panel "Approve" path via the
+  // pure scoring helper in server/mvgs-scoring.ts.
   gradeStrengthScore:      integer("grade_strength_score"),
+  // MVGS inputs — admin-set per cert. dark_border boosts edge-defect weight
+  // when a WH (whitening) defect lands on a dark-border card. eye_appeal_modifier
+  // is the ±2 finishing adjustment applied after all deductions.
+  darkBorder:              boolean("dark_border").notNull().default(false),
+  eyeAppealModifier:       integer("eye_appeal_modifier").notNull().default(0),
   centeringOuterFront:     jsonb("centering_outer_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
   centeringOuterBack:      jsonb("centering_outer_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
   centeringInnerFront:     jsonb("centering_inner_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
@@ -940,6 +970,10 @@ export interface PublicCertificate {
   gradeCorners: string | null;
   gradeEdges: string | null;
   gradeSurface: string | null;
+  // MVGS — admin-computed score 0–100, set on grade approval. Null when
+  // gradeType !== "numeric" or when the cert was approved before MVGS
+  // existed. UI gates rendering on both fields.
+  gradeStrengthScore: number | null;
   frontImageUrl: string | null;
   backImageUrl: string | null;
   gradedDate: string;

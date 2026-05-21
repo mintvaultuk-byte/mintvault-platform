@@ -9,6 +9,71 @@ export interface Defect {
   image_side: string;
   x_percent: number;
   y_percent: number;
+  // MVGS classification — optional so legacy pins (auto-promoted from
+  // ai_defects on grade approval) keep validating. The scoring engine
+  // ignores pins where any of these are missing.
+  tier?: "D1" | "D2" | "D3";
+  mvgsCode?: MvgsCode;
+  zone?: MvgsZone;
+}
+
+export type MvgsCode =
+  | "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS"
+  | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
+
+export type MvgsZone =
+  | "FA" | "FH" | "FB"
+  | "FC1" | "FC2" | "FC3" | "FC4"
+  | "FE1" | "FE2" | "FE3" | "FE4"
+  | "BA" | "BB"
+  | "BC1" | "BC2" | "BC3" | "BC4"
+  | "BE1" | "BE2" | "BE3" | "BE4";
+
+/** MVGS defect-type catalogue with codes + display labels. The picker in
+ *  image-viewer.tsx renders this; the scoring engine in
+ *  server/mvgs-scoring.ts deducts based on the code. */
+export const MVGS_DEFECT_TYPES: Array<{ code: MvgsCode; label: string }> = [
+  { code: "WH", label: "Whitening" },
+  { code: "CH", label: "Chip" },
+  { code: "FR", label: "Fray" },
+  { code: "SC", label: "Scratch (surface)" },
+  { code: "SP", label: "Scratch (gloss-penetrating)" },
+  { code: "PI", label: "Pit / Dent" },
+  { code: "PL", label: "Print Line" },
+  { code: "PS", label: "Print Spot" },
+  { code: "SV", label: "Silvering (holo)" },
+  { code: "ST", label: "Stain" },
+  { code: "GL", label: "Gloss Loss" },
+  { code: "CR", label: "Crease" },
+  { code: "RD", label: "Corner Rounding" },
+  { code: "DG", label: "Corner Ding" },
+  { code: "OC", label: "Off-centre (noted)" },
+];
+
+/** Pure helper — derive the zone code from pin coordinates + image side per
+ *  the MVGS spec: corner if two edge bands intersect, edge if one, art
+ *  zone otherwise. Holo (FH) and border-surface (FB / BB) zones aren't
+ *  auto-derivable from coords alone; admin can correct manually. */
+export function deriveZone(opts: { xPercent: number; yPercent: number; imageSide: string }): MvgsZone {
+  const isFront = String(opts.imageSide).toLowerCase() !== "back";
+  const x = opts.xPercent;
+  const y = opts.yPercent;
+  const leftBand = x < 15;
+  const rightBand = x > 85;
+  const topBand = y < 15;
+  const bottomBand = y > 85;
+  // Corners — two bands meet.
+  if (topBand && leftBand)  return isFront ? "FC1" : "BC1";
+  if (topBand && rightBand) return isFront ? "FC2" : "BC2";
+  if (bottomBand && rightBand) return isFront ? "FC3" : "BC3";
+  if (bottomBand && leftBand)  return isFront ? "FC4" : "BC4";
+  // Edges — single band.
+  if (topBand)    return isFront ? "FE1" : "BE1";
+  if (rightBand)  return isFront ? "FE2" : "BE2";
+  if (bottomBand) return isFront ? "FE3" : "BE3";
+  if (leftBand)   return isFront ? "FE4" : "BE4";
+  // Interior — art zone by default.
+  return isFront ? "FA" : "BA";
 }
 
 /** AI-suggested defect candidate. Same field shape as Defect but unconfirmed

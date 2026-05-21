@@ -246,6 +246,7 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
     gradeCorners: c.gradeCorners != null ? String(c.gradeCorners) : null,
     gradeEdges: c.gradeEdges != null ? String(c.gradeEdges) : null,
     gradeSurface: c.gradeSurface != null ? String(c.gradeSurface) : null,
+    gradeStrengthScore: c.gradeStrengthScore != null ? Number(c.gradeStrengthScore) : null,
     frontImageUrl: frontUrl,
     backImageUrl: backUrl,
     gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
@@ -2686,7 +2687,37 @@ export async function registerRoutes(
         return isNaN(n) ? null : n;
       };
 
-      // Promote ai_defects → verified_defects on grade approval (if not already set)
+      // ── MVGS scoring on approve ──────────────────────────────────────────
+      // Cert state (defects, dark_border, eye_appeal_modifier, centering
+      // ratios) was already saved by the grading-panel /grade PUT before
+      // the operator hit Approve. Re-read the relevant columns and run the
+      // pure scoring helper. Result lands in grade_strength_score.
+      //
+      // verified_defects gets the MVGS-classified pins from the `defects`
+      // column when any are classified (any pin with mvgsCode+tier+zone);
+      // otherwise falls through to the legacy auto-promote-from-ai-defects
+      // behaviour so existing flows keep working.
+      const { computeMvgsScore } = await import("./mvgs-scoring");
+      const savedDefects: any[] = Array.isArray((cert as any).defects) ? (cert as any).defects : [];
+      const mvgsPins = savedDefects
+        .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+        .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
+      let mvgsScore: number | null = null;
+      if (!isNonNum) {
+        const r = computeMvgsScore({
+          centeringFrontLr: (cert as any).centeringFrontLr ?? null,
+          centeringFrontTb: (cert as any).centeringFrontTb ?? null,
+          centeringBackLr:  (cert as any).centeringBackLr ?? null,
+          centeringBackTb:  (cert as any).centeringBackTb ?? null,
+          defects: mvgsPins,
+          darkBorder: !!(cert as any).darkBorder,
+          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
+        });
+        mvgsScore = r.score;
+      }
+      const useMvgsClassifiedVerified = mvgsPins.length > 0;
+      const mvgsVerifiedJson = useMvgsClassifiedVerified ? JSON.stringify(savedDefects) : null;
+
       await db.execute(sql`
         UPDATE certificates SET
           grade_type        = ${finalGradeType},
@@ -2699,11 +2730,16 @@ export async function registerRoutes(
           grade_approved_by = ${"Cornelius Oliver"},
           grade_approved_at = NOW(),
           status            = 'active',
-          verified_defects  = CASE
-            WHEN verified_defects IS NULL OR verified_defects = '[]'::jsonb
-            THEN COALESCE(ai_defects, '[]'::jsonb)
-            ELSE verified_defects
-          END,
+          grade_strength_score = ${isNonNum ? sql`grade_strength_score` : sql`${mvgsScore}::int`},
+          verified_defects  = ${
+            useMvgsClassifiedVerified
+              ? sql`${mvgsVerifiedJson}::jsonb`
+              : sql`CASE
+                  WHEN verified_defects IS NULL OR verified_defects = '[]'::jsonb
+                  THEN COALESCE(ai_defects, '[]'::jsonb)
+                  ELSE verified_defects
+                END`
+          },
           grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at        = NOW()
         WHERE id = ${id}
@@ -8251,6 +8287,9 @@ Defects (admin-confirmed): ${defectLines}`;
         gradeApprovedBy:  c.gradeApprovedBy  || null,
         gradeApprovedAt:  c.gradeApprovedAt  || null,
         gradeStrengthScore: c.gradeStrengthScore ?? null,
+        // MVGS admin inputs — hydrated into grading-panel local state on load.
+        darkBorder:        !!c.darkBorder,
+        eyeAppealModifier: Number(c.eyeAppealModifier ?? 0) || 0,
         // Saved aggregate subgrades for hydration on reload. Field names below
         // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
         // map to corners_score/edges_score/surface_score). Pre-v408 the
@@ -8344,6 +8383,18 @@ Defects (admin-confirmed): ${defectLines}`;
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
+          dark_border         = ${
+            typeof b.dark_border === "boolean" ? b.dark_border : sql`dark_border`
+          },
+          eye_appeal_modifier = ${
+            // Clamp ±2 server-side; ignore non-finite payloads.
+            (() => {
+              const n = Number(b.eye_appeal_modifier);
+              if (!Number.isFinite(n)) return sql`eye_appeal_modifier`;
+              const clamped = Math.max(-2, Math.min(2, Math.trunc(n)));
+              return sql`${clamped}`;
+            })()
+          },
           updated_at          = NOW()
         WHERE id = ${id}
       `);

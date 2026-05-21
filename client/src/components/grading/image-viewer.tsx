@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2, Crop } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
-import { DEFECT_TYPES } from "./defect-annotation";
-import type { Defect } from "./defect-annotation";
+import { DEFECT_TYPES, MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
+import type { Defect, MvgsCode } from "./defect-annotation";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -194,6 +194,9 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   const [pendingBatch, setPendingBatch] = useState<PendingPin[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ pxX: number; pxY: number; xPct: number; yPct: number } | null>(null);
+  // MVGS tier selection inside the picker — defaults to D2 (most common
+  // mid-tier) so a single click + type pick can commit the batch.
+  const [pickerTier, setPickerTier] = useState<"D1" | "D2" | "D3">("D2");
   const lastClickTimeRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgElRef = useRef<HTMLImageElement>(null);
@@ -301,23 +304,33 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     setPickerOpen(true);
   }
 
-  function commitBatch(typeName: string) {
+  function commitBatch(opts: { mvgsCode: MvgsCode; label: string; tier: "D1" | "D2" | "D3" }) {
     let nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
     for (const pin of pendingBatch) {
+      // Auto-derive zone from coords + side per the MVGS spec. Admin can
+      // hand-edit later via the defect-annotation list if needed.
+      const zone = deriveZone({ xPercent: pin.x, yPercent: pin.y, imageSide: pin.image_side });
       onDefectAdded({
         id: nextId++,
-        type: typeName,
+        // Legacy fields preserved for backwards compat — readers of d.type /
+        // d.severity continue to work.
+        type: opts.label,
         severity: "moderate",
         description: "",
         location: pin.location,
         image_side: pin.image_side,
         x_percent: pin.x,
         y_percent: pin.y,
+        // MVGS fields — drive the scoring engine.
+        mvgsCode: opts.mvgsCode,
+        tier: opts.tier,
+        zone,
       });
     }
     setPendingBatch([]);
     setPickerOpen(false);
     setPickerAnchor(null);
+    setPickerTier("D2");
     // Stay in markMode so admin can start the next batch immediately.
   }
 
@@ -674,7 +687,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                 onClick={e => e.stopPropagation()}
               >
                 <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect type ({pendingBatch.length})</span>
+                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect ({pendingBatch.length})</span>
                   <button
                     type="button"
                     onClick={cancelBatch}
@@ -684,15 +697,37 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                     <X size={12} />
                   </button>
                 </div>
-                <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 36 }}>
-                  {DEFECT_TYPES.map(t => (
+                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-white">
+                  <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">Tier</div>
+                  <div className="flex gap-1">
+                    {(["D1","D2","D3"] as const).map(t => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setPickerTier(t)}
+                        className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
+                          pickerTier === t
+                            ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
+                            : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                        }`}
+                        data-testid={`btn-tier-${t}`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 90 }}>
+                  {MVGS_DEFECT_TYPES.map(t => (
                     <button
-                      key={t}
+                      key={t.code}
                       type="button"
-                      onClick={() => commitBatch(t)}
-                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors"
+                      onClick={() => commitBatch({ mvgsCode: t.code, label: t.label, tier: pickerTier })}
+                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors flex items-center justify-between gap-2"
+                      data-testid={`mvgs-pick-${t.code}`}
                     >
-                      {t}
+                      <span>{t.label}</span>
+                      <span className="font-mono text-[10px] text-[#888]">{t.code}</span>
                     </button>
                   ))}
                 </div>
