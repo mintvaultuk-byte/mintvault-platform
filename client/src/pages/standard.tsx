@@ -72,7 +72,7 @@ export default function StandardPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-[#ccc]">
       <SeoHead
-        title="MintVault Grading Standard (MVGS) | MintVault"
+        title="MVGS | MintVault Grading Standard"
         description="The open, transparent grading specification for trading cards. MintVault is the reference implementation and founding body. Free to adopt and self-certify."
         canonical="/standard"
       />
