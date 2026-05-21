@@ -193,15 +193,35 @@ function remainingToGrade(remaining: number): number {
 }
 
 /**
- * Per the floor-rule spec: when finalGrade is capped, we let the cappedScore
- * sit at the top of the next-up label bracket. So gradeBracketTop[N] ≠ "top
- * of grade N's range" — it's "the max score allowed when the floor caps the
- * card at grade N." Half-grades 9.5/8.5/7.5 are direct lookups; half-grades
- * below 7 (2.5, 3.5, …) aren't keyed and fall through to floor lookup.
+ * Top of each label bracket — the highest score that gradeLabelForScore
+ * returns the matching label for. When the floor rule caps finalGrade at
+ * grade N, the cappedScore drops to GRADE_BRACKET_TOP[N] so the displayed
+ * label matches finalGrade exactly.
+ *
+ * The previous version offset each entry by +5 ("top of the next-up
+ * bracket") which meant capping at 7.5 produced a cappedScore of 75 — and
+ * gradeLabelForScore(75) is "NM-Mint 8", not "NM+ 7.5". That mis-display
+ * was the bug fixed here: now strict per-bracket.
+ *
+ * Half-grades below 7 (2.5, 3.5, ...) have no label bracket of their own
+ * (gradeLabelForScore brackets only support half-grades from 7.5 up), so
+ * they fall through to the integer-floor lookup. E.g. finalGrade 2.5 →
+ * bracketTopFor(2.5) = GRADE_BRACKET_TOP[2] = 20 → "Fair 2".
  */
 const GRADE_BRACKET_TOP: Record<number, number> = {
-  10: 100, 9.5: 95, 9: 90, 8.5: 85, 8: 80, 7.5: 75,
-  7: 70, 6: 65, 5: 60, 4: 50, 3: 40, 2: 30, 1: 20,
+  10:  100,  // top of "Pristine 10P" range (96-100); also covers "Gem Mint 10"
+  9.5:  90,  // top of "Mint+ 9.5" (86-90)
+  9:    85,  // top of "Mint 9" (81-85)
+  8.5:  80,  // top of "NM-Mint+ 8.5" (76-80)
+  8:    75,  // top of "NM-Mint 8" (71-75)
+  7.5:  70,  // top of "NM+ 7.5" (66-70)
+  7:    65,  // top of "Near Mint 7" (61-65)
+  6:    60,  // top of "Excellent-Mint 6" (51-60)
+  5:    50,  // top of "Excellent 5" (41-50)
+  4:    40,  // top of "Very Good-Excellent 4" (31-40)
+  3:    30,  // top of "Good 3" (21-30)
+  2:    20,  // top of "Fair 2" (11-20)
+  1:    10,  // top of "Poor 1" (1-10)
 };
 function bracketTopFor(grade: number): number {
   if (GRADE_BRACKET_TOP[grade] !== undefined) return GRADE_BRACKET_TOP[grade];
