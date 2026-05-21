@@ -15,10 +15,13 @@
  * Deduction tables and grade brackets follow the MVGS spec exactly:
  *   - Centering front bucket (worst of LR vs TB), 0..-20
  *   - Centering back bucket  (worst of LR vs TB), 0..-5
- *   - Corner defects: D1/D2/D3 weights, half on back, capped at -25 total
- *   - Edge defects: D1/D2 weights, half on back, capped at -25 total
+ *   - Corner defects: D1 -4/-2, D2 -2/-1, D3 -0.5/-0.25 (front/back),
+ *     capped at -25 total
+ *   - Edge defects: D1 -3/-2, D2 -1/-0.5, D3 -0.5/-0.25 (front/back),
+ *     capped at -25 total
  *     · Dark border + WH (whitening): multiply that defect's deduction ×1.25
- *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier
+ *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
+ *     capped at -25 total
  *     · CR D1 (crease) sets a hard cap of 74 on the final score
  *     · SP D1 in art/holo zone (FA/FH) multiplies ×1.5
  *   - Eye appeal modifier added last, clamped ±2
@@ -96,8 +99,9 @@ function cornerDeduction(d: MvgsDefect): number {
   const isFront = FRONT_CORNER_ZONES.has(d.zone);
   const isBack  = BACK_CORNER_ZONES.has(d.zone);
   if (!isFront && !isBack) return 0;
-  if (d.tier === "D1") return isFront ? -4 : -2;
-  if (d.tier === "D2") return isFront ? -2 : -1;
+  if (d.tier === "D1") return isFront ? -4   : -2;
+  if (d.tier === "D2") return isFront ? -2   : -1;
+  if (d.tier === "D3") return isFront ? -0.5 : -0.25;
   return 0;
 }
 
@@ -106,9 +110,13 @@ function edgeDeduction(d: MvgsDefect, darkBorder: boolean): number {
   const isBack  = BACK_EDGE_ZONES.has(d.zone);
   if (!isFront && !isBack) return 0;
   let base = 0;
-  if (d.tier === "D1") base = isFront ? -3 : -2;
-  else if (d.tier === "D2") base = isFront ? -1 : -0.5;
+  if (d.tier === "D1")      base = isFront ? -3   : -2;
+  else if (d.tier === "D2") base = isFront ? -1   : -0.5;
+  else if (d.tier === "D3") base = isFront ? -0.5 : -0.25;
   else return 0;
+  // Dark-border + WH multiplier applies to whatever base the tier produced
+  // (D1/D2/D3) — kept after the tier branch so D3 whitening on a dark border
+  // still gets the ×1.25 boost.
   if (darkBorder && d.mvgsCode === "WH") base = base * 1.25;
   return base;
 }
@@ -201,7 +209,8 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   if (edgeSum < -25) edgeSum = -25;
   if (edgeSum !== 0) deductions.edges = edgeSum;
 
-  // Surface — no documented cap; CR D1 forces a hard 74 cap on the final.
+  // Surface — capped at -25 same as corners/edges. CR D1 also forces a
+  // hard 74 cap on the final score (applied below after totals sum).
   let surfaceSum = 0;
   let surfaceForceCap = false;
   for (const d of input.defects) {
@@ -209,6 +218,7 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
     surfaceSum += r.deduction;
     if (r.forceCap74) surfaceForceCap = true;
   }
+  if (surfaceSum < -25) surfaceSum = -25;
   if (surfaceSum !== 0) deductions.surface = surfaceSum;
 
   // Eye appeal modifier — clamped ±2.
