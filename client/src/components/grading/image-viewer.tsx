@@ -116,12 +116,17 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   // Stores the defect id rather than the whole defect so we always read fresh
   // values from the live `defects` array (avoids stale closures during edit).
   const [editingDefectId, setEditingDefectId] = useState<number | null>(null);
+  // Viewport-space rect of the marker the popover is anchored to. Captured
+  // at click time so the popover (which renders via portal into document.body
+  // to escape the image container's stacking context + overflow:hidden) can
+  // position itself with `position: fixed` against the marker's screen coords.
+  const [editingDefectAnchor, setEditingDefectAnchor] = useState<DOMRect | null>(null);
   // Close popover on ESC. Plus a no-op cleanup when popover is closed —
   // the listener bind/unbind is cheap.
   useEffect(() => {
     if (editingDefectId == null) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setEditingDefectId(null);
+      if (e.key === "Escape") { setEditingDefectId(null); setEditingDefectAnchor(null); }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -137,6 +142,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     if (!onDefectsChange) return;
     onDefectsChange(defects.filter(d => d.id !== id));
     setEditingDefectId(null);
+    setEditingDefectAnchor(null);
   }
 
   const [internalSide, setSideRaw] = useState<Side>("front");
@@ -523,7 +529,20 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                     {clickable ? (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setEditingDefectId(isEditing ? null : d.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isEditing) {
+                            setEditingDefectId(null);
+                            setEditingDefectAnchor(null);
+                          } else {
+                            // Capture the marker's viewport rect so the
+                            // portal'd popover can position itself in fixed
+                            // coordinates. currentTarget is the marker button;
+                            // its bounding rect matches the visible marker.
+                            setEditingDefectAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
+                            setEditingDefectId(d.id);
+                          }
+                        }}
                         title={`Defect ${badge}: ${d.type}, ${d.severity}`}
                         aria-label={`Defect ${badge}: ${d.type}, ${d.severity}. Click to edit or delete.`}
                         className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
@@ -540,14 +559,15 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
                       style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{badge}</span>
 
                     {/* Inline edit/delete popover */}
-                    {isEditing && (
+                    {isEditing && editingDefectAnchor && (
                       <DefectEditPopover
                         defect={d}
                         badge={badge}
                         anchorAbove={popoverAbove}
+                        anchorRect={editingDefectAnchor}
                         onChangeField={(k, v) => updateDefectField(d.id, k, v)}
                         onDelete={() => deleteDefect(d.id)}
-                        onClose={() => setEditingDefectId(null)}
+                        onClose={() => { setEditingDefectId(null); setEditingDefectAnchor(null); }}
                       />
                     )}
                   </div>
@@ -875,11 +895,12 @@ function locationFromPercent(x: number, y: number, side: string): string {
 // the marker stays visible. Click-outside closes via a capture-phase mousedown
 // listener; ESC handled by the parent.
 function DefectEditPopover({
-  defect, badge, anchorAbove, onChangeField, onDelete, onClose,
+  defect, badge, anchorAbove, anchorRect, onChangeField, onDelete, onClose,
 }: {
   defect: Defect;
   badge: string;
   anchorAbove: boolean;
+  anchorRect: DOMRect;
   onChangeField: <K extends keyof Defect>(key: K, value: Defect[K]) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -896,19 +917,33 @@ function DefectEditPopover({
     return () => document.removeEventListener("mousedown", onDown, true);
   }, [onClose]);
 
-  // Position: anchored so the marker sits at one edge. Marker is 32px so
-  // 20px gap clears it cleanly.
-  const verticalCss = anchorAbove
-    ? { bottom: "calc(100% + 20px)" }
-    : { top:    "calc(100% + 20px)" };
+  // Position in viewport-fixed coords against the marker's rect, then portal
+  // into document.body. The marker's parent (image container) has
+  // `transform: scale(...)` (creates a stacking context) AND `overflow: hidden`
+  // — without portaling, the popover would either render below the image OR
+  // get clipped off the edge of the visible area. Same pattern as the picker
+  // dropdown earlier in this file (~L670).
+  //
+  // GAP = 20px clears the 32px marker cleanly. Width = 256 (Tailwind w-64).
+  // Clamp to viewport edges with 8px padding so the popover never slides
+  // off-screen on the right or bottom.
+  const GAP = 20;
+  const POP_W = 256;
+  const POP_H_EST = 360; // upper-bound for flip-decision clamping
+  const markerCenterX = anchorRect.left + anchorRect.width / 2;
+  const leftRaw = markerCenterX - POP_W / 2;
+  const left = Math.max(8, Math.min(window.innerWidth - POP_W - 8, leftRaw));
+  const top = anchorAbove
+    ? Math.max(8, anchorRect.top - GAP - POP_H_EST)
+    : Math.min(window.innerHeight - POP_H_EST - 8, anchorRect.bottom + GAP);
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       role="dialog"
       aria-label={`Edit defect ${badge}`}
-      className="absolute left-1/2 -translate-x-1/2 z-50 w-64 bg-white border border-[#D4AF37]/60 rounded-lg shadow-xl p-3 space-y-2 text-left"
-      style={verticalCss}
+      className="fixed z-[10000] w-64 bg-white border border-[#D4AF37]/60 rounded-lg shadow-xl p-3 space-y-2 text-left"
+      style={{ left, top }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between">
@@ -973,6 +1008,7 @@ function DefectEditPopover({
           Done
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
