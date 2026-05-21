@@ -333,13 +333,13 @@ export default function StandardPage() {
                   <tr>
                     <td className={tdCls}>Front corners</td>
                     <td className={codeCls}>-4</td>
-                    <td className={codeCls}>-2</td>
+                    <td className={codeCls}>-0.50</td>
                     <td className={codeCls}>0</td>
                   </tr>
                   <tr>
                     <td className={tdCls}>Back corners</td>
                     <td className={codeCls}>-2</td>
-                    <td className={codeCls}>-1</td>
+                    <td className={codeCls}>-0.25</td>
                     <td className={codeCls}>0</td>
                   </tr>
                 </tbody>
@@ -361,13 +361,13 @@ export default function StandardPage() {
                   <tr>
                     <td className={tdCls}>Front edges</td>
                     <td className={codeCls}>-3</td>
-                    <td className={codeCls}>-1</td>
+                    <td className={codeCls}>-0.50</td>
                     <td className={codeCls}>0</td>
                   </tr>
                   <tr>
                     <td className={tdCls}>Back edges</td>
                     <td className={codeCls}>-2</td>
-                    <td className={codeCls}>-0.5</td>
+                    <td className={codeCls}>-0.25</td>
                     <td className={codeCls}>0</td>
                   </tr>
                 </tbody>
@@ -425,10 +425,11 @@ export default function StandardPage() {
                 </thead>
                 <tbody>
                   {[
-                    { c: "PL", l: "Print Line",          v: "-1 pt" },
-                    { c: "PS", l: "Print Spot",          v: "-0.5 pts" },
-                    { c: "PI", l: "Pit / Dent",          v: "-1 pt" },
-                    { c: "SC", l: "Scratch (surface)",   v: "-1 pt" },
+                    { c: "PL", l: "Print Line",          v: "-0.50 pts" },
+                    { c: "PS", l: "Print Spot",          v: "-0.25 pts" },
+                    { c: "PI", l: "Pit / Dent",          v: "-0.50 pts" },
+                    { c: "SC", l: "Scratch (surface)",   v: "-0.50 pts" },
+                    { c: "WH", l: "Whitening",           v: "-0.50 pts" },
                   ].map(({ c, l, v }) => (
                     <tr key={c}>
                       <td className={codeCls}>{c}</td>
@@ -447,6 +448,23 @@ export default function StandardPage() {
             <p className={`${para} mt-2 text-xs italic`}>
               <strong className="text-[#D4AF37]/80 not-italic">Back surface:</strong>{" "}
               all surface deductions × 0.5.
+            </p>
+
+            <h3 className={subTitle}>Overall Grade Floor Rule</h3>
+            <p className={`${para} mb-3`}>
+              The overall grade cannot exceed the lowest MVGS category subgrade
+              plus 0.5. If the gap between the lowest and all other subgrades
+              is less than 4 aggregate points, the overall equals the lowest
+              subgrade exactly — no bump.
+            </p>
+            <p className={`${para} mb-3`}>
+              Example: a card with Centering 10, Corners 10, Edges 2,
+              Surface 10 cannot grade overall higher than 2.5. A single
+              destroyed category is never hidden by strong scores elsewhere.
+            </p>
+            <p className={para}>
+              This mirrors the BGS published algorithm — the most trusted
+              formula in the industry.
             </p>
           </section>
 
@@ -497,6 +515,18 @@ export default function StandardPage() {
               </Link>
             </div>
           </section>
+        </div>
+
+        {/* MVGS version lock — quiet footer note; spec lineage in case a
+            future revision changes weights / rules. Issued certificates
+            stay bound to the version active at grading time. */}
+        <div className="text-center mt-12 space-y-1.5 text-[10px] text-[#666] leading-relaxed">
+          <p>MVGS v1.0 · Published 21 May 2026 · MintVault UK Ltd.</p>
+          <p>
+            Grades issued under MVGS v1.0 are certified to this specification.
+            Future revisions carry a new version number and do not retroactively
+            alter issued certificates.
+          </p>
         </div>
       </div>
     </div>
