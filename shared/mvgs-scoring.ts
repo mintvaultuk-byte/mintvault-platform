@@ -242,3 +242,28 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
 // Convenience re-export of the grade-label lookup so the UI can label an
 // already-computed score without going through the full pipeline.
 export { gradeLabelForScore as mvgsGradeLabel };
+
+/**
+ * Numeric 1-10 grade that corresponds to a 0-100 MVGS score. Mirrors the
+ * brackets in gradeLabelForScore — Pristine 10P collapses to grade 10
+ * (the "P" suffix is a label-only distinction, not a separate grade).
+ *
+ * Used by the admin grading panel to substitute the AI/manual overall
+ * grade with the MVGS-derived grade when defects have been MVGS-classified.
+ */
+export function gradeFromMvgsScore(score: number): number {
+  if (score >= 96) return 10;     // Pristine 10P → 10
+  if (score >= 91) return 10;     // Gem Mint 10
+  if (score >= 86) return 9.5;    // Mint+ 9.5
+  if (score >= 81) return 9;      // Mint 9
+  if (score >= 76) return 8.5;    // NM-Mint+ 8.5
+  if (score >= 71) return 8;      // NM-Mint 8
+  if (score >= 66) return 7.5;    // NM+ 7.5
+  if (score >= 61) return 7;      // Near Mint 7
+  if (score >= 51) return 6;      // Excellent-Mint 6
+  if (score >= 41) return 5;      // Excellent 5
+  if (score >= 31) return 4;      // Very Good-Excellent 4
+  if (score >= 21) return 3;      // Good 3
+  if (score >= 11) return 2;      // Fair 2
+  return 1;                       // Poor 1
+}

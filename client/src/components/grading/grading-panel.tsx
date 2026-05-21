@@ -19,7 +19,7 @@ import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade, psaCenteringSubgrade } from "./grade-logic";
-import { computeMvgsScore } from "@shared/mvgs-scoring";
+import { computeMvgsScore, gradeFromMvgsScore } from "@shared/mvgs-scoring";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -56,6 +56,32 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
        "Reprocess"}
     </button>
   );
+}
+
+/**
+ * Map MVGS remaining-points-in-category (0..25) to a 1-10 subgrade. Each
+ * scoring category (centering / corners / edges / surface) has a 25-pt
+ * budget; this helper buckets the leftover into the 10-step subgrade scale.
+ *
+ * Brackets per MVGS spec:
+ *   23-25 → 10   17-19 → 8   11-13 → 6   5-7 → 4   1-2 → 2
+ *   20-22 →  9   14-16 → 7    8-10 → 5   3-4 → 3   0   → 1
+ *
+ * Implemented with descending `>=` thresholds so non-integer remainders
+ * (e.g. edges 2.5 from a 22.5-pt deduction) deterministically bucket
+ * down: 2.5 ∈ [1, 3) → grade 2.
+ */
+function mvgsRemainingToGrade(remaining: number): number {
+  if (remaining >= 23) return 10;
+  if (remaining >= 20) return 9;
+  if (remaining >= 17) return 8;
+  if (remaining >= 14) return 7;
+  if (remaining >= 11) return 6;
+  if (remaining >= 8)  return 5;
+  if (remaining >= 5)  return 4;
+  if (remaining >= 3)  return 3;
+  if (remaining >= 1)  return 2;
+  return 1;
 }
 
 interface Props {
@@ -636,8 +662,53 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const cornersZonesSet = Object.values(corners).filter(v => typeof v === "number" && v > 0).length;
   const edgesZonesSet   = Object.values(edges).filter(v => typeof v === "number" && v > 0).length;
 
-  const sub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
-  const overall = overallOverride ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+  // AI / manual subgrades — produced from the steppers + AI baseline +
+  // per-zone arrays. Used as the displayed subs when NO MVGS pins are
+  // classified, and as the input to calculateOverallGrade in the same case.
+  const aiSub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
+
+  // MVGS-derived overall — once any defect has been MVGS-classified
+  // (mvgsCode set), the MVGS scoring engine becomes authoritative for both
+  // the four subgrade chips AND the headline overall grade. Admin's
+  // explicit overallOverride still wins over MVGS, which wins over AI.
+  const mvgsForOverall = computeMvgsScore({
+    centeringFrontLr: frontLR || null,
+    centeringFrontTb: frontTB || null,
+    centeringBackLr:  backLR  || null,
+    centeringBackTb:  backTB  || null,
+    defects: (defects || [])
+      .filter(d => d.mvgsCode && d.tier && d.zone)
+      .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+    darkBorder,
+    eyeAppealModifier,
+  });
+  const hasMvgsPins = (defects || []).some(d => d.mvgsCode);
+
+  // MVGS subgrades — each category has a 25-pt budget; remaining points
+  // bucket to 1-10. Centering's budget spans the combined front+back
+  // deductions (front max -20, back max -5, total max -25). The three
+  // other categories cap at -25 inside the scoring engine, so remaining ≥ 0.
+  const mvgsCenteringGrade = mvgsRemainingToGrade(
+    25
+    - Math.abs(mvgsForOverall.deductions.centering_front ?? 0)
+    - Math.abs(mvgsForOverall.deductions.centering_back  ?? 0)
+  );
+  const mvgsCornersGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.corners ?? 0));
+  const mvgsEdgesGrade   = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges   ?? 0));
+  const mvgsSurfaceGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.surface ?? 0));
+
+  // Displayed + saved subs: MVGS when any pin is MVGS-classified, AI/manual
+  // otherwise. Feeds GradeDisplay's subgrade chips, isBlackLabel(), and
+  // (via sub.* in buildPayload below) the approve-payload's grade_centering/
+  // grade_corners/grade_edges/grade_surface fields.
+  const sub = hasMvgsPins
+    ? { centering: mvgsCenteringGrade, corners: mvgsCornersGrade, edges: mvgsEdgesGrade, surface: mvgsSurfaceGrade }
+    : aiSub;
+
+  const mvgsGrade = (hasMvgsPins && mvgsForOverall.score != null)
+    ? gradeFromMvgsScore(mvgsForOverall.score)
+    : null;
+  const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
 
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
@@ -662,13 +733,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     };
 
     // Subgrade scalars — omit if 0/null (zone state at empty default).
+    // Reads from `sub` so the MVGS-derived subgrades ship to the server when
+    // any defect is MVGS-classified; falls back to AI/manual subgrades
+    // otherwise (sub === aiSub when hasMvgsPins is false).
     const sendNum = (key: string, val: number | null | undefined) => {
       if (val != null && !isNaN(val) && val > 0) out[key] = val;
     };
-    sendNum("grade_centering", centering);
-    sendNum("grade_corners",   cornersGrade);
-    sendNum("grade_edges",     edgesGrade);
-    sendNum("grade_surface",   surfaceGrade);
+    sendNum("grade_centering", sub.centering);
+    sendNum("grade_corners",   sub.corners);
+    sendNum("grade_edges",     sub.edges);
+    sendNum("grade_surface",   sub.surface);
 
     // Centering ratios — omit if empty.
     const sendTxt = (key: string, val: string | null | undefined) => {
