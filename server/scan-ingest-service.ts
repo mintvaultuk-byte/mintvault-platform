@@ -9,7 +9,7 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2 } from "./r2";
-import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, suggestDefectsFromBuffer, gradeCardFromBuffer, type EnrichedCardData, type DefectCandidate, type AiGrading } from "./ai-grading-service";
+import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, gradeCardFromBuffer, type EnrichedCardData, type AiGrading } from "./ai-grading-service";
 
 /**
  * Create a new certificate for an admin scan.
@@ -224,11 +224,15 @@ export async function uploadImagesToCert(
 }
 
 /**
- * Option A: scan-time AI runs three Haiku 4.5 calls in parallel —
- * identification, defect candidates, and per-zone grading. The grading
- * pre-populates the form so the admin reviews + verifies + approves
- * rather than starting from zero. Marketing positioning: "AI-graded,
- * human-verified".
+ * Option A (fast path): scan-time AI runs two Haiku 4.5 calls in parallel —
+ * identification and quick per-zone grading (centering + corners + edges +
+ * surface). The quick grade pre-populates the form so the admin reviews +
+ * verifies + approves rather than starting from zero.
+ *
+ * Defect candidates are NOT generated automatically on ingest — that's the
+ * slowest Haiku call (~5–10s) and the admin triggers it manually from the
+ * grading panel ("Detect Defects" / "Run All" / "Analyze with AI (Full)").
+ * Skipping it here roughly halves ingest latency.
  *
  * Returns identification fields for the response payload; grade reflects
  * the AI's overall_grade (admin can override pre-approve).
@@ -246,11 +250,10 @@ export async function runAiOnCert(
     if (row?.certificate_number) certTag = row.certificate_number;
   } catch { /* best-effort — fall back to numeric id */ }
 
-  // Three parallel Haiku calls. All three Haiku, no shared rate-limit
-  // contention beyond what rateLimit() already enforces.
-  const [identification, defectCandidates, aiGrading] = await Promise.all([
+  // Two parallel Haiku calls — identify + quick grade. Defect suggestion is
+  // deferred to the admin's manual trigger to keep ingest fast.
+  const [identification, aiGrading] = await Promise.all([
     identifyCardFromBuffer(frontCropped, "image/jpeg", certTag),
-    suggestDefectsFromBuffer(frontCropped, backCropped, certTag),
     gradeCardFromBuffer(frontCropped, backCropped, certTag),
   ]);
 
@@ -332,10 +335,11 @@ export async function runAiOnCert(
     aiAnalysisPayload.grading = aiGrading;
   }
 
+  // ai_defect_candidates intentionally NOT written here — the manual
+  // "Detect Defects" endpoint owns that column on first user trigger.
   await db.execute(sql`
     UPDATE certificates SET
       ai_analysis = ${JSON.stringify(aiAnalysisPayload)}::jsonb,
-      ai_defect_candidates = ${JSON.stringify(defectCandidates)}::jsonb,
       card_name = CASE WHEN card_name IS NULL OR card_name = '' THEN ${cardName} ELSE card_name END,
       set_name = CASE WHEN set_name IS NULL OR set_name = '' THEN ${setName} ELSE set_name END,
       card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
@@ -421,14 +425,11 @@ export async function runAiOnCert(
       'system',
       ${JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        operations: aiGrading
-          ? ["identify", "suggest_defects", "grade"]
-          : ["identify", "suggest_defects"],
+        operations: aiGrading ? ["identify", "grade"] : ["identify"],
         identification_confidence: aiConfidence,
         tcg_verified: tcgVerified,
         card_game: cardGame,
         card_name: cardName,
-        defect_candidate_count: defectCandidates.length,
         ai_grading_overall: aiGrading?.overall_grade ?? null,
         ai_grading_overall_confidence: aiGrading?.confidence?.overall ?? null,
         ai_grading_persisted: gradeWritten,
@@ -438,7 +439,7 @@ export async function runAiOnCert(
   `);
 
   const overallReturned = aiGrading?.overall_grade ?? null;
-  console.log(`[scan-ingest] cert=${certId}: Option-A AI complete — card="${cardName}" game=${cardGame} candidates=${defectCandidates.length} overall=${overallReturned} graded=${gradeWritten}`);
+  console.log(`[scan-ingest] cert=${certId}: Option-A AI complete (fast path, no defects) — card="${cardName}" game=${cardGame} overall=${overallReturned} graded=${gradeWritten}`);
   return { cardName, grade: overallReturned, strengthScore: null };
 }
 
