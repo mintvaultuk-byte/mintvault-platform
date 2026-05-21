@@ -336,7 +336,20 @@ export default function CertDetailPage() {
                   </div>
                 )}
                 <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
-                  {displayedGrade != null ? cert.grade : "\u00a0"}
+                  {displayedGrade != null
+                    ? (
+                        // Pristine 10P override \u2014 a perfect-score 10 (MVGS \u2265 96)
+                        // is the highest MVGS bracket. Falls back to cert.grade
+                        // (e.g. "GEM MINT") for everything else, including 10s
+                        // that didn't make 96. Big number stays "10".
+                        cert.gradeType === "numeric"
+                          && cert.gradeNumeric === 10
+                          && cert.gradeStrengthScore != null
+                          && cert.gradeStrengthScore >= 96
+                          ? "PRISTINE 10P"
+                          : cert.grade
+                      )
+                    : "\u00a0"}
                 </div>
 
                 {/* Subgrades (screen) */}

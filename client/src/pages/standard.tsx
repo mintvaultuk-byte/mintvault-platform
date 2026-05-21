@@ -159,7 +159,9 @@ export default function StandardPage() {
               ))}
             </ul>
             <p className={`${para} mb-3`}>
-              The score maps to the familiar 1–10 grade:
+              The score maps to the familiar 1–10 grade. Within a grade, the
+              score shows strength — a 94/100 and a 91/100 are both Gem
+              Mint 10, but the score differentiates them:
             </p>
             <div className={tableWrap}>
               <table className={tableCls}>
@@ -304,9 +306,153 @@ export default function StandardPage() {
             </div>
           </section>
 
+          {/* ── 6. Corner / Edge / Surface deductions ─────────────────
+                 Mirrors the per-defect tables in shared/mvgs-scoring.ts.
+                 Numbers are static documentation; the scoring engine is
+                 the source of truth at runtime. */}
+          <section id="defects-scoring">
+            <h2 className={sectionTitle}>6. Corner, Edge &amp; Surface Deductions</h2>
+            <p className={`${para} mb-4`}>
+              Each defect on the card is classified by code and tier, then
+              its location decides which deduction table applies. Deductions
+              are cumulative within each category and capped at -25 points.
+            </p>
+
+            <h3 className={subTitle}>Corners — per pin, max -25 total</h3>
+            <div className={tableWrap}>
+              <table className={tableCls}>
+                <thead>
+                  <tr>
+                    <th className={thCls}>Side</th>
+                    <th className={thCls}>D1</th>
+                    <th className={thCls}>D2</th>
+                    <th className={thCls}>D3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className={tdCls}>Front corners</td>
+                    <td className={codeCls}>-4</td>
+                    <td className={codeCls}>-2</td>
+                    <td className={codeCls}>0</td>
+                  </tr>
+                  <tr>
+                    <td className={tdCls}>Back corners</td>
+                    <td className={codeCls}>-2</td>
+                    <td className={codeCls}>-1</td>
+                    <td className={codeCls}>0</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className={subTitle}>Edges — per pin, max -25 total</h3>
+            <div className={tableWrap}>
+              <table className={tableCls}>
+                <thead>
+                  <tr>
+                    <th className={thCls}>Side</th>
+                    <th className={thCls}>D1</th>
+                    <th className={thCls}>D2</th>
+                    <th className={thCls}>D3</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className={tdCls}>Front edges</td>
+                    <td className={codeCls}>-3</td>
+                    <td className={codeCls}>-1</td>
+                    <td className={codeCls}>0</td>
+                  </tr>
+                  <tr>
+                    <td className={tdCls}>Back edges</td>
+                    <td className={codeCls}>-2</td>
+                    <td className={codeCls}>-0.5</td>
+                    <td className={codeCls}>0</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className={`${para} mt-3 text-xs italic`}>
+              <strong className="text-[#D4AF37]/80 not-italic">Dark-border note:</strong>{" "}
+              <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered
+              cards apply a ×1.25 multiplier to that edge deduction.
+            </p>
+
+            <h3 className={subTitle}>Surface — per pin, max -25 total</h3>
+            <p className={`${para} mb-2`}>
+              <strong className="text-[#ccc]">D1 defects</strong>
+            </p>
+            <div className={tableWrap}>
+              <table className={tableCls}>
+                <thead>
+                  <tr>
+                    <th className={thCls}>Code</th>
+                    <th className={thCls}>Defect</th>
+                    <th className={thCls}>Front</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { c: "SP", l: "Scratch (gloss-penetrating)", v: "-4 pts (×1.5 in art/holo zone)" },
+                    { c: "CR", l: "Crease",                       v: "-10 pts + hard cap: final score ≤ 74" },
+                    { c: "SC", l: "Scratch (surface)",            v: "-2 pts" },
+                    { c: "SV", l: "Silvering (holo)",             v: "-3 pts" },
+                    { c: "ST", l: "Stain",                        v: "-2 pts" },
+                    { c: "GL", l: "Gloss Loss",                   v: "-4 pts" },
+                  ].map(({ c, l, v }) => (
+                    <tr key={c}>
+                      <td className={codeCls}>{c}</td>
+                      <td className={tdCls}>{l}</td>
+                      <td className={tdCls}>{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className={`${para} mb-2 mt-4`}>
+              <strong className="text-[#ccc]">D2 defects</strong>
+            </p>
+            <div className={tableWrap}>
+              <table className={tableCls}>
+                <thead>
+                  <tr>
+                    <th className={thCls}>Code</th>
+                    <th className={thCls}>Defect</th>
+                    <th className={thCls}>Front</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { c: "PL", l: "Print Line",          v: "-1 pt" },
+                    { c: "PS", l: "Print Spot",          v: "-0.5 pts" },
+                    { c: "PI", l: "Pit / Dent",          v: "-1 pt" },
+                    { c: "SC", l: "Scratch (surface)",   v: "-1 pt" },
+                  ].map(({ c, l, v }) => (
+                    <tr key={c}>
+                      <td className={codeCls}>{c}</td>
+                      <td className={tdCls}>{l}</td>
+                      <td className={tdCls}>{v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className={`${para} mt-4 text-xs`}>
+              <strong className="text-[#ccc]">D3 defects:</strong> 0 pts (factory origin,
+              documented only).
+            </p>
+            <p className={`${para} mt-2 text-xs italic`}>
+              <strong className="text-[#D4AF37]/80 not-italic">Back surface:</strong>{" "}
+              all surface deductions × 0.5.
+            </p>
+          </section>
+
           {/* ── 7. Anti-fraud fingerprint ────────────────────────────── */}
           <section id="fingerprint">
-            <h2 className={sectionTitle}>6. Anti-Fraud: MVGS Authenticity Fingerprint</h2>
+            <h2 className={sectionTitle}>7. Anti-Fraud: MVGS Authenticity Fingerprint</h2>
             <p className={`${para} mb-3`}>
               The defect map published on every certificate is unique to that
               card. The combination of defect codes, zone placements, and pin
