@@ -11224,6 +11224,64 @@ Defects (admin-confirmed): ${defectLines}`;
           size_in_bytes:     file.size,
         });
 
+        // ── Post-save: run the same crop + AI pipeline scan-ingest uses ──
+        // Without this, the cert has the raw original in R2 but no display
+        // PNG, no AI variants, and AI grading is never queued — so the
+        // workstation viewer is blank and the grade stays at "—". Mirrors
+        // PUT /attach-images, which calls uploadImagesToCert + AI for new
+        // certs that get image attachments from the admin UI.
+        //
+        // uploadImagesToCert requires the FRONT original (back-only certs
+        // can't go through the pipeline). When the operator uploads back
+        // first, we skip with pipeline_status='skipped-no-front' — the
+        // operator's subsequent front upload will trigger the full pipeline
+        // for both sides.
+        let pipelineStatus: "ok" | "skipped-no-front" | "failed" = "skipped-no-front";
+        let pipelineError: string | null = null;
+        let aiTriggered = false;
+
+        const frontKeyAfter = side === "front" ? newKey : (cert.grading_front_original as string | null);
+        const backKeyAfter  = side === "back"  ? newKey : (cert.grading_back_original  as string | null);
+
+        if (frontKeyAfter) {
+          try {
+            // Fetch buffers — the just-uploaded side is already in memory
+            // as jpegBuf; the other side comes from R2.
+            const fetchR2Buf = async (key: string): Promise<Buffer> => {
+              const url = await getR2SignedUrl(key, 300);
+              const resp = await fetch(url);
+              if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
+              return Buffer.from(await resp.arrayBuffer());
+            };
+            const frontBuf: Buffer = side === "front" ? jpegBuf : await fetchR2Buf(frontKeyAfter);
+            const backBuf: Buffer | null = !backKeyAfter
+              ? null
+              : side === "back"
+                ? jpegBuf
+                : await fetchR2Buf(backKeyAfter);
+
+            const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
+            const { frontVariants, backVariants } = await uploadImagesToCert(cert.id, frontBuf, backBuf);
+            pipelineStatus = "ok";
+            console.log(`[cert-image-attach] pipeline ok for cert ${cert.id} (${certId}) side=${side}`);
+
+            const aiPromise = runAiOnCertIfIdle(cert.id, frontVariants.cropped, backVariants?.cropped || null);
+            if (aiPromise) {
+              aiTriggered = true;
+              aiPromise
+                .then(r => console.log(`[cert-image-attach] AI done for cert ${cert.id}: grade=${r?.grade}`))
+                .catch(e => console.warn(`[cert-image-attach] AI failed for cert ${cert.id}:`, e?.message || e));
+            }
+          } catch (err: any) {
+            // Original is saved on R2 + the column is updated — pipeline
+            // failure doesn't undo that. Return 200 with the failure flagged
+            // so the caller can decide (e.g. re-run /reprocess-images).
+            pipelineStatus = "failed";
+            pipelineError  = err?.message || String(err);
+            console.error(`[cert-image-attach] pipeline failed for cert ${cert.id}:`, pipelineError);
+          }
+        }
+
         res.json({
           ok:       true,
           cert_id:  certId,
@@ -11231,6 +11289,9 @@ Defects (admin-confirmed): ${defectLines}`;
           new_key:  newKey,
           previous_key: previousKey,
           replaced: !!previousKey,
+          pipeline_status: pipelineStatus,
+          pipeline_error:  pipelineError,
+          ai_triggered:    aiTriggered,
         });
       } catch (err: any) {
         console.error("[cert-image-attach] failed:", err);
