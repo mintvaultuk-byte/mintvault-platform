@@ -224,18 +224,18 @@ export async function uploadImagesToCert(
 }
 
 /**
- * Option A (fast path): scan-time AI runs two Haiku 4.5 calls in parallel —
- * identification and quick per-zone grading (centering + corners + edges +
- * surface). The quick grade pre-populates the form so the admin reviews +
- * verifies + approves rather than starting from zero.
+ * Option A (minimum fast path): scan-time AI runs two Haiku 4.5 calls in
+ * parallel — identification and centering measurement. The Haiku grade
+ * call (gradeCardFromBuffer) is the only fast Haiku route that returns
+ * centering data, so we still invoke it; but we only persist the
+ * centering portion of its response on ingest. Corners/edges/surface/
+ * overall are deferred to the admin's manual triggers from the grading
+ * panel ("Detect Defects" / "Run All" / "Analyze with AI (Full)").
  *
- * Defect candidates are NOT generated automatically on ingest — that's the
- * slowest Haiku call (~5–10s) and the admin triggers it manually from the
- * grading panel ("Detect Defects" / "Run All" / "Analyze with AI (Full)").
- * Skipping it here roughly halves ingest latency.
+ * Defect candidates are not generated automatically here either.
  *
- * Returns identification fields for the response payload; grade reflects
- * the AI's overall_grade (admin can override pre-approve).
+ * Returns identification fields for the response payload; grade is null
+ * on the fast path (admin's manual grade trigger fills it in).
  */
 export async function runAiOnCert(
   certId: number,
@@ -250,8 +250,10 @@ export async function runAiOnCert(
     if (row?.certificate_number) certTag = row.certificate_number;
   } catch { /* best-effort — fall back to numeric id */ }
 
-  // Two parallel Haiku calls — identify + quick grade. Defect suggestion is
-  // deferred to the admin's manual trigger to keep ingest fast.
+  // Two parallel Haiku calls — identify + the grade call (used here only
+  // to extract centering; full grade is deferred to the admin's manual
+  // trigger). gradeCardFromBuffer is the only Haiku route that returns
+  // centering data; we discard corners/edges/surface/overall below.
   const [identification, aiGrading] = await Promise.all([
     identifyCardFromBuffer(frontCropped, "image/jpeg", certTag),
     gradeCardFromBuffer(frontCropped, backCropped, certTag),
@@ -322,17 +324,18 @@ export async function runAiOnCert(
     }
   }
 
-  // Step 4: Save identification + defect candidates first (always safe to
-  // overwrite — these are non-graded metadata). ai_analysis carries the
-  // identification snapshot AND the AI grading payload (when successful)
-  // alongside the model/pipeline tag.
+  // Step 4: Save identification (always safe to overwrite — non-graded
+  // metadata). ai_analysis carries the identification snapshot and, when
+  // available, just the centering portion of the Haiku grade response.
+  // The rest of the grade payload (corners/edges/surface/overall) is
+  // discarded here so ai_analysis honestly reflects what got persisted.
   const aiAnalysisPayload: Record<string, unknown> = {
     identification: enrichedId,
     model: "claude-haiku-4-5-20251001",
-    pipeline: "option_a",
+    pipeline: "option_a_fast",
   };
   if (aiGrading) {
-    aiAnalysisPayload.grading = aiGrading;
+    aiAnalysisPayload.centering = aiGrading.centering;
   }
 
   // ai_defect_candidates intentionally NOT written here — the manual
@@ -350,67 +353,30 @@ export async function runAiOnCert(
     WHERE id = ${certId}
   `);
 
-  // Step 5: Persist AI grading values into the per-zone columns. Gated on
-  // `grade_approved_at IS NULL` — re-scanning an already-approved cert
-  // must NEVER overwrite the published grade. The CASE WHEN is column-
-  // level too, but the WHERE gate is the durable safety net: if a row
-  // has been approved, this UPDATE simply doesn't fire.
-  let gradeWritten = false;
+  // Step 5: Persist ONLY centering on the fast path. Per-zone grading
+  // (corners/edges/surface) and ai_draft_grade are deliberately not written
+  // on ingest — the admin triggers those manually via the grading panel
+  // (Detect Defects / Run All / Analyze with AI (Full)).
+  //
+  // Gated on `grade_approved_at IS NULL` — re-scanning an already-approved
+  // cert must NEVER overwrite the published grade. centering_score column
+  // is also CASE-guarded so we don't clobber a value the admin already
+  // chose during their first review pass.
+  let centeringWritten = false;
   if (aiGrading) {
-    const cornerValues = {
-      frontTL: aiGrading.corners.front_top_left,
-      frontTR: aiGrading.corners.front_top_right,
-      frontBL: aiGrading.corners.front_bottom_left,
-      frontBR: aiGrading.corners.front_bottom_right,
-      backTL:  aiGrading.corners.back_top_left,
-      backTR:  aiGrading.corners.back_top_right,
-      backBL:  aiGrading.corners.back_bottom_left,
-      backBR:  aiGrading.corners.back_bottom_right,
-    };
-    const edgeValues = {
-      frontTop:    aiGrading.edges.front_top,
-      frontRight:  aiGrading.edges.front_right,
-      frontBottom: aiGrading.edges.front_bottom,
-      frontLeft:   aiGrading.edges.front_left,
-      backTop:     aiGrading.edges.back_top,
-      backRight:   aiGrading.edges.back_right,
-      backBottom:  aiGrading.edges.back_bottom,
-      backLeft:    aiGrading.edges.back_left,
-    };
-    const surfaceValues = {
-      front: aiGrading.surface.front_grade,
-      back:  aiGrading.surface.back_grade,
-      hasPrintLines:       aiGrading.surface.has_print_lines       || false,
-      hasHoloScratches:    aiGrading.surface.has_holo_scratches    || false,
-      hasSurfaceScratches: aiGrading.surface.has_surface_scratches || false,
-      hasStaining:         aiGrading.surface.has_staining          || false,
-      hasIndentation:      false,
-      hasRollerMarks:      false,
-      hasColorRegistration: false,
-      hasCrease:           aiGrading.surface.has_crease            || false,
-      hasTear:             aiGrading.surface.has_tear              || false,
-    };
-
     const result = await db.execute(sql`
       UPDATE certificates SET
-        corner_values        = ${JSON.stringify(cornerValues)}::jsonb,
-        edge_values          = ${JSON.stringify(edgeValues)}::jsonb,
-        surface_values       = ${JSON.stringify(surfaceValues)}::jsonb,
-        centering_score      = ${aiGrading.centering.subgrade}::numeric,
-        corners_score        = ${aiGrading.corners.subgrade}::numeric,
-        edges_score          = ${aiGrading.edges.subgrade}::numeric,
-        surface_score        = ${aiGrading.surface.subgrade}::numeric,
-        centering_front_lr   = COALESCE(${aiGrading.centering.front_left_right}, centering_front_lr),
-        centering_front_tb   = COALESCE(${aiGrading.centering.front_top_bottom}, centering_front_tb),
-        centering_back_lr    = COALESCE(${aiGrading.centering.back_left_right},  centering_back_lr),
-        centering_back_tb    = COALESCE(${aiGrading.centering.back_top_bottom},  centering_back_tb),
-        ai_draft_grade       = ${aiGrading.overall_grade}::numeric,
-        updated_at           = NOW()
+        centering_score    = CASE WHEN centering_score IS NULL THEN ${aiGrading.centering.subgrade}::numeric ELSE centering_score END,
+        centering_front_lr = COALESCE(${aiGrading.centering.front_left_right}, centering_front_lr),
+        centering_front_tb = COALESCE(${aiGrading.centering.front_top_bottom}, centering_front_tb),
+        centering_back_lr  = COALESCE(${aiGrading.centering.back_left_right},  centering_back_lr),
+        centering_back_tb  = COALESCE(${aiGrading.centering.back_top_bottom},  centering_back_tb),
+        updated_at         = NOW()
       WHERE id = ${certId} AND grade_approved_at IS NULL
     `);
-    gradeWritten = (result.rowCount ?? 0) > 0;
-    if (!gradeWritten) {
-      console.log(`[scan-ingest] cert=${certId}: cert already approved — AI grading written to ai_analysis only, per-zone columns preserved`);
+    centeringWritten = (result.rowCount ?? 0) > 0;
+    if (!centeringWritten) {
+      console.log(`[scan-ingest] cert=${certId}: cert already approved — centering skipped, ai_analysis snapshot only`);
     }
   }
 
@@ -425,22 +391,22 @@ export async function runAiOnCert(
       'system',
       ${JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        operations: aiGrading ? ["identify", "grade"] : ["identify"],
+        pipeline: "option_a_fast",
+        operations: aiGrading ? ["identify", "centering"] : ["identify"],
         identification_confidence: aiConfidence,
         tcg_verified: tcgVerified,
         card_game: cardGame,
         card_name: cardName,
-        ai_grading_overall: aiGrading?.overall_grade ?? null,
-        ai_grading_overall_confidence: aiGrading?.confidence?.overall ?? null,
-        ai_grading_persisted: gradeWritten,
+        centering_subgrade: aiGrading?.centering?.subgrade ?? null,
+        centering_persisted: centeringWritten,
       })}::jsonb,
       NOW()
     )
   `);
 
-  const overallReturned = aiGrading?.overall_grade ?? null;
-  console.log(`[scan-ingest] cert=${certId}: Option-A AI complete (fast path, no defects) — card="${cardName}" game=${cardGame} overall=${overallReturned} graded=${gradeWritten}`);
-  return { cardName, grade: overallReturned, strengthScore: null };
+  const centeringSubgrade = aiGrading?.centering?.subgrade ?? null;
+  console.log(`[scan-ingest] cert=${certId}: Option-A fast-path complete (identify + centering only) — card="${cardName}" game=${cardGame} centering=${centeringSubgrade} persisted=${centeringWritten}`);
+  return { cardName, grade: null, strengthScore: null };
 }
 
 // ── Auto-trigger gate ──────────────────────────────────────────────────────
