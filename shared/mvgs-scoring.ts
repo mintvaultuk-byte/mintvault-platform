@@ -15,9 +15,9 @@
  * Deduction tables and grade brackets follow the MVGS spec exactly:
  *   - Centering front bucket (worst of LR vs TB), 0..-20
  *   - Centering back bucket  (worst of LR vs TB), 0..-5
- *   - Corner defects: D1 -4/-2, D2 -0.5/-0.25, D3 -0.5/-0.25 (front/back),
+ *   - Corner defects: D1 -4/-2, D2 -0.5/-0.25, D3 0 (front/back),
  *     capped at -25 total
- *   - Edge defects: D1 -3/-2, D2 -0.5/-0.25, D3 -0.5/-0.25 (front/back),
+ *   - Edge defects: D1 -3/-2, D2 -0.5/-0.25, D3 0 (front/back),
  *     capped at -25 total
  *     · Dark border + WH (whitening): multiply that defect's deduction ×1.25
  *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
@@ -105,7 +105,7 @@ function cornerDeduction(d: MvgsDefect): number {
   if (!isFront && !isBack) return 0;
   if (d.tier === "D1") return isFront ? -4    : -2;
   if (d.tier === "D2") return isFront ? -0.5  : -0.25;
-  if (d.tier === "D3") return isFront ? -0.5  : -0.25;
+  if (d.tier === "D3") return 0;  // Factory — documented only, no deduction.
   return 0;
 }
 
@@ -116,11 +116,12 @@ function edgeDeduction(d: MvgsDefect, darkBorder: boolean): number {
   let base = 0;
   if (d.tier === "D1")      base = isFront ? -3   : -2;
   else if (d.tier === "D2") base = isFront ? -0.5 : -0.25;
-  else if (d.tier === "D3") base = isFront ? -0.5 : -0.25;
+  // D3: Factory — documented only, no deduction (matches the published
+  // standard at /standard). Falling through to return 0 here also skips
+  // the dark-border WH multiplier below, which is correct: 0 × 1.25 = 0.
   else return 0;
   // Dark-border + WH multiplier applies to whatever base the tier produced
-  // (D1/D2/D3) — kept after the tier branch so D3 whitening on a dark border
-  // still gets the ×1.25 boost.
+  // (D1/D2 only after the D3-returns-zero change above).
   if (darkBorder && d.mvgsCode === "WH") base = base * 1.25;
   return base;
 }
