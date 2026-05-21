@@ -16,7 +16,7 @@ const FEATURES = [
   {
     icon: <Shield size={20} className="text-[#B8960C]" />,
     title: "Centering Diagram",
-    desc: "Technical blueprint showing exact L/R and T/B border ratios, with PSA and Black Label threshold checks.",
+    desc: "Technical blueprint showing exact L/R and T/B border ratios, with PSA and Pristine 10P threshold checks.",
   },
   {
     icon: <Users size={20} className="text-[#B8960C]" />,

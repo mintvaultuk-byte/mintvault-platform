@@ -99,7 +99,7 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
       {isBlack && (
         <div className="flex items-center justify-center gap-2 border border-[#D4AF37]/50 rounded-lg px-3 py-2 bg-[#D4AF37]/10 animate-pulse">
           <Star size={14} className="text-[#D4AF37] fill-[#D4AF37]" />
-          <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Black Label Candidate</span>
+          <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Pristine 10P Candidate</span>
         </div>
       )}
 

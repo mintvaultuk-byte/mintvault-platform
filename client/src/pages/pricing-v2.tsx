@@ -483,7 +483,7 @@ function SectionAHero() {
             Grade it once.<br />Get it right.
           </h1>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 17, lineHeight: 1.6, maxWidth: 540, marginBottom: 32, color: V.inkSoft }}>
-            Three tiers, 5 to 40 working day turnaround, same four-point inspection on every card. Black Label upgrade when your card earns it — free, never sold.
+            Three tiers, 5 to 40 working day turnaround, same four-point inspection on every card. Pristine 10P upgrade when your card earns it — free, never sold.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, backgroundColor: V.ink, color: V.paper, textDecoration: "none" }}>
@@ -494,7 +494,7 @@ function SectionAHero() {
             </a>
           </div>
           <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-            From £19 · 3 tiers · Free Black Label upgrade
+            From £19 · 3 tiers · Free Pristine 10P upgrade
           </p>
         </div>
         <HeroSlabFan slabs={tierSlabs} />
@@ -693,13 +693,13 @@ function SectionI() {
 
         <div style={{ marginTop: 64, maxWidth: 768, marginInline: "auto", textAlign: "center" }}>
           <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.3em", marginBottom: 12, color: V.goldSoft }}>
-            Black Label · Earned, not sold
+            Pristine 10P · Earned, not sold
           </p>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.5rem, 2.5vw, 1.875rem)", lineHeight: 1.3, marginBottom: 12, color: "#FFFFFF" }}>
             When every subgrade scores a 10, the slab upgrades automatically.
           </p>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, color: "rgba(255,255,255,0.6)" }}>
-            Black Label is MintVault's top-tier finish — a visual signal that a card hit perfect across centering, corners, edges, and surface. There's no separate fee, no form to tick. If it earns it, you get it.
+            Pristine 10P is MintVault's top-tier finish — a visual signal that a card hit perfect across centering, corners, edges, and surface. There's no separate fee, no form to tick. If it earns it, you get it.
           </p>
         </div>
       </div>
@@ -1017,7 +1017,7 @@ function FAQItem({ q, a, index }) {
 function SectionVII() {
   const items = [
     { q: "Why only three tiers? What happened to Gold?", a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork." },
-    { q: "Is Black Label a paid upgrade?", a: "No. Black Label is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There's no extra charge, no form to tick. If your card earns it, you get it." },
+    { q: "Is Pristine 10P a paid upgrade?", a: "No. Pristine 10P is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There's no extra charge, no form to tick. If your card earns it, you get it." },
     { q: "Are cards insured in transit?", a: "Yes. All return shipping is Royal Mail Special Delivery with cover matched to your declared-value tier. Incoming shipping is your responsibility, but we recommend Royal Mail Special Delivery for anything above £100." },
     { q: "Do you grade cards other than Pokémon?", a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you're unsure, submit anyway — we'll flag it before grading if we can't authenticate." },
   ];

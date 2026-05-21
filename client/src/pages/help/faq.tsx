@@ -19,7 +19,7 @@ const FAQ_DATA: FAQGroup[] = [
     category: "Submission",
     items: [
       { q: "How do I submit cards for grading?", a: `Choose your service tier on our Pricing page, then click Submit Cards. You'll receive a submission reference number. Place each card in a penny sleeve and semi-rigid card saver, pack securely, and post to ${POSTAL_ADDRESS_INLINE}, including your order number inside.` },
-      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. Black Label is a free automatic upgrade when every subgrade scores a 10 — no separate tier or fee." },
+      { q: "What's the turnaround time?", a: "Turnaround times are measured from the day we receive your cards. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. Pristine 10P is a free automatic upgrade when every subgrade scores a 10 — no separate tier or fee." },
       { q: "How much does grading cost?", a: "Vault Queue grading is £19 per card. Standard is £25 per card. Express is £45 per card. Full pricing including bulk discounts is on our Pricing page." },
       { q: "What payment methods do you accept?", a: "We accept all major credit and debit cards via Stripe. Payment is taken at the time of submission. We do not currently accept bank transfer or PayPal." },
       { q: "Can I track my submission?", a: "Yes. Visit the Track Submission page and enter your submission reference number to see the current status of your order." },
@@ -29,7 +29,7 @@ const FAQ_DATA: FAQGroup[] = [
     category: "Grading",
     items: [
       { q: "What scale do you use?", a: "We use a 1–10 numeric scale with half-point increments where applicable. We also issue Authentic (AA) grades for cards that are genuine but altered, and Not Graded (NG) designations where appropriate." },
-      { q: "What's the difference between a standard 10 and a Black Label 10?", a: "A Black Label 10 requires all four subgrades — centering, corners, edges, and surface — to individually score a perfect 10. A standard 10 reflects the overall assessment where the card meets Gem Mint criteria overall." },
+      { q: "What's the difference between a standard 10 and a Pristine 10P?", a: "A Pristine 10P requires all four subgrades — centering, corners, edges, and surface — to individually score a perfect 10. A standard 10 reflects the overall assessment where the card meets Gem Mint criteria overall." },
       { q: "How does AI-assisted grading work?", a: "Every card is scanned at 6400 DPI and analysed by our AI system, which assesses centering, detects surface defects, and produces an initial grade estimate. This is then reviewed and finalised by our human expert grader. The AI supports the grader; the final decision is always human." },
       { q: "Can I appeal a grade I disagree with?", a: "Not currently. Our grading decisions are final. We take great care with every assessment, and your Vault gives you full visibility into how the grade was reached. Grade appeals may be introduced in a future update." },
       { q: "Do you grade Japanese/Asian language cards?", a: "Yes. We grade cards in English, Japanese, Korean, and other languages. Select the appropriate language when submitting." },

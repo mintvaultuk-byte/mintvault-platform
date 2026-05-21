@@ -88,7 +88,7 @@ export default function SessionSummary({ cards, sessionDurationSeconds, onClose 
           <div className="border border-[#D4AF37]/30 rounded-lg px-4 py-3 bg-[#D4AF37]/5">
             <div className="flex items-center gap-2">
               <Star size={14} className="text-[#D4AF37] fill-[#D4AF37]" />
-              <p className="text-[#D4AF37] text-xs font-bold">{blackLabels.length} Black Label{blackLabels.length > 1 ? "s" : ""} awarded!</p>
+              <p className="text-[#D4AF37] text-xs font-bold">{blackLabels.length} Pristine 10P{blackLabels.length > 1 ? "s" : ""} awarded!</p>
             </div>
             {blackLabels.map(c => <p key={c.certId} className="text-[#CCCCCC] text-xs mt-1 ml-6">{c.certId} — {c.cardName}</p>)}
           </div>

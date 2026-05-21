@@ -1570,7 +1570,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             {isBlack && (
               <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
                 <span className="text-lg">★</span>
-                <span>This card qualifies for a BLACK LABEL — all subgrades are perfect 10.0</span>
+                <span>This card qualifies for PRISTINE 10P — all subgrades are perfect 10.0</span>
               </div>
             )}
             <div className="flex gap-2">

@@ -373,7 +373,7 @@ export default function GradingReportPage() {
           {isBlack && (
             <div className={`flex items-center justify-center gap-2 mb-3 text-[#D4AF37] text-xs font-bold uppercase tracking-widest animate-pulse`}>
               <Star size={14} className="fill-[#D4AF37]" />
-              BLACK LABEL
+              PRISTINE 10P
               <Star size={14} className="fill-[#D4AF37]" />
             </div>
           )}
@@ -525,7 +525,7 @@ export default function GradingReportPage() {
             )}
             {isBlack && (
               <p className="text-sm mt-1 text-[#D4AF37] font-bold">
-                ★ This is one of {population.sameGradeCount} Black Label {population.sameGradeCount === 1 ? "copy" : "copies"} — the rarest grade at MintVault.
+                ★ This is one of {population.sameGradeCount} Pristine 10P {population.sameGradeCount === 1 ? "copy" : "copies"} — the rarest grade at MintVault.
               </p>
             )}
             {population.higherGradeCount === 0 && population.totalGraded > 1 && (

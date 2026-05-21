@@ -440,7 +440,7 @@ export default function LogbookPage() {
                 {grades.gradeLabel}
               </div>
               {grades.isBlackLabel && (
-                <div className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mt-2 animate-pulse">Black Label</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mt-2 animate-pulse">Pristine 10P</div>
               )}
             </div>
 

@@ -258,7 +258,7 @@ export default function PopulationPage() {
               {[
                 "Total graded count for each card across all grade levels",
                 "Grade distribution shows scarcity at each tier — useful for pricing",
-                "BL = Black Label: all four sub-scores are 10 (quad-10)",
+                "P10 = Pristine 10P: all four sub-scores are 10 (quad-10)",
                 "Updated in real time as new cards are graded and certified",
                 "Click 'View certs' to see individual certificates for that card",
               ].map((item, i) => (

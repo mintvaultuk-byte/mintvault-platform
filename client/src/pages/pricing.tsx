@@ -95,7 +95,7 @@ export default function PricingV2() {
               style={{ color: "var(--v2-ink-soft)" }}
             >
               Three tiers, 5 to 40 working day turnaround, same four-point inspection on every
-              card. Black Label upgrade when your card earns it &mdash; free, never sold.
+              card. Pristine 10P upgrade when your card earns it &mdash; free, never sold.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
               <Link
@@ -117,7 +117,7 @@ export default function PricingV2() {
               className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
               style={{ color: "var(--v2-ink-mute)" }}
             >
-              From &pound;19 &middot; 3 tiers &middot; Free Black Label upgrade
+              From &pound;19 &middot; 3 tiers &middot; Free Pristine 10P upgrade
             </p>
         </div>
       </section>
@@ -250,13 +250,13 @@ export default function PricingV2() {
               className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] no-text-shadow mb-3"
               style={{ color: "#D4AF37" }}
             >
-              Black Label &middot; Earned, not sold
+              Pristine 10P &middot; Earned, not sold
             </p>
             <p className="font-display italic font-medium text-2xl md:text-3xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
               When every subgrade scores a 10, the slab upgrades automatically.
             </p>
             <p className="font-body text-sm md:text-base" style={{ color: "#ffffff" }}>
-              Black Label is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit
+              Pristine 10P is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit
               perfect across centering, corners, edges, and surface. There&rsquo;s no separate fee,
               no form to tick. If it earns it, you get it.
             </p>
@@ -509,8 +509,8 @@ export default function PricingV2() {
                 a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork.",
               },
               {
-                q: "Is Black Label a paid upgrade?",
-                a: "No. Black Label is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There&rsquo;s no extra charge, no form to tick. If your card earns it, you get it.",
+                q: "Is Pristine 10P a paid upgrade?",
+                a: "No. Pristine 10P is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There&rsquo;s no extra charge, no form to tick. If your card earns it, you get it.",
               },
               {
                 q: "Are cards insured in transit?",

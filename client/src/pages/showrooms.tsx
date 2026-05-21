@@ -150,7 +150,7 @@ function ShowroomRow({ showroom }: { showroom: ShowroomEntry }) {
           <div className="flex items-center gap-3 mt-1.5 text-[10px] text-[#999999]">
             <span className="flex items-center gap-1"><Layers size={10} />{showroom.total_cards} cards</span>
             {showroom.black_label_count > 0 && (
-              <span className="flex items-center gap-1"><Award size={10} />{showroom.black_label_count} Black Label</span>
+              <span className="flex items-center gap-1"><Award size={10} />{showroom.black_label_count} Pristine 10P</span>
             )}
             <span>Since {memberSince}</span>
           </div>

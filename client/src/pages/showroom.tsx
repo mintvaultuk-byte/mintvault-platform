@@ -83,7 +83,7 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
           {card.is_black_label && (
             <div className="absolute bottom-2 left-2">
               <span className="text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#D4AF37] px-1.5 py-0.5 rounded">
-                BLACK LABEL
+                PRISTINE 10P
               </span>
             </div>
           )}
@@ -146,7 +146,7 @@ function CardListItem({ card }: { card: ShowroomCard }) {
         </p>
         {card.is_black_label && (
           <span className="inline-block text-[8px] font-black uppercase tracking-widest bg-[#1A1A1A] text-[#D4AF37] px-1.5 py-0.5 rounded mt-1">
-            BLACK LABEL
+            PRISTINE 10P
           </span>
         )}
       </div>
@@ -380,7 +380,7 @@ export default function ShowroomPage() {
         {data.stats && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-10">
             <StatTile label="Total Cards" value={data.stats.total_cards} icon={<Layers size={18} />} />
-            <StatTile label="Black Labels" value={data.stats.black_label_count} icon={<Award size={18} />} />
+            <StatTile label="Pristine 10Ps" value={data.stats.black_label_count} icon={<Award size={18} />} />
             <StatTile label="Gem Mint 10s" value={data.stats.grade_breakdown["10"] ?? 0} icon={<Star size={18} />} />
             <StatTile label="Mint 9s" value={data.stats.grade_breakdown["9"] ?? 0} icon={<TrendingUp size={18} />} />
             <StatTile label="Avg Grade" value={data.stats.average_grade ?? "—"} icon={<Hash size={18} />} />

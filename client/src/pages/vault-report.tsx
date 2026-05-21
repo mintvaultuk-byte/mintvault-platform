@@ -134,7 +134,7 @@ function GradeBar({ score }: { score: number | null }) {
 
 function conditionLabel(overall: number | string, isBlackLabel: boolean, isNonNumeric: boolean, gradeLabel: string): string {
   if (isNonNumeric) return gradeLabel.toUpperCase();
-  if (isBlackLabel) return "BLACK LABEL";
+  if (isBlackLabel) return "PRISTINE 10P";
   const n = Number(overall);
   if (n >= 10) return "GEM MINT";
   if (n >= 9)  return "MINT";
@@ -434,7 +434,7 @@ function CenteringBlueprint({ report }: { report: VaultReport }) {
                     color: report.centering.meetsPsaGemMt10 ? "#4ade80" : "#f87171",
                   },
                   {
-                    label: "MEETS BLACK LABEL",
+                    label: "MEETS PRISTINE 10P",
                     value: report.centering.meetsBlackLabel ? "✓" : "✗",
                     color: report.centering.meetsBlackLabel ? "#4ade80" : "#f87171",
                   },

@@ -50,7 +50,7 @@ const REGISTRY_POINTS = [
   "Every graded cert is public and permanent",
   "Ownership claims are optional but encouraged",
   "Transfers between verified owners are tracked",
-  "Black Label status is shown inline on the cert",
+  "Pristine 10P status is shown inline on the cert",
 ];
 
 // ── Page ─────────────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ export default function RegistryV2() {
                       className="px-3 py-2 font-mono-v2 text-xs font-bold uppercase tracking-widest text-center"
                       style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-gold)" }}
                     >
-                      {cert.label_type === "Black Label" ? "Black Label" : `Grade ${cert.grade}`}
+                      {cert.label_type === "Black Label" ? "Pristine 10P" : `Grade ${cert.grade}`}
                     </div>
                   )}
                   <div className="p-4">

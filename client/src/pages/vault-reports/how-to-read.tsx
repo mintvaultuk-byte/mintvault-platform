@@ -16,7 +16,7 @@ const SECTIONS = [
   {
     num: "03",
     title: "Centering Analysis",
-    body: "Our centering blueprint shows the exact left/right and top/bottom border ratios as measured by our AI. A perfect card centres at 50/50 on both axes. PSA Gem Mint 10 requires 55/45 or better. Our exclusive Black Label requires near-perfect centering across both axes.",
+    body: "Our centering blueprint shows the exact left/right and top/bottom border ratios as measured by our AI. A perfect card centres at 50/50 on both axes. PSA Gem Mint 10 requires 55/45 or better. Our exclusive Pristine 10P requires near-perfect centering across both axes.",
   },
   {
     num: "04",
