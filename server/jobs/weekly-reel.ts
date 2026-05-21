@@ -2,87 +2,79 @@
  * Weekly grade-highlight reel job.
  *
  * Mirrors the ig-daily-post scheduler pattern (server/jobs/ig-daily-post.ts):
- *   - setInterval tick (hourly), London-time hour gate, day-key idempotency.
+ *   - setInterval tick (hourly), day + hour gate, day-key idempotency.
  *   - Boot-delayed start so route registration finishes first.
  *
+ * Every dial (schedule, selection rules, video style, output, notifications)
+ * is read from pipeline_settings (server/lib/pipeline-settings.ts) at run-
+ * time so the admin UI can live-edit behaviour without a redeploy.
+ *
  * What it does:
- *   1. Fetch top 8 consenting graded certs from the last 7 days
- *      (server/ig/weekly-reel-data.ts).
- *   2. If fewer than 3 cards qualify → log + exit (skip the reel this week).
- *   3. For each card: presign the front PNG R2 URL, call Segmind
- *      hfai-dop-lite (server/lib/segmind-client.ts), collect output URL.
- *   4. Per-card errors are NON-FATAL — log and continue with the rest.
- *   5. Persist a JSON manifest at
- *        videos/weekly-reels/draft-{YYYY-MM-DD}.json
- *      with { date, cards: [{ certNumber, grade, cardName, videoUrl }] }.
- *   6. Write one audit_log row: action='generated',
- *      details={ cardCount, successCount, failCount }.
+ *   1. Fetch admin-featured top-N cards (server/ig/weekly-reel-data.ts) —
+ *      respects min_grade, max_cards, sort_order, pin/blacklist.
+ *   2. If fewer than 3 cards qualify → log + exit (skip the reel).
+ *   3. For each card: presign the front PNG R2 URL, call Segmind with the
+ *      configured model + clip length, collect output URL. If include_back
+ *      is set, also call for the back PNG.
+ *   4. Per-card errors are NON-FATAL — log and continue.
+ *   5. Persist a JSON manifest at videos/weekly-reels/draft-{YYYY-MM-DD}.json.
+ *   6. Write one audit_log row + one reel_analytics row.
+ *   7. If notify_email / notify_webhook_url set, fire summary.
+ *   8. If auto_post_instagram is set, kick off runIgDailyPost (best-effort).
  *
- * Stitching the per-card clips into a single weekly reel is OUT OF SCOPE for
- * this version (no FFmpeg yet — the manifest exists for manual stitch v1).
- *
- * SEGMIND_API_KEY must be present in env. If missing, the job logs a warning
- * and exits gracefully without firing API calls.
- *
- * Cron: Fridays at 18:00 UTC (registered by startWeeklyReelScheduler).
+ * SEGMIND_API_KEY must be present in env. Pipeline can be paused via
+ * pipeline_settings.pipeline_paused.
  */
 
 import { sql } from "drizzle-orm";
 import { db } from "../db";
-import { auditLog } from "@shared/schema";
+import { auditLog, reelAnalytics } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
 import { imageToVideo } from "../lib/segmind-client";
+import { getAllSettings, type PipelineSettings } from "../lib/pipeline-settings";
+import { sendReelSummaryEmail, postReelWebhook } from "../lib/reel-notifications";
 
 const MIN_CARDS_TO_PUBLISH = 3;
-const REEL_LIMIT = 8;
-const SOURCE_URL_TTL_SECONDS = 60 * 60; // 1 hour — generous, Segmind only needs to fetch once
-const VIDEO_PROMPT =
-  "Cinematic slow reveal of a graded trading card slab, gold accents, dark vault background, premium quality";
-
-// Cron config — Friday 18:00 UTC.
-const REEL_CRON_WEEKDAY_UTC = 5;   // Friday (0=Sun, 5=Fri)
-const REEL_CRON_HOUR_UTC = 18;
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const BOOT_DELAY_MS = 120 * 1000;        // 2 min after boot
+const SOURCE_URL_TTL_SECONDS = 60 * 60;  // 1h presign
+
+/** Per-generation cost in USD. Segmind hfai-dop-lite list price = $0.40. */
+export const COST_PER_GENERATION = 0.40;
 
 export interface PerCardResult {
   certNumber: string;
   grade: number | null;
   cardName: string | null;
   videoUrl: string | null;
+  backVideoUrl?: string | null;
   error?: string;
 }
 
 export interface WeeklyReelOutput {
   status: "ok" | "skipped" | "failed";
   reason?: string;
-  date?: string;           // YYYY-MM-DD UTC
-  manifestKey?: string;    // R2 key of the persisted JSON
-  cardCount?: number;      // number of cards fed in (pre-segmind)
+  date?: string;
+  manifestKey?: string;
+  cardCount?: number;
   successCount?: number;
   failCount?: number;
   results?: PerCardResult[];
 }
 
 function utcDateKey(date: Date = new Date()): string {
-  // YYYY-MM-DD in UTC. Used in the manifest filename + audit_log entity_id.
   const y = date.getUTCFullYear();
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   const d = String(date.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
-function isFridayAtCronHourUtc(date: Date = new Date()): boolean {
-  return date.getUTCDay() === REEL_CRON_WEEKDAY_UTC && date.getUTCHours() === REEL_CRON_HOUR_UTC;
+function isScheduledMoment(settings: PipelineSettings, date: Date = new Date()): boolean {
+  return date.getUTCDay() === settings.schedule_day
+      && date.getUTCHours() === settings.schedule_hour_utc;
 }
 
-/**
- * Has the reel already run for this UTC date? Checks audit_log for a
- * matching entity_id (the date string). Soft-fails open — if the query
- * itself errors, we assume not-yet-run (consistent with ig-daily-post's
- * "conservative for dev environments" stance).
- */
 async function hasRunForDate(dateKey: string): Promise<boolean> {
   try {
     const rows = (await db.execute(sql`
@@ -99,7 +91,7 @@ async function hasRunForDate(dateKey: string): Promise<boolean> {
   }
 }
 
-async function processOne(card: WeeklyReelCard): Promise<PerCardResult> {
+async function processOne(card: WeeklyReelCard, settings: PipelineSettings): Promise<PerCardResult> {
   const base: PerCardResult = {
     certNumber: card.certNumber,
     grade: card.grade,
@@ -107,12 +99,25 @@ async function processOne(card: WeeklyReelCard): Promise<PerCardResult> {
     videoUrl: null,
   };
   try {
-    // Presigned GET URL of the live front display PNG. Segmind fetches
-    // it once when the job is submitted; 1h TTL gives plenty of slack
-    // even if their queue is backed up.
     const sourceUrl = await getR2SignedUrl(card.frontPngKey, SOURCE_URL_TTL_SECONDS);
-    const videoUrl = await imageToVideo(sourceUrl, VIDEO_PROMPT);
-    return { ...base, videoUrl };
+    const videoUrl = await imageToVideo(sourceUrl, settings.video_prompt, {
+      model: settings.video_model,
+      clipLengthSeconds: settings.clip_length_seconds,
+    });
+    let backVideoUrl: string | null | undefined = undefined;
+    if (settings.include_back) {
+      try {
+        const backSource = await getR2SignedUrl(card.backPngKey, SOURCE_URL_TTL_SECONDS);
+        backVideoUrl = await imageToVideo(backSource, settings.video_prompt, {
+          model: settings.video_model,
+          clipLengthSeconds: settings.clip_length_seconds,
+        });
+      } catch (err: any) {
+        console.warn(`[weekly-reel] ${card.certNumber}: back-image failed — ${err?.message ?? err}`);
+        backVideoUrl = null;
+      }
+    }
+    return { ...base, videoUrl, backVideoUrl };
   } catch (err: any) {
     const detail = err?.message ?? String(err);
     console.warn(`[weekly-reel] ${card.certNumber}: segmind failed — ${detail}`);
@@ -120,8 +125,28 @@ async function processOne(card: WeeklyReelCard): Promise<PerCardResult> {
   }
 }
 
+/** Substitute caption-template variables. Mirrors what the spec lists:
+ *  {{topGrade}}, {{cardCount}}, {{date}}, {{topCard}}. Unknown variables
+ *  are left as-is so the operator can spot typos. */
+export function applyCaptionTemplate(
+  template: string,
+  vars: { topGrade: string; cardCount: number; date: string; topCard: string },
+): string {
+  return template
+    .replace(/\{\{\s*topGrade\s*\}\}/g, vars.topGrade)
+    .replace(/\{\{\s*cardCount\s*\}\}/g, String(vars.cardCount))
+    .replace(/\{\{\s*date\s*\}\}/g, vars.date)
+    .replace(/\{\{\s*topCard\s*\}\}/g, vars.topCard);
+}
+
 export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<WeeklyReelOutput> {
   const dateKey = utcDateKey();
+  const settings = await getAllSettings();
+
+  if (settings.pipeline_paused && !opts.force) {
+    console.log("[weekly-reel] pipeline paused — skipping");
+    return { status: "skipped", reason: "pipeline-paused", date: dateKey };
+  }
 
   if (!opts.force && await hasRunForDate(dateKey)) {
     console.log(`[weekly-reel] already-generated-today (${dateKey}) — skipping`);
@@ -136,18 +161,18 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   // 1. Fetch admin-featured top-N
   let data;
   try {
-    data = await fetchWeeklyReelData(REEL_LIMIT);
+    data = await fetchWeeklyReelData();
   } catch (err: any) {
     const detail = err?.message ?? String(err);
     console.error(`[weekly-reel] data fetch failed: ${detail}`);
     return { status: "failed", reason: `fetch-data: ${detail}`, date: dateKey };
   }
 
-  console.log(`[weekly-reel] featured graded certs: ${data.totalFeatured}; picking top ${data.cards.length}`);
+  console.log(`[weekly-reel] featured graded certs: ${data.totalFeatured}; picking ${data.cards.length}`);
 
-  // 2. Floor — need at least 3 cards to publish a reel
+  // 2. Floor
   if (data.cards.length < MIN_CARDS_TO_PUBLISH) {
-    console.warn(`[weekly-reel] only ${data.cards.length} featured card(s) — below floor of ${MIN_CARDS_TO_PUBLISH}, no reel this week`);
+    console.warn(`[weekly-reel] only ${data.cards.length} card(s) — below floor of ${MIN_CARDS_TO_PUBLISH}`);
     return {
       status: "skipped",
       reason: `below-floor (${data.cards.length} < ${MIN_CARDS_TO_PUBLISH})`,
@@ -156,27 +181,38 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     };
   }
 
-  // 3. Per-card pipeline — sequential. Concurrency would be cheap network-
-  // wise but Segmind's rate-limits are per-key, so sequential keeps us
-  // well clear. ~8 cards × ~30-60s each = ~4-8 min total. Audit log
-  // captures completion regardless of how long it took.
+  // 3. Per-card pipeline
   const results: PerCardResult[] = [];
   for (const card of data.cards) {
-    console.log(`[weekly-reel] ${card.certNumber}: grade=${card.grade} card=${card.cardName ?? "?"}`);
-    const r = await processOne(card);
+    console.log(`[weekly-reel] ${card.certNumber}: grade=${card.grade} card=${card.cardName ?? "?"}${card.pinned ? " [PINNED]" : ""}`);
+    const r = await processOne(card, settings);
     results.push(r);
   }
 
   const successCount = results.filter(r => r.videoUrl !== null).length;
   const failCount = results.length - successCount;
 
-  // 4. Persist manifest (always, even if all per-card calls failed — the
-  // record itself is useful for debugging).
+  // Caption (substituted) — stored in manifest for downstream consumers.
+  const top = results.find(r => r.videoUrl != null) ?? results[0];
+  const caption = applyCaptionTemplate(settings.caption_template, {
+    topGrade: top?.grade != null ? String(top.grade) : "—",
+    cardCount: results.length,
+    date: dateKey,
+    topCard: top?.cardName ?? top?.certNumber ?? "—",
+  });
+
+  // 4. Persist manifest
   const manifestKey = `videos/weekly-reels/draft-${dateKey}.json`;
   const manifest = {
     date: dateKey,
     generatedAt: new Date().toISOString(),
-    prompt: VIDEO_PROMPT,
+    prompt: settings.video_prompt,
+    model: settings.video_model,
+    clipLengthSeconds: settings.clip_length_seconds,
+    includeBack: settings.include_back,
+    outputResolution: settings.output_resolution,
+    watermarkEnabled: settings.watermark_enabled,
+    caption,
     cardCount: results.length,
     successCount,
     failCount,
@@ -185,6 +221,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
       grade: r.grade,
       cardName: r.cardName,
       videoUrl: r.videoUrl,
+      backVideoUrl: r.backVideoUrl ?? null,
       error: r.error ?? undefined,
     })),
   };
@@ -197,22 +234,77 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     );
   } catch (err: any) {
     console.error(`[weekly-reel] manifest upload failed: ${err?.message ?? err}`);
-    // Continue — the audit log still goes through.
   }
 
-  // 5. Audit log — one row per job run. entity_id is the date key so a
-  // re-trigger on the same UTC day is recorded as a separate row but
-  // the hasRunForDate idempotency check still catches it.
+  // 5. Audit log
   try {
     await db.insert(auditLog).values({
       entityType: "weekly_reel",
       entityId: dateKey,
       action: "generated",
       adminUser: null,
-      details: { cardCount: results.length, successCount, failCount },
+      details: {
+        cardCount: results.length,
+        successCount,
+        failCount,
+        model: settings.video_model,
+        clipLengthSeconds: settings.clip_length_seconds,
+      },
     });
   } catch (err: any) {
     console.warn(`[weekly-reel] audit_log insert failed: ${err?.message ?? err}`);
+  }
+
+  // 6. Analytics row — cost is per-generation × (cards + back clips)
+  const totalGenerations = successCount + (settings.include_back
+    ? results.filter(r => r.backVideoUrl != null).length
+    : 0);
+  const estimatedCost = totalGenerations * COST_PER_GENERATION;
+  try {
+    await db.insert(reelAnalytics).values({
+      reelDate: dateKey,
+      cardCount: results.length,
+      successCount,
+      failCount,
+      estimatedCostUsd: estimatedCost.toFixed(4),
+      model: settings.video_model,
+      clipLengthSeconds: settings.clip_length_seconds,
+    });
+  } catch (err: any) {
+    console.warn(`[weekly-reel] reel_analytics insert failed: ${err?.message ?? err}`);
+  }
+
+  // 7. Notifications — fire-and-forget; failures only warn.
+  const summary = {
+    date: dateKey,
+    status: failCount > 0 && successCount === 0 ? "failed" as const
+          : failCount > 0 ? "partial" as const
+          : "ok" as const,
+    cardCount: results.length,
+    successCount,
+    failCount,
+    manifestKey,
+  };
+  if (settings.notify_email) {
+    try { await sendReelSummaryEmail(settings.notify_email, summary); }
+    catch (err: any) { console.warn(`[weekly-reel] notify_email failed: ${err?.message ?? err}`); }
+  }
+  if (settings.notify_webhook_url) {
+    try { await postReelWebhook(settings.notify_webhook_url, summary); }
+    catch (err: any) { console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`); }
+  }
+
+  // 8. Auto-post to Instagram (best-effort). Reel job and IG-daily-post are
+  // separate pipelines; this just kicks the latter once the reel is in
+  // hand. Failure here does not affect the reel result.
+  if (settings.auto_post_instagram) {
+    try {
+      const { runIgDailyPost } = await import("./ig-daily-post");
+      const r = await runIgDailyPost({ force: true });
+      console.log(`[weekly-reel] auto_post_instagram → ig-daily-post status=${r.status}`);
+    } catch (err: any) {
+      console.warn(`[weekly-reel] auto-post failed: ${err?.message ?? err}`);
+    }
   }
 
   console.log(`[weekly-reel] DONE date=${dateKey} cardCount=${results.length} ok=${successCount} fail=${failCount} manifest=${manifestKey}`);
@@ -228,7 +320,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   };
 }
 
-// ── Scheduler — Friday 18:00 UTC ────────────────────────────────────────────
+// ── Scheduler ──────────────────────────────────────────────────────────────
 
 let started = false;
 
@@ -241,7 +333,12 @@ export function startWeeklyReelScheduler(): void {
 
   setTimeout(() => {
     const tick = async () => {
-      if (!isFridayAtCronHourUtc()) return;
+      const settings = await getAllSettings();
+      if (settings.pipeline_paused) {
+        // Silent on the tick — pause is expected admin state.
+        return;
+      }
+      if (!isScheduledMoment(settings)) return;
       try {
         const result = await runWeeklyReel();
         if (result.status === "skipped") {

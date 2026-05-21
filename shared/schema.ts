@@ -355,6 +355,11 @@ export const certificates = pgTable("certificates", {
   // Toggled via /api/admin/weekly-reel/card/:certNumber/featured.
   marketingFeatured: boolean("marketing_featured").notNull().default(false),
   marketingFeaturedAt: timestamp("marketing_featured_at", { withTimezone: true }),
+  // Pinned certs always appear first in the weekly reel regardless of
+  // grade/sort order. Blacklisted certs are excluded from the pool
+  // permanently. Both are admin-only and set via /admin/weekly-reel.
+  marketingPinned: boolean("marketing_pinned").notNull().default(false),
+  marketingBlacklisted: boolean("marketing_blacklisted").notNull().default(false),
   // Time spent in admin grading UI between open and approve, in seconds.
   // Captured client-side, capped at 1800s (30 min) server-side to filter
   // coffee-break sessions out of the dashboard average.
@@ -502,6 +507,34 @@ export const auditLog = pgTable("audit_log", {
   adminUser: text("admin_user"),
   details: jsonb("details").$type<Record<string, unknown>>().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ── Weekly-reel pipeline settings (key/value JSON, admin-editable) ─────────
+// Generic store for every dial on /admin/weekly-reel (schedule, selection
+// rules, video style, output, notifications). Defaults live in
+// server/lib/pipeline-settings.ts; rows here are admin overrides only.
+export const pipelineSettings = pgTable("pipeline_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by"),
+});
+
+// ── Weekly-reel analytics (per-run record) ─────────────────────────────────
+// One row per reel run, populated by server/jobs/weekly-reel.ts after each
+// generation. Drives the analytics dashboard (running total cost +
+// per-week bar chart). Cost is in USD; Segmind list price is captured at
+// run time so historical rows stay accurate after price changes.
+export const reelAnalytics = pgTable("reel_analytics", {
+  id: serial("id").primaryKey(),
+  reelDate: text("reel_date").notNull(),
+  cardCount: integer("card_count"),
+  successCount: integer("success_count"),
+  failCount: integer("fail_count"),
+  estimatedCostUsd: numeric("estimated_cost_usd", { precision: 10, scale: 4 }),
+  model: text("model"),
+  clipLengthSeconds: integer("clip_length_seconds"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ── AI feature toggles (DB-backed, runtime-flippable) ─────────────────────

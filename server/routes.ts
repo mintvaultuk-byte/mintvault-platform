@@ -12937,6 +12937,8 @@ Defects (admin-confirmed): ${defectLines}`;
           manifestKey,
           manifestPresent: manifest !== null,
           cards: Array.isArray(manifest?.cards) ? manifest.cards : [],
+          model: manifest?.model ?? row.details?.model ?? null,
+          clipLengthSeconds: manifest?.clipLengthSeconds ?? row.details?.clipLengthSeconds ?? null,
         };
       }));
 
@@ -13095,11 +13097,16 @@ Defects (admin-confirmed): ${defectLines}`;
           c.set_name               AS set_name,
           c.year_text              AS year_text,
           c.marketing_featured     AS featured,
-          c.marketing_featured_at  AS featured_at
+          c.marketing_featured_at  AS featured_at,
+          c.marketing_pinned       AS pinned,
+          c.marketing_blacklisted  AS blacklisted
         FROM certificates c
         WHERE c.deleted_at IS NULL
           AND c.grade_approved_at IS NOT NULL
-        ORDER BY c.marketing_featured DESC, c.grade DESC NULLS LAST, c.grade_approved_at DESC
+        ORDER BY c.marketing_pinned DESC,
+                 c.marketing_featured DESC,
+                 c.grade DESC NULLS LAST,
+                 c.grade_approved_at DESC
       `)).rows as Array<any>;
       const cards = rows.map((r) => ({
         certNumber: String(r.cert_number),
@@ -13109,6 +13116,8 @@ Defects (admin-confirmed): ${defectLines}`;
         year: r.year_text ?? null,
         featured: r.featured === true,
         featuredAt: r.featured_at ?? null,
+        pinned: r.pinned === true,
+        blacklisted: r.blacklisted === true,
       }));
       res.json({ cards });
     } catch (err: any) {
@@ -13165,6 +13174,232 @@ Defects (admin-confirmed): ${defectLines}`;
     } catch (err: any) {
       console.error("[weekly-reel] featured override failed:", err);
       res.status(500).json({ error: err?.message ?? "featured update failed" });
+    }
+  });
+
+  // ── Pipeline settings (single key/value store backing every admin dial) ──
+
+  app.get("/api/admin/weekly-reel/settings", requireAdmin, async (_req, res) => {
+    try {
+      const { getAllSettings } = await import("./lib/pipeline-settings");
+      const settings = await getAllSettings();
+      res.json({ settings });
+    } catch (err: any) {
+      console.error("[weekly-reel] settings fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "settings fetch failed" });
+    }
+  });
+
+  // PATCH body: { key, value }. Validates key against PIPELINE_DEFAULTS and
+  // clamps numeric values into their permitted ranges so a typo in the UI
+  // can't put the scheduler into an invalid state.
+  app.patch("/api/admin/weekly-reel/settings", requireAdmin, async (req, res) => {
+    try {
+      const { PIPELINE_DEFAULTS, setSetting, getSetting } = await import("./lib/pipeline-settings");
+      const key = String(req.body?.key ?? "").trim();
+      if (!(key in PIPELINE_DEFAULTS)) {
+        return res.status(400).json({ error: `unknown setting key: ${key}` });
+      }
+      const raw = req.body?.value;
+      // Per-key sanitisation. Keep this small + obvious; extra cases get
+      // their own dedicated endpoint.
+      let value: any = raw;
+      switch (key) {
+        case "schedule_day":
+          value = Math.max(0, Math.min(6, Number(raw)));
+          break;
+        case "schedule_hour_utc":
+          value = Math.max(0, Math.min(23, Number(raw)));
+          break;
+        case "min_grade":
+          value = Math.max(0, Math.min(10, Number(raw)));
+          break;
+        case "max_cards":
+          value = Math.max(3, Math.min(8, Number(raw)));
+          break;
+        case "clip_length_seconds":
+          value = [4, 6, 8].includes(Number(raw)) ? Number(raw) : 6;
+          break;
+        case "output_resolution":
+          value = Number(raw) === 720 ? 720 : 1080;
+          break;
+        case "sort_order":
+          value = ["grade_desc", "value_desc", "newest_first"].includes(String(raw))
+            ? String(raw) : "grade_desc";
+          break;
+        case "pipeline_paused":
+        case "include_back":
+        case "auto_post_instagram":
+        case "watermark_enabled":
+          value = raw === true || raw === "true";
+          break;
+        case "video_prompt":
+        case "video_model":
+        case "caption_template":
+        case "notify_email":
+        case "notify_webhook_url":
+          value = String(raw ?? "");
+          break;
+        default:
+          // unreachable — `key in PIPELINE_DEFAULTS` is the gate
+          break;
+      }
+      const before = await getSetting(key as any, (PIPELINE_DEFAULTS as any)[key]);
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      await setSetting(key as any, value, actor);
+      try {
+        await db.insert(auditLog).values({
+          entityType: "pipeline_setting",
+          entityId: key,
+          action: "setting_changed",
+          adminUser: actor,
+          details: { key, before, after: value },
+        });
+      } catch {}
+      res.json({ ok: true, key, value });
+    } catch (err: any) {
+      console.error("[weekly-reel] settings update failed:", err);
+      res.status(500).json({ error: err?.message ?? "settings update failed" });
+    }
+  });
+
+  // PATCH /pinned and /blacklisted — same shape as /featured.
+  function makeBoolColPatch(opts: {
+    bodyField: string;
+    sqlCol: string;
+    auditAction: string;
+    logTag: string;
+  }) {
+    return async (req: any, res: any) => {
+      try {
+        const certNumberRaw = String(req.params.certNumber).trim();
+        if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
+        const nextVal = req.body?.[opts.bodyField] === true;
+        const rows = (await db.execute(sql`
+          SELECT id, ${sql.raw(opts.sqlCol)} AS cur
+          FROM certificates
+          WHERE certificate_number = ${certNumberRaw}
+            AND deleted_at IS NULL
+          LIMIT 1
+        `)).rows;
+        const cur = rows[0] as any;
+        if (!cur) return res.status(404).json({ error: "cert not found" });
+        const certId = Number(cur.id);
+        const before = cur.cur === true;
+        if (before === nextVal) return res.json({ ok: true, changed: false, [opts.bodyField]: nextVal });
+        await db.execute(sql`
+          UPDATE certificates
+          SET ${sql.raw(opts.sqlCol)} = ${nextVal}
+          WHERE id = ${certId}
+        `);
+        const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+        try {
+          await db.insert(auditLog).values({
+            entityType: "certificate",
+            entityId: String(certId),
+            action: opts.auditAction,
+            adminUser: actor,
+            details: { before, after: nextVal, certNumber: certNumberRaw },
+          });
+        } catch {}
+        res.json({ ok: true, changed: true, [opts.bodyField]: nextVal, certId });
+      } catch (err: any) {
+        console.error(`[${opts.logTag}] update failed:`, err);
+        res.status(500).json({ error: err?.message ?? "update failed" });
+      }
+    };
+  }
+
+  app.patch(
+    "/api/admin/weekly-reel/card/:certNumber/pinned",
+    requireAdmin,
+    makeBoolColPatch({
+      bodyField: "pinned",
+      sqlCol: "marketing_pinned",
+      auditAction: "marketing_pinned_changed",
+      logTag: "weekly-reel:pin",
+    }),
+  );
+
+  app.patch(
+    "/api/admin/weekly-reel/card/:certNumber/blacklisted",
+    requireAdmin,
+    makeBoolColPatch({
+      bodyField: "blacklisted",
+      sqlCol: "marketing_blacklisted",
+      auditAction: "marketing_blacklisted_changed",
+      logTag: "weekly-reel:blacklist",
+    }),
+  );
+
+  // POST /test-webhook — fires a synthetic payload to the configured webhook
+  // so the operator can verify the URL accepts traffic before relying on it.
+  app.post("/api/admin/weekly-reel/test-webhook", requireAdmin, async (_req, res) => {
+    try {
+      const { getAllSettings } = await import("./lib/pipeline-settings");
+      const { postReelWebhook } = await import("./lib/reel-notifications");
+      const settings = await getAllSettings();
+      if (!settings.notify_webhook_url) {
+        return res.status(400).json({ error: "notify_webhook_url not configured" });
+      }
+      await postReelWebhook(settings.notify_webhook_url, {
+        date: new Date().toISOString().slice(0, 10),
+        status: "ok",
+        cardCount: 0,
+        successCount: 0,
+        failCount: 0,
+        manifestKey: "test-payload",
+      });
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "webhook test failed" });
+    }
+  });
+
+  // POST /rerun — regenerate the reel for the same date key with force=true.
+  // Same long-running characteristics as /generate.
+  app.post("/api/admin/weekly-reel/rerun", requireAdmin, async (_req, res) => {
+    try {
+      const { runWeeklyReel } = await import("./jobs/weekly-reel");
+      const result = await runWeeklyReel({ force: true });
+      res.json(result);
+    } catch (err: any) {
+      console.error("[weekly-reel] rerun crashed:", err);
+      res.status(500).json({ error: err?.message ?? "rerun failed" });
+    }
+  });
+
+  // GET /api/admin/weekly-reel/analytics — last 12 weeks + running total cost.
+  app.get("/api/admin/weekly-reel/analytics", requireAdmin, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT reel_date, card_count, success_count, fail_count,
+               estimated_cost_usd::text AS estimated_cost_usd,
+               model, clip_length_seconds, created_at
+        FROM reel_analytics
+        ORDER BY created_at DESC
+        LIMIT 12
+      `)).rows as Array<any>;
+      const totalRow = (await db.execute(sql`
+        SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total
+        FROM reel_analytics
+      `)).rows[0] as any;
+      res.json({
+        rows: rows.map((r) => ({
+          reelDate: r.reel_date,
+          cardCount: r.card_count,
+          successCount: r.success_count,
+          failCount: r.fail_count,
+          estimatedCostUsd: r.estimated_cost_usd != null ? Number(r.estimated_cost_usd) : 0,
+          model: r.model,
+          clipLengthSeconds: r.clip_length_seconds,
+          createdAt: r.created_at,
+        })),
+        totalCostUsd: totalRow?.total != null ? Number(totalRow.total) : 0,
+      });
+    } catch (err: any) {
+      console.error("[weekly-reel] analytics fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "analytics fetch failed" });
     }
   });
 

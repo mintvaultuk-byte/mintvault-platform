@@ -21,9 +21,17 @@
  */
 
 const SEGMIND_BASE_URL = "https://api.segmind.com/v1";
-const SEGMIND_MODEL_SLUG = "hfai-dop-lite";
+const DEFAULT_MODEL_SLUG = "hfai-dop-lite";
+const DEFAULT_CLIP_LENGTH = 6;
 const POLL_INTERVAL_MS = 5_000;
 const POLL_TIMEOUT_MS = 120_000;
+
+export interface ImageToVideoOptions {
+  /** Segmind model slug, e.g. "hfai-dop-lite", "seedance-1-5". */
+  model?: string;
+  /** Clip duration in seconds. Passed through to Segmind as `duration`. */
+  clipLengthSeconds?: 4 | 6 | 8 | number;
+}
 
 interface SegmindAsyncResponse {
   // Async-style response shape (best-effort — Segmind's API surface varies
@@ -118,15 +126,25 @@ async function pollUntilDone(pollUrl: string, apiKey: string, deadlineMs: number
   }
 }
 
-export async function imageToVideo(imageUrl: string, prompt: string): Promise<string> {
+export async function imageToVideo(
+  imageUrl: string,
+  prompt: string,
+  options: ImageToVideoOptions = {},
+): Promise<string> {
   const apiKey = requireKey();
-  const url = `${SEGMIND_BASE_URL}/${SEGMIND_MODEL_SLUG}`;
+  const model = options.model || DEFAULT_MODEL_SLUG;
+  const duration = options.clipLengthSeconds || DEFAULT_CLIP_LENGTH;
+  const url = `${SEGMIND_BASE_URL}/${model}`;
 
   // Payload field naming follows Segmind convention — `image` for the
-  // source URL, `prompt` for the text guidance. Exact accepted fields
-  // may vary; if the API returns a 4xx flagging unknown fields, this is
-  // the place to tweak.
-  const { status, body } = await postJson(url, { image: imageUrl, prompt }, apiKey);
+  // source URL, `prompt` for the text guidance, `duration` for clip
+  // length. Exact accepted fields vary by model; if the API returns a
+  // 4xx flagging unknown fields, this is the place to tweak.
+  const { status, body } = await postJson(
+    url,
+    { image: imageUrl, prompt, duration },
+    apiKey,
+  );
   if (status < 200 || status >= 300) {
     const reason = body?.error ?? body?.message ?? `HTTP ${status}`;
     throw new Error(`Segmind POST failed: ${reason}`);
