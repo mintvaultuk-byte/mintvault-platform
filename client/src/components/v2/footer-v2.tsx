@@ -62,7 +62,7 @@ const LEGAL_LINKS = [
   { label: "Privacy Policy",           href: "/legal/privacy-policy" },
   { label: "Cookies Policy",           href: "/legal/cookies" },
   { label: "Shipping Requirements",    href: "/legal/shipping-requirements" },
-  { label: "Grading Standards",        href: "/legal/grading-standards" },
+  { label: "Grading Standards",        href: "/standard" },
   { label: "Cancellation",             href: "/legal/cancel" },
   { label: "Dispute Resolution (ADR)", href: "/legal/adr" },
 ];

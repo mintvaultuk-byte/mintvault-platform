@@ -135,6 +135,15 @@ export default function PricingV2() {
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
               Every card passes the same four-point inspection: centering, corners, edges,
               surface. Tier only changes how quickly the work comes back.
+              {" "}
+              <Link
+                href="/standard"
+                className="underline underline-offset-2"
+                style={{ color: "var(--v2-gold)" }}
+                data-testid="link-mvgs-pricing"
+              >
+                Published as the open MVGS standard.
+              </Link>
             </p>
           </div>
 

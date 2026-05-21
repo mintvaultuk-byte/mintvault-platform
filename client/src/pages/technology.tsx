@@ -352,6 +352,17 @@ export default function TechnologyV2() {
               See pricing <ArrowRight size={14} />
             </Link>
           </div>
+          <p className="font-body text-xs mt-8" style={{ color: "rgba(255,255,255,0.55)" }}>
+            Built to the open{" "}
+            <Link
+              href="/standard"
+              className="underline underline-offset-2"
+              style={{ color: "var(--v2-gold)" }}
+              data-testid="link-mvgs-technology"
+            >
+              MVGS specification
+            </Link>.
+          </p>
         </div>
       </section>
 

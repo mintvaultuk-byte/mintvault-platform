@@ -1086,6 +1086,48 @@ export async function registerRoutes(
     }
   });
 
+  // ── MVGS compliance interest (public, rate-limited) ──────────────────────
+  // POST /api/mvgs/interest — captures the /mvgs/join form. Append-only into
+  // mvgs_interest table; no read endpoint, no public listing.
+  const mvgsInterestRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many submissions from this device. Please wait an hour." },
+  });
+
+  const mvgsInterestSchema = z.object({
+    company: z.string().trim().min(1, "Company name is required").max(200, "Company name too long"),
+    email:   z.string().trim().email("Invalid email address").max(254, "Email too long"),
+    message: z.string().trim().max(2000, "Message too long").optional(),
+  });
+
+  app.post("/api/mvgs/interest", mvgsInterestRateLimit, async (req, res) => {
+    try {
+      const parsed = mvgsInterestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const firstIssue = parsed.error.issues[0];
+        return res.status(400).json({ error: firstIssue?.message || "Invalid submission" });
+      }
+      const { company, email, message } = parsed.data;
+      const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+        || req.socket.remoteAddress
+        || null;
+      const { mvgsInterest } = await import("@shared/schema");
+      await db.insert(mvgsInterest).values({
+        company,
+        email,
+        message: message ?? null,
+        ip,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[mvgs-interest] error:", err?.message || err);
+      return res.status(500).json({ error: "Couldn't record interest. Please try again." });
+    }
+  });
+
   // ── Legal page API routes ─────────────────────────────────────────────────
   app.get("/api/legal/:slug", (req, res) => {
     const { FEATURE_FLAGS } = require("./config/feature-flags");
@@ -1166,7 +1208,7 @@ export async function registerRoutes(
   app.get("/privacy",                         (_req, res) => res.redirect(301, "/legal/privacy-policy"));
   app.get("/cookies",                         (_req, res) => res.redirect(301, "/legal/cookies"));
   app.get("/shipping-requirements",           (_req, res) => res.redirect(301, "/legal/shipping-requirements"));
-  app.get("/grading-standards",               (_req, res) => res.redirect(301, "/legal/grading-standards"));
+  app.get("/grading-standards",               (_req, res) => res.redirect(301, "/standard"));
   app.get("/cancel",                          (_req, res) => res.redirect(301, "/legal/cancel"));
   app.get("/adr",                             (_req, res) => res.redirect(301, "/legal/adr"));
   app.get("/website-terms",                   (_req, res) => res.redirect(301, "/legal/website-terms"));

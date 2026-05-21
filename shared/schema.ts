@@ -539,6 +539,17 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ── MVGS compliance interest (public form capture) ────────────────────────
+// Backs POST /api/mvgs/interest. Append-only; no auth, no public read.
+export const mvgsInterest = pgTable("mvgs_interest", {
+  id:        serial("id").primaryKey(),
+  company:   text("company").notNull(),
+  email:     text("email").notNull(),
+  message:   text("message"),
+  ip:        text("ip"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Weekly-reel pipeline settings (key/value JSON, admin-editable) ─────────
 // Generic store for every dial on /admin/weekly-reel (schedule, selection
 // rules, video style, output, notifications). Defaults live in

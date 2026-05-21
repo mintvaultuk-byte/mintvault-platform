@@ -163,10 +163,10 @@ function gradeLabelForScore(score: number): string {
   if (score >= 76) return "NM-Mint+ 8.5";
   if (score >= 71) return "NM-Mint 8";
   if (score >= 66) return "NM+ 7.5";
-  if (score >= 61) return "NM 7";
+  if (score >= 61) return "Near Mint 7";
   if (score >= 51) return "Excellent-Mint 6";
   if (score >= 41) return "Excellent 5";
-  if (score >= 31) return "Very Good 4";
+  if (score >= 31) return "Very Good-Excellent 4";
   if (score >= 21) return "Good 3";
   if (score >= 11) return "Fair 2";
   return "Poor 1";

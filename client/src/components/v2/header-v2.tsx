@@ -29,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Vault Club",   href: "/vault-club" },
   { label: "Verify",       href: "/verify" },
   { label: "Technology",   href: "/technology" },
+  { label: "MVGS",         href: "/standard" },
   { label: "Registry",     href: "/registry" },
   { label: "Journal",      href: "/journal" },
 ];
