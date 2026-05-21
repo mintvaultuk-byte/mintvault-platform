@@ -15,17 +15,21 @@
  * Deduction tables and grade brackets follow the MVGS spec exactly:
  *   - Centering front bucket (worst of LR vs TB), 0..-20
  *   - Centering back bucket  (worst of LR vs TB), 0..-5
- *   - Corner defects: D1 -4/-2, D2 -2/-1, D3 -0.5/-0.25 (front/back),
+ *   - Corner defects: D1 -4/-2, D2 -0.5/-0.25, D3 -0.5/-0.25 (front/back),
  *     capped at -25 total
- *   - Edge defects: D1 -3/-2, D2 -1/-0.5, D3 -0.5/-0.25 (front/back),
+ *   - Edge defects: D1 -3/-2, D2 -0.5/-0.25, D3 -0.5/-0.25 (front/back),
  *     capped at -25 total
  *     · Dark border + WH (whitening): multiply that defect's deduction ×1.25
  *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
  *     capped at -25 total
+ *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5
  *     · CR D1 (crease) sets a hard cap of 74 on the final score
  *     · SP D1 in art/holo zone (FA/FH) multiplies ×1.5
  *   - Eye appeal modifier added last, clamped ±2
- *   - Final clamped 1..100
+ *   - Final clamped 1..100, then lowest-subgrade floor rule applies:
+ *     · per-category subgrades derived from deductions (25-pt budget each)
+ *     · cap headline grade at lowest single subgrade (+0.5 when variance is high)
+ *     · cappedScore sits at top of the next-up label bracket
  */
 
 export interface MvgsDefect {
@@ -99,9 +103,9 @@ function cornerDeduction(d: MvgsDefect): number {
   const isFront = FRONT_CORNER_ZONES.has(d.zone);
   const isBack  = BACK_CORNER_ZONES.has(d.zone);
   if (!isFront && !isBack) return 0;
-  if (d.tier === "D1") return isFront ? -4   : -2;
-  if (d.tier === "D2") return isFront ? -2   : -1;
-  if (d.tier === "D3") return isFront ? -0.5 : -0.25;
+  if (d.tier === "D1") return isFront ? -4    : -2;
+  if (d.tier === "D2") return isFront ? -0.5  : -0.25;
+  if (d.tier === "D3") return isFront ? -0.5  : -0.25;
   return 0;
 }
 
@@ -111,7 +115,7 @@ function edgeDeduction(d: MvgsDefect, darkBorder: boolean): number {
   if (!isFront && !isBack) return 0;
   let base = 0;
   if (d.tier === "D1")      base = isFront ? -3   : -2;
-  else if (d.tier === "D2") base = isFront ? -1   : -0.5;
+  else if (d.tier === "D2") base = isFront ? -0.5 : -0.25;
   else if (d.tier === "D3") base = isFront ? -0.5 : -0.25;
   else return 0;
   // Dark-border + WH multiplier applies to whatever base the tier produced
@@ -149,10 +153,15 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
 
   if (d.tier === "D2") {
     switch (d.mvgsCode) {
-      case "PL": return { deduction: -1,    forceCap74: false };
-      case "PS": return { deduction: -0.5,  forceCap74: false };
-      case "PI": return { deduction: -1,    forceCap74: false };
-      case "SC": return { deduction: -1,    forceCap74: false };
+      case "PL": return { deduction: -0.5,  forceCap74: false };
+      case "PS": return { deduction: -0.25, forceCap74: false };
+      case "PI": return { deduction: -0.5,  forceCap74: false };
+      case "SC": return { deduction: -0.5,  forceCap74: false };
+      // WH (whitening) on a surface zone — added in the D2 weight update.
+      // Was previously falling through to default=0; now scored -0.5.
+      // Distinct from WH on an edge zone, which routes through
+      // edgeDeduction and gets the dark-border ×1.25 multiplier.
+      case "WH": return { deduction: -0.5,  forceCap74: false };
       default:   return { deduction: 0,     forceCap74: false };
     }
   }
@@ -162,6 +171,41 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
 }
 
 // ── Grade brackets ────────────────────────────────────────────────────────
+
+/**
+ * Map MVGS remaining-points-in-category (0..25) to a 1-10 subgrade. Mirror
+ * of mvgsRemainingToGrade in grading-panel.tsx — kept in sync because the
+ * lowest-subgrade floor rule (below) needs the same bucketing the UI uses
+ * for chip display.
+ */
+function remainingToGrade(remaining: number): number {
+  if (remaining >= 23) return 10;
+  if (remaining >= 20) return 9;
+  if (remaining >= 17) return 8;
+  if (remaining >= 14) return 7;
+  if (remaining >= 11) return 6;
+  if (remaining >= 8)  return 5;
+  if (remaining >= 5)  return 4;
+  if (remaining >= 3)  return 3;
+  if (remaining >= 1)  return 2;
+  return 1;
+}
+
+/**
+ * Per the floor-rule spec: when finalGrade is capped, we let the cappedScore
+ * sit at the top of the next-up label bracket. So gradeBracketTop[N] ≠ "top
+ * of grade N's range" — it's "the max score allowed when the floor caps the
+ * card at grade N." Half-grades 9.5/8.5/7.5 are direct lookups; half-grades
+ * below 7 (2.5, 3.5, …) aren't keyed and fall through to floor lookup.
+ */
+const GRADE_BRACKET_TOP: Record<number, number> = {
+  10: 100, 9.5: 95, 9: 90, 8.5: 85, 8: 80, 7.5: 75,
+  7: 70, 6: 65, 5: 60, 4: 50, 3: 40, 2: 30, 1: 20,
+};
+function bracketTopFor(grade: number): number {
+  if (GRADE_BRACKET_TOP[grade] !== undefined) return GRADE_BRACKET_TOP[grade];
+  return GRADE_BRACKET_TOP[Math.floor(grade)] ?? 100;
+}
 
 function gradeLabelForScore(score: number): string {
   if (score >= 96) return "Pristine 10P";
@@ -232,9 +276,33 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   if (surfaceForceCap && raw > 74) raw = 74;
   const score = Math.max(1, Math.min(100, raw));
 
+  // ── Lowest-subgrade floor rule ────────────────────────────────────────
+  // Derive per-category subgrades from deductions, find the lowest, and cap
+  // the headline grade so a near-perfect card with one destroyed category
+  // can't whitewash that category. Two regimes:
+  //   gap ≥ 4 (high variance): maxGrade = lowest + 0.5  (one half-grade above)
+  //   gap < 4 (low variance) : maxGrade = lowest        (strict cap to lowest)
+  // The cappedScore then sits at the top of the bracket one step ABOVE
+  // finalGrade, matching how the engine surfaces labels through
+  // gradeLabelForScore (see GRADE_BRACKET_TOP rationale).
+  const catScores = {
+    centering: 25 - Math.abs((deductions.centering_front ?? 0) + (deductions.centering_back ?? 0)),
+    corners:   25 - Math.abs(deductions.corners ?? 0),
+    edges:     25 - Math.abs(deductions.edges   ?? 0),
+    surface:   25 - Math.abs(deductions.surface ?? 0),
+  };
+  const subList = Object.values(catScores).map(remainingToGrade);
+  const lowest  = Math.min(...subList);
+  const others  = subList.filter((s) => s !== lowest);
+  const gap     = others.reduce((sum, s) => sum + (s - lowest), 0);
+  const maxGrade   = gap >= 4 ? lowest + 0.5 : lowest;
+  const scoreGrade = gradeFromMvgsScore(score);
+  const finalGrade = Math.min(scoreGrade, maxGrade);
+  const cappedScore = Math.min(score, bracketTopFor(finalGrade));
+
   return {
-    score,
-    grade: gradeLabelForScore(score),
+    score: cappedScore,
+    grade: gradeLabelForScore(cappedScore),
     deductions,
   };
 }
