@@ -3,7 +3,8 @@
  *
  * Three sections:
  *   1. Pipeline controls — manual trigger, schedule, Segmind key status
- *   2. Consenting cards — table + per-row admin override toggle
+ *   2. Featured cards — single table, admin checkbox flips the
+ *      marketing_featured flag on each cert. Reel job picks from this pool.
  *   3. Reel history — last 10 runs (from audit_log) with per-card video
  *      previews + error messages
  *
@@ -25,14 +26,14 @@ import {
 
 // ── Types — mirror the backend response shapes ─────────────────────────────
 
-interface GradedCard {
+interface FeaturedCard {
   certNumber: string;
   grade: number | null;
   cardName: string | null;
   cardSet: string | null;
   year: string | null;
-  consent: boolean;
-  consentedAt: string | null;
+  featured: boolean;
+  featuredAt: string | null;
 }
 
 interface ManifestCard {
@@ -146,7 +147,7 @@ function PipelineControls() {
             <Calendar size={14} className="text-[#D4AF37]" /> Next scheduled run
           </div>
           <p className="mt-2 text-sm font-semibold text-[#1A1A1A]">Friday 18:00 UTC</p>
-          <p className="mt-1 text-[10px] text-[#888888]">Runs weekly. Skipped automatically if fewer than 3 consenting cards in the last 7 days.</p>
+          <p className="mt-1 text-[10px] text-[#888888]">Runs weekly. Skipped automatically if fewer than 3 featured cards.</p>
         </div>
 
         <div className="border border-[#E8E4DC] rounded-xl p-4">
@@ -199,173 +200,108 @@ function PipelineControls() {
   );
 }
 
-// ── Section 2: Consenting cards ────────────────────────────────────────────
+// ── Section 2: Featured cards ──────────────────────────────────────────────
 
-// Per-row table render — extracted so the In Pool / Not in Pool tables
-// share markup. `mode` controls the toggle's current state + the action
-// fired on click (remove vs add).
-function CardsTable({
-  cards,
-  mode,
-  busyCert,
-  onToggle,
-  emptyMessage,
-}: {
-  cards: GradedCard[];
-  mode: "in-pool" | "not-in-pool";
-  busyCert: string | null;
-  onToggle: (certNumber: string, nextConsent: boolean) => void;
-  emptyMessage: string;
-}) {
-  if (cards.length === 0) {
-    return <p className="text-sm text-[#888888] py-6 text-center">{emptyMessage}</p>;
-  }
-  const checked = mode === "in-pool";
-  const showConsentedCol = mode === "in-pool";
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left border-b border-[#E8E4DC]">
-            <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cert ID</th>
-            <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Card Name</th>
-            <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Set</th>
-            <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Grade</th>
-            {showConsentedCol && (
-              <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Consented</th>
-            )}
-            <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-right">
-              {mode === "in-pool" ? "Remove" : "Add"}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {cards.map((c) => {
-            const busy = busyCert === c.certNumber;
-            const next = !checked;
-            return (
-              <tr key={c.certNumber} className="border-b border-[#F0EDE5]" data-testid={`row-card-${c.certNumber}`}>
-                <td className="py-2 px-3 font-mono text-[#1A1A1A]">{c.certNumber}</td>
-                <td className="py-2 px-3 text-[#1A1A1A]">{c.cardName ?? "—"}</td>
-                <td className="py-2 px-3 text-[#555]">{c.cardSet ?? "—"}{c.year ? ` (${c.year})` : ""}</td>
-                <td className="py-2 px-3 font-bold text-[#1A1A1A]">{fmtGrade(c.grade)}</td>
-                {showConsentedCol && (
-                  <td className="py-2 px-3 text-[#888]">{fmtDate(c.consentedAt)}</td>
-                )}
-                <td className="py-2 px-3 text-right">
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <span className="text-xs text-[#666]">{busy ? "…" : (checked ? "on" : "off")}</span>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={busy}
-                      onChange={() => onToggle(c.certNumber, next)}
-                      className="accent-[#D4AF37] h-4 w-4"
-                      data-testid={`toggle-${c.certNumber}`}
-                    />
-                  </label>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ConsentingCardsTable() {
+function FeaturedCardsTable() {
   const queryClient = useQueryClient();
   const [busyCert, setBusyCert] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch ALL graded cards (consenting + not), split client-side into
-  // two tables. One query → no risk of the two tables drifting out of
-  // sync, no double round-trip on mount.
-  const { data, isLoading } = useQuery<{ cards: GradedCard[] }>({
-    queryKey: ["/api/admin/weekly-reel/all-graded-cards"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/all-graded-cards")).json(),
+  const { data, isLoading } = useQuery<{ cards: FeaturedCard[] }>({
+    queryKey: ["/api/admin/weekly-reel/featured-cards"],
+    queryFn: async () => (await fetch("/api/admin/weekly-reel/featured-cards")).json(),
   });
 
   const toggleMutation = useMutation({
-    mutationFn: async ({ certNumber, consent }: { certNumber: string; consent: boolean }) => {
+    mutationFn: async ({ certNumber, featured }: { certNumber: string; featured: boolean }) => {
       const r = await apiRequest(
         "PATCH",
-        `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/consent`,
-        { consent },
+        `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/featured`,
+        { featured },
       );
       return r.json();
     },
     onSuccess: () => {
       setError(null);
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/all-graded-cards"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/featured-cards"] });
     },
     onError: (err: any) => setError(err?.message ?? "Toggle failed"),
     onSettled: () => setBusyCert(null),
   });
 
-  const all = data?.cards ?? [];
-  const inPool = all.filter(c => c.consent);
-  const notInPool = all.filter(c => !c.consent);
+  const cards = data?.cards ?? [];
+  const featuredCount = cards.filter(c => c.featured).length;
 
-  function onToggle(certNumber: string, nextConsent: boolean) {
+  function onToggle(certNumber: string, nextFeatured: boolean) {
     setBusyCert(certNumber);
-    toggleMutation.mutate({ certNumber, consent: nextConsent });
+    toggleMutation.mutate({ certNumber, featured: nextFeatured });
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">In Pool</h2>
-          <span className="text-xs text-[#888888]">
-            {isLoading ? "…" : `${inPool.length} card${inPool.length === 1 ? "" : "s"} consenting`}
-          </span>
-        </div>
-        <p className="text-xs text-[#666666] mb-4">
-          Consenting cards — eligible for the weekly reel if within the 7-day grading window. Toggling here flips
-          <code className="mx-1">marketing_feature_consent</code> on the linked submission OFF and writes an audit_log
-          row with <code>reason: "admin_override"</code>.
-        </p>
-        {isLoading ? (
-          <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
-        ) : (
-          <CardsTable
-            cards={inPool}
-            mode="in-pool"
-            busyCert={busyCert}
-            onToggle={onToggle}
-            emptyMessage="No consenting graded cards yet."
-          />
-        )}
+    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+      <div className="flex items-baseline justify-between mb-4">
+        <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Featured Cards</h2>
+        <span className="text-xs text-[#888888]">
+          {isLoading ? "…" : `${featuredCount} of ${cards.length} featured`}
+        </span>
       </div>
-
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Not in Pool</h2>
-          <span className="text-xs text-[#888888]">
-            {isLoading ? "…" : `${notInPool.length} card${notInPool.length === 1 ? "" : "s"} not consenting`}
-          </span>
+      <p className="text-xs text-[#666666] mb-4">
+        Admin-curated pool for the weekly reel. Toggling flips
+        <code className="mx-1">certificates.marketing_featured</code> and writes an audit_log row.
+        Independent of the user's <code>marketing_feature_consent</code> — the admin flag is the
+        only thing the reel job reads.
+      </p>
+      {isLoading ? (
+        <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
+      ) : cards.length === 0 ? (
+        <p className="text-sm text-[#888888] py-6 text-center">No graded cards yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b border-[#E8E4DC]">
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cert ID</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Card Name</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Set</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Grade</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Featured At</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-right">Featured</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cards.map((c) => {
+                const busy = busyCert === c.certNumber;
+                const next = !c.featured;
+                return (
+                  <tr key={c.certNumber} className="border-b border-[#F0EDE5]" data-testid={`row-card-${c.certNumber}`}>
+                    <td className="py-2 px-3 font-mono text-[#1A1A1A]">{c.certNumber}</td>
+                    <td className="py-2 px-3 text-[#1A1A1A]">{c.cardName ?? "—"}</td>
+                    <td className="py-2 px-3 text-[#555]">{c.cardSet ?? "—"}{c.year ? ` (${c.year})` : ""}</td>
+                    <td className="py-2 px-3 font-bold text-[#1A1A1A]">{fmtGrade(c.grade)}</td>
+                    <td className="py-2 px-3 text-[#888]">{c.featured ? fmtDate(c.featuredAt) : "—"}</td>
+                    <td className="py-2 px-3 text-right">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <span className="text-xs text-[#666]">{busy ? "…" : (c.featured ? "on" : "off")}</span>
+                        <input
+                          type="checkbox"
+                          checked={c.featured}
+                          disabled={busy}
+                          onChange={() => onToggle(c.certNumber, next)}
+                          className="accent-[#D4AF37] h-4 w-4"
+                          data-testid={`toggle-${c.certNumber}`}
+                        />
+                      </label>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        <p className="text-xs text-[#666666] mb-4">
-          Graded cards whose owners haven't opted in. Toggling here is an <strong>admin override</strong> — it grants
-          marketing consent on behalf of the user (audit_log records <code>reason: "admin_override"</code>). Use sparingly.
-        </p>
-        {isLoading ? (
-          <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
-        ) : (
-          <CardsTable
-            cards={notInPool}
-            mode="not-in-pool"
-            busyCert={busyCert}
-            onToggle={onToggle}
-            emptyMessage="Every graded card has consent — no opt-ins to add."
-          />
-        )}
-      </div>
+      )}
 
       {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
+        <div className="mt-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
@@ -486,7 +422,7 @@ export default function AdminWeeklyReelPage() {
 
         <div className="space-y-6">
           <PipelineControls />
-          <ConsentingCardsTable />
+          <FeaturedCardsTable />
           <HistorySection />
         </div>
       </div>

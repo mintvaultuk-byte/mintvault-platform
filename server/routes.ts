@@ -13081,6 +13081,93 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // GET /api/admin/weekly-reel/featured-cards — every graded cert with the
+  // admin marketing_featured flag. Replaces the consent-driven
+  // /all-graded-cards view: the weekly reel pool is now admin-curated and
+  // independent of submissions.marketing_feature_consent.
+  app.get("/api/admin/weekly-reel/featured-cards", requireAdmin, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT
+          c.certificate_number     AS cert_number,
+          c.grade::text            AS grade,
+          c.card_name              AS card_name,
+          c.set_name               AS set_name,
+          c.year_text              AS year_text,
+          c.marketing_featured     AS featured,
+          c.marketing_featured_at  AS featured_at
+        FROM certificates c
+        WHERE c.deleted_at IS NULL
+          AND c.grade_approved_at IS NOT NULL
+        ORDER BY c.marketing_featured DESC, c.grade DESC NULLS LAST, c.grade_approved_at DESC
+      `)).rows as Array<any>;
+      const cards = rows.map((r) => ({
+        certNumber: String(r.cert_number),
+        grade: r.grade != null ? Number(r.grade) : null,
+        cardName: r.card_name ?? null,
+        cardSet: r.set_name ?? null,
+        year: r.year_text ?? null,
+        featured: r.featured === true,
+        featuredAt: r.featured_at ?? null,
+      }));
+      res.json({ cards });
+    } catch (err: any) {
+      console.error("[weekly-reel] featured-cards fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "featured-cards fetch failed" });
+    }
+  });
+
+  // PATCH /api/admin/weekly-reel/card/:certNumber/featured — flip the admin
+  // marketing_featured flag on a certificate. Writes audit_log with
+  // before/after. Idempotent — no-op + no audit row when state already
+  // matches.
+  app.patch("/api/admin/weekly-reel/card/:certNumber/featured", requireAdmin, async (req, res) => {
+    try {
+      const certNumberRaw = String(req.params.certNumber).trim();
+      if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
+      const featured = req.body?.featured === true;
+
+      const rows = (await db.execute(sql`
+        SELECT id, marketing_featured
+        FROM certificates
+        WHERE certificate_number = ${certNumberRaw}
+          AND deleted_at IS NULL
+        LIMIT 1
+      `)).rows;
+      const cur = rows[0] as any;
+      if (!cur) {
+        return res.status(404).json({ error: "cert not found" });
+      }
+      const certId = Number(cur.id);
+      const before = cur.marketing_featured === true;
+
+      if (before === featured) {
+        return res.json({ ok: true, changed: false, featured });
+      }
+
+      await db.execute(sql`
+        UPDATE certificates
+        SET marketing_featured = ${featured},
+            marketing_featured_at = NOW()
+        WHERE id = ${certId}
+      `);
+
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      await db.insert(auditLog).values({
+        entityType: "certificate",
+        entityId: String(certId),
+        action: "marketing_featured_changed",
+        adminUser: actor,
+        details: { before, after: featured, certNumber: certNumberRaw },
+      });
+
+      res.json({ ok: true, changed: true, featured, certId });
+    } catch (err: any) {
+      console.error("[weekly-reel] featured override failed:", err);
+      res.status(500).json({ error: err?.message ?? "featured update failed" });
+    }
+  });
+
   app.patch("/api/admin/ig/queue/:id/skip", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);

@@ -349,6 +349,12 @@ export const certificates = pgTable("certificates", {
   verifiedDefects: jsonb("verified_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
+  // Admin-controlled marketing-pool flag. Distinct from
+  // submissions.marketing_feature_consent (user opt-in, legal record) —
+  // this column gates the weekly-reel pool regardless of consent state.
+  // Toggled via /api/admin/weekly-reel/card/:certNumber/featured.
+  marketingFeatured: boolean("marketing_featured").notNull().default(false),
+  marketingFeaturedAt: timestamp("marketing_featured_at", { withTimezone: true }),
   // Time spent in admin grading UI between open and approve, in seconds.
   // Captured client-side, capped at 1800s (30 min) server-side to filter
   // coffee-break sessions out of the dashboard average.

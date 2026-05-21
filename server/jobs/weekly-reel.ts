@@ -133,7 +133,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     return { status: "failed", reason: "segmind-key-missing", date: dateKey };
   }
 
-  // 1. Fetch consenting top-N
+  // 1. Fetch admin-featured top-N
   let data;
   try {
     data = await fetchWeeklyReelData(REEL_LIMIT);
@@ -143,11 +143,11 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     return { status: "failed", reason: `fetch-data: ${detail}`, date: dateKey };
   }
 
-  console.log(`[weekly-reel] consenting graded certs (last ${data.windowDays}d): ${data.totalWithConsent}; picking top ${data.cards.length}`);
+  console.log(`[weekly-reel] featured graded certs: ${data.totalFeatured}; picking top ${data.cards.length}`);
 
   // 2. Floor — need at least 3 cards to publish a reel
   if (data.cards.length < MIN_CARDS_TO_PUBLISH) {
-    console.warn(`[weekly-reel] only ${data.cards.length} consenting card(s) — below floor of ${MIN_CARDS_TO_PUBLISH}, no reel this week`);
+    console.warn(`[weekly-reel] only ${data.cards.length} featured card(s) — below floor of ${MIN_CARDS_TO_PUBLISH}, no reel this week`);
     return {
       status: "skipped",
       reason: `below-floor (${data.cards.length} < ${MIN_CARDS_TO_PUBLISH})`,

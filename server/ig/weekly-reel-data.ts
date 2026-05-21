@@ -1,14 +1,12 @@
 /**
- * Weekly-reel data query — top-N graded certificates from the last 7 days
- * that have marketing-feature consent.
+ * Weekly-reel data query — graded certificates flagged by an admin for the
+ * marketing pool.
  *
- * Joins:
- *   certificates ↔ submission_items.id = certificates.submission_item_id
- *   submission_items.submission_id ↔ submissions.id
- *
- * Consent filter is on the SUBMISSION row (consent is per-submission, not
- * per-cert — one consent decision covers all cards in a submission).
- * Deletion filter is belt-and-braces on both tables.
+ * Selection is driven by certificates.marketing_featured, an admin-controlled
+ * boolean. This is intentionally independent of
+ * submissions.marketing_feature_consent (the user opt-in, kept as a legal
+ * record): the admin curates the reel pool directly, so a featured cert is
+ * eligible regardless of consent state.
  *
  * Sort key: overall_grade DESC then declared_value DESC. Both can be NULL
  * (NULLS LAST so ungraded / no-value rows don't surface ahead of real
@@ -36,12 +34,10 @@ export interface WeeklyReelCard {
 
 export interface WeeklyReelDataResult {
   cards: WeeklyReelCard[];
-  totalWithConsent: number;   // total consenting graded certs in the window (info)
-  windowDays: number;
+  totalFeatured: number;      // total featured graded certs (info)
 }
 
 const DEFAULT_LIMIT = 8;
-const WINDOW_DAYS = 7;
 
 export async function fetchWeeklyReelData(limit: number = DEFAULT_LIMIT): Promise<WeeklyReelDataResult> {
   const r = await db.execute(sql`
@@ -55,13 +51,10 @@ export async function fetchWeeklyReelData(limit: number = DEFAULT_LIMIT): Promis
       c.year_text                AS year_text,
       si.declared_value          AS declared_value
     FROM certificates c
-    JOIN submission_items si ON si.id = c.submission_item_id
-    JOIN submissions     s  ON s.id  = si.submission_id
-    WHERE s.marketing_feature_consent = true
-      AND s.deleted_at IS NULL
+    LEFT JOIN submission_items si ON si.id = c.submission_item_id
+    WHERE c.marketing_featured = true
       AND c.deleted_at IS NULL
       AND c.grade_approved_at IS NOT NULL
-      AND c.grade_approved_at >= NOW() - INTERVAL '${sql.raw(String(WINDOW_DAYS))} days'
     ORDER BY c.grade DESC NULLS LAST, si.declared_value DESC NULLS LAST
     LIMIT ${limit}
   `);
@@ -81,25 +74,21 @@ export async function fetchWeeklyReelData(limit: number = DEFAULT_LIMIT): Promis
     };
   });
 
-  // Separately count consenting certs in window (so the job can log how
-  // much of the consenting pool ended up in the top-N, useful telemetry).
-  let totalWithConsent = 0;
+  // Separately count featured certs (so the job can log how much of the
+  // featured pool ended up in the top-N — useful telemetry).
+  let totalFeatured = 0;
   try {
     const cnt = await db.execute(sql`
       SELECT COUNT(*)::int AS n
       FROM certificates c
-      JOIN submission_items si ON si.id = c.submission_item_id
-      JOIN submissions     s  ON s.id  = si.submission_id
-      WHERE s.marketing_feature_consent = true
-        AND s.deleted_at IS NULL
+      WHERE c.marketing_featured = true
         AND c.deleted_at IS NULL
         AND c.grade_approved_at IS NOT NULL
-        AND c.grade_approved_at >= NOW() - INTERVAL '${sql.raw(String(WINDOW_DAYS))} days'
     `);
-    totalWithConsent = (cnt.rows[0] as any)?.n ?? cards.length;
+    totalFeatured = (cnt.rows[0] as any)?.n ?? cards.length;
   } catch {
-    totalWithConsent = cards.length;
+    totalFeatured = cards.length;
   }
 
-  return { cards, totalWithConsent, windowDays: WINDOW_DAYS };
+  return { cards, totalFeatured };
 }
