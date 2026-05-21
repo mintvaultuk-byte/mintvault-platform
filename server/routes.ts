@@ -13231,13 +13231,39 @@ Defects (admin-confirmed): ${defectLines}`;
         case "include_back":
         case "auto_post_instagram":
         case "watermark_enabled":
+        case "auto_post_instagram_video":
+        case "auto_post_facebook":
+        case "instagram_draft_mode":
+        case "auto_post_tiktok":
+        case "tiktok_disable_duet":
+        case "tiktok_disable_stitch":
+        case "text_overlay_enabled":
+        case "require_card_approval":
+        case "auto_generate_thumbnail":
+        case "notify_card_owners":
+        case "smart_schedule":
           value = raw === true || raw === "true";
+          break;
+        case "post_delay_minutes":
+          value = Math.max(0, Math.min(180, Number(raw) || 0));
+          break;
+        case "tiktok_privacy":
+          value = ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "SELF_ONLY"].includes(String(raw))
+            ? String(raw) : "PUBLIC_TO_EVERYONE";
+          break;
+        case "transition_style":
+          value = ["cut", "dissolve", "zoom"].includes(String(raw))
+            ? String(raw) : "cut";
           break;
         case "video_prompt":
         case "video_model":
         case "caption_template":
         case "notify_email":
         case "notify_webhook_url":
+        case "intro_video_r2_key":
+        case "outro_video_r2_key":
+        case "background_music_r2_key":
+        case "text_overlay_format":
           value = String(raw ?? "");
           break;
         default:
@@ -13375,7 +13401,10 @@ Defects (admin-confirmed): ${defectLines}`;
       const rows = (await db.execute(sql`
         SELECT reel_date, card_count, success_count, fail_count,
                estimated_cost_usd::text AS estimated_cost_usd,
-               model, clip_length_seconds, created_at
+               model, clip_length_seconds, created_at,
+               instagram_post_id, facebook_post_id, tiktok_post_id,
+               instagram_likes, instagram_views, instagram_reach,
+               instagram_comments, thumbnail_r2_key
         FROM reel_analytics
         ORDER BY created_at DESC
         LIMIT 12
@@ -13394,12 +13423,412 @@ Defects (admin-confirmed): ${defectLines}`;
           model: r.model,
           clipLengthSeconds: r.clip_length_seconds,
           createdAt: r.created_at,
+          instagramPostId: r.instagram_post_id ?? null,
+          facebookPostId: r.facebook_post_id ?? null,
+          tiktokPostId: r.tiktok_post_id ?? null,
+          instagramLikes: r.instagram_likes ?? null,
+          instagramViews: r.instagram_views ?? null,
+          instagramReach: r.instagram_reach ?? null,
+          instagramComments: r.instagram_comments ?? null,
+          thumbnailR2Key: r.thumbnail_r2_key ?? null,
         })),
         totalCostUsd: totalRow?.total != null ? Number(totalRow.total) : 0,
       });
     } catch (err: any) {
       console.error("[weekly-reel] analytics fetch failed:", err);
       res.status(500).json({ error: err?.message ?? "analytics fetch failed" });
+    }
+  });
+
+  // ── Social publishing (Meta + TikTok) ──────────────────────────────────
+
+  // Helper: read manifest JSON for a date from R2. Returns null on miss.
+  async function readReelManifest(date: string): Promise<any | null> {
+    const key = `videos/weekly-reels/draft-${date}.json`;
+    try {
+      const url = await getR2SignedUrl(key, 60);
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }
+
+  async function ensureAllCardsApproved(date: string): Promise<{ ok: boolean; pending: string[] }> {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT cert_number, approved FROM reel_card_approvals WHERE reel_date = ${date}
+      `)).rows as Array<{ cert_number: string; approved: boolean }>;
+      if (rows.length === 0) return { ok: true, pending: [] };
+      const pending = rows.filter(r => r.approved !== true).map(r => r.cert_number);
+      return { ok: pending.length === 0, pending };
+    } catch {
+      return { ok: true, pending: [] };
+    }
+  }
+
+  app.get("/api/admin/weekly-reel/meta-status", requireAdmin, async (_req, res) => {
+    try {
+      const { getMetaTokenStatus } = await import("./lib/meta-publisher");
+      res.json(await getMetaTokenStatus());
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "meta-status failed" });
+    }
+  });
+
+  app.get("/api/admin/weekly-reel/tiktok-status", requireAdmin, async (_req, res) => {
+    try {
+      const { getTikTokTokenStatus } = await import("./lib/tiktok-publisher");
+      res.json(await getTikTokTokenStatus());
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "tiktok-status failed" });
+    }
+  });
+
+  // Shared publish handler factory — IG/FB/TikTok all follow the same shape:
+  // read manifest → require approvals (when configured) → pick top video →
+  // call publisher → store post id in reel_analytics.
+  async function publishHandler(
+    req: any, res: any,
+    publisher: (videoUrl: string, caption: string) => Promise<{ postId: string }>,
+    column: "instagram_post_id" | "facebook_post_id" | "tiktok_post_id",
+    label: string,
+  ) {
+    try {
+      const date = String(req.body?.date ?? "").trim();
+      if (!date) return res.status(400).json({ error: "date required" });
+      const manifest = await readReelManifest(date);
+      if (!manifest) return res.status(404).json({ error: "manifest not found" });
+      const { getAllSettings } = await import("./lib/pipeline-settings");
+      const settings = await getAllSettings();
+      if (settings.require_card_approval) {
+        const approval = await ensureAllCardsApproved(date);
+        if (!approval.ok) {
+          return res.status(409).json({ error: "approvals_pending", pending: approval.pending });
+        }
+      }
+      const topCard = (manifest.cards ?? []).find((c: any) => c.videoUrl);
+      if (!topCard?.videoUrl) return res.status(400).json({ error: "no successful video in manifest" });
+      const caption = String(manifest.caption ?? "");
+      const { postId } = await publisher(topCard.videoUrl, caption);
+      await db.execute(sql`
+        UPDATE reel_analytics
+        SET ${sql.raw(column)} = ${postId}
+        WHERE reel_date = ${date}
+      `);
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      try {
+        await db.insert(auditLog).values({
+          entityType: "weekly_reel", entityId: date, action: `${label}_published`,
+          adminUser: actor, details: { postId },
+        });
+      } catch {}
+      res.json({ ok: true, postId });
+    } catch (err: any) {
+      const msg = err?.message ?? "publish failed";
+      if (msg === "token_not_configured") return res.json({ error: "token_not_configured" });
+      console.error(`[weekly-reel] ${label} publish failed:`, err);
+      res.status(500).json({ error: msg });
+    }
+  }
+
+  app.post("/api/admin/weekly-reel/publish-instagram", requireAdmin, async (req, res) => {
+    const { publishToInstagram } = await import("./lib/meta-publisher");
+    return publishHandler(req, res, publishToInstagram, "instagram_post_id", "instagram");
+  });
+
+  app.post("/api/admin/weekly-reel/publish-facebook", requireAdmin, async (req, res) => {
+    const { publishToFacebook } = await import("./lib/meta-publisher");
+    return publishHandler(req, res, publishToFacebook, "facebook_post_id", "facebook");
+  });
+
+  app.post("/api/admin/weekly-reel/publish-tiktok", requireAdmin, async (req, res) => {
+    const { publishToTikTok } = await import("./lib/tiktok-publisher");
+    const { getAllSettings } = await import("./lib/pipeline-settings");
+    const settings = await getAllSettings();
+    return publishHandler(
+      req, res,
+      (videoUrl, caption) => publishToTikTok(videoUrl, caption, {
+        privacy: settings.tiktok_privacy,
+        disableDuet: settings.tiktok_disable_duet,
+        disableStitch: settings.tiktok_disable_stitch,
+      }),
+      "tiktok_post_id", "tiktok",
+    );
+  });
+
+  // POST /refresh-insights — pull latest IG numbers for a reel and store
+  // in reel_analytics.
+  app.post("/api/admin/weekly-reel/refresh-insights", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.body?.date ?? "").trim();
+      if (!date) return res.status(400).json({ error: "date required" });
+      const row = (await db.execute(sql`
+        SELECT instagram_post_id FROM reel_analytics WHERE reel_date = ${date} LIMIT 1
+      `)).rows[0] as { instagram_post_id?: string } | undefined;
+      if (!row?.instagram_post_id) return res.status(404).json({ error: "no instagram_post_id for date" });
+      const { getInstagramInsights } = await import("./lib/meta-publisher");
+      const insights = await getInstagramInsights(row.instagram_post_id);
+      await db.execute(sql`
+        UPDATE reel_analytics
+        SET instagram_likes    = ${insights.likes},
+            instagram_views    = ${insights.views},
+            instagram_reach    = ${insights.reach},
+            instagram_comments = ${insights.comments}
+        WHERE reel_date = ${date}
+      `);
+      res.json({ ok: true, insights });
+    } catch (err: any) {
+      const msg = err?.message ?? "refresh-insights failed";
+      if (msg === "token_not_configured") return res.json({ error: "token_not_configured" });
+      console.error("[weekly-reel] refresh-insights failed:", err);
+      res.status(500).json({ error: msg });
+    }
+  });
+
+  // ── Per-card approval workflow ─────────────────────────────────────────
+
+  app.get("/api/admin/weekly-reel/approvals/:date", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.params.date).trim();
+      const rows = (await db.execute(sql`
+        SELECT cert_number, approved, reviewed_at, reviewed_by
+        FROM reel_card_approvals
+        WHERE reel_date = ${date}
+        ORDER BY cert_number
+      `)).rows as Array<any>;
+      res.json({
+        date,
+        cards: rows.map(r => ({
+          certNumber: r.cert_number,
+          approved: r.approved === true,
+          reviewedAt: r.reviewed_at ?? null,
+          reviewedBy: r.reviewed_by ?? null,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "approvals fetch failed" });
+    }
+  });
+
+  app.patch("/api/admin/weekly-reel/approvals/:date/:certNumber", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.params.date).trim();
+      const certNumber = String(req.params.certNumber).trim();
+      const approved = req.body?.approved === true;
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      await db.execute(sql`
+        INSERT INTO reel_card_approvals (reel_date, cert_number, approved, reviewed_at, reviewed_by)
+        VALUES (${date}, ${certNumber}, ${approved}, NOW(), ${actor})
+        ON CONFLICT (reel_date, cert_number) DO UPDATE
+          SET approved = EXCLUDED.approved,
+              reviewed_at = NOW(),
+              reviewed_by = EXCLUDED.reviewed_by
+      `);
+      res.json({ ok: true, date, certNumber, approved });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "approval update failed" });
+    }
+  });
+
+  app.post("/api/admin/weekly-reel/approvals/:date/approve-all", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.params.date).trim();
+      const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+      await db.execute(sql`
+        UPDATE reel_card_approvals
+        SET approved = true, reviewed_at = NOW(), reviewed_by = ${actor}
+        WHERE reel_date = ${date}
+      `);
+      res.json({ ok: true, date });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "approve-all failed" });
+    }
+  });
+
+  // POST /regenerate-card — re-run Segmind for one card only, replace the
+  // entry in the manifest. Cheap-and-cheerful: no re-running of approvals.
+  app.post("/api/admin/weekly-reel/regenerate-card", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.body?.date ?? "").trim();
+      const certNumber = String(req.body?.certNumber ?? "").trim();
+      if (!date || !certNumber) return res.status(400).json({ error: "date + certNumber required" });
+      if (!process.env.SEGMIND_API_KEY) return res.status(400).json({ error: "SEGMIND_API_KEY missing" });
+
+      const manifestKey = `videos/weekly-reels/draft-${date}.json`;
+      const manifest = await readReelManifest(date);
+      if (!manifest) return res.status(404).json({ error: "manifest not found" });
+
+      const { getAllSettings } = await import("./lib/pipeline-settings");
+      const settings = await getAllSettings();
+      const { imageToVideo } = await import("./lib/segmind-client");
+
+      const cardIdx = (manifest.cards ?? []).findIndex((c: any) => c.certNumber === certNumber);
+      if (cardIdx < 0) return res.status(404).json({ error: "card not in manifest" });
+
+      const frontKey = `images/${certNumber}/front.png`;
+      const srcUrl = await getR2SignedUrl(frontKey, 60 * 60);
+      let videoUrl: string | null = null;
+      let error: string | undefined = undefined;
+      try {
+        videoUrl = await imageToVideo(srcUrl, settings.video_prompt, {
+          model: settings.video_model,
+          clipLengthSeconds: settings.clip_length_seconds,
+        });
+      } catch (err: any) {
+        error = err?.message ?? String(err);
+      }
+
+      manifest.cards[cardIdx] = {
+        ...manifest.cards[cardIdx],
+        videoUrl,
+        error,
+      };
+      // Recount success/fail
+      const cards = manifest.cards as Array<any>;
+      manifest.successCount = cards.filter(c => c.videoUrl).length;
+      manifest.failCount = cards.length - manifest.successCount;
+
+      try {
+        await uploadToR2(manifestKey, Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"), "application/json");
+      } catch (err: any) {
+        return res.status(500).json({ error: `manifest re-upload failed: ${err?.message ?? err}` });
+      }
+
+      res.json({ ok: true, videoUrl, error });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "regenerate failed" });
+    }
+  });
+
+  // ── Content enhancement uploads (intro / outro / music) ────────────────
+
+  const reelAssetUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 },   // 50 MB cap
+  });
+
+  function makeAssetUploadHandler(opts: {
+    r2Key: string;
+    settingKey: "intro_video_r2_key" | "outro_video_r2_key" | "background_music_r2_key";
+    contentType: string;
+    logTag: string;
+  }) {
+    return async (req: any, res: any) => {
+      try {
+        const file = req.file;
+        if (!file?.buffer?.length) return res.status(400).json({ error: "file required" });
+        await uploadToR2(opts.r2Key, file.buffer, opts.contentType);
+        const { setSetting } = await import("./lib/pipeline-settings");
+        const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
+        await setSetting(opts.settingKey, opts.r2Key, actor);
+        res.json({ ok: true, r2Key: opts.r2Key, size: file.buffer.length });
+      } catch (err: any) {
+        console.error(`[${opts.logTag}] upload failed:`, err);
+        res.status(500).json({ error: err?.message ?? "upload failed" });
+      }
+    };
+  }
+
+  app.post("/api/admin/weekly-reel/upload-intro", requireAdmin, reelAssetUpload.single("file"),
+    makeAssetUploadHandler({
+      r2Key: "weekly-reel/intro.mp4",
+      settingKey: "intro_video_r2_key",
+      contentType: "video/mp4",
+      logTag: "reel-asset:intro",
+    }));
+  app.post("/api/admin/weekly-reel/upload-outro", requireAdmin, reelAssetUpload.single("file"),
+    makeAssetUploadHandler({
+      r2Key: "weekly-reel/outro.mp4",
+      settingKey: "outro_video_r2_key",
+      contentType: "video/mp4",
+      logTag: "reel-asset:outro",
+    }));
+  app.post("/api/admin/weekly-reel/upload-music", requireAdmin, reelAssetUpload.single("file"),
+    makeAssetUploadHandler({
+      r2Key: "weekly-reel/music.mp3",
+      settingKey: "background_music_r2_key",
+      contentType: "audio/mpeg",
+      logTag: "reel-asset:music",
+    }));
+
+  // ── Thumbnail presigned URL ────────────────────────────────────────────
+
+  app.get("/api/admin/weekly-reel/thumbnail/:date", requireAdmin, async (req, res) => {
+    try {
+      const date = String(req.params.date).trim();
+      const key = `videos/weekly-reels/thumbnail-${date}.jpg`;
+      const url = await getR2SignedUrl(key, 60 * 60);
+      res.json({ url });
+    } catch (err: any) {
+      res.status(404).json({ error: "thumbnail not available" });
+    }
+  });
+
+  // ── Public reel endpoints (no auth) ────────────────────────────────────
+
+  // GET /api/reels — last 12 reel runs with successCount > 0. Manifests
+  // fetched from R2 + audit_log to determine recency. PII-free: only
+  // cert numbers, grades, card names + video URLs are returned. No
+  // owner emails, no submission internals.
+  app.get("/api/reels", async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT entity_id, created_at
+        FROM audit_log
+        WHERE entity_type = 'weekly_reel' AND action = 'generated'
+        ORDER BY created_at DESC
+        LIMIT 24
+      `)).rows as Array<{ entity_id: string; created_at: Date }>;
+      const reels = [];
+      for (const row of rows) {
+        const manifest = await readReelManifest(row.entity_id);
+        if (!manifest) continue;
+        if ((manifest.successCount ?? 0) <= 0) continue;
+        reels.push({
+          date: row.entity_id,
+          generatedAt: manifest.generatedAt ?? row.created_at,
+          caption: manifest.caption ?? "",
+          cardCount: manifest.cardCount ?? 0,
+          successCount: manifest.successCount ?? 0,
+          thumbnailKey: manifest.thumbnailR2Key ?? null,
+          cards: (manifest.cards ?? [])
+            .filter((c: any) => c.videoUrl)
+            .map((c: any) => ({
+              certNumber: c.certNumber,
+              grade: c.grade,
+              cardName: c.cardName,
+              videoUrl: c.videoUrl,
+            })),
+        });
+        if (reels.length >= 12) break;
+      }
+      res.json({ reels });
+    } catch (err: any) {
+      console.error("[public-reels] fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "reels fetch failed" });
+    }
+  });
+
+  // GET /api/reels/:date/:certNumber — single card from a reel manifest.
+  // Used by the public /share/reel page.
+  app.get("/api/reels/:date/:certNumber", async (req, res) => {
+    try {
+      const date = String(req.params.date).trim();
+      const certNumber = String(req.params.certNumber).trim();
+      const manifest = await readReelManifest(date);
+      if (!manifest) return res.status(404).json({ error: "reel not found" });
+      const card = (manifest.cards ?? []).find((c: any) => c.certNumber === certNumber && c.videoUrl);
+      if (!card) return res.status(404).json({ error: "card not in reel" });
+      res.json({
+        date,
+        certNumber: card.certNumber,
+        grade: card.grade,
+        cardName: card.cardName,
+        videoUrl: card.videoUrl,
+        caption: manifest.caption ?? "",
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message ?? "share-reel fetch failed" });
     }
   });
 

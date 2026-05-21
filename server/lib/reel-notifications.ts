@@ -68,3 +68,51 @@ export async function postReelWebhook(url: string, summary: ReelSummary): Promis
     throw new Error(`Webhook ${res.status}: ${body.slice(0, 200)}`);
   }
 }
+
+/**
+ * "Your card was featured" notification — sent to the cert owner after a
+ * successful reel run, gated on (a) the notify_card_owners pipeline setting
+ * and (b) the submission's marketing_feature_consent flag.
+ *
+ * Best-effort: caller wraps in try/catch and only warns on failure.
+ */
+export interface FeaturedCardNotification {
+  toEmail: string;
+  certNumber: string;
+  grade: number | null;
+  cardName: string | null;
+  appBaseUrl: string;        // e.g. "https://mintvaultuk.com"
+}
+
+export async function sendCardFeaturedEmail(n: FeaturedCardNotification): Promise<void> {
+  const resend = getResend();
+  if (!resend) {
+    console.warn("[reel-notify] RESEND_API_KEY missing — skipping owner email");
+    return;
+  }
+  const subject = "Your card was featured in MintVault's weekly highlights!";
+  const gradeLine = n.grade != null ? `Grade <strong>${n.grade}</strong>` : "";
+  const cardLine = n.cardName ? `<p><strong>${escapeHtml(n.cardName)}</strong></p>` : "";
+  const certUrl = `${n.appBaseUrl.replace(/\/+$/, "")}/cert/${encodeURIComponent(n.certNumber)}`;
+  const html = `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;background:#0a0a0a;color:#ccc;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#111;border:1px solid #D4AF37;border-radius:8px;padding:32px;">
+    <h1 style="color:#D4AF37;margin:0 0 16px 0;letter-spacing:2px;">YOUR CARD WAS FEATURED</h1>
+    <p>Your card appeared in our weekly grade highlights reel.</p>
+    ${cardLine}
+    <p>Certificate <code style="color:#D4AF37;">${escapeHtml(n.certNumber)}</code>${gradeLine ? ` · ${gradeLine}` : ""}</p>
+    <p style="margin-top:24px;">
+      <a href="${certUrl}" style="display:inline-block;background:linear-gradient(135deg,#D4AF37,#B8960C);color:#1A1400;font-weight:bold;text-decoration:none;padding:12px 24px;border-radius:6px;">View Certificate</a>
+    </p>
+    <p style="color:#666;font-size:11px;margin-top:32px;">MintVault UK · mintvaultuk@gmail.com</p>
+  </div>
+  </body></html>`;
+  const result = await resend.emails.send({ from: getFromEmail(), to: n.toEmail, subject, html });
+  if ((result as any).error) {
+    throw new Error(`Resend error: ${JSON.stringify((result as any).error)}`);
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}

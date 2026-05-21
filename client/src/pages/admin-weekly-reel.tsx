@@ -27,6 +27,8 @@ import { apiRequest } from "@/lib/queryClient";
 import {
   Loader2, PlayCircle, KeyRound, Calendar, CheckCircle2, XCircle,
   AlertTriangle, ChevronDown, ChevronUp, Pin, Ban, Download, RotateCcw, Pause,
+  Instagram, Facebook, Music, Image as ImageIcon, Send, RefreshCw, Check,
+  Upload, Sparkles,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -35,11 +37,14 @@ import {
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type SortOrder = "grade_desc" | "value_desc" | "newest_first";
+type TiktokPrivacy = "PUBLIC_TO_EVERYONE" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
+type TransitionStyle = "cut" | "dissolve" | "zoom";
 
 interface PipelineSettings {
   schedule_day: number;
   schedule_hour_utc: number;
   pipeline_paused: boolean;
+  smart_schedule: boolean;
   min_grade: number;
   max_cards: number;
   sort_order: SortOrder;
@@ -51,8 +56,44 @@ interface PipelineSettings {
   caption_template: string;
   output_resolution: 720 | 1080;
   watermark_enabled: boolean;
+  auto_post_instagram_video: boolean;
+  auto_post_facebook: boolean;
+  instagram_draft_mode: boolean;
+  post_delay_minutes: number;
+  auto_post_tiktok: boolean;
+  tiktok_privacy: TiktokPrivacy;
+  tiktok_disable_duet: boolean;
+  tiktok_disable_stitch: boolean;
+  intro_video_r2_key: string;
+  outro_video_r2_key: string;
+  background_music_r2_key: string;
+  text_overlay_enabled: boolean;
+  text_overlay_format: string;
+  transition_style: TransitionStyle;
+  require_card_approval: boolean;
+  auto_generate_thumbnail: boolean;
+  notify_card_owners: boolean;
   notify_email: string;
   notify_webhook_url: string;
+}
+
+interface MetaStatus {
+  valid: boolean;
+  expiresAt: string | null;
+  scopes: string[];
+  igUserId: string | null;
+  fbPageId: string | null;
+}
+interface TiktokStatus {
+  valid: boolean;
+  expiresAt: string | null;
+  openId: string | null;
+}
+interface ApprovalCard {
+  certNumber: string;
+  approved: boolean;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
 }
 
 interface FeaturedCard {
@@ -110,6 +151,14 @@ interface AnalyticsRow {
   model: string | null;
   clipLengthSeconds: number | null;
   createdAt: string;
+  instagramPostId: string | null;
+  facebookPostId: string | null;
+  tiktokPostId: string | null;
+  instagramLikes: number | null;
+  instagramViews: number | null;
+  instagramReach: number | null;
+  instagramComments: number | null;
+  thumbnailR2Key: string | null;
 }
 interface AnalyticsResp { rows: AnalyticsRow[]; totalCostUsd: number }
 
@@ -266,6 +315,12 @@ function PipelineControls({ paused }: { paused: boolean }) {
 
 function ScheduleCard() {
   const { settings, update } = useSettings();
+  const { data: meta } = useQuery<MetaStatus>({
+    queryKey: ["/api/admin/weekly-reel/meta-status"],
+    queryFn: async () => (await fetch("/api/admin/weekly-reel/meta-status")).json(),
+  });
+  // Peak-hour preview isn't exposed by a dedicated endpoint; we show a
+  // hint once smart schedule is on so the operator knows what to expect.
   if (!settings) {
     return (
       <div className="border border-[#E8E4DC] rounded-xl p-4">
@@ -293,7 +348,8 @@ function ScheduleCard() {
         <select
           value={settings.schedule_hour_utc}
           onChange={(e) => update({ key: "schedule_hour_utc", value: Number(e.target.value) })}
-          className="text-xs border border-[#E8E4DC] rounded px-2 py-1 bg-white"
+          disabled={settings.smart_schedule}
+          className="text-xs border border-[#E8E4DC] rounded px-2 py-1 bg-white disabled:opacity-50"
           data-testid="select-schedule-hour"
         >
           {Array.from({ length: 24 }, (_, h) => (
@@ -301,6 +357,25 @@ function ScheduleCard() {
           ))}
         </select>
       </div>
+      <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={settings.smart_schedule}
+          onChange={() => update({ key: "smart_schedule", value: !settings.smart_schedule })}
+          className="accent-[#D4AF37] h-3 w-3"
+          data-testid="check-smart-schedule"
+        />
+        <span className="text-[10px] text-[#666] inline-flex items-center gap-1">
+          <Sparkles size={10} className="text-[#D4AF37]" /> Smart schedule (IG peak)
+        </span>
+      </label>
+      {settings.smart_schedule && (
+        <p className="mt-1 text-[10px] text-[#888]">
+          {meta?.valid
+            ? "Posts at the IG-insights peak hour of the day."
+            : <span className="text-amber-700">Connect Meta to read peak hour.</span>}
+        </p>
+      )}
       <p className="mt-1 text-[10px] text-[#888888]">Skipped if fewer than 3 featured cards.</p>
     </div>
   );
@@ -602,6 +677,22 @@ function Notifications() {
     <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
       <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Notifications</h2>
       <div className="space-y-4">
+        <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+          <div>
+            <p className="text-sm font-semibold text-[#1A1A1A]">Notify card owners when featured</p>
+            <p className="text-[10px] text-[#888]">Emails each cert's owner only if they have <code>marketing_feature_consent</code>.</p>
+          </div>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.notify_card_owners}
+              onChange={() => update({ key: "notify_card_owners", value: !settings.notify_card_owners })}
+              className="accent-[#D4AF37] h-4 w-4"
+              data-testid="check-notify-card-owners"
+            />
+            <span className="text-xs text-[#666]">{settings.notify_card_owners ? "on" : "off"}</span>
+          </label>
+        </div>
         <div>
           <label className="text-[10px] uppercase tracking-wider text-[#888]">Email recipient</label>
           <div className="mt-2 flex gap-2">
@@ -659,6 +750,245 @@ function Notifications() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Social Publishing (Meta + TikTok) ──────────────────────────────────────
+
+function SocialPublishing() {
+  const { settings, update } = useSettings();
+  const { data: meta } = useQuery<MetaStatus>({
+    queryKey: ["/api/admin/weekly-reel/meta-status"],
+    queryFn: async () => (await fetch("/api/admin/weekly-reel/meta-status")).json(),
+  });
+  const { data: tiktok } = useQuery<TiktokStatus>({
+    queryKey: ["/api/admin/weekly-reel/tiktok-status"],
+    queryFn: async () => (await fetch("/api/admin/weekly-reel/tiktok-status")).json(),
+  });
+  if (!settings) return null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Social Publishing</h2>
+
+      {/* Meta */}
+      <div className="border border-[#E8E4DC] rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Instagram size={14} className="text-[#D4AF37]" />
+            <Facebook size={14} className="text-[#D4AF37]" />
+            <span className="text-xs uppercase tracking-wider text-[#666]">Meta (Instagram + Facebook)</span>
+          </div>
+          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
+            meta?.valid ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
+          }`}>
+            {meta === undefined ? "…" : meta.valid ? "Connected" : "Not connected"}
+          </span>
+        </div>
+        {meta && (
+          <p className="text-[10px] text-[#888] mb-3 font-mono">
+            IG user: {meta.igUserId ?? "—"} · FB page: {meta.fbPageId ?? "—"} · scopes: {meta.scopes.length}
+          </p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ToggleRow label="Auto-post Instagram video" value={settings.auto_post_instagram_video}
+            onChange={(v) => update({ key: "auto_post_instagram_video", value: v })} />
+          <ToggleRow label="Auto-post Facebook" value={settings.auto_post_facebook}
+            onChange={(v) => update({ key: "auto_post_facebook", value: v })} />
+          <ToggleRow label="Draft mode (hold for manual)" value={settings.instagram_draft_mode}
+            onChange={(v) => update({ key: "instagram_draft_mode", value: v })} />
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#888]">
+              Post delay — {settings.post_delay_minutes} min
+            </label>
+            <input
+              type="range" min={0} max={120} step={5}
+              value={settings.post_delay_minutes}
+              onChange={(e) => update({ key: "post_delay_minutes", value: Number(e.target.value) })}
+              className="w-full mt-2 accent-[#D4AF37]"
+              data-testid="slider-post-delay"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* TikTok */}
+      <div className="border border-[#E8E4DC] rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Music size={14} className="text-[#D4AF37]" />
+            <span className="text-xs uppercase tracking-wider text-[#666]">TikTok</span>
+          </div>
+          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
+            tiktok?.valid ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
+          }`}>
+            {tiktok === undefined ? "…" : tiktok.valid ? "Connected" : "Not connected"}
+          </span>
+        </div>
+        {tiktok && (
+          <p className="text-[10px] text-[#888] mb-3 font-mono">open_id: {tiktok.openId ?? "—"}</p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <ToggleRow label="Auto-post TikTok" value={settings.auto_post_tiktok}
+            onChange={(v) => update({ key: "auto_post_tiktok", value: v })} />
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#888]">Privacy</label>
+            <select
+              value={settings.tiktok_privacy}
+              onChange={(e) => update({ key: "tiktok_privacy", value: e.target.value })}
+              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              data-testid="select-tiktok-privacy"
+            >
+              <option value="PUBLIC_TO_EVERYONE">Public</option>
+              <option value="FOLLOWER_OF_CREATOR">Followers only</option>
+              <option value="SELF_ONLY">Self only</option>
+            </select>
+          </div>
+          <ToggleRow label="Disable duet" value={settings.tiktok_disable_duet}
+            onChange={(v) => update({ key: "tiktok_disable_duet", value: v })} />
+          <ToggleRow label="Disable stitch" value={settings.tiktok_disable_stitch}
+            onChange={(v) => update({ key: "tiktok_disable_stitch", value: v })} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg px-3 py-2">
+      <span className="text-sm text-[#1A1A1A]">{label}</span>
+      <label className="inline-flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={() => onChange(!value)}
+          className="accent-[#D4AF37] h-4 w-4"
+        />
+        <span className="text-xs text-[#666]">{value ? "on" : "off"}</span>
+      </label>
+    </div>
+  );
+}
+
+// ── Content Enhancement (intro/outro/music/text overlay/transition) ───────
+
+function ContentEnhancement() {
+  const { settings, update } = useSettings();
+  const queryClient = useQueryClient();
+  const [draftFormat, setDraftFormat] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings && draftFormat === null) setDraftFormat(settings.text_overlay_format);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.text_overlay_format]);
+
+  async function upload(endpoint: string, file: File) {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch(endpoint, { method: "POST", body: fd, credentials: "include" });
+    if (!r.ok) throw new Error(await r.text());
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/settings"] });
+    return r.json();
+  }
+
+  if (!settings) return null;
+  const formatDirty = draftFormat !== null && draftFormat !== settings.text_overlay_format;
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Content Enhancement</h2>
+      <div className="space-y-4">
+        <AssetUploadRow label="Intro clip" current={settings.intro_video_r2_key} accept="video/mp4"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-intro", f)} />
+        <AssetUploadRow label="Outro clip" current={settings.outro_video_r2_key} accept="video/mp4"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-outro", f)} />
+        <AssetUploadRow label="Background music" current={settings.background_music_r2_key} accept="audio/mpeg,audio/mp3"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-music", f)} />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <div>
+            <ToggleRow label="Text overlay" value={settings.text_overlay_enabled}
+              onChange={(v) => update({ key: "text_overlay_enabled", value: v })} />
+            <label className="mt-3 block text-[10px] uppercase tracking-wider text-[#888]">Format</label>
+            <input
+              type="text"
+              value={draftFormat ?? ""}
+              onChange={(e) => setDraftFormat(e.target.value)}
+              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white font-mono"
+              data-testid="input-text-overlay-format"
+            />
+            <p className="mt-1 text-[10px] text-[#888]">
+              Variables: <code>{"{{certNumber}}"}</code>, <code>{"{{grade}}"}</code>, <code>{"{{cardName}}"}</code>
+            </p>
+            <button
+              type="button"
+              onClick={() => { if (draftFormat !== null) update({ key: "text_overlay_format", value: draftFormat }); }}
+              disabled={!formatDirty}
+              className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+            >
+              Save
+            </button>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-[#888]">Transition</label>
+            <select
+              value={settings.transition_style}
+              onChange={(e) => update({ key: "transition_style", value: e.target.value })}
+              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              data-testid="select-transition"
+            >
+              <option value="cut">Cut</option>
+              <option value="dissolve">Dissolve</option>
+              <option value="zoom">Zoom</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="border-t border-[#F0EDE5] pt-3">
+          <ToggleRow label="Auto-generate thumbnail" value={settings.auto_generate_thumbnail}
+            onChange={(v) => update({ key: "auto_generate_thumbnail", value: v })} />
+          <ToggleRow label="Require per-card approval before publish"
+            value={settings.require_card_approval}
+            onChange={(v) => update({ key: "require_card_approval", value: v })} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssetUploadRow({ label, current, accept, onPick }: {
+  label: string; current: string; accept: string; onPick: (f: File) => Promise<any>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <div className="flex items-center justify-between gap-3 bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-[#1A1A1A]">{label}</p>
+        <p className="text-[10px] text-[#888] truncate font-mono">{current || "none"}</p>
+        {err && <p className="text-[10px] text-red-700">{err}</p>}
+      </div>
+      <label className={`inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg cursor-pointer ${
+        busy ? "bg-white text-[#888] border border-[#E8E4DC] opacity-50" : "bg-white text-[#555] border border-[#E8E4DC] hover:border-[#D4AF37]"
+      }`}>
+        <Upload size={12} /> {busy ? "Uploading…" : "Upload"}
+        <input
+          type="file"
+          accept={accept}
+          className="hidden"
+          disabled={busy}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            setBusy(true); setErr(null);
+            try { await onPick(f); }
+            catch (x: any) { setErr(x?.message ?? "Upload failed"); }
+            finally { setBusy(false); e.target.value = ""; }
+          }}
+        />
+      </label>
     </div>
   );
 }
@@ -866,7 +1196,10 @@ function BlacklistSection({ cards, onRestore, busyCert }: { cards: FeaturedCard[
 // ── Section 8: Reel History ────────────────────────────────────────────────
 
 function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () => void }) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [pubMsg, setPubMsg] = useState<string | null>(null);
   const badge = statusBadge(entry.status);
   const ageHours = useMemo(() => {
     try { return (Date.now() - new Date(entry.createdAt).getTime()) / (1000 * 60 * 60); }
@@ -874,12 +1207,33 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
   }, [entry.createdAt]);
   const stale = ageHours > 24;
 
+  const { data: approvalsData } = useQuery<{ cards: ApprovalCard[] }>({
+    queryKey: ["/api/admin/weekly-reel/approvals/", entry.date],
+    queryFn: async () => (await fetch(`/api/admin/weekly-reel/approvals/${entry.date}`)).json(),
+    enabled: open,
+  });
+  const approvals: Record<string, ApprovalCard> = useMemo(() => {
+    const m: Record<string, ApprovalCard> = {};
+    (approvalsData?.cards ?? []).forEach(a => { m[a.certNumber] = a; });
+    return m;
+  }, [approvalsData]);
+  const hasApprovals = (approvalsData?.cards.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/admin/weekly-reel/thumbnail/${entry.date}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!cancelled) setThumbUrl(j.url ?? null);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [open, entry.date]);
+
   function downloadAll() {
-    // Best-effort: kick off an <a download> for each video URL. Browsers
-    // typically prompt once for "Allow multiple downloads" and then save
-    // each file individually. We can't build a ZIP without a new dep and
-    // Segmind URLs are cross-origin so a server-side proxy ZIP would have
-    // to fetch + repackage — out of scope for v1.
     const valid = entry.cards.filter(c => c.videoUrl).map(c => c.videoUrl as string);
     if (valid.length === 0) return;
     if (stale && !confirm("Segmind URLs may have expired (manifest > 24h old). Try anyway?")) return;
@@ -897,6 +1251,48 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
     });
   }
 
+  async function publish(channel: "instagram" | "facebook" | "tiktok") {
+    setPubMsg(`Publishing to ${channel}…`);
+    try {
+      const r = await apiRequest("POST", `/api/admin/weekly-reel/publish-${channel}`, { date: entry.date });
+      const j = await r.json();
+      if (j.error === "token_not_configured") setPubMsg(`${channel}: token not configured`);
+      else if (j.error === "approvals_pending") setPubMsg(`${channel}: pending approval — ${(j.pending ?? []).join(", ")}`);
+      else if (j.error) setPubMsg(`${channel}: ${j.error}`);
+      else { setPubMsg(`${channel}: published — ${j.postId}`); queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] }); }
+    } catch (err: any) {
+      setPubMsg(`${channel}: ${err?.message ?? "publish failed"}`);
+    }
+  }
+
+  async function refreshInsights() {
+    setPubMsg("Refreshing IG insights…");
+    try {
+      const r = await apiRequest("POST", "/api/admin/weekly-reel/refresh-insights", { date: entry.date });
+      const j = await r.json();
+      if (j.error) setPubMsg(`insights: ${j.error}`);
+      else { setPubMsg("insights: refreshed"); queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] }); }
+    } catch (err: any) { setPubMsg(`insights: ${err?.message ?? "failed"}`); }
+  }
+
+  async function toggleApproval(certNumber: string, approved: boolean) {
+    await apiRequest("PATCH", `/api/admin/weekly-reel/approvals/${entry.date}/${encodeURIComponent(certNumber)}`, { approved });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/approvals/", entry.date] });
+  }
+  async function approveAll() {
+    await apiRequest("POST", `/api/admin/weekly-reel/approvals/${entry.date}/approve-all`);
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/approvals/", entry.date] });
+  }
+  async function regenerate(certNumber: string) {
+    setPubMsg(`Regenerating ${certNumber}…`);
+    try {
+      const r = await apiRequest("POST", "/api/admin/weekly-reel/regenerate-card", { date: entry.date, certNumber });
+      const j = await r.json();
+      setPubMsg(j.error ? `regen: ${j.error}` : `regen: ${certNumber} ${j.videoUrl ? "ok" : "failed"}`);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/status"] });
+    } catch (err: any) { setPubMsg(`regen: ${err?.message ?? "failed"}`); }
+  }
+
   return (
     <div className="border border-[#E8E4DC] rounded-xl overflow-hidden" data-testid={`history-${entry.date}`}>
       <div className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[#FAFAF8] transition-colors">
@@ -905,6 +1301,9 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           onClick={() => setOpen(!open)}
           className="flex items-center gap-3 min-w-0 flex-1 text-left"
         >
+          {thumbUrl && open && (
+            <img src={thumbUrl} alt="" className="w-[60px] h-[60px] object-cover rounded border border-[#E8E4DC]" />
+          )}
           <span className="font-mono text-sm text-[#1A1A1A]">{entry.date}</span>
           <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${badge.cls}`}>
             {badge.label}
@@ -916,52 +1315,105 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
             {!entry.manifestPresent && <> · manifest missing</>}
           </span>
         </button>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={downloadAll}
-            disabled={entry.successCount === 0}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37] disabled:opacity-40"
-            title={stale ? "URLs may have expired" : "Download all videos"}
-          >
-            <Download size={12} /> {stale ? "Stale" : "Download"}
-          </button>
-          <button
-            type="button"
-            onClick={onRerun}
+        <div className="flex items-center gap-1 shrink-0">
+          <button type="button" onClick={() => publish("instagram")}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Re-run with force=true"
-          >
-            <RotateCcw size={12} /> Re-run
+            title="Publish to Instagram">
+            <Instagram size={12} />
+          </button>
+          <button type="button" onClick={() => publish("facebook")}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            title="Publish to Facebook">
+            <Facebook size={12} />
+          </button>
+          <button type="button" onClick={() => publish("tiktok")}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            title="Publish to TikTok">
+            <Music size={12} />
+          </button>
+          <button type="button" onClick={refreshInsights}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            title="Refresh IG insights">
+            <RefreshCw size={12} />
+          </button>
+          <button type="button" onClick={downloadAll} disabled={entry.successCount === 0}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37] disabled:opacity-40"
+            title={stale ? "URLs may have expired" : "Download all videos"}>
+            <Download size={12} /> {stale ? "Stale" : ""}
+          </button>
+          <button type="button" onClick={onRerun}
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            title="Re-run with force=true">
+            <RotateCcw size={12} />
           </button>
           {open ? <ChevronUp size={16} className="text-[#888]" /> : <ChevronDown size={16} className="text-[#888]" />}
         </div>
       </div>
+      {pubMsg && (
+        <div className="px-4 py-2 text-[10px] bg-[#FAFAF8] border-t border-[#E8E4DC] text-[#555] font-mono">
+          {pubMsg}
+        </div>
+      )}
       {open && (
         <div className="border-t border-[#E8E4DC] p-4 bg-[#FAFAF8]">
           <p className="text-[10px] text-[#888] mb-3">
             Generated {fmtDate(entry.createdAt)} · manifest <code>{entry.manifestKey}</code>
           </p>
+          {hasApprovals && (
+            <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg p-2">
+              <span className="text-xs text-amber-800">Per-card approval required before publishing.</span>
+              <button type="button" onClick={approveAll}
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">
+                Approve All
+              </button>
+            </div>
+          )}
           {entry.cards.length === 0 ? (
             <p className="text-sm text-[#888]">No per-card data — manifest is empty or unreadable.</p>
           ) : (
             <ul className="space-y-3">
-              {entry.cards.map((c, i) => (
-                <li key={`${entry.date}-${c.certNumber}-${i}`} className="bg-white border border-[#E8E4DC] rounded-lg p-3" data-testid={`history-card-${entry.date}-${c.certNumber}`}>
-                  <div className="flex items-baseline gap-2 mb-2">
-                    <span className="font-mono text-sm font-semibold text-[#1A1A1A]">{c.certNumber}</span>
-                    <span className="text-xs text-[#666]">grade {fmtGrade(c.grade)}</span>
-                    {c.cardName && <span className="text-xs text-[#888] truncate">· {c.cardName}</span>}
-                  </div>
-                  {c.videoUrl ? (
-                    <video src={c.videoUrl} controls preload="none" className="w-full max-w-sm rounded-lg border border-[#E8E4DC] bg-black" />
-                  ) : c.error ? (
-                    <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 font-mono break-words">{c.error}</p>
-                  ) : (
-                    <p className="text-xs text-[#888]">No video URL · no error recorded</p>
-                  )}
-                </li>
-              ))}
+              {entry.cards.map((c, i) => {
+                const ap = approvals[c.certNumber];
+                return (
+                  <li key={`${entry.date}-${c.certNumber}-${i}`} className="bg-white border border-[#E8E4DC] rounded-lg p-3" data-testid={`history-card-${entry.date}-${c.certNumber}`}>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-baseline gap-2 min-w-0">
+                        <span className="font-mono text-sm font-semibold text-[#1A1A1A]">{c.certNumber}</span>
+                        <span className="text-xs text-[#666]">grade {fmtGrade(c.grade)}</span>
+                        {c.cardName && <span className="text-xs text-[#888] truncate">· {c.cardName}</span>}
+                        {ap && (
+                          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-semibold ${
+                            ap.approved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
+                          }`}>
+                            {ap.approved ? "approved" : "pending"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {ap && (ap.approved
+                          ? <button type="button" onClick={() => toggleApproval(c.certNumber, false)}
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-red-400 hover:text-red-700">Reject</button>
+                          : <button type="button" onClick={() => toggleApproval(c.certNumber, true)}
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-emerald-400 hover:text-emerald-700">
+                              <Check size={10} className="inline" /> Approve
+                            </button>
+                        )}
+                        <button type="button" onClick={() => regenerate(c.certNumber)}
+                          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+                          <RotateCcw size={10} className="inline" /> Regen
+                        </button>
+                      </div>
+                    </div>
+                    {c.videoUrl ? (
+                      <video src={c.videoUrl} controls preload="none" className="w-full max-w-sm rounded-lg border border-[#E8E4DC] bg-black" />
+                    ) : c.error ? (
+                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 font-mono break-words">{c.error}</p>
+                    ) : (
+                      <p className="text-xs text-[#888]">No video URL · no error recorded</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -1015,12 +1467,33 @@ function AnalyticsSection() {
     queryFn: async () => (await fetch("/api/admin/weekly-reel/analytics")).json(),
   });
   const rows = data?.rows ?? [];
-  // Bar chart wants oldest-first.
   const chartData = useMemo(() => [...rows].reverse().map(r => ({
     date: r.reelDate,
     success: r.successCount ?? 0,
   })), [rows]);
   const totalUsd = data?.totalCostUsd ?? 0;
+
+  // Best-performing: max instagram_likes (when any). Falls back to highest
+  // successCount when no IG data yet.
+  const best = useMemo(() => {
+    if (rows.length === 0) return null;
+    const withLikes = rows.filter(r => r.instagramLikes != null);
+    if (withLikes.length > 0) {
+      return withLikes.reduce((a, b) => ((a.instagramLikes ?? 0) >= (b.instagramLikes ?? 0) ? a : b));
+    }
+    return rows.reduce((a, b) => ((a.successCount ?? 0) >= (b.successCount ?? 0) ? a : b));
+  }, [rows]);
+
+  function engagementRate(r: AnalyticsRow): number | null {
+    if (r.instagramLikes == null || !r.instagramReach) return null;
+    return (r.instagramLikes / r.instagramReach) * 100;
+  }
+  function trendArrow(curr: AnalyticsRow, prev: AnalyticsRow | undefined): string {
+    if (!prev || curr.instagramLikes == null || prev.instagramLikes == null) return "—";
+    if (curr.instagramLikes > prev.instagramLikes) return "↑";
+    if (curr.instagramLikes < prev.instagramLikes) return "↓";
+    return "→";
+  }
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
@@ -1030,6 +1503,12 @@ function AnalyticsSection() {
           {isLoading ? "…" : `$${totalUsd.toFixed(2)} spent to date`}
         </span>
       </div>
+      {best && (
+        <div className="mb-4 inline-flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-[#FAF5E0] border border-[#D4AF37] text-[#1A1400]">
+          ★ Best performing: {best.reelDate}
+          {best.instagramLikes != null && <> · {best.instagramLikes.toLocaleString()} likes</>}
+        </div>
+      )}
       {chartData.length > 0 && (
         <div style={{ width: "100%", height: 160 }} className="mb-4">
           <ResponsiveContainer>
@@ -1052,26 +1531,43 @@ function AnalyticsSection() {
             <thead>
               <tr className="text-left border-b border-[#E8E4DC]">
                 <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Date</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cards</th>
                 <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Success</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Failed</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cost (USD)</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Model</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cost</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">IG Likes</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Views</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Reach</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Eng%</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">vs Prev</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Posted</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={`${r.reelDate}-${i}`} className="border-b border-[#F0EDE5]">
-                  <td className="py-2 px-3 font-mono text-[#1A1A1A]">{r.reelDate}</td>
-                  <td className="py-2 px-3 text-[#1A1A1A]">{r.cardCount ?? 0}</td>
-                  <td className="py-2 px-3 text-emerald-700">{r.successCount ?? 0}</td>
-                  <td className="py-2 px-3 text-red-700">{r.failCount ?? 0}</td>
-                  <td className="py-2 px-3 font-mono">${(r.estimatedCostUsd ?? 0).toFixed(2)}</td>
-                  <td className="py-2 px-3 text-[#555]">
-                    {r.model ?? "—"}{r.clipLengthSeconds ? ` · ${r.clipLengthSeconds}s` : ""}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r, i) => {
+                const prev = rows[i + 1];
+                const eng = engagementRate(r);
+                return (
+                  <tr key={`${r.reelDate}-${i}`} className="border-b border-[#F0EDE5]">
+                    <td className="py-2 px-3 font-mono text-[#1A1A1A]">{r.reelDate}</td>
+                    <td className="py-2 px-3 text-emerald-700">{r.successCount ?? 0}</td>
+                    <td className="py-2 px-3 font-mono">${(r.estimatedCostUsd ?? 0).toFixed(2)}</td>
+                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramLikes ?? "—"}</td>
+                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramViews ?? "—"}</td>
+                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramReach ?? "—"}</td>
+                    <td className="py-2 px-3 text-[#1A1A1A]">{eng == null ? "—" : `${eng.toFixed(1)}%`}</td>
+                    <td className="py-2 px-3 text-[#555]">{trendArrow(r, prev)}</td>
+                    <td className="py-2 px-3 text-[10px] text-[#555] space-x-1">
+                      {r.instagramPostId && (
+                        <a href={`https://www.instagram.com/p/${r.instagramPostId}`} target="_blank" rel="noopener"
+                           className="inline-flex items-center hover:text-[#D4AF37]" title="View on Instagram">
+                          <Instagram size={12} />
+                        </a>
+                      )}
+                      {r.facebookPostId && <Facebook size={12} className="inline" />}
+                      {r.tiktokPostId && <Music size={12} className="inline" />}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1110,7 +1606,9 @@ export default function AdminWeeklyReelPage() {
           <PipelineControls paused={paused} />
           <SelectionRules />
           <VideoStyle />
+          <ContentEnhancement />
           <OutputPublishing />
+          <SocialPublishing />
           <Notifications />
           <FeaturedCardsTable />
           <HistorySection />

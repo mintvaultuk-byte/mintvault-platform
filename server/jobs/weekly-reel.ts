@@ -28,12 +28,17 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "../db";
-import { auditLog, reelAnalytics } from "@shared/schema";
+import { auditLog, reelAnalytics, reelCardApprovals } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
 import { imageToVideo } from "../lib/segmind-client";
 import { getAllSettings, type PipelineSettings } from "../lib/pipeline-settings";
-import { sendReelSummaryEmail, postReelWebhook } from "../lib/reel-notifications";
+import {
+  sendReelSummaryEmail, postReelWebhook, sendCardFeaturedEmail,
+} from "../lib/reel-notifications";
+import { publishToInstagram, publishToFacebook, getInstagramPeakHour } from "../lib/meta-publisher";
+import { publishToTikTok } from "../lib/tiktok-publisher";
+import { APP_BASE_URL } from "../app-url";
 
 const MIN_CARDS_TO_PUBLISH = 3;
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
@@ -70,9 +75,12 @@ function utcDateKey(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-function isScheduledMoment(settings: PipelineSettings, date: Date = new Date()): boolean {
+function isScheduledMoment(settings: PipelineSettings, peakHour: number | null, date: Date = new Date()): boolean {
+  const targetHour = settings.smart_schedule && peakHour != null
+    ? peakHour
+    : settings.schedule_hour_utc;
   return date.getUTCDay() === settings.schedule_day
-      && date.getUTCHours() === settings.schedule_hour_utc;
+      && date.getUTCHours() === targetHour;
 }
 
 async function hasRunForDate(dateKey: string): Promise<boolean> {
@@ -201,7 +209,29 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     topCard: top?.cardName ?? top?.certNumber ?? "—",
   });
 
-  // 4. Persist manifest
+  // 4a. Thumbnail — copy the first successful card's front PNG into the
+  // weekly-reels namespace under a deterministic key. Cheap, no Segmind
+  // round-trip. Gated by setting.
+  let thumbnailKey: string | null = null;
+  if (settings.auto_generate_thumbnail) {
+    const topCard = data.cards.find((_c, i) => results[i]?.videoUrl != null) ?? data.cards[0];
+    if (topCard) {
+      try {
+        const srcUrl = await getR2SignedUrl(topCard.frontPngKey, 60);
+        const r = await fetch(srcUrl);
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer());
+          thumbnailKey = `videos/weekly-reels/thumbnail-${dateKey}.jpg`;
+          await uploadToR2(thumbnailKey, buf, "image/jpeg");
+        }
+      } catch (err: any) {
+        console.warn(`[weekly-reel] thumbnail copy failed: ${err?.message ?? err}`);
+        thumbnailKey = null;
+      }
+    }
+  }
+
+  // 4b. Persist manifest
   const manifestKey = `videos/weekly-reels/draft-${dateKey}.json`;
   const manifest = {
     date: dateKey,
@@ -212,6 +242,13 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     includeBack: settings.include_back,
     outputResolution: settings.output_resolution,
     watermarkEnabled: settings.watermark_enabled,
+    textOverlayEnabled: settings.text_overlay_enabled,
+    textOverlayFormat: settings.text_overlay_format,
+    transitionStyle: settings.transition_style,
+    introVideoR2Key: settings.intro_video_r2_key || null,
+    outroVideoR2Key: settings.outro_video_r2_key || null,
+    backgroundMusicR2Key: settings.background_music_r2_key || null,
+    thumbnailR2Key: thumbnailKey,
     caption,
     cardCount: results.length,
     successCount,
@@ -234,6 +271,24 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     );
   } catch (err: any) {
     console.error(`[weekly-reel] manifest upload failed: ${err?.message ?? err}`);
+  }
+
+  // 4c. Approval rows — one per card when require_card_approval is on.
+  // Inserted with approved=false; the operator flips them via the admin
+  // UI. Publish endpoints check that every row is approved before firing.
+  if (settings.require_card_approval) {
+    for (const r of results) {
+      if (!r.videoUrl) continue;
+      try {
+        await db.execute(sql`
+          INSERT INTO reel_card_approvals (reel_date, cert_number, approved)
+          VALUES (${dateKey}, ${r.certNumber}, false)
+          ON CONFLICT (reel_date, cert_number) DO NOTHING
+        `);
+      } catch (err: any) {
+        console.warn(`[weekly-reel] approval-row insert failed (${r.certNumber}): ${err?.message ?? err}`);
+      }
+    }
   }
 
   // 5. Audit log
@@ -269,9 +324,41 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
       estimatedCostUsd: estimatedCost.toFixed(4),
       model: settings.video_model,
       clipLengthSeconds: settings.clip_length_seconds,
+      thumbnailR2Key: thumbnailKey,
     });
   } catch (err: any) {
     console.warn(`[weekly-reel] reel_analytics insert failed: ${err?.message ?? err}`);
+  }
+
+  // 6b. Owner notifications — one email per successful card, gated by
+  // notify_card_owners pipeline setting AND per-submission consent.
+  if (settings.notify_card_owners) {
+    for (const r of results) {
+      if (!r.videoUrl) continue;
+      try {
+        const ownerRow = (await db.execute(sql`
+          SELECT s.email AS email
+          FROM certificates c
+          JOIN submission_items si ON si.id = c.submission_item_id
+          JOIN submissions     s  ON s.id  = si.submission_id
+          WHERE c.certificate_number = ${r.certNumber}
+            AND c.deleted_at IS NULL
+            AND s.deleted_at IS NULL
+            AND s.marketing_feature_consent = true
+          LIMIT 1
+        `)).rows[0] as { email?: string } | undefined;
+        if (!ownerRow?.email) continue;
+        await sendCardFeaturedEmail({
+          toEmail: ownerRow.email,
+          certNumber: r.certNumber,
+          grade: r.grade,
+          cardName: r.cardName,
+          appBaseUrl: APP_BASE_URL,
+        });
+      } catch (err: any) {
+        console.warn(`[weekly-reel] owner-notify ${r.certNumber} failed: ${err?.message ?? err}`);
+      }
+    }
   }
 
   // 7. Notifications — fire-and-forget; failures only warn.
@@ -294,16 +381,59 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     catch (err: any) { console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`); }
   }
 
-  // 8. Auto-post to Instagram (best-effort). Reel job and IG-daily-post are
-  // separate pipelines; this just kicks the latter once the reel is in
-  // hand. Failure here does not affect the reel result.
-  if (settings.auto_post_instagram) {
+  // 8. Auto-publish to social channels. Skipped entirely when card-approval
+  // is required (operator must explicitly publish each card-set first), or
+  // when draft mode is on. post_delay_minutes shifts the publish by N min
+  // so accounts that prefer staggered posting don't have to time it
+  // manually.
+  const canAutoPublish = !settings.require_card_approval && !settings.instagram_draft_mode && successCount > 0;
+  if (canAutoPublish && (settings.auto_post_instagram_video || settings.auto_post_facebook || settings.auto_post_tiktok)) {
+    if (settings.post_delay_minutes > 0) {
+      await new Promise<void>((res) => setTimeout(res, settings.post_delay_minutes * 60 * 1000));
+    }
+    const topVideo = results.find(r => r.videoUrl != null);
+    if (topVideo?.videoUrl) {
+      if (settings.auto_post_instagram_video) {
+        try {
+          const { postId } = await publishToInstagram(topVideo.videoUrl, caption);
+          await db.execute(sql`UPDATE reel_analytics SET instagram_post_id=${postId} WHERE reel_date=${dateKey}`);
+          console.log(`[weekly-reel] IG published: ${postId}`);
+        } catch (err: any) {
+          console.warn(`[weekly-reel] IG publish failed: ${err?.message ?? err}`);
+        }
+      }
+      if (settings.auto_post_facebook) {
+        try {
+          const { postId } = await publishToFacebook(topVideo.videoUrl, caption);
+          await db.execute(sql`UPDATE reel_analytics SET facebook_post_id=${postId} WHERE reel_date=${dateKey}`);
+          console.log(`[weekly-reel] FB published: ${postId}`);
+        } catch (err: any) {
+          console.warn(`[weekly-reel] FB publish failed: ${err?.message ?? err}`);
+        }
+      }
+      if (settings.auto_post_tiktok) {
+        try {
+          const { postId } = await publishToTikTok(topVideo.videoUrl, caption, {
+            privacy: settings.tiktok_privacy,
+            disableDuet: settings.tiktok_disable_duet,
+            disableStitch: settings.tiktok_disable_stitch,
+          });
+          await db.execute(sql`UPDATE reel_analytics SET tiktok_post_id=${postId} WHERE reel_date=${dateKey}`);
+          console.log(`[weekly-reel] TikTok published: ${postId}`);
+        } catch (err: any) {
+          console.warn(`[weekly-reel] TikTok publish failed: ${err?.message ?? err}`);
+        }
+      }
+    }
+  } else if (settings.auto_post_instagram) {
+    // Legacy compat — the old toggle kicked runIgDailyPost. Preserve the
+    // behaviour so existing operator setups keep working.
     try {
       const { runIgDailyPost } = await import("./ig-daily-post");
       const r = await runIgDailyPost({ force: true });
-      console.log(`[weekly-reel] auto_post_instagram → ig-daily-post status=${r.status}`);
+      console.log(`[weekly-reel] auto_post_instagram (legacy) → ig-daily-post status=${r.status}`);
     } catch (err: any) {
-      console.warn(`[weekly-reel] auto-post failed: ${err?.message ?? err}`);
+      console.warn(`[weekly-reel] auto-post (legacy) failed: ${err?.message ?? err}`);
     }
   }
 
@@ -338,7 +468,8 @@ export function startWeeklyReelScheduler(): void {
         // Silent on the tick — pause is expected admin state.
         return;
       }
-      if (!isScheduledMoment(settings)) return;
+      const peakHour = settings.smart_schedule ? await getInstagramPeakHour() : null;
+      if (!isScheduledMoment(settings, peakHour)) return;
       try {
         const result = await runWeeklyReel();
         if (result.status === "skipped") {

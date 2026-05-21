@@ -534,8 +534,34 @@ export const reelAnalytics = pgTable("reel_analytics", {
   estimatedCostUsd: numeric("estimated_cost_usd", { precision: 10, scale: 4 }),
   model: text("model"),
   clipLengthSeconds: integer("clip_length_seconds"),
+  // Social-publishing metadata. Populated when the operator publishes the
+  // reel to a channel. Insights backfilled via /refresh-insights.
+  instagramPostId: text("instagram_post_id"),
+  facebookPostId: text("facebook_post_id"),
+  instagramLikes: integer("instagram_likes"),
+  instagramViews: integer("instagram_views"),
+  instagramReach: integer("instagram_reach"),
+  instagramComments: integer("instagram_comments"),
+  tiktokPostId: text("tiktok_post_id"),
+  thumbnailR2Key: text("thumbnail_r2_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Per-card approval rows (created when require_card_approval is on) ─────
+// One row per (reel_date, cert_number). Reel publishing is held until every
+// row in a given reel_date is approved=true (or the operator triggers the
+// approve-all endpoint).
+export const reelCardApprovals = pgTable("reel_card_approvals", {
+  id: serial("id").primaryKey(),
+  reelDate: text("reel_date").notNull(),
+  certNumber: text("cert_number").notNull(),
+  approved: boolean("approved").notNull().default(false),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewedBy: text("reviewed_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  uniqDateCert: uniqueIndex("idx_reel_card_approvals_date_cert").on(t.reelDate, t.certNumber),
+}));
 
 // ── AI feature toggles (DB-backed, runtime-flippable) ─────────────────────
 // One row per env-var flag from server/config/feature-flags.ts. The DB row

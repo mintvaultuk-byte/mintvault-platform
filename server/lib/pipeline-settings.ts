@@ -15,12 +15,15 @@ import { sql } from "drizzle-orm";
 import { db } from "../db";
 
 export type SortOrder = "grade_desc" | "value_desc" | "newest_first";
+export type TiktokPrivacy = "PUBLIC_TO_EVERYONE" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
+export type TransitionStyle = "cut" | "dissolve" | "zoom";
 
 export interface PipelineSettings {
   // Schedule
   schedule_day: number;            // 0=Sun … 6=Sat — default 5 (Fri)
   schedule_hour_utc: number;       // 0–23 — default 18
   pipeline_paused: boolean;        // default false
+  smart_schedule: boolean;         // default false — use IG insights peak hour
   // Card selection
   min_grade: number;               // 0–10, 0 = any — default 0
   max_cards: number;               // 3–8 — default 8
@@ -31,10 +34,33 @@ export interface PipelineSettings {
   clip_length_seconds: 4 | 6 | 8;  // default 6
   include_back: boolean;           // default false
   // Output & publishing
-  auto_post_instagram: boolean;    // default false
+  auto_post_instagram: boolean;    // default false (legacy: kicks runIgDailyPost)
   caption_template: string;
   output_resolution: 720 | 1080;   // default 1080
   watermark_enabled: boolean;      // default false
+  // Social publishing — Meta
+  auto_post_instagram_video: boolean;   // default false
+  auto_post_facebook: boolean;          // default false
+  instagram_draft_mode: boolean;        // default true — hold for manual approve
+  post_delay_minutes: number;           // default 0
+  // Social publishing — TikTok
+  auto_post_tiktok: boolean;            // default false
+  tiktok_privacy: TiktokPrivacy;        // default "PUBLIC_TO_EVERYONE"
+  tiktok_disable_duet: boolean;         // default false
+  tiktok_disable_stitch: boolean;       // default false
+  // Content enhancement
+  intro_video_r2_key: string;           // default ""
+  outro_video_r2_key: string;           // default ""
+  background_music_r2_key: string;      // default ""
+  text_overlay_enabled: boolean;        // default true
+  text_overlay_format: string;
+  transition_style: TransitionStyle;    // default "cut"
+  // Approval workflow
+  require_card_approval: boolean;       // default false
+  // Thumbnail
+  auto_generate_thumbnail: boolean;     // default true
+  // Owner notify
+  notify_card_owners: boolean;          // default false
   // Notifications
   notify_email: string;            // empty string = disabled
   notify_webhook_url: string;      // empty string = disabled
@@ -44,6 +70,7 @@ export const PIPELINE_DEFAULTS: PipelineSettings = {
   schedule_day: 5,
   schedule_hour_utc: 18,
   pipeline_paused: false,
+  smart_schedule: false,
   min_grade: 0,
   max_cards: 8,
   sort_order: "grade_desc",
@@ -57,6 +84,23 @@ export const PIPELINE_DEFAULTS: PipelineSettings = {
     "This week's top grades: {{topCard}} earned a {{topGrade}}. {{cardCount}} cards featured — {{date}}.",
   output_resolution: 1080,
   watermark_enabled: false,
+  auto_post_instagram_video: false,
+  auto_post_facebook: false,
+  instagram_draft_mode: true,
+  post_delay_minutes: 0,
+  auto_post_tiktok: false,
+  tiktok_privacy: "PUBLIC_TO_EVERYONE",
+  tiktok_disable_duet: false,
+  tiktok_disable_stitch: false,
+  intro_video_r2_key: "",
+  outro_video_r2_key: "",
+  background_music_r2_key: "",
+  text_overlay_enabled: true,
+  text_overlay_format: "{{certNumber}} · Grade {{grade}}",
+  transition_style: "cut",
+  require_card_approval: false,
+  auto_generate_thumbnail: true,
+  notify_card_owners: false,
   notify_email: "",
   notify_webhook_url: "",
 };
