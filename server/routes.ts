@@ -12985,6 +12985,46 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // GET /api/admin/weekly-reel/all-graded-cards — every graded cert (whether
+  // consenting or not) joined to its submission so the admin UI can render
+  // BOTH an "In Pool" table (consent=true) AND a "Not in Pool" table
+  // (consent=false) from a single round-trip. Superset of /consenting-cards;
+  // that endpoint is now unused but left for backwards-compat.
+  app.get("/api/admin/weekly-reel/all-graded-cards", requireAdmin, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT
+          c.certificate_number       AS cert_number,
+          c.grade::text              AS grade,
+          c.card_name                AS card_name,
+          c.set_name                 AS set_name,
+          c.year_text                AS year_text,
+          s.marketing_feature_consent     AS consent,
+          s.marketing_feature_consent_at  AS consented_at
+        FROM certificates c
+        JOIN submission_items si ON si.id = c.submission_item_id
+        JOIN submissions     s  ON s.id  = si.submission_id
+        WHERE c.deleted_at IS NULL
+          AND s.deleted_at IS NULL
+          AND c.grade_approved_at IS NOT NULL
+        ORDER BY c.grade DESC NULLS LAST, c.grade_approved_at DESC
+      `)).rows as Array<any>;
+      const cards = rows.map((r) => ({
+        certNumber: String(r.cert_number),
+        grade: r.grade != null ? Number(r.grade) : null,
+        cardName: r.card_name ?? null,
+        cardSet: r.set_name ?? null,
+        year: r.year_text ?? null,
+        consent: r.consent === true,
+        consentedAt: r.consented_at ?? null,
+      }));
+      res.json({ cards });
+    } catch (err: any) {
+      console.error("[weekly-reel] all-graded-cards fetch failed:", err);
+      res.status(500).json({ error: err?.message ?? "all-graded-cards fetch failed" });
+    }
+  });
+
   // PATCH /api/admin/weekly-reel/card/:certNumber/consent — admin override
   // of the submission's marketing_feature_consent. Walks cert → submission
   // _item → submission. Writes audit_log with before/after +
