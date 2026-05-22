@@ -26,10 +26,9 @@ const GradientButton = (props: GradientButtonProps) => {
   const { children, width, height = "48px", className = "", disabled = false, as, ...rest } = props;
 
   const sharedClass = cn(
-    "gradient-btn-wrapper relative rounded-[50px] cursor-pointer",
+    "gradient-btn-wrapper gradient-btn-filled relative rounded-[50px] cursor-pointer",
     "after:content-[''] after:block after:absolute after:bg-[var(--gradient-btn-bg,#0a0e1a)]",
     "after:inset-[2px] after:rounded-[48px] after:z-[1]",
-    "after:transition-opacity after:duration-300 after:ease-linear",
     "flex items-center justify-center text-center",
     "transition-opacity duration-200",
     "hover:opacity-90 active:opacity-80",
@@ -43,7 +42,7 @@ const GradientButton = (props: GradientButtonProps) => {
   } as React.CSSProperties;
 
   const inner = (
-    <span className="relative z-10 flex items-center justify-center gap-2 px-6 font-semibold text-sm tracking-wide text-[#D4AF37]">
+    <span className="relative z-10 flex items-center justify-center gap-2 px-6 font-semibold text-sm tracking-wide text-[#1a1400]">
       {children}
     </span>
   );
