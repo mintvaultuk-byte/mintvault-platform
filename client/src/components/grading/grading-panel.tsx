@@ -1356,8 +1356,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               sub={sub}
               hasCrease={surface.hasCrease}
               hasTear={surface.hasTear}
-              manualOverride={overallOverride}
-              onOverride={setOverallOverride}
+              manualOverride={hasMvgsPins ? null : overallOverride}
+              onOverride={hasMvgsPins ? () => {} : setOverallOverride}
+              lockedByMvgs={hasMvgsPins}
               gradeLabel={label}
               isBlack={isBlack}
               strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}

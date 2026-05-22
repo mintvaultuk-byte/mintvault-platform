@@ -27,6 +27,9 @@ interface Props {
    *  overridden, and a low-confidence pip when AI flagged uncertainty. */
   aiSubgrades?: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
   aiConfidence?: { centering: "high" | "medium" | "low" | null; corners: "high" | "medium" | "low" | null; edges: "high" | "medium" | "low" | null; surface: "high" | "medium" | "low" | null };
+  /** True when MVGS pins are present — the MVGS engine is authoritative
+   *  for the overall grade, so the manual override dropdown is locked. */
+  lockedByMvgs?: boolean;
 }
 
 const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7.5, 7, 6, 5, 4, 3, 2, 1];
@@ -51,7 +54,7 @@ function strengthColor(s: number): string {
   return "#D97706"; // amber — weak
 }
 
-export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore, cornersZonesSet, edgesZonesSet, cornersWorstKey, edgesWorstKey, aiSubgrades, aiConfidence }: Props) {
+export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualOverride, onOverride, onSubgradeChange, gradeLabel, isBlack, strengthScore, cornersZonesSet, edgesZonesSet, cornersWorstKey, edgesWorstKey, aiSubgrades, aiConfidence, lockedByMvgs }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const [showCalc, setShowCalc] = useState(false);
   const display = manualOverride ?? overall;
@@ -188,22 +191,40 @@ export default function GradeDisplay({ overall, sub, hasCrease, hasTear, manualO
         </div>
       )}
 
-      {/* Override */}
-      {!showOverride && (
-        <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override Grade</button>
-      )}
-      {showOverride && (
-        <div className="flex items-center gap-2">
-          <select
-            value={manualOverride ?? ""}
-            onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-            className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
-          >
-            <option value="">Auto (formula)</option>
-            {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
+      {/* Override — locked when MVGS pins drive the grade */}
+      {lockedByMvgs ? (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <select
+              value=""
+              disabled
+              title="Grade locked by MVGS — adjust via eye appeal only"
+              className="bg-[#F0EEE8] border border-[#D4D0C8] text-[#888888] text-xs rounded px-2 py-1 cursor-not-allowed opacity-60"
+            >
+              <option value="">Locked by MVGS</option>
+            </select>
+          </div>
+          <p className="text-[#888888] text-[9px] italic">Grade locked by MVGS — adjust via eye appeal only</p>
         </div>
+      ) : (
+        <>
+          {!showOverride && (
+            <button type="button" onClick={() => setShowOverride(true)} className="text-[#D4AF37]/50 text-[10px] hover:text-[#D4AF37]">Override Grade</button>
+          )}
+          {showOverride && (
+            <div className="flex items-center gap-2">
+              <select
+                value={manualOverride ?? ""}
+                onChange={e => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
+                className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
+              >
+                <option value="">Auto (formula)</option>
+                {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <button type="button" onClick={() => { setShowOverride(false); onOverride(null); }} className="text-[#555555] text-[10px] hover:text-[#333333]">clear</button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
