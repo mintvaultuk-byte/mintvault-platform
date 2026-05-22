@@ -793,7 +793,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
   // Left — "GRADED UNDER".
   ctx.save();
-  ctx.font = "13px Arial, Helvetica, sans-serif";
+  ctx.font = "10px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "left";
@@ -807,7 +807,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // and glyph baselines hit whole pixels (no AA fuzz).
   ctx.save();
   (ctx as any).imageSmoothingEnabled = false;
-  const markFontSize = 32;
+  const markFontSize = 22;
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
@@ -832,7 +832,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // Right — "MINTVAULT GRADING STANDARD".
   ctx.save();
-  ctx.font = "13px Arial, Helvetica, sans-serif";
+  ctx.font = "10px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "right";
@@ -851,7 +851,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   ctx.save();
   ctx.translate(PANEL_X + PANEL_W / 2, (I_TOP + I_BOTTOM) / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = "bold 32px Georgia, 'Times New Roman', serif";
+  ctx.font = "bold 24px Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "4px";
   ctx.fillStyle    = INK;
   ctx.textAlign    = "center";
@@ -861,7 +861,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // ── 6. URL ───────────────────────────────────────────────────────────────
   ctx.save();
-  ctx.font = "bold 38px 'Cinzel', Georgia, 'Times New Roman', serif";
+  ctx.font = "bold 26px 'Cinzel', Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = INK;
   ctx.textAlign    = "center";
@@ -871,7 +871,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // ── 7. TAP NFC TEXT ──────────────────────────────────────────────────────
   ctx.save();
-  ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
+  ctx.font = "bold 20px Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = INK;
   ctx.textAlign    = "center";
