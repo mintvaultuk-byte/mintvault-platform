@@ -245,23 +245,14 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   }
 
-  /* Strip the inherited text-shadow from buttons and button-like
-     anchors inside vault-page wrappers — labels should always render
-     solid, the button background already provides contrast. */
+  /* Strip the inherited text-shadow from buttons — labels should
+     always render solid, the button background provides contrast. */
   .vault-page button,
   .vault-page a[role="button"],
   .vault-page a.btn,
   .vault-page button *,
   .vault-page a[role="button"] *,
   .vault-page a.btn * {
-    text-shadow: none !important;
-  }
-  /* Cover wouter <Link> rendered as plain <a> with inline gold-pill
-     styling — most CTA Links carry the gold variable in their inline
-     style, so an attribute-substring match catches them all without
-     touching decorative anchors. */
-  .vault-page a[style*="--v2-gold"],
-  .vault-page a[style*="--v2-gold"] * {
     text-shadow: none !important;
   }
 
@@ -788,6 +779,10 @@
 /* ── Gold pill button ─────────────────────────────────────────────── */
 .gradient-btn-wrapper {
   background: linear-gradient(135deg, #b8960c 0%, #d4af37 40%, #ffd700 70%, #d4af37 100%);
+}
+.gradient-btn-wrapper,
+.gradient-btn-wrapper * {
+  text-shadow: none !important;
 }
 
 /* ── Gold button shimmer (sweep for btn-gold::before) ───────────────── */
