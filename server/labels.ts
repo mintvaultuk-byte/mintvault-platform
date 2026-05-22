@@ -454,6 +454,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const grade     = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
+  const FRONT_BANNER_H = 28;                  // dark strip across the inner top
   const PANEL_W = 148;                        // right grade panel (≈ 18%, -5.7%)
   const STRIP_H = 44;                         // v432: 28→44 — taller strip hosts rarity (left) + cert ID (right) at matched main-line size.
   const panelX  = I_RIGHT - PANEL_W;          // 651
@@ -464,34 +465,44 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textLeft = I_LEFT + TXT_PAD;          // 47
   const textMaxW = panelX - textLeft - 6;     // 495
 
-  // Vertical content zone (inner area above bottom strip)
-  const contentT = I_TOP;
+  // Vertical content zone — starts BELOW the front banner so the wordmark
+  // lockup, grade panel, and text block all sit clear of the dark strip.
+  const contentT = I_TOP + FRONT_BANNER_H;
   const contentB = stripY;
+
+  // ── 0. TOP BANNER — full inner width dark strip ───────────────────────────
+  // Drawn first so subsequent content (artwork, panel, wordmark) renders
+  // into the post-banner zone via the shifted contentT / panelY origins.
+  ctx.fillStyle = "#1A1A1A";
+  ctx.fillRect(I_LEFT, I_TOP, I_W, FRONT_BANNER_H);
 
   // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
   // If artwork is available, draw it then add a white wash overlay so dark
   // text remains legible on any card image. No dark overlays — white bg design.
+  // Artwork now occupies the inner area BELOW the banner (y starts at
+  // contentT, height = I_H - FRONT_BANNER_H).
   const artworkUrl = (cert as any).frontImageUrl;
+  const artH = I_H - FRONT_BANNER_H;
   if (artworkUrl) {
     try {
       const artImg = await loadImage(artworkUrl);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(I_LEFT, I_TOP, I_W, I_H);
+      ctx.rect(I_LEFT, contentT, I_W, artH);
       ctx.clip();
-      const sc = Math.max(I_W / artImg.width, I_H / artImg.height);
+      const sc = Math.max(I_W / artImg.width, artH / artImg.height);
       const dw = artImg.width * sc, dh = artImg.height * sc;
-      ctx.drawImage(artImg, I_LEFT + (I_W - dw) / 2, I_TOP + (I_H - dh) / 2, dw, dh);
+      ctx.drawImage(artImg, I_LEFT + (I_W - dw) / 2, contentT + (artH - dh) / 2, dw, dh);
       ctx.restore();
       // Wash overlay — lightens (white label) or darkens (black label) artwork so text is legible
       ctx.fillStyle = labelBg === WHITE ? "rgba(255,255,255,0.62)" : "rgba(0,0,0,0.60)";
-      ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
+      ctx.fillRect(I_LEFT, contentT, I_W, artH);
     } catch {}
   }
 
   // ── 2. GRADE PANEL (right, above bottom strip) ────────────────────────────
-  const panelY  = I_TOP;
-  const panelH  = stripY - panelY;            // 160px
+  const panelY  = contentT;
+  const panelH  = stripY - panelY;            // compressed by FRONT_BANNER_H
   const panelCX = panelX + PANEL_W / 2;
   const DARK    = "#1A1000";
 
@@ -793,12 +804,12 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
   // Left — "GRADED UNDER".
   ctx.save();
-  ctx.font = "bold 12px Arial, Helvetica, sans-serif";
+  ctx.font = "900 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
-  ctx.textAlign    = "left";
+  ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("GRADED UNDER", PANEL_RIGHT + 14, bannerMidY);
+  ctx.fillText("GRADED UNDER", PANEL_RIGHT + (centreX - PANEL_RIGHT) / 2, bannerMidY);
   ctx.restore();
 
   // Centre — MVGS mark (rectangle + text). Hard-clamped so the rect's
@@ -832,7 +843,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // Right — "MINTVAULT GRADING STANDARD".
   ctx.save();
-  ctx.font = "bold 12px Arial, Helvetica, sans-serif";
+  ctx.font = "900 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "right";
