@@ -622,7 +622,10 @@ export default function StandardPage() {
             <p className={`${para} mt-3 text-xs italic`}>
               <strong className="text-[#D4AF37]/80 not-italic">Dark-border note:</strong>{" "}
               <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered
-              cards apply a ×1.25 multiplier to that edge deduction.
+              edges apply a ×1.25 multiplier. Tick Dark Border Front for cards
+              with dark front borders (e.g. Darkness-type). Tick Dark Border
+              Back for cards with dark back borders (e.g. standard Pokémon
+              blue back).
             </p>
 
             <h3 className={subTitle}>Surface — per pin, max -25 total</h3>

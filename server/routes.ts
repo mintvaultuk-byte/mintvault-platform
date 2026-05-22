@@ -2730,10 +2730,10 @@ export async function registerRoutes(
       };
 
       // ── MVGS scoring on approve ──────────────────────────────────────────
-      // Cert state (defects, dark_border, eye_appeal_modifier, centering
-      // ratios) was already saved by the grading-panel /grade PUT before
-      // the operator hit Approve. Re-read the relevant columns and run the
-      // pure scoring helper. Result lands in grade_strength_score.
+      // Cert state (defects, dark_border_front/back, eye_appeal_modifier,
+      // centering ratios) was already saved by the grading-panel /grade PUT
+      // before the operator hit Approve. Re-read the relevant columns and
+      // run the pure scoring helper. Result lands in grade_strength_score.
       //
       // verified_defects gets the MVGS-classified pins from the `defects`
       // column when any are classified (any pin with mvgsCode+tier+zone);
@@ -2752,7 +2752,10 @@ export async function registerRoutes(
           centeringBackLr:  (cert as any).centeringBackLr ?? null,
           centeringBackTb:  (cert as any).centeringBackTb ?? null,
           defects: mvgsPins,
-          darkBorder: !!(cert as any).darkBorder,
+          // Per-side flags. Fall back to the legacy dark_border column for
+          // rows that pre-date the split (treated as both-sides dark).
+          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
+          darkBorderBack:  (cert as any).darkBorderBack  ?? !!(cert as any).darkBorder,
           eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
         });
         mvgsScore = r.score;
@@ -8330,7 +8333,11 @@ Defects (admin-confirmed): ${defectLines}`;
         gradeApprovedAt:  c.gradeApprovedAt  || null,
         gradeStrengthScore: c.gradeStrengthScore ?? null,
         // MVGS admin inputs — hydrated into grading-panel local state on load.
+        // Legacy darkBorder is preserved for old clients; new clients read
+        // darkBorderFront / darkBorderBack and fall back to darkBorder.
         darkBorder:        !!c.darkBorder,
+        darkBorderFront:   (c as any).darkBorderFront ?? !!c.darkBorder,
+        darkBorderBack:    (c as any).darkBorderBack  ?? !!c.darkBorder,
         eyeAppealModifier: Number(c.eyeAppealModifier ?? 0) || 0,
         // Saved aggregate subgrades for hydration on reload. Field names below
         // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
@@ -8425,8 +8432,27 @@ Defects (admin-confirmed): ${defectLines}`;
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
+          dark_border_front   = ${
+            typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
+          },
+          dark_border_back    = ${
+            typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`
+          },
           dark_border         = ${
-            typeof b.dark_border === "boolean" ? b.dark_border : sql`dark_border`
+            // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
+            // against the OLD row, so we can't reference the new sibling
+            // values directly — express the same OR via column refs and
+            // payload values per-side.
+            (() => {
+              const fSet = typeof b.dark_border_front === "boolean";
+              const bSet = typeof b.dark_border_back === "boolean";
+              const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
+              const backExpr  = bSet ? sql`${b.dark_border_back}::boolean`  : sql`dark_border_back`;
+              if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
+              // Neither new flag in payload — keep legacy semantics so old
+              // clients still toggle the column unchanged.
+              return typeof b.dark_border === "boolean" ? sql`${b.dark_border}` : sql`dark_border`;
+            })()
           },
           eye_appeal_modifier = ${
             // Clamp ±2 server-side; ignore non-finite payloads.

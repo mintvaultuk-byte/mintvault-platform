@@ -7,8 +7,8 @@
  *   client: `import { computeMvgsScore } from "@shared/mvgs-scoring"`
  *
  * Inputs: centering ratios (string form "55/45"), classified defect pins,
- * dark-border flag, eye-appeal modifier. Output: integer score 1–100,
- * grade label, breakdown of deductions for explainability.
+ * front/back dark-border flags, eye-appeal modifier. Output: integer score
+ * 1–100, grade label, breakdown of deductions for explainability.
  *
  * Pure function — no DB, no env, no React. Safe to call in render.
  *
@@ -20,6 +20,9 @@
  *   - Edge defects: D1 -3/-2, D2 -0.5/-0.25, D3 0 (front/back),
  *     capped at -25 total
  *     · Dark border + WH (whitening): multiply that defect's deduction ×1.25
+ *       Front edges use darkBorderFront flag; back edges use darkBorderBack.
+ *       A card can have a dark front and a light back (or vice versa) and
+ *       only the edges of the dark side get the WH multiplier.
  *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
  *     capped at -25 total
  *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5
@@ -46,7 +49,12 @@ export interface MvgsInput {
   centeringBackLr: string | null;
   centeringBackTb: string | null;
   defects: MvgsDefect[];
-  darkBorder: boolean;
+  /** Cards with a dark front border (e.g. Darkness-type Pokémon). Triggers
+   *  the WH (whitening) ×1.25 multiplier on FRONT edges only. */
+  darkBorderFront: boolean;
+  /** Cards with a dark back border (e.g. standard Pokémon blue back).
+   *  Triggers the WH ×1.25 multiplier on BACK edges only. */
+  darkBorderBack: boolean;
   eyeAppealModifier: number;         // -2..+2
 }
 
@@ -111,7 +119,7 @@ function cornerDeduction(d: MvgsDefect): number {
   return 0;
 }
 
-function edgeDeduction(d: MvgsDefect, darkBorder: boolean): number {
+function edgeDeduction(d: MvgsDefect, darkBorderFront: boolean, darkBorderBack: boolean): number {
   const isFront = FRONT_EDGE_ZONES.has(d.zone);
   const isBack  = BACK_EDGE_ZONES.has(d.zone);
   if (!isFront && !isBack) return 0;
@@ -123,8 +131,11 @@ function edgeDeduction(d: MvgsDefect, darkBorder: boolean): number {
   // the dark-border WH multiplier below, which is correct: 0 × 1.25 = 0.
   else return 0;
   // Dark-border + WH multiplier applies to whatever base the tier produced
-  // (D1/D2 only after the D3-returns-zero change above).
-  if (darkBorder && d.mvgsCode === "WH") base = base * 1.25;
+  // (D1/D2 only after the D3-returns-zero change above). Per-side: a card
+  // with a dark front but light back applies the multiplier only to its
+  // front edges, and vice versa.
+  const sideHasDarkBorder = isFront ? darkBorderFront : darkBorderBack;
+  if (sideHasDarkBorder && d.mvgsCode === "WH") base = base * 1.25;
   return base;
 }
 
@@ -278,7 +289,7 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   // Edges — capped at -25. Dark-border + WH multiplier applied per-pin
   // inside edgeDeduction, before the sum.
   let edgeSum = 0;
-  for (const d of input.defects) edgeSum += edgeDeduction(d, input.darkBorder);
+  for (const d of input.defects) edgeSum += edgeDeduction(d, input.darkBorderFront, input.darkBorderBack);
   if (edgeSum < -25) edgeSum = -25;
   if (edgeSum !== 0) deductions.edges = edgeSum;
 

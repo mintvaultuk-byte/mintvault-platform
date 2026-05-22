@@ -429,10 +429,15 @@ export const certificates = pgTable("certificates", {
   // score 0–100. Written by the admin grading-panel "Approve" path via the
   // pure scoring helper in server/mvgs-scoring.ts.
   gradeStrengthScore:      integer("grade_strength_score"),
-  // MVGS inputs — admin-set per cert. dark_border boosts edge-defect weight
-  // when a WH (whitening) defect lands on a dark-border card. eye_appeal_modifier
-  // is the ±2 finishing adjustment applied after all deductions.
+  // MVGS inputs — admin-set per cert. dark_border_front / dark_border_back
+  // each boost the WH (whitening) ×1.25 edge multiplier on their own side.
+  // Legacy dark_border column is preserved for backwards compat and now
+  // mirrors (dark_border_front OR dark_border_back) on save.
+  // eye_appeal_modifier is the ±2 finishing adjustment applied after all
+  // deductions.
   darkBorder:              boolean("dark_border").notNull().default(false),
+  darkBorderFront:         boolean("dark_border_front").notNull().default(false),
+  darkBorderBack:          boolean("dark_border_back").notNull().default(false),
   eyeAppealModifier:       integer("eye_appeal_modifier").notNull().default(0),
   centeringOuterFront:     jsonb("centering_outer_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
   centeringOuterBack:      jsonb("centering_outer_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),

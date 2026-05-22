@@ -154,9 +154,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [defects, setDefects] = useState<Defect[]>([]);
   const [defectCandidates, setDefectCandidates] = useState<DefectCandidate[]>([]);
   // MVGS admin inputs — persisted on cert via buildPayload → /grade PUT.
-  // dark_border boosts edge-defect weight when whitening (WH) is on the edge.
-  // eye_appeal_modifier is a ±2 finishing tweak applied last in scoring.
-  const [darkBorder, setDarkBorder] = useState(false);
+  // dark_border_front / dark_border_back independently boost the WH (whitening)
+  // ×1.25 edge multiplier on their own side. eye_appeal_modifier is a ±2
+  // finishing tweak applied last in scoring.
+  const [darkBorderFront, setDarkBorderFront] = useState(false);
+  const [darkBorderBack, setDarkBorderBack]   = useState(false);
   const [eyeAppealModifier, setEyeAppealModifier] = useState(0);
   const [authStatus, setAuthStatus]   = useState<AuthStatus>("genuine");
   const [authNotes, setAuthNotes]     = useState("");
@@ -260,7 +262,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if ((gradingData as any).aiDefectCandidates && Array.isArray((gradingData as any).aiDefectCandidates)) {
       setDefectCandidates((gradingData as any).aiDefectCandidates as DefectCandidate[]);
     }
-    if (typeof (gradingData as any).darkBorder === "boolean") setDarkBorder((gradingData as any).darkBorder);
+    // Hydrate per-side flags, with fallback to legacy single dark_border
+    // for rows that pre-date the split.
+    {
+      const g = gradingData as any;
+      const legacy = typeof g.darkBorder === "boolean" ? g.darkBorder : false;
+      if (typeof g.darkBorderFront === "boolean") setDarkBorderFront(g.darkBorderFront);
+      else if (typeof g.darkBorder === "boolean") setDarkBorderFront(legacy);
+      if (typeof g.darkBorderBack === "boolean") setDarkBorderBack(g.darkBorderBack);
+      else if (typeof g.darkBorder === "boolean") setDarkBorderBack(legacy);
+    }
     if (typeof (gradingData as any).eyeAppealModifier === "number") setEyeAppealModifier((gradingData as any).eyeAppealModifier);
     if (gradingData.authStatus) setAuthStatus(gradingData.authStatus);
     if (gradingData.authNotes)  setAuthNotes(gradingData.authNotes);
@@ -679,7 +690,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     defects: (defects || [])
       .filter(d => d.mvgsCode && d.tier && d.zone)
       .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-    darkBorder,
+    darkBorderFront,
+    darkBorderBack,
     eyeAppealModifier,
   });
   const hasMvgsPins = (defects || []).some(d => d.mvgsCode);
@@ -774,8 +786,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     out.ai_defect_candidates = defectCandidates || [];
 
     // MVGS inputs — boolean / integer, send unconditionally so toggling OFF
-    // actually persists (no false-as-default conflation).
-    out.dark_border = darkBorder;
+    // actually persists (no false-as-default conflation). Server mirrors the
+    // legacy dark_border column from (front OR back) — no need to send it.
+    out.dark_border_front = darkBorderFront;
+    out.dark_border_back  = darkBorderBack;
     out.eye_appeal_modifier = eyeAppealModifier;
 
     return out;
@@ -1281,9 +1295,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
           {/* MVGS controls + live score — visible whenever the panel is in
               numeric-grade mode. The score updates as defects, centering,
-              dark_border, and eye_appeal_modifier change locally — same
-              pure function (shared/mvgs-scoring.ts) the server runs on
-              approve. */}
+              dark_border_front/back, and eye_appeal_modifier change locally
+              — same pure function (shared/mvgs-scoring.ts) the server runs
+              on approve. */}
           {!isNonNumeric && (() => {
             const mvgs = computeMvgsScore({
               centeringFrontLr: frontLR || null,
@@ -1293,7 +1307,8 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               defects: (defects || [])
                 .filter(d => d.mvgsCode && d.tier && d.zone)
                 .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-              darkBorder,
+              darkBorderFront,
+              darkBorderBack,
               eyeAppealModifier,
             });
             return (
@@ -1305,16 +1320,31 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                  <div className="flex flex-col gap-1.5">
                     <span className="text-[10px] uppercase tracking-wider text-[#555]">Dark border</span>
-                    <input
-                      type="checkbox"
-                      checked={darkBorder}
-                      onChange={() => setDarkBorder(v => !v)}
-                      className="accent-[#D4AF37] h-4 w-4"
-                      data-testid="check-dark-border"
-                    />
-                  </label>
+                    <div className="flex gap-3">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={darkBorderFront}
+                          onChange={() => setDarkBorderFront(v => !v)}
+                          className="accent-[#D4AF37] h-4 w-4"
+                          data-testid="check-dark-border-front"
+                        />
+                        <span className="text-[10px] text-[#555]">Front</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={darkBorderBack}
+                          onChange={() => setDarkBorderBack(v => !v)}
+                          className="accent-[#D4AF37] h-4 w-4"
+                          data-testid="check-dark-border-back"
+                        />
+                        <span className="text-[10px] text-[#555]">Back</span>
+                      </label>
+                    </div>
+                  </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-[#555] block mb-1">Eye appeal</span>
                     <div className="flex gap-1">
