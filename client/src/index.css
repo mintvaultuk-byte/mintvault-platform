@@ -785,21 +785,9 @@
   opacity: 0.5;
 }
 
-/* ── Gradient border button (static gold gradient, no animation) ───── */
+/* ── Gold pill button ─────────────────────────────────────────────── */
 .gradient-btn-wrapper {
   background: linear-gradient(135deg, #b8960c 0%, #d4af37 40%, #ffd700 70%, #d4af37 100%);
-  --gradient-btn-bg: #0a0e1a;
-}
-
-/* Filled variant — gold bg, dark text */
-.gradient-btn-filled {
-  --gradient-btn-bg: transparent;
-}
-.gradient-btn-filled::after {
-  background: linear-gradient(135deg, #b8960c 0%, #d4af37 40%, #ffd700 70%, #d4af37 100%) !important;
-}
-.gradient-btn-filled span {
-  color: #1a1400 !important;
 }
 
 /* ── Gold button shimmer (sweep for btn-gold::before) ───────────────── */
