@@ -1,12 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { ArrowRight, Shield, Cpu, MapPin, RefreshCw } from "lucide-react";
+import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, CheckCheck, Clock, Zap } from "lucide-react";
+import NumberFlow from "@number-flow/react";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
+import { pricingTiers } from "@shared/schema";
+
+const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React.ReactNode }> = {
+  standard: {
+    shortName: "Vault Queue",
+    blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
+    icon: <Shield size={20} />,
+  },
+  priority: {
+    shortName: "Standard",
+    blurb: "The balanced option: fair turnaround, full report, priority you can feel.",
+    icon: <Clock size={20} />,
+  },
+  express: {
+    shortName: "Express",
+    blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
+    icon: <Zap size={20} />,
+  },
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -330,138 +352,75 @@ export default function HomeV2() {
               </p>
             </div>
 
-            {/* Pricing cards — outlined, narrow, centred */}
             <div className="flex justify-center">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
-                {[
-                  {
-                    name: "Vault Queue",
-                    price: "19",
-                    days: "45 day",
-                    featured: false,
-                    features: [
-                      "Same 4-point grading inspection",
-                      "NFC ownership chip",
-                      "Registry listing",
-                      "Value up to \u00a3500",
-                    ],
-                  },
-                  {
-                    name: "Standard",
-                    price: "25",
-                    days: "21 day",
-                    featured: true,
-                    features: [
-                      "Same 4-point grading inspection",
-                      "NFC ownership chip",
-                      "Registry listing",
-                      "Photographic report",
-                      "Value up to \u00a32,500",
-                    ],
-                  },
-                  {
-                    name: "Express",
-                    price: "45",
-                    days: "5 day",
-                    featured: false,
-                    features: [
-                      "Same 4-point grading inspection",
-                      "NFC ownership chip",
-                      "Registry listing",
-                      "Photographic report",
-                      "Priority handling",
-                      "Value up to \u00a310,000",
-                    ],
-                  },
-                ].map((tier) => (
-                  <div
-                    key={tier.name}
-                    className="relative rounded-xl flex flex-col"
-                    style={{
-                      padding: "48px 40px",
-                      backgroundColor: "var(--v2-paper)",
-                      border: tier.featured
-                        ? "1px solid rgba(212, 175, 55, 0.6)"
-                        : "1px solid rgba(212, 175, 55, 0.25)",
-                    }}
-                  >
-                    {/* MOST CHOSEN floating pill */}
-                    {tier.featured && (
-                      <span
-                        className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded"
-                        style={{
-                          top: "-14px",
-                          backgroundColor: "var(--v2-gold)",
-                          color: "var(--v2-panel-dark)",
-                        }}
-                      >
-                        Most chosen
-                      </span>
-                    )}
+                {pricingTiers.map((tier) => {
+                  const d = TIER_ICONS[tier.id];
+                  const price = tier.pricePerCard / 100;
+                  const days = tier.turnaroundDays ?? 0;
+                  const featured = tier.id === "priority";
 
-                    {/* Tier name */}
-                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "var(--v2-gold)" }}>
-                      {tier.name}
-                    </p>
-
-                    {/* Price — Fraunces non-italic, floating pound sign */}
-                    <div className="relative mb-1" style={{ lineHeight: 1 }}>
-                      <span
-                        className="font-numeral font-semibold absolute"
-                        style={{
-                          color: "var(--v2-ink-mute)",
-                          fontSize: "clamp(28px, 3vw, 36px)",
-                          top: "4px",
-                          left: "-2px",
-                          transform: "translateX(-100%)",
-                        }}
-                      >
-                        &pound;
-                      </span>
-                      <span
-                        className="font-numeral font-semibold"
-                        style={{
-                          color: "var(--v2-ink)",
-                          fontSize: "clamp(72px, 6vw, 96px)",
-                          marginLeft: "20px",
-                        }}
-                      >
-                        {tier.price}
-                      </span>
-                    </div>
-
-                    {/* Turnaround — mono */}
-                    <p
-                      className="font-mono-v2 text-[10px] uppercase mb-8"
-                      style={{ color: "var(--v2-ink-mute)", letterSpacing: "0.15em" }}
+                  return (
+                    <Card
+                      key={tier.id}
+                      className={cn(
+                        "relative border h-full flex flex-col transition-all duration-300",
+                        featured
+                          ? "ring-2 ring-[#D4AF37] bg-[#171510] border-[#D4AF37]/50 md:scale-105 md:-my-4 z-10 shadow-[0_0_30px_rgba(212,175,55,0.3),0_0_60px_rgba(212,175,55,0.15)]"
+                          : "bg-[#0f0e0b] border-[#333]"
+                      )}
                     >
-                      {tier.days} turnaround
-                    </p>
-
-                    {/* Feature bullets — em-dash prefix */}
-                    <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                      {tier.features.map((f) => (
-                        <li
-                          key={f}
-                          className="flex items-start gap-3 font-body text-sm"
-                          style={{ color: "var(--v2-ink-soft)" }}
-                        >
-                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>
-                            &mdash;
+                      <CardHeader className="text-left">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
+                              {d.icon}
+                            </div>
+                            <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
+                          </div>
+                          {featured && (
+                            <span className="bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
+                              Most chosen
+                            </span>
+                          )}
+                        </div>
+                        <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-4xl font-semibold text-white">
+                            £
+                            <NumberFlow value={price} className="text-4xl font-semibold" />
                           </span>
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
+                          <span className="text-[#888] ml-1">/ card</span>
+                        </div>
+                        <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
+                      </CardHeader>
 
-                    {/* CTA button */}
-                    <Link href="/submit" className="no-underline w-full">
-                      <GradientButton className={tier.featured ? "gradient-btn-filled w-full" : "w-full"}>
-                        Start a submission <ArrowRight size={14} />
-                      </GradientButton>
-                    </Link>
-                  </div>
-                ))}
+                      <CardContent className="pt-0 flex flex-col flex-1">
+                        <div className="space-y-3 pt-4 border-t border-[#333] mb-6 flex-1">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-3">
+                            What&rsquo;s included
+                          </h4>
+                          <ul className="space-y-2.5">
+                            {tier.features.map((feature) => (
+                              <li key={feature} className="flex items-center">
+                                <span className="h-5 w-5 rounded-full border border-[#D4AF37]/40 grid place-content-center mr-3 flex-shrink-0">
+                                  <CheckCheck className="h-3 w-3 text-[#D4AF37]" />
+                                </span>
+                                <span className="text-sm text-[#ccc]">{feature}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <Link href="/submit" className="no-underline block">
+                          <GradientButton height="52px" className="w-full">
+                            Start a submission <ArrowRight size={14} />
+                          </GradientButton>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
 

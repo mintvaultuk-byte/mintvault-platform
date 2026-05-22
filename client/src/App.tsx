@@ -81,6 +81,7 @@ const HomeV3 = lazy(() => import("@/pages/home-v3"));
 const HomeV4 = lazy(() => import("@/pages/home-v4"));
 const PricingV2Mockup = lazy(() => import("@/pages/pricing-v2"));
 const Pricing = lazy(() => import("@/pages/pricing"));
+const PricingDemo = lazy(() => import("@/pages/pricing-demo"));
 const VaultClub = lazy(() => import("@/pages/vault-club"));
 const AiPreGrade = lazy(() => import("@/pages/ai-pre-grade"));
 const PreGradePage = lazy(() => import("@/pages/pre-grade"));
@@ -204,6 +205,7 @@ function Router() {
           <Route path="/home-v3" component={HomeV3} />
           <Route path="/home-v4" component={HomeV4} />
           <Route path="/pricing-v2" component={PricingV2Mockup} />
+          <Route path="/pricing-demo" component={PricingDemo} />
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/instagram" component={AdminInstagramPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />

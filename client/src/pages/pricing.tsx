@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import { Link } from "wouter";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, CheckCheck, Shield, Clock, Zap } from "lucide-react";
+import { motion } from "framer-motion";
+import NumberFlow from "@number-flow/react";
 import GradientButton from "@/components/ui/gradient-button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { TimelineContent } from "@/components/ui/timeline-animation";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -9,11 +13,9 @@ import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import { pricingTiers, insuranceTiers, insuranceSurchargeBands } from "@shared/schema";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
 
-// Silver Vault Club perk values — mirrors server/vault-club-tiers.ts Silver
-// config (verified 2026-04-19 after merge a8e5f8d). Hardcoded here because
-// VAULT_CLUB_TIERS lives under server/ and has no shared import path.
-// If Silver's perks shift, update both this file and server/vault-club-tiers.ts.
 const SILVER = {
   label: "Silver Vault",
   monthly_price_pence: 999,
@@ -21,37 +23,97 @@ const SILVER = {
   ai_credits_monthly: 50,
 } as const;
 
-// Display descriptors derived from config — keep all copy/marketing text in
-// this file so pricing-v2 stays self-contained while numbers stay bound to
-// shared config. Tier display order: VAULT_QUEUE → STANDARD (featured) → EXPRESS.
-
-const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured: boolean }> = {
+const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured: boolean; icon: React.ReactNode }> = {
   standard: {
-    // schema id "standard" = Vault Queue
     shortName: "Vault Queue",
     blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
     featured: false,
+    icon: <Shield size={20} />,
   },
   priority: {
-    // schema id "priority" = Standard
     shortName: "Standard",
     blurb: "The balanced option: fair turnaround, full report, priority you can feel.",
     featured: true,
+    icon: <Clock size={20} />,
   },
   express: {
     shortName: "Express",
     blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
     featured: false,
+    icon: <Zap size={20} />,
   },
 };
 
-// Format helpers
+const BULK_DISCOUNT = 0.8;
 const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
 const gbp = (n: number) => `£${n.toLocaleString("en-GB")}`;
+
+function PricingSwitch({ onSwitch, className }: { onSwitch: (value: string) => void; className?: string }) {
+  const [selected, setSelected] = useState("0");
+
+  const handleSwitch = (value: string) => {
+    setSelected(value);
+    onSwitch(value);
+  };
+
+  return (
+    <div className={cn("flex justify-center", className)}>
+      <div className="relative z-10 mx-auto flex w-fit rounded-xl bg-[#1a1a1a] border border-[#333] p-1">
+        <button
+          onClick={() => handleSwitch("0")}
+          className={cn(
+            "relative z-10 w-fit cursor-pointer h-12 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
+            selected === "0" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
+          )}
+        >
+          {selected === "0" && (
+            <motion.span
+              layoutId="pricing-switch"
+              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            />
+          )}
+          <span className="relative">Per Card</span>
+        </button>
+
+        <button
+          onClick={() => handleSwitch("1")}
+          className={cn(
+            "relative z-10 w-fit cursor-pointer h-12 flex-shrink-0 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
+            selected === "1" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
+          )}
+        >
+          {selected === "1" && (
+            <motion.span
+              layoutId="pricing-switch"
+              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            />
+          )}
+          <span className="relative flex items-center gap-2">
+            Bulk (10+)
+            <span className="rounded-full bg-[#1a1400] px-2 py-0.5 text-xs font-medium text-[#D4AF37]">Save 20%</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const revealVariants = {
+  visible: (i: number) => ({
+    y: 0,
+    opacity: 1,
+    filter: "blur(0px)",
+    transition: { delay: i * 0.3, duration: 0.5 },
+  }),
+  hidden: { filter: "blur(10px)", y: -20, opacity: 0 },
+};
+
 export default function PricingV2() {
-  // FAQ left-edge gold accent fade-in (Section VII).
-  // Single IntersectionObserver shared by all FAQ items; each fades once
-  // on first intersection then unobserves, no re-trigger on scroll back.
+  const [isBulk, setIsBulk] = useState(false);
+  const pricingRef = useRef<HTMLDivElement>(null);
+
   const faqRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -69,8 +131,10 @@ export default function PricingV2() {
     return () => observer.disconnect();
   }, []);
 
+  const togglePricingPeriod = (value: string) => setIsBulk(Number.parseInt(value) === 1);
+
   return (
-    <div className="min-h-screen flex flex-col relative vault-page">
+    <div className="min-h-screen flex flex-col relative vault-page" ref={pricingRef}>
       <AmbientLayer />
       <HeaderV2 />
 
@@ -100,12 +164,12 @@ export default function PricingV2() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
             <Link href="/submit" className="no-underline">
-              <GradientButton className="gradient-btn-filled">
+              <GradientButton>
                 Submit a card <ArrowRight size={14} />
               </GradientButton>
             </Link>
             <Link href="/tools/estimate" className="no-underline">
-              <GradientButton className="gradient-btn-filled">
+              <GradientButton>
                 Try AI Pre-Grade <ArrowRight size={14} />
               </GradientButton>
             </Link>
@@ -119,7 +183,7 @@ export default function PricingV2() {
         </div>
       </section>
 
-      {/* ── SECTION I: GRADING TIERS (dark) ──────────────────────────── */}
+      {/* ── SECTION I: GRADING TIERS (animated cards) ────────────────── */}
       <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
@@ -149,102 +213,92 @@ export default function PricingV2() {
             </p>
           </div>
 
-          {/* Tier cards */}
+          <PricingSwitch onSwitch={togglePricingPeriod} className="mb-10" />
+
           <div className="flex justify-center">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
-              {pricingTiers.map((tier) => {
-                const d = TIER_DISPLAY[tier.id] ?? { shortName: tier.name, blurb: "", featured: false };
-                const priceDisplay = (tier.pricePerCard / 100).toFixed(0);
+              {pricingTiers.map((tier, index) => {
+                const d = TIER_DISPLAY[tier.id] ?? {
+                  shortName: tier.name,
+                  blurb: "",
+                  featured: false,
+                  icon: <Shield size={20} />,
+                };
+                const price = tier.pricePerCard / 100;
+                const bulkPrice = Math.round(price * BULK_DISCOUNT);
                 const days = tier.turnaroundDays ?? 0;
+
                 return (
-                  <div
+                  <TimelineContent
                     key={tier.id}
-                    className="tier-card-v2 relative rounded-xl flex flex-col"
-                    style={{
-                      padding: "48px 40px",
-                      backgroundColor: "var(--v2-paper)",
-                      border: d.featured ? "1px solid rgba(212, 175, 55, 0.6)" : "1px solid rgba(212, 175, 55, 0.25)",
-                    }}
+                    as="div"
+                    animationNum={3 + index}
+                    timelineRef={pricingRef}
+                    customVariants={revealVariants}
                   >
-                    {d.featured && (
-                      <span
-                        className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded"
-                        style={{ top: "-14px", backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-                      >
-                        Most chosen
-                      </span>
-                    )}
-
-                    <p className="font-body text-xs uppercase tracking-widest mb-5" style={{ color: "var(--v2-gold)" }}>
-                      {d.shortName}
-                    </p>
-
-                    {/* Price — floating pound, Fraunces non-italic */}
-                    <div className="relative mb-1" style={{ lineHeight: 1 }}>
-                      <span
-                        className="font-numeral font-semibold absolute"
-                        style={{
-                          color: "var(--v2-ink-mute)",
-                          fontSize: "clamp(28px, 3vw, 36px)",
-                          top: "4px",
-                          left: "-2px",
-                          transform: "translateX(-100%)",
-                        }}
-                      >
-                        &pound;
-                      </span>
-                      <span
-                        className="font-numeral font-semibold"
-                        style={{
-                          color: "var(--v2-ink)",
-                          fontSize: "clamp(72px, 6vw, 96px)",
-                          marginLeft: "20px",
-                        }}
-                      >
-                        {priceDisplay}
-                      </span>
-                    </div>
-
-                    <p
-                      className="font-mono-v2 text-[10px] uppercase mb-6"
-                      style={{ color: "var(--v2-ink-mute)", letterSpacing: "0.15em" }}
+                    <Card
+                      className={cn(
+                        "relative border h-full flex flex-col transition-all duration-300",
+                        d.featured
+                          ? "ring-2 ring-[#D4AF37] bg-[#171510] border-[#D4AF37]/50 md:scale-105 md:-my-4 z-10 shadow-[0_0_30px_rgba(212,175,55,0.3),0_0_60px_rgba(212,175,55,0.15)]"
+                          : "bg-[#0f0e0b] border-[#333]"
+                      )}
                     >
-                      {days} day turnaround
-                    </p>
-
-                    {d.blurb && (
-                      <p className="font-body text-sm leading-relaxed mb-8" style={{ color: "var(--v2-ink-soft)" }}>
-                        {d.blurb}
-                      </p>
-                    )}
-
-                    <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                      {tier.features.slice(0, 5).map((f) => (
-                        <li
-                          key={f}
-                          className="flex items-start gap-3 font-body text-sm"
-                          style={{ color: "var(--v2-ink-soft)" }}
-                        >
-                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>
-                            &mdash;
+                      <CardHeader className="text-left">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
+                              {d.icon}
+                            </div>
+                            <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
+                          </div>
+                          {d.featured && (
+                            <span className="bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
+                              Most chosen
+                            </span>
+                          )}
+                        </div>
+                        <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-4xl font-semibold text-white">
+                            £
+                            <NumberFlow value={isBulk ? bulkPrice : price} className="text-4xl font-semibold" />
                           </span>
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
+                          <span className="text-[#888] ml-1">/ card</span>
+                        </div>
+                        <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
+                      </CardHeader>
 
-                    <Link href="/submit" className="no-underline w-full">
-                      <GradientButton className={d.featured ? "gradient-btn-filled w-full" : "w-full"}>
-                        Start a submission <ArrowRight size={14} />
-                      </GradientButton>
-                    </Link>
-                  </div>
+                      <CardContent className="pt-0 flex flex-col flex-1">
+                        <div className="space-y-3 pt-4 border-t border-[#333] mb-6 flex-1">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-[#D4AF37] mb-3">
+                            What&rsquo;s included
+                          </h4>
+                          <ul className="space-y-2.5">
+                            {tier.features.map((feature, featureIndex) => (
+                              <li key={featureIndex} className="flex items-center">
+                                <span className="h-5 w-5 rounded-full border border-[#D4AF37]/40 grid place-content-center mr-3 flex-shrink-0">
+                                  <CheckCheck className="h-3 w-3 text-[#D4AF37]" />
+                                </span>
+                                <span className="text-sm text-[#ccc]">{feature}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <Link href="/submit" className="no-underline block">
+                          <GradientButton height="52px" className="w-full">
+                            Start a submission <ArrowRight size={14} />
+                          </GradientButton>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                  </TimelineContent>
                 );
               })}
             </div>
           </div>
 
-          {/* Black Label editorial callout — not a 4th tier card */}
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
               className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.3em] no-text-shadow mb-3"
@@ -549,7 +603,7 @@ export default function PricingV2() {
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <Link href="/vault-club" className="no-underline self-start">
-                <GradientButton className="gradient-btn-filled">
+                <GradientButton>
                   See Vault Club <ArrowRight size={14} />
                 </GradientButton>
               </Link>
@@ -576,48 +630,27 @@ export default function PricingV2() {
             you save per card.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-            <div
-              className="rounded-lg p-6"
-              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
-            >
-              <p
-                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
-                style={{ color: "var(--v2-gold)" }}
+            {[
+              { range: "10–24 cards", discount: "5% off" },
+              { range: "25–49 cards", discount: "10% off" },
+              { range: "50+ cards", discount: "15% off" },
+            ].map((tier) => (
+              <div
+                key={tier.range}
+                className="rounded-lg p-6"
+                style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
               >
-                10–24 cards
-              </p>
-              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                <strong style={{ color: "var(--v2-ink)" }}>5% off</strong> the per-card grading fee.
-              </p>
-            </div>
-            <div
-              className="rounded-lg p-6"
-              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
-            >
-              <p
-                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
-                style={{ color: "var(--v2-gold)" }}
-              >
-                25–49 cards
-              </p>
-              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                <strong style={{ color: "var(--v2-ink)" }}>10% off</strong> the per-card grading fee.
-              </p>
-            </div>
-            <div
-              className="rounded-lg p-6"
-              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
-            >
-              <p
-                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
-                style={{ color: "var(--v2-gold)" }}
-              >
-                50+ cards
-              </p>
-              <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                <strong style={{ color: "var(--v2-ink)" }}>15% off</strong> the per-card grading fee.
-              </p>
-            </div>
+                <p
+                  className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
+                  style={{ color: "var(--v2-gold)" }}
+                >
+                  {tier.range}
+                </p>
+                <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                  <strong style={{ color: "var(--v2-ink)" }}>{tier.discount}</strong> the per-card grading fee.
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -641,7 +674,7 @@ export default function PricingV2() {
               },
               {
                 q: "Is Pristine 10P a paid upgrade?",
-                a: "No. Pristine 10P is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There&rsquo;s no extra charge, no form to tick. If your card earns it, you get it.",
+                a: "No. Pristine 10P is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There’s no extra charge, no form to tick. If your card earns it, you get it.",
               },
               {
                 q: "Are cards insured in transit?",
@@ -649,7 +682,7 @@ export default function PricingV2() {
               },
               {
                 q: "Do you grade cards other than Pokémon?",
-                a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you&rsquo;re unsure, submit anyway &mdash; we&rsquo;ll flag it before grading if we can&rsquo;t authenticate.",
+                a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you’re unsure, submit anyway — we’ll flag it before grading if we can’t authenticate.",
               },
             ].map((item, i) => (
               <div
@@ -690,16 +723,14 @@ export default function PricingV2() {
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <Link href="/submit" className="no-underline">
-              <GradientButton className="gradient-btn-filled">
+              <GradientButton>
                 Submit a card <ArrowRight size={14} />
               </GradientButton>
             </Link>
-            <Link
-              href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ borderColor: "rgba(255,255,255,0.2)", color: "#ffffff" }}
-            >
-              Try AI Pre-Grade (free) <ArrowRight size={14} />
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton>
+                Try AI Pre-Grade (free) <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
         </div>
