@@ -759,43 +759,21 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // the cert ID). Nothing more to draw in the white panel.
 }
 
-/**
- * Draws the standard contactless/NFC symbol — three arcs opening rightward
- * plus a center dot. cx/cy is the geometric centre of the bounding box.
- * size is the half-width of the bounding box (= largest arc radius).
- */
-function drawContactlessIcon(
-  ctx: any,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string,
-) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth   = Math.max(2.5, size * 0.13);
-  ctx.lineCap     = "round";
-  // Three arcs, 30 % / 60 % / 90 % of size, opening rightward (−60° → +60°)
-  for (const r of [size * 0.30, size * 0.60, size * 0.90]) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, -Math.PI / 3, Math.PI / 3);
-    ctx.stroke();
-  }
-  // Centre dot
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(cx, cy, Math.max(2, size * 0.13), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
 async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
+  // ── Layout constants — declared up front so the top banner can centre
+  //    its MVGS mark relative to the left gold panel and the QR. Both
+  //    blocks below (QR + panel) re-use these references; do not redeclare.
+  const PANEL_W = 50;
+  const PANEL_X = I_LEFT;
+  const qrSize  = 160;
+  const qrX     = I_RIGHT - qrSize;
+
   // ── TOP BANNER — MVGS attribution strip ──────────────────────────────────
   // Full inner-width dark banner. The QR (drawn below) overlays the right
   // portion since its white box flushes to the top-right corner — the right
   // text is positioned before the QR's left edge so it stays visible.
   // Applies to both Black Label and Standard (white) label variants.
-  const BANNER_H = 24;
+  const BANNER_H = 48;
   const BANNER_BG = "#1A1A1A";
   const BANNER_MUTED_FG = "#888888";
   const BANNER_MARK_FG = GOLD_LIGHT;
@@ -805,26 +783,36 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   ctx.fillStyle = BANNER_BG;
   ctx.fillRect(I_LEFT, bannerY, I_W, BANNER_H);
 
-  // Centre — MVGS mark (rectangle border with "MVGS" inside).
+  // Centre — MVGS mark (rectangle border with "MVGS" inside). Centred in
+  // the corridor between the left gold panel and the QR — not the full
+  // inner width — so the doubled mark cannot overlap the panel.
   ctx.save();
-  const markFontSize = 13;
+  const markFontSize = 40;
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
-  const markPadX = 8;
-  const markPadY = 4;
+  const markPadX = 20;
+  const markPadY = 12;
   const markRectW = Math.round(markTextW + markPadX * 2);
   const markRectH = markFontSize + markPadY * 2;
-  const bannerCenterX = I_LEFT + I_W / 2;
-  const markRectX = Math.round(bannerCenterX - markRectW / 2);
+  // Mid-point between the panel's right edge and the QR's left edge.
+  const corridorCenterX = (PANEL_X + PANEL_W + qrX) / 2;
+  let markRectX = Math.round(corridorCenterX - markRectW / 2);
+  // Hard floor — the rect's left edge must never sit on or past the gold
+  // panel. If centring would put it too close, shift right.
+  const minMarkRectX = PANEL_X + PANEL_W + 10;
+  if (markRectX < minMarkRectX) markRectX = minMarkRectX;
   const markRectY = Math.round(bannerMidY - markRectH / 2);
+  // The text follows the (possibly clamped) rect so the glyph stays centred
+  // inside the box, not inside the original corridor mid-point.
+  const markTextX = markRectX + markRectW / 2;
   ctx.strokeStyle = BANNER_MARK_FG;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 2.5;
   ctx.strokeRect(markRectX + 0.5, markRectY + 0.5, markRectW - 1, markRectH - 1);
   ctx.fillStyle = BANNER_MARK_FG;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("MVGS", bannerCenterX, bannerMidY);
+  ctx.fillText("MVGS", markTextX, bannerMidY);
   ctx.restore();
 
   // Left — "GRADED UNDER" small caps, muted.
@@ -846,9 +834,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   ctx.fillStyle = BANNER_MUTED_FG;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
-  // qrX = I_RIGHT - qrSize; computed below. Inline here so we can right-
-  // anchor the text against the QR's left edge with breathing room.
-  ctx.fillText("MINTVAULT GRADING STANDARD", I_RIGHT - 160 - 10, bannerMidY);
+  ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 10, bannerMidY);
   ctx.restore();
 
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
@@ -858,10 +844,10 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // so the cert text was bleeding into the bottom of the QR. New geometry:
   // QR ends y=178, cert ID centred at y=198 (text spans 186-210), 8px
   // breathing room above and below.
-  const qrSize = 160;
+  // qrSize and qrX are lifted to the top of drawBack so the banner can
+  // centre its mark in the panel↔QR corridor; declared here only:
   const qrPad  = 0;                          // QR's internal margin:1 (~6px) provides quiet zone — no external pad needed
   const qrY    = I_TOP;                      // flush to top inner border
-  const qrX    = I_RIGHT - qrSize;           // flush to right inner border
   const qrCenterX = qrX + qrSize / 2;
 
   // White box matches QR dimensions exactly (no external pad).
@@ -912,8 +898,8 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
   // Left gold panel — sits below the banner, runs to the inner bottom.
   // Replaces the previous shield logo image with a serif "MINTVAULT"
   // wordmark rotated 90° (reads bottom-to-top).
-  const PANEL_W = 50;
-  const PANEL_X = I_LEFT;
+  // PANEL_X / PANEL_W are lifted to the top of drawBack so the banner can
+  // reference them; only PANEL_Y / PANEL_H are declared here.
   const PANEL_Y = I_TOP + BANNER_H;
   const PANEL_H = I_BOTTOM - PANEL_Y;
 
@@ -970,20 +956,6 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.shadowBlur       = 0;
     ctx.shadowColor      = "transparent";
     ctx.fillText("Tap NFC to verify", NFC_ICON_CX, nfcY);
-  }
-
-  // ── CENTRE MIDDLE: NFC radiating waves — programmatic arcs ────────────────
-  // Standard contactless symbol: three concentric arcs + centre dot. Replaces
-  // the prior hand/thumb tap PNG with a more universally-recognised icon.
-  // Vertically centred between the URL baseline (above) and tap-text baseline
-  // (below), matching the visual-mid approach used by the prior PNG path.
-  {
-    const urlY       = I_TOP + BANNER_H + 22;
-    const nfcY       = I_BOTTOM - 31;
-    const visualMidY = (urlY + nfcY) / 2;
-    // size = half-width of bounding box; full icon diameter ≈ 2 × size.
-    const arcSize    = 44;
-    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(visualMidY), arcSize, GOLD_LIGHT);
   }
 
   ctx.textAlign    = "left";
