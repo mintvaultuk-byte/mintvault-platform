@@ -8,6 +8,9 @@ import { getR2SignedUrl } from "../r2";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { APP_BASE_URL } from "../app-url";
+import { FEATURE_FLAGS } from "../config/feature-flags";
+import fs from "fs";
+import path from "path";
 
 /** Normalise cert IDs: MV-0000000001 → MV1 */
 function normalizeCertId(raw: string): string {
@@ -24,7 +27,6 @@ export function registerPublicRoutes(app: Express): void {
 
   // ── Public flags endpoint ──────────────────────────────────────────────────
   app.get("/api/config/public-flags", (_req, res) => {
-    const { FEATURE_FLAGS } = require("../config/feature-flags");
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
@@ -279,20 +281,14 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── Legal page API routes ─────────────────────────────────────────────────
-  app.get("/api/legal/:slug", (req, res) => {
-    const { FEATURE_FLAGS } = require("../config/feature-flags");
+  app.get("/api/legal/:slug", async (req, res) => {
     if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
 
-    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("../config/legal") as {
-      LEGAL_SLUGS: readonly string[];
-      LEGAL_ALIASES: Record<string, string>;
-    };
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = await import("../config/legal");
     const slug = String(req.params.slug);
-    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+    if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return res.status(404).json({ error: "Not found" });
 
     try {
-      const fs = require("fs");
-      const path = require("path");
       const fileSlug = LEGAL_ALIASES[slug] || slug;
       const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
       const content = fs.readFileSync(filePath, "utf-8");

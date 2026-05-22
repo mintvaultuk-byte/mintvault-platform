@@ -129,6 +129,7 @@ import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
 import { isActiveStatus } from "./vault-club-tiers";
+import { FEATURE_FLAGS } from "./config/feature-flags";
 
 /** Count unused, unexpired credits of a given type */
 async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
@@ -1303,7 +1304,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Public flags endpoint ──────────────────────────────────────────────────
   app.get("/api/config/public-flags", (_req, res) => {
-    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    // FEATURE_FLAGS imported at top level
     res.json({
       legalPagesLive: FEATURE_FLAGS.LEGAL_PAGES_LIVE,
       transferFlowLive: FEATURE_FLAGS.TRANSFER_FLOW_LIVE,
@@ -1560,20 +1561,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Legal page API routes ─────────────────────────────────────────────────
-  app.get("/api/legal/:slug", (req, res) => {
-    const { FEATURE_FLAGS } = require("./config/feature-flags");
+  app.get("/api/legal/:slug", async (req, res) => {
+    // FEATURE_FLAGS imported at top level
     if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
 
-    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as {
-      LEGAL_SLUGS: readonly string[];
-      LEGAL_ALIASES: Record<string, string>;
-    };
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = await import("./config/legal");
     const slug = String(req.params.slug);
-    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+    if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return res.status(404).json({ error: "Not found" });
 
     try {
-      const fs = require("fs");
-      const path = require("path");
       const fileSlug = LEGAL_ALIASES[slug] || slug;
       const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
       const content = fs.readFileSync(filePath, "utf-8");
@@ -1595,17 +1591,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Admin preview — always available regardless of flag
-  app.get("/api/admin/legal/:slug", requireAdmin, (req, res) => {
-    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as {
-      LEGAL_SLUGS: readonly string[];
-      LEGAL_ALIASES: Record<string, string>;
-    };
+  app.get("/api/admin/legal/:slug", requireAdmin, async (req, res) => {
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = await import("./config/legal");
     const slug = String(req.params.slug);
-    if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
+    if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return res.status(404).json({ error: "Not found" });
 
     try {
-      const fs = require("fs");
-      const path = require("path");
       const fileSlug = LEGAL_ALIASES[slug] || slug;
       const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
       const content = fs.readFileSync(filePath, "utf-8");
@@ -2216,11 +2207,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
       if (!type || !VALID_SERVICE_TYPES.includes(type)) {
-        return res
-          .status(400)
-          .json({
-            error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}`,
+        });
       }
 
       // Check tier capacity — block paused tiers
@@ -2230,12 +2219,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         );
         const cap = capRow.rows[0] as any;
         if (cap?.status === "paused") {
-          return res
-            .status(403)
-            .json({
-              error:
-                cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.`,
-            });
+          return res.status(403).json({
+            error:
+              cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.`,
+          });
         }
       }
 
@@ -2265,24 +2252,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const tierData = serviceTierToPricingTier(dbTier);
 
       if (!tierData.pricePerCard || tierData.pricePerCard <= 0) {
-        return res
-          .status(400)
-          .json({
-            error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.`,
-          });
+        return res.status(400).json({
+          error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.`,
+        });
       }
 
       // Capacity gating — only applied to grading submissions (reholder/crossover/auth have no tier capacity)
       if (serviceType === "grading") {
         const capacity = await getTierCapacity(tier).catch(() => null);
         if (capacity && capacity.full) {
-          return res
-            .status(409)
-            .json({
-              error: "tier_full",
-              tier,
-              message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.`,
-            });
+          return res.status(409).json({
+            error: "tier_full",
+            tier,
+            message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.`,
+          });
         }
       }
 
@@ -3852,12 +3835,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         err.stack?.split("\n")[1]?.trim()
       );
       if (!res.headersSent)
-        res
-          .status(503)
-          .json({
-            error:
-              "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
-          });
+        res.status(503).json({
+          error:
+            "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
+        });
     }
   });
 
@@ -3915,12 +3896,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         err.stack?.split("\n")[1]?.trim()
       );
       if (!res.headersSent)
-        res
-          .status(503)
-          .json({
-            error:
-              "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
-          });
+        res.status(503).json({
+          error:
+            "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
+        });
     }
   });
 
@@ -6539,7 +6518,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // false (default), they return 503. Admin endpoints are NOT gated so we
   // can inspect/resolve regardless of the public switch.
   const requireTransferFlowLive = (_req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
-    const { FEATURE_FLAGS } = require("./config/feature-flags");
+    // FEATURE_FLAGS imported at top level
     if (!FEATURE_FLAGS.TRANSFER_FLOW_LIVE) {
       return res.status(503).json({ error: "Transfer flow not yet available — coming soon." });
     }
@@ -6964,12 +6943,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             reason: "Another transfer in progress",
             claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
           });
-          return res
-            .status(409)
-            .json({
-              error:
-                "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
-            });
+          return res.status(409).json({
+            error:
+              "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
+          });
         }
         if (cert.ownershipStatus !== "claimed") {
           return res.status(400).json({ error: "This certificate is not in a state that supports transfer." });

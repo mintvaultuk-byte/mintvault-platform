@@ -22,6 +22,7 @@ import { requireCustomer } from "../customer-auth";
 import { APP_BASE_URL } from "../app-url";
 import { generateCertificateDocument } from "../certificate-document";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "../claim-insert";
+import { FEATURE_FLAGS } from "../config/feature-flags";
 import { getOwnerChain } from "../ownership-service";
 import { normalizeCertId } from "../routes";
 import {
@@ -313,7 +314,6 @@ export function registerTransferRoutes(app: Express): void {
   // false (default), they return 503. Admin endpoints are NOT gated so we
   // can inspect/resolve regardless of the public switch.
   const requireTransferFlowLive = (_req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
-    const { FEATURE_FLAGS } = require("../config/feature-flags");
     if (!FEATURE_FLAGS.TRANSFER_FLOW_LIVE) {
       return res.status(503).json({ error: "Transfer flow not yet available — coming soon." });
     }
@@ -735,12 +735,10 @@ export function registerTransferRoutes(app: Express): void {
             reason: "Another transfer in progress",
             claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
           });
-          return res
-            .status(409)
-            .json({
-              error:
-                "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
-            });
+          return res.status(409).json({
+            error:
+              "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
+          });
         }
         if (cert.ownershipStatus !== "claimed") {
           return res.status(400).json({ error: "This certificate is not in a state that supports transfer." });

@@ -13,6 +13,7 @@ import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
+import { FEATURE_FLAGS } from "./config/feature-flags";
 import pg from "pg";
 import path from "path";
 
@@ -526,7 +527,7 @@ async function runTransferV2Sweep() {
       log(`serving on port ${port}`);
       // Resolved AI feature-flag state at boot — surfaces in Fly logs so we can
       // confirm which AI features are live without exec'ing into the machine.
-      const { FEATURE_FLAGS: FF } = require("./config/feature-flags");
+      const FF = FEATURE_FLAGS;
       console.log(
         "[ai-flags]",
         JSON.stringify({
