@@ -25,6 +25,8 @@
  *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5
  *     · CR D1 (crease) sets a hard cap of 74 on the final score
  *     · SP D1 in art/holo zone (FA/FH) multiplies ×1.5
+ *     · Back-surface zones (BA/BB) multiply final deduction ×0.5 —
+ *       matches the published MVGS standard's lenient back treatment
  *   - Eye appeal modifier added last, clamped ±2
  *   - Final clamped 1..100, then lowest-subgrade floor rule applies:
  *     · per-category subgrades derived from deductions (25-pt budget each)
@@ -136,39 +138,45 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
   const isBackSurf  = BACK_SURFACE_ZONES.has(d.zone);
   if (!isFrontSurf && !isBackSurf) return { deduction: 0, forceCap74: false };
 
+  let raw = 0;
+  let forceCap74 = false;
+
   if (d.tier === "D1") {
     switch (d.mvgsCode) {
-      case "SP": {
-        let v = -4;
-        if (FRONT_ART_HOLO_ZONES.has(d.zone)) v = v * 1.5;
-        return { deduction: v, forceCap74: false };
-      }
-      case "CR": return { deduction: -10, forceCap74: true };
-      case "SC": return { deduction: -2,  forceCap74: false };
-      case "SV": return { deduction: -3,  forceCap74: false };
-      case "ST": return { deduction: -2,  forceCap74: false };
-      case "GL": return { deduction: -4,  forceCap74: false };
-      default:   return { deduction: 0,   forceCap74: false };
+      case "SP":
+        raw = -4;
+        // ×1.5 applies ONLY on the front art/holo zones (FA/FH). A back-
+        // surface SP (BA/BB) skips this bonus and falls through to the
+        // back-side ×0.5 multiplier at exit instead.
+        if (FRONT_ART_HOLO_ZONES.has(d.zone)) raw = raw * 1.5;
+        break;
+      case "CR": raw = -10; forceCap74 = true; break;
+      case "SC": raw = -2;  break;
+      case "SV": raw = -3;  break;
+      case "ST": raw = -2;  break;
+      case "GL": raw = -4;  break;
     }
-  }
-
-  if (d.tier === "D2") {
+  } else if (d.tier === "D2") {
     switch (d.mvgsCode) {
-      case "PL": return { deduction: -0.5,  forceCap74: false };
-      case "PS": return { deduction: -0.25, forceCap74: false };
-      case "PI": return { deduction: -0.5,  forceCap74: false };
-      case "SC": return { deduction: -0.5,  forceCap74: false };
+      case "PL": raw = -0.5;  break;
+      case "PS": raw = -0.25; break;
+      case "PI": raw = -0.5;  break;
+      case "SC": raw = -0.5;  break;
       // WH (whitening) on a surface zone — added in the D2 weight update.
-      // Was previously falling through to default=0; now scored -0.5.
       // Distinct from WH on an edge zone, which routes through
       // edgeDeduction and gets the dark-border ×1.25 multiplier.
-      case "WH": return { deduction: -0.5,  forceCap74: false };
-      default:   return { deduction: 0,     forceCap74: false };
+      case "WH": raw = -0.5;  break;
     }
   }
+  // D3 or unknown codes leave raw=0 → returns 0 below.
 
-  // D3 or unknown
-  return { deduction: 0, forceCap74: false };
+  // Back-surface ×0.5 multiplier — matches the published MVGS standard's
+  // lenient treatment of back-side defects. Applied to the *deduction*
+  // value only; forceCap74 still triggers if the underlying pin is a CR
+  // crease, regardless of which side the crease is on (a creased card
+  // is structurally degraded either way).
+  const backMultiplier = isBackSurf ? 0.5 : 1;
+  return { deduction: raw * backMultiplier, forceCap74 };
 }
 
 // ── Grade brackets ────────────────────────────────────────────────────────
