@@ -790,6 +790,67 @@ function drawContactlessIcon(
 }
 
 async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
+  // ── TOP BANNER — MVGS attribution strip ──────────────────────────────────
+  // Full inner-width dark banner. The QR (drawn below) overlays the right
+  // portion since its white box flushes to the top-right corner — the right
+  // text is positioned before the QR's left edge so it stays visible.
+  // Applies to both Black Label and Standard (white) label variants.
+  const BANNER_H = 24;
+  const BANNER_BG = "#1A1A1A";
+  const BANNER_MUTED_FG = "#888888";
+  const BANNER_MARK_FG = GOLD_LIGHT;
+  const bannerY = I_TOP;
+  const bannerMidY = bannerY + BANNER_H / 2;
+
+  ctx.fillStyle = BANNER_BG;
+  ctx.fillRect(I_LEFT, bannerY, I_W, BANNER_H);
+
+  // Centre — MVGS mark (rectangle border with "MVGS" inside).
+  ctx.save();
+  const markFontSize = 13;
+  ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
+  (ctx as any).letterSpacing = "2px";
+  const markTextW = ctx.measureText("MVGS").width;
+  const markPadX = 8;
+  const markPadY = 4;
+  const markRectW = Math.round(markTextW + markPadX * 2);
+  const markRectH = markFontSize + markPadY * 2;
+  const bannerCenterX = I_LEFT + I_W / 2;
+  const markRectX = Math.round(bannerCenterX - markRectW / 2);
+  const markRectY = Math.round(bannerMidY - markRectH / 2);
+  ctx.strokeStyle = BANNER_MARK_FG;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(markRectX + 0.5, markRectY + 0.5, markRectW - 1, markRectH - 1);
+  ctx.fillStyle = BANNER_MARK_FG;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("MVGS", bannerCenterX, bannerMidY);
+  ctx.restore();
+
+  // Left — "GRADED UNDER" small caps, muted.
+  ctx.save();
+  ctx.font = "10px Arial, Helvetica, sans-serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle = BANNER_MUTED_FG;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("GRADED UNDER", I_LEFT + 10, bannerMidY);
+  ctx.restore();
+
+  // Right — "MINTVAULT GRADING STANDARD" small caps, muted. Right-anchored
+  // BEFORE the QR's left edge so it remains visible after the QR overlays
+  // the top-right corner of the banner below.
+  ctx.save();
+  ctx.font = "10px Arial, Helvetica, sans-serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle = BANNER_MUTED_FG;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  // qrX = I_RIGHT - qrSize; computed below. Inline here so we can right-
+  // anchor the text against the QR's left edge with breathing room.
+  ctx.fillText("MINTVAULT GRADING STANDARD", I_RIGHT - 160 - 10, bannerMidY);
+  ctx.restore();
+
   // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
   // Clean white background, no border, no framing — high contrast for scanning.
   // v425 — QR shrunk 187→160 and cert font max 28→24. Post-v424 the inner
@@ -844,38 +905,48 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
 
   // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
   //
-  //   LEFT   — Logo        : fits within inner content area (~24% of label width)
-  //   CENTRE — NFC + txt   : horizontally centred between logo's right edge and QR's left edge
-  //   RIGHT  — QR code     : flush top-right (qrSize set above)
+  //   LEFT   — Gold panel + rotated "MINTVAULT" wordmark
+  //   CENTRE — NFC waves + URL + tap text
+  //   RIGHT  — QR code (flush top-right; overlays banner's right portion)
   //
-  const LOGO_DRAW    = I_H - 10;                  // logo target HEIGHT (px)
-  const LOGO_LX      = I_LEFT + 4;                // logo left X — tight to left gold border
+  // Left gold panel — sits below the banner, runs to the inner bottom.
+  // Replaces the previous shield logo image with a serif "MINTVAULT"
+  // wordmark rotated 90° (reads bottom-to-top).
+  const PANEL_W = 50;
+  const PANEL_X = I_LEFT;
+  const PANEL_Y = I_TOP + BANNER_H;
+  const PANEL_H = I_BOTTOM - PANEL_Y;
 
-  // v429 — derive the logo's actual rendered WIDTH from its aspect ratio
-  // so NFC_ICON_CX correctly centres in the gap between logo-right and
-  // qr-left. The pre-v429 calc used LOGO_DRAW (height) as a proxy for
-  // width, which only worked for square logos and pushed the icon /
-  // URL / NFC text noticeably leftward when the logo was wider than tall.
-  const logoAspect   = logo ? (logo.width / logo.height) : 1;
-  const LOGO_DRAW_W  = Math.round(LOGO_DRAW * logoAspect);
-  const logoRightX   = LOGO_LX + LOGO_DRAW_W;
-  const NFC_ICON_CX  = Math.round((logoRightX + gfLeft) / 2);
+  ctx.fillStyle = GOLD_LIGHT;
+  ctx.fillRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
 
-  // ── LEFT: MintVault logo — primary visual anchor ──────────────────────────
-  if (logo) {
-    const ly = I_TOP + Math.round((I_H - LOGO_DRAW) / 2); // vertically centred within inner area
-    ctx.drawImage(logo, LOGO_LX, ly, LOGO_DRAW_W, LOGO_DRAW);
+  // Rotated wordmark — counterclockwise 90° rotation makes "MINTVAULT"
+  // read from bottom of the panel up to the top.
+  ctx.save();
+  ctx.translate(PANEL_X + PANEL_W / 2, PANEL_Y + PANEL_H / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "#1A1A1A";
+  ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
+  (ctx as any).letterSpacing = "4px";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("MINTVAULT", 0, 0);
+  ctx.restore();
 
-    // Redraw gold frame on top so logo never bleeds into the border.
-    drawGoldFrame(ctx);
-  }
+  // Redraw gold frame so the panel + banner never bleed into the border.
+  drawGoldFrame(ctx);
+
+  // NFC zone centred between the panel's right edge and the QR's left edge.
+  const panelRightX  = PANEL_X + PANEL_W;
+  const NFC_ICON_CX  = Math.round((panelRightX + gfLeft) / 2);
 
   // ── CENTRE TOP: website URL ───────────────────────────────────────────────
   // v6: white-label uses black text for inkjet legibility on white background;
   // Black Label keeps GOLD_LIGHT for the premium gold-on-black treatment.
+  // Pushed below the new top banner so the URL doesn't overlap the strip.
   {
-    const urlY    = I_TOP + 24;
-    const urlSz   = 38;
+    const urlY    = I_TOP + BANNER_H + 22;
+    const urlSz   = 32;
     (ctx as any).letterSpacing = "1.5px";
     ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
     ctx.fillStyle        = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
@@ -901,52 +972,18 @@ async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage:
     ctx.fillText("Tap NFC to verify", NFC_ICON_CX, nfcY);
   }
 
-  // ── CENTRE MIDDLE: NFC hand-tap icon — tinted gold ─────────────────────────
-  try {
-    const { createCanvas } = await import("canvas");
-    const nfcImg  = await loadImage(NFC_ICON_PATH);
-    const iconSz  = 165;                                  // rendered square size (px)
-    const iconX   = Math.round(NFC_ICON_CX - iconSz / 2);
-    // v436 — vertically centre between the URL baseline (above) and the
-    // tap-text baseline (below) instead of the canvas midpoint. The two
-    // text rows aren't symmetric about PX_H/2, so canvas-midpoint
-    // centring read visibly low. Mirrors the URL/tap-text Y constants
-    // defined in the blocks above.
-    const urlY    = I_TOP + 24;
-    const nfcY    = I_BOTTOM - 31;
+  // ── CENTRE MIDDLE: NFC radiating waves — programmatic arcs ────────────────
+  // Standard contactless symbol: three concentric arcs + centre dot. Replaces
+  // the prior hand/thumb tap PNG with a more universally-recognised icon.
+  // Vertically centred between the URL baseline (above) and tap-text baseline
+  // (below), matching the visual-mid approach used by the prior PNG path.
+  {
+    const urlY       = I_TOP + BANNER_H + 22;
+    const nfcY       = I_BOTTOM - 31;
     const visualMidY = (urlY + nfcY) / 2;
-    const iconY   = Math.round(visualMidY - iconSz / 2);
-    console.log(`[label-back-debug] cert=${cert.certId} NFC_ICON_PATH=${NFC_ICON_PATH} CX=${NFC_ICON_CX} iconSz=${iconSz} iconX=${iconX} iconY=${iconY} img=${nfcImg.width}x${nfcImg.height}`);
-
-    // PNG is opaque RGB (black icon on white background), no alpha channel —
-    // confirmed via `sips`: samplesPerPixel: 3, hasAlpha: no. The previous
-    // destination-out/destination-in compositing assumed alpha and produced
-    // invisible output. Extract alpha via inverse luminance instead: dark
-    // pixels become opaque gold, light pixels become transparent. Continuous
-    // luminance values handle antialiased edges cleanly.
-    const off    = createCanvas(iconSz, iconSz);
-    const offCtx = off.getContext("2d");
-    offCtx.drawImage(nfcImg, 0, 0, iconSz, iconSz);
-    const imgData = offCtx.getImageData(0, 0, iconSz, iconSz);
-    const d = imgData.data;
-    const goldHex = GOLD_LIGHT.replace("#", "");
-    const gR = parseInt(goldHex.substring(0, 2), 16);
-    const gG = parseInt(goldHex.substring(2, 4), 16);
-    const gB = parseInt(goldHex.substring(4, 6), 16);
-    for (let i = 0; i < d.length; i += 4) {
-      const lum = (d[i] + d[i+1] + d[i+2]) / 3;
-      d[i]   = gR;
-      d[i+1] = gG;
-      d[i+2] = gB;
-      d[i+3] = 255 - lum;  // alpha: black input → 255 (opaque), white → 0 (clear)
-    }
-    offCtx.putImageData(imgData, 0, 0);
-    ctx.drawImage(off, iconX, iconY);
-  } catch (err) {
-    // Fallback: draw programmatic signal arcs if icon fails to load
-    console.error(`[label-back-debug] cert=${cert.certId} NFC icon failed, falling back to arcs:`, err);
-    const iconSz = 100;
-    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(PX_H / 2), iconSz / 2.5, GOLD_LIGHT);
+    // size = half-width of bounding box; full icon diameter ≈ 2 × size.
+    const arcSize    = 44;
+    drawContactlessIcon(ctx, NFC_ICON_CX, Math.round(visualMidY), arcSize, GOLD_LIGHT);
   }
 
   ctx.textAlign    = "left";
