@@ -160,6 +160,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [darkBorderFront, setDarkBorderFront] = useState(false);
   const [darkBorderBack, setDarkBorderBack]   = useState(false);
   const [eyeAppealModifier, setEyeAppealModifier] = useState(0);
+  // Pre-grade checklist — session-only state, deliberately NOT persisted to
+  // the cert. It's an operational reminder that the grader deionized the
+  // card before scanning, not a data field on the certificate.
+  const [deionizationComplete, setDeionizationComplete] = useState(false);
   const [authStatus, setAuthStatus]   = useState<AuthStatus>("genuine");
   const [authNotes, setAuthNotes]     = useState("");
   const [privateNotes, setPrivateNotes]         = useState("");
@@ -238,7 +242,16 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       const tag = (e.target as HTMLElement).tagName;
       if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
       if (e.ctrlKey && e.key === "s") { e.preventDefault(); saveDraft(); }
-      else if (e.ctrlKey && e.key === "Enter") { e.preventDefault(); setShowConfirm(true); }
+      else if (e.ctrlKey && e.key === "Enter") {
+        e.preventDefault();
+        // Pre-grade checklist gate — Ctrl+Enter shortcut must respect the
+        // deionization checkbox the same way the Approve button does.
+        if (!deionizationComplete) {
+          toast({ title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." });
+          return;
+        }
+        setShowConfirm(true);
+      }
       else if (e.key === "q" || e.key === "Q") {
         setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; });
       }
@@ -946,6 +959,34 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         </div>
       </div>
 
+      {/* Pre-grade checklist — operational reminder that the card was
+          deionized before imaging. Session-only state; gates the Approve
+          & Publish button below. Hidden once the cert is approved since
+          it's pre-grade-only and would clutter the post-approve view. */}
+      {!approved && (
+        <label
+          className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
+            deionizationComplete
+              ? "bg-emerald-50 border-emerald-200"
+              : "bg-amber-50 border-amber-300"
+          }`}
+          data-testid="check-deionization-complete"
+        >
+          <input
+            type="checkbox"
+            checked={deionizationComplete}
+            onChange={() => setDeionizationComplete(v => !v)}
+            className="accent-[#D4AF37] h-4 w-4"
+          />
+          <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">
+            Deionization complete
+          </span>
+          <span className="text-[10px] text-[#555] ml-auto">
+            Required before approve
+          </span>
+        </label>
+      )}
+
       {quickGrade && (
         <QuickGrade
           subgrades={{ centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade }}
@@ -956,7 +997,15 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             setSurfaceOverride(s.surface);
             clearOverallOverrideIfSet();
           }}
-          onApprove={() => setShowConfirm(true)}
+          onApprove={() => {
+            // Mirror the main Approve button's deionization gate so the
+            // QuickGrade panel can't bypass it.
+            if (!deionizationComplete) {
+              toast({ title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." });
+              return;
+            }
+            setShowConfirm(true);
+          }}
           onSave={saveDraft}
           approving={approving}
           saving={saving}
@@ -1593,17 +1642,23 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               <button
                 type="button"
                 onClick={() => setShowConfirm(true)}
-                disabled={approving || overall <= 0 || subgradesIncomplete}
+                disabled={approving || overall <= 0 || subgradesIncomplete || !deionizationComplete}
                 title={
                   overall <= 0 || subgradesIncomplete
                     ? "Set all four subgrades first"
-                    : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                    : !deionizationComplete
+                      ? "Tick 'Deionization complete' before approving"
+                      : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                 }
                 data-testid="btn-approve-publish"
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
               >
                 {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                {subgradesIncomplete ? "Set subgrades first" : "Approve & Publish"}
+                {subgradesIncomplete
+                  ? "Set subgrades first"
+                  : !deionizationComplete
+                    ? "Confirm deionization first"
+                    : "Approve & Publish"}
               </button>
             ) : (
               <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">

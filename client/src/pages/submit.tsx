@@ -223,6 +223,14 @@ function Step1Tier({ state, setState, tiers, capacity }: {
         All turnaround times begin when we receive your cards, not when you post them.
       </p>
 
+      {/* Deionization disclosure — sits between tier selection and the
+          submit CTA so submitters see it before paying. */}
+      <p className="text-[#888888] text-xs text-center mt-3 max-w-md mx-auto leading-relaxed">
+        Every card receives complimentary deionization before imaging — ionised air
+        removes loose dust and neutralises static charge. No contact with the card
+        surface. No chemicals. Cards are graded as-received.
+      </p>
+
       {/* Other Services — shown when browsing grading tiers */}
       {state.type === "grading" && (
         <div className="mt-8">

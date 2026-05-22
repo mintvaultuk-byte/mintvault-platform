@@ -104,12 +104,17 @@ export default function StandardPage() {
         <div className="space-y-10">
           {/* ── 1. Intro ──────────────────────────────────────────────── */}
           <section>
-            <p className={para}>
+            <p className={`${para} mb-3`}>
               MVGS is a free, openly licensed grading specification. Any
               grading company can self-certify MVGS compliance and display the
               "MVGS Compliant" mark. MintVault is the reference implementation
               and founding body — every card we grade ships with a full MVGS
               score, a published defect report, and a 600 DPI scan.
+            </p>
+            <p className={`${para} text-xs italic`}>
+              All MintVault submissions are deionized before imaging. Cards are
+              graded as-received — deionization removes loose surface dust only
+              and does not constitute cleaning or alteration.
             </p>
           </section>
 

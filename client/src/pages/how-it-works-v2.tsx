@@ -609,6 +609,34 @@ function ActGrading() {
           }}>
             ── 03 / Grading
           </p>
+
+          {/* Card Care — step 1 of grading, sits above the headline so it's
+              the first thing read in this act. Ionised-air deionization
+              happens before any imaging or measurement. */}
+          <div style={{
+            borderLeft: `2px solid ${V.gold}`,
+            paddingLeft: 16,
+            marginBottom: 32,
+            maxWidth: 560,
+          }}>
+            <div style={{
+              fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+              fontSize: 10, color: V.goldSoft,
+              letterSpacing: "0.3em", textTransform: "uppercase",
+              marginBottom: 8,
+            }}>
+              Step 1 · Card Care
+            </div>
+            <p style={{
+              fontFamily: "'Geist Variable', system-ui, sans-serif",
+              fontSize: 15, lineHeight: 1.55, color: V.inkSoft,
+              margin: 0,
+            }}>
+              Your card is deionized before imaging. Ionised air removes loose
+              dust and neutralises static charge without touching the card surface.
+            </p>
+          </div>
+
           <h2 style={{
             fontFamily: "'Fraunces', Georgia, serif",
             fontStyle: "italic", fontWeight: 500,
