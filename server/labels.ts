@@ -793,43 +793,48 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
   // Left — "GRADED UNDER".
   ctx.save();
-  ctx.font = "9px Arial, Helvetica, sans-serif";
+  ctx.font = "11px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle    = BANNER_MUTED;
+  ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "left";
   ctx.textBaseline = "middle";
   ctx.fillText("GRADED UNDER", PANEL_RIGHT + 14, bannerMidY);
   ctx.restore();
 
   // Centre — MVGS mark (rectangle + text). Hard-clamped so the rect's
-  // left edge cannot encroach on the gold panel.
+  // left edge cannot encroach on the gold panel. Every coordinate is
+  // integer-rounded and imageSmoothingEnabled is off so the rect edges
+  // and glyph baselines hit whole pixels (no AA fuzz).
   ctx.save();
-  const markFontSize = 28;
+  (ctx as any).imageSmoothingEnabled = false;
+  const markFontSize = 32;
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
   const markPadX  = 20;
   const markPadY  = 8;
   const markRectW = Math.round(markTextW + markPadX * 2);
-  const markRectH = markFontSize + markPadY * 2;
+  const markRectH = Math.round(markFontSize + markPadY * 2);
   let markRectX   = Math.round(centreX - markRectW / 2);
-  const minMarkX  = PANEL_RIGHT + 10;
+  const minMarkX  = Math.round(PANEL_RIGHT + 10);
   if (markRectX < minMarkX) markRectX = minMarkX;
   const markRectY = Math.round(bannerMidY - markRectH / 2);
+  const markTextX = Math.round(markRectX + markRectW / 2);
+  const markTextY = Math.round(markRectY + markPadY + markFontSize * 0.85);
   ctx.strokeStyle = GOLD_MARK;
   ctx.lineWidth   = 3;
   ctx.strokeRect(markRectX, markRectY, markRectW, markRectH);
   ctx.fillStyle   = GOLD_MARK;
   ctx.textAlign   = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText("MVGS", markRectX + markRectW / 2, markRectY + markPadY + markFontSize * 0.85);
+  ctx.fillText("MVGS", markTextX, markTextY);
   ctx.restore();
 
   // Right — "MINTVAULT GRADING STANDARD".
   ctx.save();
-  ctx.font = "9px Arial, Helvetica, sans-serif";
+  ctx.font = "11px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle    = BANNER_MUTED;
+  ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "right";
   ctx.textBaseline = "middle";
   ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 14, bannerMidY);
