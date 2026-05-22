@@ -10488,38 +10488,48 @@ Defects (admin-confirmed): ${defectLines}`;
 
   app.get("/api/admin/learning/overview", requireAdmin, async (_req, res) => {
     try {
+      // INNER JOIN to certificates + deleted_at IS NULL filter — excludes
+      // both soft-deleted certs AND orphaned grading_sessions (where the
+      // referenced cert has been hard-deleted). pristine_10p_count is
+      // derived from the cert's MVGS score (grade_strength_score >= 96)
+      // rather than the headline grade — only MVGS-qualified Pristine
+      // 10Ps count, not every grade-10 cert.
       const rows = await db.execute(sql`
         SELECT
-          COUNT(*)::int                                    AS total_graded,
-          COUNT(*) FILTER (WHERE DATE_TRUNC('month', completed_at) = DATE_TRUNC('month', NOW()))::int AS this_month,
-          ROUND(AVG(final_grade)::numeric, 2)             AS avg_grade,
-          ROUND(AVG(grading_duration_seconds)::numeric, 0)::int AS avg_seconds,
-          COUNT(*) FILTER (WHERE final_grade = 10)::int   AS black_label_count
-        FROM grading_sessions
-        WHERE final_grade IS NOT NULL
+          COUNT(*)::int                                                                 AS total_graded,
+          COUNT(*) FILTER (WHERE DATE_TRUNC('month', gs.completed_at) = DATE_TRUNC('month', NOW()))::int AS this_month,
+          ROUND(AVG(gs.final_grade)::numeric, 2)                                        AS avg_grade,
+          ROUND(AVG(gs.grading_duration_seconds)::numeric, 0)::int                      AS avg_seconds,
+          COUNT(*) FILTER (WHERE c.grade_strength_score >= 96)::int                     AS pristine_10p_count
+        FROM grading_sessions gs
+        INNER JOIN certificates c ON c.certificate_number = gs.cert_id AND c.deleted_at IS NULL
+        WHERE gs.final_grade IS NOT NULL
       `);
       const overview = rows.rows[0] || {};
 
       const distRows = await db.execute(sql`
-        SELECT final_grade, COUNT(*)::int AS count
-        FROM grading_sessions
-        WHERE final_grade IS NOT NULL
-        GROUP BY final_grade
-        ORDER BY final_grade DESC
+        SELECT gs.final_grade, COUNT(*)::int AS count
+        FROM grading_sessions gs
+        INNER JOIN certificates c ON c.certificate_number = gs.cert_id AND c.deleted_at IS NULL
+        WHERE gs.final_grade IS NOT NULL
+        GROUP BY gs.final_grade
+        ORDER BY gs.final_grade DESC
       `);
 
       const gameRows = await db.execute(sql`
-        SELECT card_game, COUNT(*)::int AS count
-        FROM grading_sessions
-        WHERE card_game IS NOT NULL
-        GROUP BY card_game
+        SELECT gs.card_game, COUNT(*)::int AS count
+        FROM grading_sessions gs
+        INNER JOIN certificates c ON c.certificate_number = gs.cert_id AND c.deleted_at IS NULL
+        WHERE gs.card_game IS NOT NULL
+        GROUP BY gs.card_game
         ORDER BY count DESC
       `);
 
       const activityRows = await db.execute(sql`
-        SELECT DATE(completed_at) AS day, COUNT(*)::int AS count
-        FROM grading_sessions
-        WHERE completed_at >= NOW() - INTERVAL '30 days'
+        SELECT DATE(gs.completed_at) AS day, COUNT(*)::int AS count
+        FROM grading_sessions gs
+        INNER JOIN certificates c ON c.certificate_number = gs.cert_id AND c.deleted_at IS NULL
+        WHERE gs.completed_at >= NOW() - INTERVAL '30 days'
         GROUP BY day
         ORDER BY day
       `);
@@ -10537,20 +10547,24 @@ Defects (admin-confirmed): ${defectLines}`;
 
   app.get("/api/admin/learning/accuracy", requireAdmin, async (_req, res) => {
     try {
+      // Same JOIN + deleted_at filter as /api/admin/learning/overview —
+      // accuracy figures must not include sessions whose certs have been
+      // hard-deleted or soft-deleted.
       const rows = await db.execute(sql`
         SELECT
-          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(centering_diff) <= 0.5) / NULLIF(COUNT(*) FILTER (WHERE centering_diff IS NOT NULL), 0), 1) AS centering_accuracy,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(corners_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE corners_diff IS NOT NULL), 0), 1)   AS corners_accuracy,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(edges_diff) <= 0.5)     / NULLIF(COUNT(*) FILTER (WHERE edges_diff IS NOT NULL), 0), 1)     AS edges_accuracy,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(surface_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE surface_diff IS NOT NULL), 0), 1)   AS surface_accuracy,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(overall_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE overall_diff IS NOT NULL), 0), 1)   AS overall_accuracy,
-          ROUND(AVG(centering_diff)::numeric, 2) AS avg_centering_diff,
-          ROUND(AVG(corners_diff)::numeric, 2)   AS avg_corners_diff,
-          ROUND(AVG(edges_diff)::numeric, 2)     AS avg_edges_diff,
-          ROUND(AVG(surface_diff)::numeric, 2)   AS avg_surface_diff,
-          ROUND(AVG(overall_diff)::numeric, 2)   AS avg_overall_diff
-        FROM grading_sessions
-        WHERE overall_diff IS NOT NULL
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(gs.centering_diff) <= 0.5) / NULLIF(COUNT(*) FILTER (WHERE gs.centering_diff IS NOT NULL), 0), 1) AS centering_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(gs.corners_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE gs.corners_diff IS NOT NULL), 0), 1)   AS corners_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(gs.edges_diff) <= 0.5)     / NULLIF(COUNT(*) FILTER (WHERE gs.edges_diff IS NOT NULL), 0), 1)     AS edges_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(gs.surface_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE gs.surface_diff IS NOT NULL), 0), 1)   AS surface_accuracy,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE ABS(gs.overall_diff) <= 0.5)   / NULLIF(COUNT(*) FILTER (WHERE gs.overall_diff IS NOT NULL), 0), 1)   AS overall_accuracy,
+          ROUND(AVG(gs.centering_diff)::numeric, 2) AS avg_centering_diff,
+          ROUND(AVG(gs.corners_diff)::numeric, 2)   AS avg_corners_diff,
+          ROUND(AVG(gs.edges_diff)::numeric, 2)     AS avg_edges_diff,
+          ROUND(AVG(gs.surface_diff)::numeric, 2)   AS avg_surface_diff,
+          ROUND(AVG(gs.overall_diff)::numeric, 2)   AS avg_overall_diff
+        FROM grading_sessions gs
+        INNER JOIN certificates c ON c.certificate_number = gs.cert_id AND c.deleted_at IS NULL
+        WHERE gs.overall_diff IS NOT NULL
       `);
       res.json(rows.rows[0] || {});
     } catch (err: any) {
@@ -10657,7 +10671,7 @@ Defects (admin-confirmed): ${defectLines}`;
           COUNT(*) FILTER (WHERE DATE_TRUNC('month', grade_approved_at) = DATE_TRUNC('month', NOW()))::int AS this_month,
           ROUND(AVG(grade)::numeric, 2)                                     AS average_grade,
           ROUND(AVG(grading_time_seconds)::numeric, 0)::int                 AS avg_time_seconds,
-          COUNT(*) FILTER (WHERE label_type = 'black')::int                 AS black_labels_count
+          COUNT(*) FILTER (WHERE grade_strength_score >= 96)::int           AS pristine_10p_count
         FROM certificates
         WHERE grade_approved_at IS NOT NULL AND deleted_at IS NULL
       `);
@@ -10740,7 +10754,7 @@ Defects (admin-confirmed): ${defectLines}`;
         average_grade:      topRow.average_grade != null ? Number(topRow.average_grade) : null,
         avg_time_seconds:   topRow.avg_time_seconds != null ? Number(topRow.avg_time_seconds) : null,
         grade_distribution: dist.rows,
-        black_labels_count: Number(topRow.black_labels_count || 0),
+        pristine_10p_count: Number(topRow.pristine_10p_count || 0),
         ai_accuracy:        aiAccuracy,
         last_30_days:       activity.rows,
       });

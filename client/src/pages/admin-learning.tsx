@@ -10,7 +10,7 @@ interface AiDashboardStats {
   average_grade: number | null;
   avg_time_seconds: number | null;
   grade_distribution: { grade: string; count: number }[];
-  black_labels_count: number;
+  pristine_10p_count: number;
   ai_accuracy: {
     prediction_count: number;
     approved_count: number;
@@ -51,7 +51,7 @@ interface LearningOverview {
     this_month: number;
     avg_grade: number;
     avg_seconds: number;
-    black_label_count: number;
+    pristine_10p_count: number;
   };
   grade_distribution: { final_grade: number; count: number }[];
   game_distribution: { card_game: string; count: number }[];
@@ -316,10 +316,10 @@ export default function AdminLearningPage() {
             ))}
           </div>
 
-          {o && o.black_label_count > 0 && (
+          {o && o.pristine_10p_count > 0 && (
             <div className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-xl px-4 py-3">
               <span className="text-[#D4AF37] text-lg">★</span>
-              <p className="text-[#D4AF37] font-bold text-sm">{o.black_label_count} Black Label{o.black_label_count !== 1 ? "s" : ""} awarded</p>
+              <p className="text-[#D4AF37] font-bold text-sm">{o.pristine_10p_count} Pristine 10P{o.pristine_10p_count !== 1 ? "s" : ""} awarded</p>
             </div>
           )}
 
