@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { ArrowRight, BarChart2, Shield, Crosshair, Users } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 const FEATURES = [
   {
@@ -46,12 +47,14 @@ export default function VaultReportsAboutPage() {
       </section>
 
       <div className="max-w-3xl mx-auto px-6 py-16 md:py-24 space-y-16">
-
         {/* What is */}
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">What is a Vault?</p>
           <p className="text-[#555555] text-base leading-relaxed text-lg">
-            A Vault is a complete digital record of every MintVault graded card. It includes high-resolution images, AI-detected defect analysis, centering measurements, ownership history, population data, and authentication status — all accessible by scanning the QR code on the slab or visiting the unique cert URL. Every card has a Vault.
+            A Vault is a complete digital record of every MintVault graded card. It includes high-resolution images,
+            AI-detected defect analysis, centering measurements, ownership history, population data, and authentication
+            status — all accessible by scanning the QR code on the slab or visiting the unique cert URL. Every card has
+            a Vault.
           </p>
         </section>
 
@@ -72,22 +75,32 @@ export default function VaultReportsAboutPage() {
         </section>
 
         {/* Why it matters */}
-        <section className="p-6 rounded-2xl border-l-4 bg-[#FAFAF8] border border-[#E8E4DC]" style={{ borderLeftColor: "#D4AF37" }}>
+        <section
+          className="p-6 rounded-2xl border-l-4 bg-[#FAFAF8] border border-[#E8E4DC]"
+          style={{ borderLeftColor: "#D4AF37" }}
+        >
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">Why It Matters</p>
           <p className="text-[#555555] text-base leading-relaxed">
-            Other graders give you a number on a slab and nothing else. We believe every collector deserves to see exactly how their card was assessed. Full transparency builds trust — and protects the value of your collection.
+            Other graders give you a number on a slab and nothing else. We believe every collector deserves to see
+            exactly how their card was assessed. Full transparency builds trust — and protects the value of your
+            collection.
           </p>
         </section>
 
         {/* Sample CTA */}
         <section className="text-center space-y-4">
           <p className="text-[#888888] text-sm">Open a sample Vault</p>
-          <Link href="/vault/MV1">
-            <button className="gold-shimmer inline-flex items-center gap-2 font-bold text-sm px-8 py-4 rounded-xl">
+          <Link href="/vault/MV1" className="no-underline">
+            <GradientButton height="48px" className="gradient-btn-filled">
               View Sample Vault <ArrowRight size={15} />
-            </button>
+            </GradientButton>
           </Link>
-          <p className="text-[#AAAAAA] text-xs">Then <Link href="/vault-reports/how-to-read" className="text-[#B8960C] hover:underline">learn how to read one →</Link></p>
+          <p className="text-[#AAAAAA] text-xs">
+            Then{" "}
+            <Link href="/vault-reports/how-to-read" className="text-[#B8960C] hover:underline">
+              learn how to read one →
+            </Link>
+          </p>
         </section>
       </div>
     </>

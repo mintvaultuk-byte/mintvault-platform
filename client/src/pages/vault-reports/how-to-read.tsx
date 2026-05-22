@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 const SECTIONS = [
   {
@@ -64,22 +65,14 @@ export default function HowToReadVaultPage() {
       <div className="max-w-2xl mx-auto px-6 py-16">
         <div className="space-y-0">
           {SECTIONS.map(({ num, title, body }, i) => (
-            <div
-              key={num}
-              className="flex gap-6 py-10 border-b border-[#E8E4DC] last:border-0"
-            >
+            <div key={num} className="flex gap-6 py-10 border-b border-[#E8E4DC] last:border-0">
               <div className="flex-shrink-0 w-12 text-center">
-                <span
-                  className="font-black leading-none"
-                  style={{ fontSize: 36, color: "#D4AF37", opacity: 0.25 }}
-                >
+                <span className="font-black leading-none" style={{ fontSize: 36, color: "#D4AF37", opacity: 0.25 }}>
                   {num}
                 </span>
               </div>
               <div className="flex-1">
-                <h2 className="text-xl font-black text-[#1A1A1A] mb-3">
-                  {title}
-                </h2>
+                <h2 className="text-xl font-black text-[#1A1A1A] mb-3">{title}</h2>
                 <p className="text-[#555555] text-base leading-relaxed">{body}</p>
               </div>
             </div>
@@ -89,10 +82,10 @@ export default function HowToReadVaultPage() {
         {/* CTA */}
         <div className="text-center pt-12 space-y-4">
           <p className="text-[#888888] text-sm">Ready to see one in action?</p>
-          <Link href="/vault/MV1">
-            <button className="gold-shimmer inline-flex items-center gap-2 font-bold text-sm px-8 py-4 rounded-xl">
+          <Link href="/vault/MV1" className="no-underline">
+            <GradientButton height="48px" className="gradient-btn-filled">
               Open Sample Vault <ArrowRight size={15} />
-            </button>
+            </GradientButton>
           </Link>
         </div>
       </div>

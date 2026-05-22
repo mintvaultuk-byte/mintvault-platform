@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { ArrowRight, Shield, Wifi, MapPin } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import MintVaultWordmark from "@/components/mintvault-wordmark";
+import GradientButton from "@/components/ui/gradient-button";
 
 export default function OurStoryPage() {
   return (
@@ -27,24 +28,23 @@ export default function OurStoryPage() {
 
       {/* Content */}
       <div className="max-w-2xl mx-auto px-6 py-16 md:py-24 space-y-16 no-text-shadow">
-
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Beginning</p>
-          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
-            A collector's frustration
-          </h2>
+          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">A collector's frustration</h2>
           <p className="text-[#d4d4d4] text-base leading-relaxed">
-            MintVault was founded in 2023 in Rochester, Kent by a collector frustrated with the gap in the UK trading card grading market. Cards were being sent overseas, taking months to return, with no transparency on grading decisions and no way to prove ownership when reselling.
+            MintVault was founded in 2023 in Rochester, Kent by a collector frustrated with the gap in the UK trading
+            card grading market. Cards were being sent overseas, taking months to return, with no transparency on
+            grading decisions and no way to prove ownership when reselling.
           </p>
         </section>
 
         <div className="border-l-2 border-[#D4AF37]/30 pl-6">
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">The Vision</p>
-          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
-            Something different
-          </h2>
+          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">Something different</h2>
           <p className="text-[#d4d4d4] text-base leading-relaxed">
-            We set out to build something different: a UK-based grading service with full digital transparency, AI-assisted grading verified by human experts, and the world's first verified ownership registry for trading cards.
+            We set out to build something different: a UK-based grading service with full digital transparency,
+            AI-assisted grading verified by human experts, and the world's first verified ownership registry for trading
+            cards.
           </p>
         </div>
 
@@ -68,7 +68,10 @@ export default function OurStoryPage() {
                 desc: "Every card receives a complete Vault — images, measurements, defect analysis, and ownership history. Every card has a Vault.",
               },
             ].map(({ icon, title, desc }) => (
-              <div key={title} className="flex gap-4 p-5 rounded-2xl bg-[#0a0e1a]/85 backdrop-blur-sm border border-[#D4AF37]/20">
+              <div
+                key={title}
+                className="flex gap-4 p-5 rounded-2xl bg-[#0a0e1a]/85 backdrop-blur-sm border border-[#D4AF37]/20"
+              >
                 <div className="w-10 h-10 rounded-xl bg-[#1a1410]/85 backdrop-blur-sm border border-[#D4AF37]/20 flex items-center justify-center flex-shrink-0">
                   {icon}
                 </div>
@@ -83,11 +86,10 @@ export default function OurStoryPage() {
 
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-4">Looking Forward</p>
-          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">
-            Built to last
-          </h2>
+          <h2 className="text-2xl md:text-3xl font-black text-white mb-5 leading-tight">Built to last</h2>
           <p className="text-[#d4d4d4] text-base leading-relaxed">
-            We're building MintVault to become the standard for trading card grading in the UK. Every slab, every grade, every report is designed to outlast trends and protect your collection for decades.
+            We're building MintVault to become the standard for trading card grading in the UK. Every slab, every grade,
+            every report is designed to outlast trends and protect your collection for decades.
           </p>
         </section>
       </div>
@@ -95,13 +97,11 @@ export default function OurStoryPage() {
       {/* CTA */}
       <section className="border-t border-[#E8E4DC] bg-[#FAFAF8] px-6 py-16">
         <div className="max-w-xl mx-auto text-center space-y-6">
-          <h2 className="text-2xl font-black text-[#1A1A1A]">
-            Ready to grade your collection?
-          </h2>
-          <Link href="/submit">
-            <button className="gold-shimmer inline-flex items-center gap-2 font-bold text-sm px-8 py-4 rounded-xl">
+          <h2 className="text-2xl font-black text-[#1A1A1A]">Ready to grade your collection?</h2>
+          <Link href="/submit" className="no-underline">
+            <GradientButton height="48px" className="gradient-btn-filled">
               Submit Your Cards <ArrowRight size={15} />
-            </button>
+            </GradientButton>
           </Link>
         </div>
       </section>

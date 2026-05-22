@@ -5,13 +5,43 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabel, gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import {
-  LogOut, Plus, Edit, Download, Search, Eye, EyeOff,
-  FileText, Image, X, Printer, BarChart3, Tag, Clock, FileDown,
-  LayoutDashboard, List, Database, Shield, Ban, AlertTriangle,
-  Package, ScanLine, DollarSign, Save, ArrowRight, ArrowRightLeft, Copy, Check, Loader2, Brain, Activity, TrendingUp,
+  LogOut,
+  Plus,
+  Edit,
+  Download,
+  Search,
+  Eye,
+  EyeOff,
+  FileText,
+  Image,
+  X,
+  Printer,
+  BarChart3,
+  Tag,
+  Clock,
+  FileDown,
+  LayoutDashboard,
+  List,
+  Database,
+  Shield,
+  Ban,
+  AlertTriangle,
+  Package,
+  ScanLine,
+  DollarSign,
+  Save,
+  ArrowRight,
+  ArrowRightLeft,
+  Copy,
+  Check,
+  Loader2,
+  Brain,
+  Activity,
+  TrendingUp,
   Film,
 } from "lucide-react";
 import StagingHarnessPanel from "@/components/staging-harness-panel";
+import GradientButton from "@/components/ui/gradient-button";
 
 const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
 
@@ -36,18 +66,18 @@ function gradingStatus(cert: CertificateRecord): GradingStatus {
 }
 
 const GRADING_STATUS_LABEL: Record<GradingStatus, string> = {
-  graded:           "Graded",
-  in_progress:      "In progress",
-  awaiting_grade:   "Awaiting grade",
-  awaiting_images:  "Awaiting images",
+  graded: "Graded",
+  in_progress: "In progress",
+  awaiting_grade: "Awaiting grade",
+  awaiting_images: "Awaiting images",
 };
 
 // Match the existing badge palette in CertRow (bg-green-50 / bg-[#D4AF37]/20 / etc).
 const GRADING_STATUS_BADGE_CLASS: Record<GradingStatus, string> = {
-  graded:           "bg-green-50 text-green-600",
-  in_progress:      "bg-yellow-50 text-yellow-700",
-  awaiting_grade:   "bg-[#D4AF37]/20 text-[#D4AF37]",
-  awaiting_images:  "bg-[#E8E4DC] text-[#999999]",
+  graded: "bg-green-50 text-green-600",
+  in_progress: "bg-yellow-50 text-yellow-700",
+  awaiting_grade: "bg-[#D4AF37]/20 text-[#D4AF37]",
+  awaiting_images: "bg-[#E8E4DC] text-[#999999]",
 };
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
@@ -93,7 +123,21 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans">("dashboard");
+  const [activeTab, setActiveTab] = useState<
+    | "dashboard"
+    | "certs"
+    | "submissions"
+    | "intake"
+    | "pricing"
+    | "capacity"
+    | "printing"
+    | "grading"
+    | "learning"
+    | "capture-health"
+    | "divergence"
+    | "transfers"
+    | "scans"
+  >("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -167,10 +211,11 @@ export default function AdminDashboard({ onLogout }: Props) {
   };
 
   const filtered = searchQuery
-    ? certs.filter((c) =>
-        c.certId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.cardName ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (c.setName ?? "").toLowerCase().includes(searchQuery.toLowerCase())
+    ? certs.filter(
+        (c) =>
+          c.certId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (c.cardName ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (c.setName ?? "").toLowerCase().includes(searchQuery.toLowerCase())
       )
     : certs;
 
@@ -197,8 +242,8 @@ export default function AdminDashboard({ onLogout }: Props) {
               // Also refetch cert for list updates
               if (editingCert) {
                 fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
-                  .then(r => r.json())
-                  .then(certs => {
+                  .then((r) => r.json())
+                  .then((certs) => {
                     const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
                     if (updated) setEditingCert(updated);
                   })
@@ -230,19 +275,20 @@ export default function AdminDashboard({ onLogout }: Props) {
                 onCertUpdated={async () => {
                   // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
                   try {
-                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" });
+                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                      credentials: "include",
+                    });
                     const certs = await r.json();
                     const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
                     if (updated) setEditingCert(updated);
-                  } catch { /* ignore */ }
+                  } catch {
+                    /* ignore */
+                  }
                   queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
                 }}
               />
               <OwnershipSection cert={editingCert} />
-              <NfcSection
-                cert={editingCert}
-                onUpdated={(updated) => setEditingCert(updated)}
-              />
+              <NfcSection cert={editingCert} onUpdated={(updated) => setEditingCert(updated)} />
             </div>
           )}
         </div>
@@ -257,7 +303,12 @@ export default function AdminDashboard({ onLogout }: Props) {
       {isStagingHost && <StagingHarnessPanel />}
 
       {activeTab === "dashboard" && (
-        <DashboardView stats={stats} onNewCert={handleNewCert} onGoToCerts={handleGoToCerts} onTabChange={setActiveTab} />
+        <DashboardView
+          stats={stats}
+          onNewCert={handleNewCert}
+          onGoToCerts={handleGoToCerts}
+          onTabChange={setActiveTab}
+        />
       )}
       {activeTab === "certs" && (
         <CertsView
@@ -283,50 +334,51 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "divergence" && <AdminDivergencePage />}
       {activeTab === "transfers" && <AdminTransfers />}
       {activeTab === "scans" && <AdminScanHistory />}
-      {activeTab === "grading" && (() => {
-        const gradingCert = certs.find(c => c.id === selectedGradingCertId) ?? null;
-        return (
-          <div className="max-w-5xl mx-auto px-4 py-6">
-            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
-              <GradingQueue
-                currentCertId={selectedGradingCertId}
-                onSelectCert={(id) => { setSelectedGradingCertId(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                approvedSignal={approvedSignal}
-              />
-              {gradingCert ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">{gradingCert.certId}</span>
-                    <span className="text-[#555555] text-xs">{gradingCert.cardName}</span>
+      {activeTab === "grading" &&
+        (() => {
+          const gradingCert = certs.find((c) => c.id === selectedGradingCertId) ?? null;
+          return (
+            <div className="max-w-5xl mx-auto px-4 py-6">
+              <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
+                <GradingQueue
+                  currentCertId={selectedGradingCertId}
+                  onSelectCert={(id) => {
+                    setSelectedGradingCertId(id);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  approvedSignal={approvedSignal}
+                />
+                {gradingCert ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">
+                        {gradingCert.certId}
+                      </span>
+                      <span className="text-[#555555] text-xs">{gradingCert.cardName}</span>
+                    </div>
+                    <GradingPanel
+                      certId={gradingCert.id}
+                      certIdStr={gradingCert.certId}
+                      cardName={gradingCert.cardName || ""}
+                      cardSet={gradingCert.setName || ""}
+                      existingGrade={gradingCert.gradeOverall}
+                      onGradeApproved={(cid, grade) => {
+                        if (cid && grade) setApprovedSignal({ certId: cid, grade, ts: Date.now() });
+                        queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                      }}
+                    />
                   </div>
-                  <GradingPanel
-                    certId={gradingCert.id}
-                    certIdStr={gradingCert.certId}
-                    cardName={gradingCert.cardName || ""}
-                    cardSet={gradingCert.setName || ""}
-                    existingGrade={gradingCert.gradeOverall}
-                    onGradeApproved={(cid, grade) => {
-                      if (cid && grade) setApprovedSignal({ certId: cid, grade, ts: Date.now() });
-                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
-                  <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
-                </div>
-              )}
+                ) : (
+                  <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
+                    <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
-      {previewCert && (
-        <LabelPreviewModal
-          cert={previewCert}
-          onClose={() => setPreviewCert(null)}
-        />
-      )}
+      {previewCert && <LabelPreviewModal cert={previewCert} onClose={() => setPreviewCert(null)} />}
 
       {voidTarget && (
         <VoidConfirmationModal
@@ -346,8 +398,36 @@ function AdminHeader({
   onTabChange,
 }: {
   onLogout: () => void;
-  activeTab: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans";
-  onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing" | "grading" | "learning" | "capture-health" | "divergence" | "transfers" | "scans") => void;
+  activeTab:
+    | "dashboard"
+    | "certs"
+    | "submissions"
+    | "intake"
+    | "pricing"
+    | "capacity"
+    | "printing"
+    | "grading"
+    | "learning"
+    | "capture-health"
+    | "divergence"
+    | "transfers"
+    | "scans";
+  onTabChange: (
+    t:
+      | "dashboard"
+      | "certs"
+      | "submissions"
+      | "intake"
+      | "pricing"
+      | "capacity"
+      | "printing"
+      | "grading"
+      | "learning"
+      | "capture-health"
+      | "divergence"
+      | "transfers"
+      | "scans"
+  ) => void;
 }) {
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
@@ -355,11 +435,9 @@ function AdminHeader({
   });
 
   const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
-  const envLabel = isStagingHost ? "STAGING" : (dbInfo?.env === "production" ? "PRODUCTION" : "DEVELOPMENT");
+  const envLabel = isStagingHost ? "STAGING" : dbInfo?.env === "production" ? "PRODUCTION" : "DEVELOPMENT";
   const envIsGreen = !isStagingHost && dbInfo?.env === "production";
-  const shortHost = dbInfo?.neon_host
-    ? dbInfo.neon_host.split(".")[0].slice(0, 12)
-    : "...";
+  const shortHost = dbInfo?.neon_host ? dbInfo.neon_host.split(".")[0].slice(0, 12) : "...";
 
   return (
     <header className="border-b border-[#D4AF37]/20 bg-white/95 px-4 py-3">
@@ -385,9 +463,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("certs")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "certs"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "certs" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-certs"
               >
@@ -407,9 +483,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("intake")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "intake"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "intake" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-intake"
               >
@@ -418,9 +492,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("pricing")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "pricing"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "pricing" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-pricing"
               >
@@ -429,9 +501,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("capacity")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "capacity"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "capacity" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-capacity"
               >
@@ -440,9 +510,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("printing")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "printing"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "printing" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-printing"
               >
@@ -460,9 +528,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("grading")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "grading"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "grading" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-grading"
               >
@@ -471,9 +537,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("learning")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "learning"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "learning" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-learning"
               >
@@ -515,9 +579,7 @@ function AdminHeader({
               <button
                 onClick={() => onTabChange("scans")}
                 className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "scans"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
+                  activeTab === "scans" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
                 }`}
                 data-testid="tab-scans"
               >
@@ -551,7 +613,8 @@ function AdminHeader({
               DB: {shortHost}/{dbInfo.db_name}
             </span>
             <span className="text-[#999999]" data-testid="text-db-counts">
-              CM:{dbInfo.card_master_active_count} · CS:{dbInfo.card_sets_active_count} · Certs:{dbInfo.certificates_count}
+              CM:{dbInfo.card_master_active_count} · CS:{dbInfo.card_sets_active_count} · Certs:
+              {dbInfo.certificates_count}
             </span>
           </div>
         )}
@@ -565,7 +628,7 @@ function AdminHeader({
 interface CapacityData {
   standard: { active: number; max: number; full: boolean; forceOpen: boolean };
   priority: { active: number; max: number; full: boolean; forceOpen: boolean };
-  express:  { active: number; max: number; full: boolean; forceOpen: boolean };
+  express: { active: number; max: number; full: boolean; forceOpen: boolean };
 }
 
 function CapacitySection() {
@@ -580,8 +643,8 @@ function CapacitySection() {
 
   const tiers = [
     { slug: "standard", label: "Standard", color: "#D4AF37" },
-    { slug: "priority", label: "Priority",  color: "#B8960C" },
-    { slug: "express",  label: "Express",   color: "#E8C547" },
+    { slug: "priority", label: "Priority", color: "#B8960C" },
+    { slug: "express", label: "Express", color: "#E8C547" },
   ] as const;
 
   const handleSave = async () => {
@@ -627,13 +690,19 @@ function CapacitySection() {
                 <div className="flex items-center gap-2">
                   <span className="text-[#D4AF37] font-bold uppercase tracking-wider">{label}</span>
                   {full && !forceOpen && (
-                    <span className="bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Full</span>
+                    <span className="bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                      Full
+                    </span>
                   )}
                   {forceOpen && (
-                    <span className="bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">Force Open</span>
+                    <span className="bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                      Force Open
+                    </span>
                   )}
                 </div>
-                <span className="text-[#999999]">{active} / {max} active</span>
+                <span className="text-[#999999]">
+                  {active} / {max} active
+                </span>
               </div>
               <div className="h-2 bg-[#E8E0C8] rounded-full overflow-hidden">
                 <div
@@ -741,20 +810,32 @@ function StolenReportsSection() {
       </div>
       <div className="space-y-2">
         {reports.map((r) => (
-          <div key={r.id} className="flex items-center justify-between py-2 border-b border-red-100 last:border-0 text-sm gap-4">
+          <div
+            key={r.id}
+            className="flex items-center justify-between py-2 border-b border-red-100 last:border-0 text-sm gap-4"
+          >
             <div className="flex-1 min-w-0">
               <span className="text-[#D4AF37] font-mono text-xs font-bold mr-2">{r.cert_id}</span>
               <span className="text-[#1A1A1A]">{r.reporter_name}</span>
               <span className="text-[#999999] ml-2 text-xs">&lt;{r.reporter_email}&gt;</span>
               {!r.verified_at && (
-                <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-bold uppercase">Unverified</span>
+                <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-bold uppercase">
+                  Unverified
+                </span>
               )}
               {r.verified_at && (
-                <span className="ml-2 text-[10px] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 font-bold uppercase">Verified</span>
+                <span className="ml-2 text-[10px] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 font-bold uppercase">
+                  Verified
+                </span>
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <a href={`/vault/${r.cert_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors">
+              <a
+                href={`/vault/${r.cert_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+              >
                 View
               </a>
               <button
@@ -851,18 +932,23 @@ function DashboardView({
     onError: (err: any) => {
       // A long-running call typically reaches here on timeout. The
       // server may still be processing — direct the operator to logs.
-      setBulkReprocessStatus(`Request error: ${err?.message || "timeout — server may still be processing. Check fly logs / audit_log."}`);
+      setBulkReprocessStatus(
+        `Request error: ${err?.message || "timeout — server may still be processing. Check fly logs / audit_log."}`
+      );
       setTimeout(() => setBulkReprocessStatus(null), 20000);
     },
   });
 
   const handleBulkReprocess = () => {
-    if (!window.confirm(
-      "Reprocess images for ALL active certs?\n\n" +
-      "This re-runs the full image pipeline (deskew → detect → recentre → tightenForDisplay → whitewash → mask) " +
-      "on every cert that has an R2 original, concurrency 10. For 100+ certs the request will likely time out " +
-      "on the client side, but the server will keep processing — check fly logs for [bulk-reprocess] and audit_log for completion."
-    )) return;
+    if (
+      !window.confirm(
+        "Reprocess images for ALL active certs?\n\n" +
+          "This re-runs the full image pipeline (deskew → detect → recentre → tightenForDisplay → whitewash → mask) " +
+          "on every cert that has an R2 original, concurrency 10. For 100+ certs the request will likely time out " +
+          "on the client side, but the server will keep processing — check fly logs for [bulk-reprocess] and audit_log for completion."
+      )
+    )
+      return;
     bulkReprocessMutation.mutate();
   };
 
@@ -879,38 +965,79 @@ function DashboardView({
       </h1>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <StatTile label="Total Certificates" value={stats?.totalCerts ?? 0} icon={<FileText size={20} />} testId="stat-total"
-          onClick={() => onGoToCerts({})} />
-        <StatTile label="Graded This Week" value={stats?.thisWeek ?? 0} icon={<Clock size={20} />} testId="stat-week"
-          onClick={() => onGoToCerts({ range: "week" })} />
-        <StatTile label="Graded This Month" value={stats?.thisMonth ?? 0} icon={<BarChart3 size={20} />} testId="stat-month"
-          onClick={() => onGoToCerts({ range: "month" })} />
+        <StatTile
+          label="Total Certificates"
+          value={stats?.totalCerts ?? 0}
+          icon={<FileText size={20} />}
+          testId="stat-total"
+          onClick={() => onGoToCerts({})}
+        />
+        <StatTile
+          label="Graded This Week"
+          value={stats?.thisWeek ?? 0}
+          icon={<Clock size={20} />}
+          testId="stat-week"
+          onClick={() => onGoToCerts({ range: "week" })}
+        />
+        <StatTile
+          label="Graded This Month"
+          value={stats?.thisMonth ?? 0}
+          icon={<BarChart3 size={20} />}
+          testId="stat-month"
+          onClick={() => onGoToCerts({ range: "month" })}
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <StatTile label="Card Master Active" value={dbInfo?.card_master_active_count ?? 0} icon={<Database size={20} />} testId="stat-cm-active" />
-        <StatTile label="Card Sets Active" value={dbInfo?.card_sets_active_count ?? 0} icon={<Database size={20} />} testId="stat-cs-active" />
-        <StatTile label="Last Issued MV Number" value={dbInfo?.last_issued_mv ?? "..."} icon={<FileText size={20} />} testId="stat-last-mv"
-          onClick={dbInfo?.last_issued_mv ? () => window.open(`/cert/${dbInfo.last_issued_mv}`, "_blank") : undefined} />
+        <StatTile
+          label="Card Master Active"
+          value={dbInfo?.card_master_active_count ?? 0}
+          icon={<Database size={20} />}
+          testId="stat-cm-active"
+        />
+        <StatTile
+          label="Card Sets Active"
+          value={dbInfo?.card_sets_active_count ?? 0}
+          icon={<Database size={20} />}
+          testId="stat-cs-active"
+        />
+        <StatTile
+          label="Last Issued MV Number"
+          value={dbInfo?.last_issued_mv ?? "..."}
+          icon={<FileText size={20} />}
+          testId="stat-last-mv"
+          onClick={dbInfo?.last_issued_mv ? () => window.open(`/cert/${dbInfo.last_issued_mv}`, "_blank") : undefined}
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatTile label="Active Certificates" value={dbInfo?.certificates_count ?? 0} icon={<Shield size={20} />} testId="stat-cert-count"
-          onClick={() => onGoToCerts({ status: "active" })} />
-        <StatTile label="Voided Certificates" value={dbInfo?.voided_count ?? 0} icon={<Ban size={20} />} testId="stat-voided"
-          onClick={() => onGoToCerts({ status: "voided" })} />
-        <StatTile label="Authentic Only" value={stats?.authenticOnlyCount ?? 0} icon={<Tag size={20} />} testId="stat-auth-only"
-          onClick={() => onGoToCerts({ gradeType: "authentic" })} />
+        <StatTile
+          label="Active Certificates"
+          value={dbInfo?.certificates_count ?? 0}
+          icon={<Shield size={20} />}
+          testId="stat-cert-count"
+          onClick={() => onGoToCerts({ status: "active" })}
+        />
+        <StatTile
+          label="Voided Certificates"
+          value={dbInfo?.voided_count ?? 0}
+          icon={<Ban size={20} />}
+          testId="stat-voided"
+          onClick={() => onGoToCerts({ status: "voided" })}
+        />
+        <StatTile
+          label="Authentic Only"
+          value={stats?.authenticOnlyCount ?? 0}
+          icon={<Tag size={20} />}
+          testId="stat-auth-only"
+          onClick={() => onGoToCerts({ gradeType: "authentic" })}
+        />
       </div>
 
       <div className="flex flex-wrap gap-3 mb-8">
-        <button
-          onClick={onNewCert}
-          className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 flex items-center gap-2"
-          data-testid="button-quick-new-cert"
-        >
+        <GradientButton as="button" onClick={onNewCert} height="40px" data-testid="button-quick-new-cert">
           <Plus size={16} /> Create New Cert
-        </button>
+        </GradientButton>
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -963,32 +1090,44 @@ function DashboardView({
         </button>
       </div>
       {backfillStatus && (
-        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-backfill-status">{backfillStatus}</p>
+        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-backfill-status">
+          {backfillStatus}
+        </p>
       )}
       {bulkReprocessStatus && (
-        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-bulk-reprocess-status">{bulkReprocessStatus}</p>
+        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-bulk-reprocess-status">
+          {bulkReprocessStatus}
+        </p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="border border-[#D4AF37]/20 rounded-lg p-5">
-          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-dist-title">Grade Distribution</h3>
+          <h3
+            className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase"
+            data-testid="text-grade-dist-title"
+          >
+            Grade Distribution
+          </h3>
           {stats?.gradeDistribution ? (
-            <GradeChart
-              data={stats.gradeDistribution}
-              onGradeClick={(g) => onGoToCerts({ grade: g })}
-            />
+            <GradeChart data={stats.gradeDistribution} onGradeClick={(g) => onGoToCerts({ grade: g })} />
           ) : (
             <div className="h-40 flex items-center justify-center text-[#999999] text-sm">No data</div>
           )}
         </div>
 
         <div className="border border-[#D4AF37]/20 rounded-lg p-5">
-          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase" data-testid="text-grade-type-title">By Grade Type</h3>
+          <h3
+            className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase"
+            data-testid="text-grade-type-title"
+          >
+            By Grade Type
+          </h3>
           <div className="space-y-1 mb-5">
             {[
               {
                 label: "Numeric (1–10)",
-                count: (stats?.totalCerts ?? 0) - (stats?.authenticOnlyCount ?? 0) - (stats?.authenticAlteredCount ?? 0),
+                count:
+                  (stats?.totalCerts ?? 0) - (stats?.authenticOnlyCount ?? 0) - (stats?.authenticAlteredCount ?? 0),
                 filter: { gradeType: "numeric" as const },
                 testId: "grade-type-numeric",
               },
@@ -1018,7 +1157,9 @@ function DashboardView({
               >
                 <div className="flex items-center gap-2">
                   <Tag size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37]/80 transition-colors" />
-                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#D4AF37]/90 transition-colors">{label}</span>
+                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#D4AF37]/90 transition-colors">
+                    {label}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[#D4AF37] font-bold text-sm">{count}</span>
@@ -1027,7 +1168,6 @@ function DashboardView({
               </div>
             ))}
           </div>
-
         </div>
       </div>
 
@@ -1036,7 +1176,9 @@ function DashboardView({
 
       <div className="border border-[#D4AF37]/20 rounded-lg p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase" data-testid="text-recent-title">Recent Activity</h3>
+          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase" data-testid="text-recent-title">
+            Recent Activity
+          </h3>
           <button
             onClick={() => onGoToCerts({})}
             className="text-[#D4AF37]/50 hover:text-[#D4AF37] text-xs transition-colors flex items-center gap-1"
@@ -1052,13 +1194,7 @@ function DashboardView({
               const isNN = isNonNumericGrade(gt);
               const grade = isNN ? 0 : parseFloat(cert.gradeOverall || "0");
               const gradeDisplay = isNN ? gradeLabelFull(gt, cert.gradeOverall || "0") : String(grade);
-              return (
-                <RecentCertRow
-                  key={cert.id}
-                  cert={cert}
-                  gradeDisplay={gradeDisplay}
-                />
-              );
+              return <RecentCertRow key={cert.id} cert={cert} gradeDisplay={gradeDisplay} />;
             })}
           </div>
         ) : (
@@ -1069,13 +1205,7 @@ function DashboardView({
   );
 }
 
-function RecentCertRow({
-  cert,
-  gradeDisplay,
-}: {
-  cert: CertificateRecord;
-  gradeDisplay: string;
-}) {
+function RecentCertRow({ cert, gradeDisplay }: { cert: CertificateRecord; gradeDisplay: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = (e: React.MouseEvent) => {
@@ -1110,9 +1240,7 @@ function RecentCertRow({
             className="opacity-0 group-hover:opacity-100 transition-opacity text-[#D4AF37]/40 hover:text-[#D4AF37] p-0.5 rounded"
             data-testid={`button-copy-certid-${cert.id}`}
           >
-            {copied
-              ? <Check size={11} className="text-emerald-400" />
-              : <Copy size={11} />}
+            {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
           </button>
         </div>
         <span className="text-[#1A1A1A] text-sm truncate">{cert.cardName}</span>
@@ -1120,13 +1248,17 @@ function RecentCertRow({
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
-        <span className={`text-xs px-1.5 py-0.5 rounded ${
-          cert.status === "active" || cert.status === "published"
-            ? "bg-green-50 text-green-600"
-            : cert.status === "voided"
-            ? "bg-red-50 text-red-600"
-            : "bg-gray-500/20 text-[#333333]"
-        }`}>{cert.status}</span>
+        <span
+          className={`text-xs px-1.5 py-0.5 rounded ${
+            cert.status === "active" || cert.status === "published"
+              ? "bg-green-50 text-green-600"
+              : cert.status === "voided"
+                ? "bg-red-50 text-red-600"
+                : "bg-gray-500/20 text-[#333333]"
+          }`}
+        >
+          {cert.status}
+        </span>
         <span className="text-[#999999] text-xs hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
         </span>
@@ -1137,7 +1269,11 @@ function RecentCertRow({
 }
 
 function StatTile({
-  label, value, icon, testId, onClick,
+  label,
+  value,
+  icon,
+  testId,
+  onClick,
 }: {
   label: string;
   value: number | string;
@@ -1154,21 +1290,23 @@ function StatTile({
       tabIndex={clickable ? 0 : undefined}
       onKeyDown={clickable ? (e) => e.key === "Enter" && onClick?.() : undefined}
       className={`border border-[#D4AF37]/20 rounded-lg p-5 flex items-center gap-4 relative transition-all select-none
-        ${clickable
-          ? "cursor-pointer hover:border-[#D4AF37]/50 hover:bg-[#D4AF37]/5 hover:shadow-[0_0_14px_rgba(212,175,55,0.12)] active:scale-[0.98] active:bg-[#D4AF37]/10"
-          : ""}`}
+        ${
+          clickable
+            ? "cursor-pointer hover:border-[#D4AF37]/50 hover:bg-[#D4AF37]/5 hover:shadow-[0_0_14px_rgba(212,175,55,0.12)] active:scale-[0.98] active:bg-[#D4AF37]/10"
+            : ""
+        }`}
       data-testid={testId}
     >
       <div className="w-10 h-10 rounded-full border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37]/60 shrink-0">
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className={`font-bold text-[#D4AF37] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>{value}</p>
+        <p className={`font-bold text-[#D4AF37] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>
+          {value}
+        </p>
         <p className="text-[#999999] text-xs uppercase tracking-wider">{label}</p>
       </div>
-      {clickable && (
-        <ArrowRight size={13} className="text-[#D4AF37]/25 shrink-0" aria-hidden />
-      )}
+      {clickable && <ArrowRight size={13} className="text-[#D4AF37]/25 shrink-0" aria-hidden />}
     </div>
   );
 }
@@ -1180,7 +1318,7 @@ function GradeChart({
   data: { grade: number; count: number }[];
   onGradeClick?: (grade: number) => void;
 }) {
-  const maxCount = Math.max(...data.map(d => d.count), 1);
+  const maxCount = Math.max(...data.map((d) => d.count), 1);
 
   return (
     <div className="flex items-end gap-2 h-40" data-testid="chart-grade-distribution">
@@ -1200,12 +1338,16 @@ function GradeChart({
             <span className="text-[#D4AF37] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
             <div
               className={`w-full rounded-t transition-all
-                ${clickable
-                  ? "bg-[#D4AF37]/30 group-hover:bg-[#D4AF37]/60 group-active:bg-[#D4AF37]/80 group-hover:shadow-[0_0_8px_rgba(212,175,55,0.25)]"
-                  : "bg-[#D4AF37]/15"}`}
+                ${
+                  clickable
+                    ? "bg-[#D4AF37]/30 group-hover:bg-[#D4AF37]/60 group-active:bg-[#D4AF37]/80 group-hover:shadow-[0_0_8px_rgba(212,175,55,0.25)]"
+                    : "bg-[#D4AF37]/15"
+                }`}
               style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
             />
-            <span className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#D4AF37]" : "text-[#999999]"}`}>
+            <span
+              className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#D4AF37]" : "text-[#999999]"}`}
+            >
               {d.grade}
             </span>
           </div>
@@ -1246,15 +1388,11 @@ function CertsView({
   totalCount: number;
   initialFilter?: CertsFilter;
 }) {
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "voided">(
-    initialFilter.status ?? "all"
-  );
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "voided">(initialFilter.status ?? "all");
   const [gradeTypeFilter, setGradeTypeFilter] = useState<"all" | "numeric" | "authentic" | "altered">(
     initialFilter.gradeType ?? "all"
   );
-  const [gradeFilter, setGradeFilter] = useState(
-    initialFilter.grade !== undefined ? String(initialFilter.grade) : ""
-  );
+  const [gradeFilter, setGradeFilter] = useState(initialFilter.grade !== undefined ? String(initialFilter.grade) : "");
   const [dateFrom, setDateFrom] = useState(() => getInitialDateFrom(initialFilter.range));
   const [dateTo, setDateTo] = useState("");
   const [ownershipFilter, setOwnershipFilter] = useState<"all" | "claimed" | "unclaimed">(() => {
@@ -1296,8 +1434,8 @@ function CertsView({
     if (gradeTypeFilter !== "all") {
       const gt: string = (c as any).gradeType || "numeric";
       if (gradeTypeFilter === "authentic" && gt !== "NO") return false;
-      if (gradeTypeFilter === "altered"   && gt !== "AA") return false;
-      if (gradeTypeFilter === "numeric"   && isNonNumericGrade(gt)) return false;
+      if (gradeTypeFilter === "altered" && gt !== "AA") return false;
+      if (gradeTypeFilter === "numeric" && isNonNumericGrade(gt)) return false;
     }
     if (gradeFilter) {
       const gradeNum = parseFloat(gradeFilter);
@@ -1323,21 +1461,34 @@ function CertsView({
 
   const voidedCount = certs.filter((c) => c.status === "voided").length;
   const claimedCount = certs.filter((c) => (c as any).ownershipStatus === "claimed").length;
-  const hasActiveFilters = statusFilter !== "all" || gradeTypeFilter !== "all" || gradeFilter || dateFrom || dateTo || searchQuery || ownershipFilter !== "all" || gradingStatusFilter !== "all";
+  const hasActiveFilters =
+    statusFilter !== "all" ||
+    gradeTypeFilter !== "all" ||
+    gradeFilter ||
+    dateFrom ||
+    dateTo ||
+    searchQuery ||
+    ownershipFilter !== "all" ||
+    gradingStatusFilter !== "all";
 
   // Counts for the grading filter tabs — reflect statusFilter + gradeTypeFilter
   // only (not the grading filter itself, not date/grade/ownership/search), so
   // tab labels show how many certs would land in each bucket if the user
   // switched to that tab.
-  const gradingCounts: Record<GradingStatus, number> = { graded: 0, in_progress: 0, awaiting_grade: 0, awaiting_images: 0 };
+  const gradingCounts: Record<GradingStatus, number> = {
+    graded: 0,
+    in_progress: 0,
+    awaiting_grade: 0,
+    awaiting_images: 0,
+  };
   for (const c of certs) {
     if (statusFilter === "voided" && c.status !== "voided") continue;
     if (statusFilter === "active" && c.status === "voided") continue;
     if (gradeTypeFilter !== "all") {
       const gt: string = (c as any).gradeType || "numeric";
       if (gradeTypeFilter === "authentic" && gt !== "NO") continue;
-      if (gradeTypeFilter === "altered"   && gt !== "AA") continue;
-      if (gradeTypeFilter === "numeric"   && isNonNumericGrade(gt)) continue;
+      if (gradeTypeFilter === "altered" && gt !== "AA") continue;
+      if (gradeTypeFilter === "numeric" && isNonNumericGrade(gt)) continue;
     }
     gradingCounts[gradingStatus(c)]++;
   }
@@ -1349,15 +1500,14 @@ function CertsView({
           <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-certs-title">
             CERTIFICATES
           </h1>
-          <p className="text-[#999999] text-sm">{totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}{hasActiveFilters ? " (filtered)" : ""}</p>
+          <p className="text-[#999999] text-sm">
+            {totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}
+            {hasActiveFilters ? " (filtered)" : ""}
+          </p>
         </div>
-        <button
-          onClick={onNewCert}
-          className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium tracking-wide text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 flex items-center gap-2"
-          data-testid="button-new-cert"
-        >
+        <GradientButton as="button" onClick={onNewCert} height="40px" data-testid="button-new-cert">
           <Plus size={16} /> New Certificate
-        </button>
+        </GradientButton>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -1386,7 +1536,8 @@ function CertsView({
               }`}
               data-testid={`filter-${f}`}
             >
-              {f}{f === "voided" && voidedCount > 0 ? ` (${voidedCount})` : ""}
+              {f}
+              {f === "voided" && voidedCount > 0 ? ` (${voidedCount})` : ""}
             </button>
           ))}
           {(["numeric", "authentic", "altered"] as const).map((gt) => (
@@ -1413,8 +1564,8 @@ function CertsView({
                   ? o === "claimed"
                     ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                     : o === "unclaimed"
-                    ? "bg-gray-700 text-[#333333] border-gray-600"
-                    : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
+                      ? "bg-gray-700 text-[#333333] border-gray-600"
+                      : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
                   : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
               }`}
               data-testid={`filter-ownership-${o}`}
@@ -1455,9 +1606,13 @@ function CertsView({
             className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
             data-testid="select-grade-filter"
           >
-            <option value="" className="bg-white">All grades</option>
+            <option value="" className="bg-white">
+              All grades
+            </option>
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
-              <option key={g} value={String(g)} className="bg-white">{g}</option>
+              <option key={g} value={String(g)} className="bg-white">
+                {g}
+              </option>
             ))}
           </select>
         </div>
@@ -1483,7 +1638,16 @@ function CertsView({
         </div>
         {hasActiveFilters && (
           <button
-            onClick={() => { setStatusFilter("all"); setGradeTypeFilter("all"); setGradeFilter(""); setDateFrom(""); setDateTo(""); setSearchQuery(""); setOwnershipFilter("all"); setGradingStatusFilter("all"); }}
+            onClick={() => {
+              setStatusFilter("all");
+              setGradeTypeFilter("all");
+              setGradeFilter("");
+              setDateFrom("");
+              setDateTo("");
+              setSearchQuery("");
+              setOwnershipFilter("all");
+              setGradingStatusFilter("all");
+            }}
             className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
             data-testid="button-clear-filters-certs"
           >
@@ -1502,7 +1666,11 @@ function CertsView({
         <div className="text-center py-16 border border-[#D4AF37]/10 rounded-lg">
           <FileText className="mx-auto text-[#D4AF37]/20 mb-3" size={40} />
           <p className="text-[#999999]">
-            {searchQuery ? "No matching certificates" : statusFilter === "voided" ? "No voided certificates" : "No certificates yet"}
+            {searchQuery
+              ? "No matching certificates"
+              : statusFilter === "voided"
+                ? "No voided certificates"
+                : "No certificates yet"}
           </p>
         </div>
       ) : (
@@ -1543,19 +1711,22 @@ function CertRow({
   // bumped updatedAt since the last embed. cert.updatedAt fires on any
   // row change so "stale" here means "embedding text may be out of date".
   const embeddedAt = (cert as any).embeddedAt ? new Date((cert as any).embeddedAt) : null;
-  const updatedAt  = (cert as any).updatedAt  ? new Date((cert as any).updatedAt)  : null;
+  const updatedAt = (cert as any).updatedAt ? new Date((cert as any).updatedAt) : null;
   const isStaleEmbedding = !!(embeddedAt && updatedAt && updatedAt.getTime() > embeddedAt.getTime());
 
   const [reembedBusy, setReembedBusy] = useState(false);
-  const [reembedMsg,  setReembedMsg]  = useState<string | null>(null);
+  const [reembedMsg, setReembedMsg] = useState<string | null>(null);
   async function handleReembed() {
     setReembedBusy(true);
     setReembedMsg(null);
     try {
-      const res = await fetch(`/api/admin/embed-corpus/cert/${encodeURIComponent(cert.certId)}`, { method: "POST", credentials: "include" });
+      const res = await fetch(`/api/admin/embed-corpus/cert/${encodeURIComponent(cert.certId)}`, {
+        method: "POST",
+        credentials: "include",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setReembedMsg(data.status === "embedded" ? "Embedded ✓" : (data.reason || data.status));
+      setReembedMsg(data.status === "embedded" ? "Embedded ✓" : data.reason || data.status);
       setTimeout(() => setReembedMsg(null), 4000);
     } catch (e: any) {
       setReembedMsg(`Error: ${e.message}`);
@@ -1566,10 +1737,7 @@ function CertRow({
   }
 
   return (
-    <div
-      className="border border-[#D4AF37]/15 rounded-lg p-4 flex flex-col gap-3"
-      data-testid={`cert-row-${cert.id}`}
-    >
+    <div className="border border-[#D4AF37]/15 rounded-lg p-4 flex flex-col gap-3" data-testid={`cert-row-${cert.id}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-4 min-w-0 flex-1">
           {(cert as any).frontImageUrl || cert.frontImagePath ? (
@@ -1588,22 +1756,34 @@ function CertRow({
               <span className="text-[#D4AF37] font-mono text-xs font-bold" data-testid={`text-cert-id-${cert.id}`}>
                 {cert.certId}
               </span>
-              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                cert.status === "active" || cert.status === "published"
-                  ? "bg-green-50 text-green-600"
-                  : cert.status === "voided"
-                  ? "bg-red-50 text-red-600"
-                  : "bg-gray-500/20 text-[#333333]"
-              }`}>
-                {cert.status === "active" || cert.status === "published" ? <Eye size={10} className="inline mr-0.5" /> : <EyeOff size={10} className="inline mr-0.5" />}
+              <span
+                className={`text-xs px-1.5 py-0.5 rounded ${
+                  cert.status === "active" || cert.status === "published"
+                    ? "bg-green-50 text-green-600"
+                    : cert.status === "voided"
+                      ? "bg-red-50 text-red-600"
+                      : "bg-gray-500/20 text-[#333333]"
+                }`}
+              >
+                {cert.status === "active" || cert.status === "published" ? (
+                  <Eye size={10} className="inline mr-0.5" />
+                ) : (
+                  <EyeOff size={10} className="inline mr-0.5" />
+                )}
                 {cert.status}
               </span>
               {(cert as any).ownershipStatus === "claimed" ? (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/20 text-[#D4AF37] flex items-center gap-0.5" data-testid={`badge-owned-${cert.id}`}>
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/20 text-[#D4AF37] flex items-center gap-0.5"
+                  data-testid={`badge-owned-${cert.id}`}
+                >
                   <Shield size={9} className="inline" /> claimed
                 </span>
               ) : (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]" data-testid={`badge-unclaimed-${cert.id}`}>
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]"
+                  data-testid={`badge-unclaimed-${cert.id}`}
+                >
                   unclaimed
                 </span>
               )}
@@ -1626,15 +1806,23 @@ function CertRow({
             <p className="text-[#999999] text-xs truncate">
               {cert.cardGame} · {cert.setName} · {cert.cardNumber}
               {cert.variant ? ` · ${cert.variant}` : ""}
-
             </p>
-            <p className="text-[#999999] text-[10px] mt-1 flex items-center gap-1.5 flex-wrap" data-testid={`text-embed-status-${cert.id}`}>
+            <p
+              className="text-[#999999] text-[10px] mt-1 flex items-center gap-1.5 flex-wrap"
+              data-testid={`text-embed-status-${cert.id}`}
+            >
               <Database size={9} className="text-[#D4AF37]/60" />
               <span>
-                Last embedded: {embeddedAt ? embeddedAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "never"}
+                Last embedded:{" "}
+                {embeddedAt
+                  ? embeddedAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                  : "never"}
               </span>
               {isStaleEmbedding && (
-                <span className="text-[9px] uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-200 px-1 py-px rounded font-bold" data-testid={`badge-embed-stale-${cert.id}`}>
+                <span
+                  className="text-[9px] uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-200 px-1 py-px rounded font-bold"
+                  data-testid={`badge-embed-stale-${cert.id}`}
+                >
                   STALE
                 </span>
               )}
@@ -1726,13 +1914,17 @@ function CertRow({
           onClick={handleReembed}
           disabled={reembedBusy}
           className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors disabled:opacity-60"
-          title={isStaleEmbedding ? "Re-embed: cert has changed since last embed" : "Re-embed: force regenerate RAG vector"}
+          title={
+            isStaleEmbedding ? "Re-embed: cert has changed since last embed" : "Re-embed: force regenerate RAG vector"
+          }
           data-testid={`button-reembed-${cert.id}`}
         >
           <Database size={10} /> {reembedBusy ? "…" : "Re-embed"}
         </button>
         {reembedMsg && (
-          <span className="text-[10px] text-[#666666]" data-testid={`text-reembed-msg-${cert.id}`}>{reembedMsg}</span>
+          <span className="text-[10px] text-[#666666]" data-testid={`text-reembed-msg-${cert.id}`}>
+            {reembedMsg}
+          </span>
         )}
       </div>
     </div>
@@ -1764,7 +1956,8 @@ function VoidConfirmationModal({
           You are about to void certificate <span className="text-[#1A1A1A] font-mono font-bold">{cert.certId}</span>.
         </p>
         <p className="text-[#333333] text-xs mb-4">
-          This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public lookup page. The certificate ID will be preserved.
+          This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public
+          lookup page. The certificate ID will be preserved.
         </p>
 
         <div className="mb-3">
@@ -1816,13 +2009,7 @@ function VoidConfirmationModal({
   );
 }
 
-function LabelPreviewModal({
-  cert,
-  onClose,
-}: {
-  cert: CertificateRecord;
-  onClose: () => void;
-}) {
+function LabelPreviewModal({ cert, onClose }: { cert: CertificateRecord; onClose: () => void }) {
   const ts = Date.now();
 
   return (
@@ -1839,7 +2026,9 @@ function LabelPreviewModal({
             <h3 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-preview-title">
               LABEL PREVIEW
             </h3>
-            <p className="text-[#999999] text-xs mt-0.5">{cert.certId} · {cert.cardName}</p>
+            <p className="text-[#999999] text-xs mt-0.5">
+              {cert.certId} · {cert.cardName}
+            </p>
           </div>
           <button
             onClick={onClose}

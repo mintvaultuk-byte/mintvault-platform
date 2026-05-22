@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { ArrowRightLeft, Mail, CheckCircle, AlertCircle, Loader2, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import GradientButton from "@/components/ui/gradient-button";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
 import CertIdInput from "@/components/cert-id-input";
@@ -32,7 +32,10 @@ export default function TransferPage() {
     const version = params.get("v");
 
     if (success === "true" && verifiedCertId) {
-      setPageState({ type: "success", message: `Ownership of certificate ${verifiedCertId} has been successfully transferred. The new owner now holds the registration.` });
+      setPageState({
+        type: "success",
+        message: `Ownership of certificate ${verifiedCertId} has been successfully transferred. The new owner now holds the registration.`,
+      });
       window.history.replaceState({}, "", "/transfer");
     } else if (step === "outgoing_confirmed" && verifiedCertId && version === "2") {
       setPageState({ type: "outgoing_confirmed", certId: verifiedCertId });
@@ -42,9 +45,12 @@ export default function TransferPage() {
       window.history.replaceState({}, "", "/transfer");
     } else if (error) {
       const decoded = decodeURIComponent(error);
-      const msg = decoded === "missing_token" ? "Invalid or missing confirmation link."
-        : decoded === "server_error" ? "A server error occurred. Please try again."
-        : decoded;
+      const msg =
+        decoded === "missing_token"
+          ? "Invalid or missing confirmation link."
+          : decoded === "server_error"
+            ? "A server error occurred. Please try again."
+            : decoded;
       setPageState({ type: "error", message: msg });
       window.history.replaceState({}, "", "/transfer");
     }
@@ -89,12 +95,8 @@ export default function TransferPage() {
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
           <ArrowRightLeft className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
-          <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight">
-            Transfer Ownership
-          </h1>
-          <p className="text-[#666666] mt-2">
-            Transfer your MintVault graded card to a new owner
-          </p>
+          <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight">Transfer Ownership</h1>
+          <p className="text-[#666666] mt-2">Transfer your MintVault graded card to a new owner</p>
         </div>
 
         {/* v2: Outgoing keeper confirmed — waiting for incoming keeper */}
@@ -105,7 +107,9 @@ export default function TransferPage() {
               <div>
                 <p className="text-sm text-[#D4AF37] font-semibold mb-1">Your authorisation received</p>
                 <p className="text-sm text-[#444444]">
-                  Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new keeper has been emailed. They must verify the Document Reference Number from the Logbook within 14 days. A further 14-day dispute window applies after they confirm.
+                  Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new keeper has been
+                  emailed. They must verify the Document Reference Number from the Logbook within 14 days. A further
+                  14-day dispute window applies after they confirm.
                 </p>
               </div>
             </CardContent>
@@ -120,7 +124,8 @@ export default function TransferPage() {
               <div>
                 <p className="text-sm text-[#D4AF37] font-semibold mb-1">Your confirmation received</p>
                 <p className="text-sm text-[#444444]">
-                  Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new owner has been emailed a confirmation link. The transfer will complete once they accept.
+                  Certificate <strong className="text-[#1A1A1A]">{pageState.certId}</strong> — the new owner has been
+                  emailed a confirmation link. The transfer will complete once they accept.
                 </p>
               </div>
             </CardContent>
@@ -163,7 +168,9 @@ export default function TransferPage() {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
-                  <Label htmlFor="certId" className="text-[#444444]">Certificate Number</Label>
+                  <Label htmlFor="certId" className="text-[#444444]">
+                    Certificate Number
+                  </Label>
                   <CertIdInput
                     id="certId"
                     placeholder="141"
@@ -171,11 +178,15 @@ export default function TransferPage() {
                     onChange={setCertId}
                     className="rounded-md"
                   />
-                  <p className="text-xs text-[#999999]">The certificate number from your slab label — just the number after &apos;MV&apos;</p>
+                  <p className="text-xs text-[#999999]">
+                    The certificate number from your slab label — just the number after &apos;MV&apos;
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="fromEmail" className="text-[#444444]">Your Email (Current Owner)</Label>
+                  <Label htmlFor="fromEmail" className="text-[#444444]">
+                    Your Email (Current Owner)
+                  </Label>
                   <Input
                     id="fromEmail"
                     type="email"
@@ -188,7 +199,9 @@ export default function TransferPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="toEmail" className="text-[#444444]">New Owner's Email</Label>
+                  <Label htmlFor="toEmail" className="text-[#444444]">
+                    New Owner's Email
+                  </Label>
                   <Input
                     id="toEmail"
                     type="email"
@@ -201,7 +214,9 @@ export default function TransferPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="newOwnerName" className="text-[#444444]">New Owner's Full Name</Label>
+                  <Label htmlFor="newOwnerName" className="text-[#444444]">
+                    New Owner's Full Name
+                  </Label>
                   <Input
                     id="newOwnerName"
                     type="text"
@@ -211,26 +226,30 @@ export default function TransferPage() {
                     className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                     autoComplete="off"
                   />
-                  <p className="text-xs text-[#999999]">Their name will appear on their Certificate of Authenticity PDF.</p>
+                  <p className="text-xs text-[#999999]">
+                    Their name will appear on their Certificate of Authenticity PDF.
+                  </p>
                 </div>
 
-                <Button
+                <GradientButton
+                  as="button"
                   type="submit"
                   disabled={loading || !certId.trim() || !fromEmail.trim() || !toEmail.trim()}
-                  className="btn-gold w-full text-[#1A1400] font-bold tracking-wide"
+                  height="48px"
+                  className="gradient-btn-filled w-full"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin" />
                       Submitting...
                     </>
                   ) : (
                     <>
-                      <Mail className="w-4 h-4 mr-2" />
+                      <Mail className="w-4 h-4" />
                       INITIATE TRANSFER
                     </>
                   )}
-                </Button>
+                </GradientButton>
               </form>
 
               <div className="mt-6 pt-5 border-t border-[#E8E4DC]">
@@ -244,7 +263,9 @@ export default function TransferPage() {
                 </ol>
                 <p className="text-xs text-[#999999] mt-3">
                   Registering a card for the first time?{" "}
-                  <a href="/claim" className="text-[#D4AF37] hover:underline">Register Ownership →</a>
+                  <a href="/claim" className="text-[#D4AF37] hover:underline">
+                    Register Ownership →
+                  </a>
                 </p>
               </div>
             </CardContent>

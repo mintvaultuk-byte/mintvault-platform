@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Shield, Mail, CheckCircle, AlertCircle, Loader2, Key } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiRequest } from "@/lib/queryClient";
 import CertIdInput from "@/components/cert-id-input";
+import GradientButton from "@/components/ui/gradient-button";
 
 /**
  * v435 — Buyer-initiated transfer.
@@ -38,7 +38,9 @@ export default function TransferClaimByCodePage() {
       const data = await res.json();
       setResult({
         type: "success",
-        message: data.message || "Transfer requested. The current keeper has been notified by email and has 14 days to confirm or dispute.",
+        message:
+          data.message ||
+          "Transfer requested. The current keeper has been notified by email and has 14 days to confirm or dispute.",
       });
     } catch (err: any) {
       let msg = "An error occurred. Please try again.";
@@ -57,7 +59,10 @@ export default function TransferClaimByCodePage() {
       <div className="max-w-lg mx-auto">
         <div className="text-center mb-8">
           <Shield className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
-          <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight" data-testid="text-transfer-claim-title">
+          <h1
+            className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight"
+            data-testid="text-transfer-claim-title"
+          >
             Request Transfer
           </h1>
           <p className="text-[#666666] mt-2">
@@ -66,17 +71,20 @@ export default function TransferClaimByCodePage() {
         </div>
 
         {result && (
-          <div className={`mb-6 flex items-start gap-3 p-4 rounded-lg border ${
-            result.type === "success"
-              ? "bg-green-950/30 border-green-600"
-              : "bg-red-100 border-red-300"
-          }`}>
+          <div
+            className={`mb-6 flex items-start gap-3 p-4 rounded-lg border ${
+              result.type === "success" ? "bg-green-950/30 border-green-600" : "bg-red-100 border-red-300"
+            }`}
+          >
             {result.type === "success" ? (
               <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
             ) : (
               <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
             )}
-            <p className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`} data-testid="text-transfer-claim-result">
+            <p
+              className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`}
+              data-testid="text-transfer-claim-result"
+            >
               {result.message}
             </p>
           </div>
@@ -85,12 +93,15 @@ export default function TransferClaimByCodePage() {
         <div className="relative z-[3] border border-[#D4AF37]/30 bg-white rounded-2xl p-6">
           <h2 className="text-[#D4AF37] text-lg font-semibold mb-2">Buyer-Initiated Transfer</h2>
           <p className="text-xs text-[#999999] mb-6">
-            The current registered keeper will be emailed and must explicitly confirm or dispute within 14 days. If they do not respond, the transfer expires and ownership stays with them.
+            The current registered keeper will be emailed and must explicitly confirm or dispute within 14 days. If they
+            do not respond, the transfer expires and ownership stays with them.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="certId" className="text-[#444444]">Certificate Number</Label>
+              <Label htmlFor="certId" className="text-[#444444]">
+                Certificate Number
+              </Label>
               <CertIdInput
                 id="certId"
                 testId="input-cert-id"
@@ -99,7 +110,9 @@ export default function TransferClaimByCodePage() {
                 onChange={setCertId}
                 className="rounded-md"
               />
-              <p className="text-xs text-[#999999]">From the slab label or the claim insert (number after &apos;MV&apos;).</p>
+              <p className="text-xs text-[#999999]">
+                From the slab label or the claim insert (number after &apos;MV&apos;).
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -118,13 +131,13 @@ export default function TransferClaimByCodePage() {
                 autoCorrect="off"
                 spellCheck={false}
               />
-              <p className="text-xs text-[#999999]">
-                Printed on the claim insert that came with the physical slab.
-              </p>
+              <p className="text-xs text-[#999999]">Printed on the claim insert that came with the physical slab.</p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="fullName" className="text-[#444444]">Your Full Name (optional)</Label>
+              <Label htmlFor="fullName" className="text-[#444444]">
+                Your Full Name (optional)
+              </Label>
               <Input
                 id="fullName"
                 data-testid="input-claimant-name"
@@ -138,7 +151,9 @@ export default function TransferClaimByCodePage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#444444]">Your Email Address</Label>
+              <Label htmlFor="email" className="text-[#444444]">
+                Your Email Address
+              </Label>
               <Input
                 id="email"
                 data-testid="input-claimant-email"
@@ -163,31 +178,34 @@ export default function TransferClaimByCodePage() {
                 className="mt-1 w-4 h-4 accent-[#D4AF37] cursor-pointer"
               />
               <span className="text-sm text-[#444444] leading-snug">
-                I confirm I am the rightful new owner of this certificate, having purchased or received it legitimately, and have the printed claim insert.
+                I confirm I am the rightful new owner of this certificate, having purchased or received it legitimately,
+                and have the printed claim insert.
                 <span className="block text-xs text-[#999999] mt-1">
                   Fraudulent claims may result in a permanent ban and legal action.
                 </span>
               </span>
             </label>
 
-            <Button
+            <GradientButton
+              as="button"
               type="submit"
               data-testid="button-submit-transfer-claim"
               disabled={loading || !certId.trim() || !claimCode.trim() || !email.trim() || !agreed}
-              className="btn-gold w-full text-[#1A1400] font-bold tracking-wide"
+              height="48px"
+              className="gradient-btn-filled w-full"
             >
               {loading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Requesting transfer...
                 </>
               ) : (
                 <>
-                  <Mail className="w-4 h-4 mr-2" />
+                  <Mail className="w-4 h-4" />
                   REQUEST TRANSFER
                 </>
               )}
-            </Button>
+            </GradientButton>
           </form>
 
           <div className="mt-6 pt-5 border-t border-[#D4AF37]/10">
@@ -201,7 +219,9 @@ export default function TransferClaimByCodePage() {
             </ol>
             <p className="text-xs text-[#999999] mt-4">
               First-time owner registering ownership instead?{" "}
-              <a href="/claim" className="text-[#D4AF37] hover:underline">Register Ownership →</a>
+              <a href="/claim" className="text-[#D4AF37] hover:underline">
+                Register Ownership →
+              </a>
             </p>
           </div>
         </div>

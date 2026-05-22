@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 /* ── Types ── */
 
@@ -55,24 +56,24 @@ function titleCase(s: string | null): string {
   const specials: Record<string, string> = { pokemon: "Pokémon" };
   return s
     .split(" ")
-    .map(w => specials[w.toLowerCase()] || (w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .map((w) => specials[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
 }
 
 const GRADE_COLS: { key: keyof PopRow; label: string; color: string }[] = [
-  { key: "gBL",  label: "BL",  color: "#D4AF37" },
-  { key: "g10",  label: "10",  color: "#B8960C" },
-  { key: "g9",   label: "9",   color: "#555555" },
-  { key: "g8",   label: "8",   color: "#777777" },
-  { key: "g7",   label: "7",   color: "#888888" },
-  { key: "gLow", label: "≤6",  color: "#AAAAAA" },
+  { key: "gBL", label: "BL", color: "#D4AF37" },
+  { key: "g10", label: "10", color: "#B8960C" },
+  { key: "g9", label: "9", color: "#555555" },
+  { key: "g8", label: "8", color: "#777777" },
+  { key: "g7", label: "7", color: "#888888" },
+  { key: "gLow", label: "≤6", color: "#AAAAAA" },
 ];
 
 /* ── Page ── */
 
 export default function PopulationPage() {
   const [game, setGame] = useState("");
-  const [set,  setSet]  = useState("");
+  const [set, setSet] = useState("");
   const [card, setCard] = useState("");
   const [submitted, setSubmitted] = useState({ game: "", set: "", card: "" });
 
@@ -81,7 +82,7 @@ export default function PopulationPage() {
     queryFn: async () => {
       const params = new URLSearchParams();
       if (submitted.game) params.set("game", submitted.game);
-      if (submitted.set)  params.set("set",  submitted.set);
+      if (submitted.set) params.set("set", submitted.set);
       if (submitted.card) params.set("card", submitted.card);
       const res = await fetch(`/api/population?${params.toString()}`);
       if (!res.ok) throw new Error("Failed");
@@ -110,7 +111,7 @@ export default function PopulationPage() {
   function certUrl(row: PopRow) {
     const params = new URLSearchParams();
     if (row.cardName) params.set("card", row.cardName);
-    if (row.setName)  params.set("set",  row.setName);
+    if (row.setName) params.set("set", row.setName);
     return `/population/certs?${params.toString()}`;
   }
 
@@ -155,7 +156,7 @@ export default function PopulationPage() {
             </h2>
 
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {recent.slice(0, 12).map(cert => (
+              {recent.slice(0, 12).map((cert) => (
                 <Link
                   key={cert.certificate_number}
                   href={`/cert/${cert.certificate_number}`}
@@ -218,30 +219,27 @@ export default function PopulationPage() {
               type="text"
               placeholder="Game (e.g. Pokémon)"
               value={game}
-              onChange={e => setGame(e.target.value)}
+              onChange={(e) => setGame(e.target.value)}
               className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
             <input
               type="text"
               placeholder="Set name"
               value={set}
-              onChange={e => setSet(e.target.value)}
+              onChange={(e) => setSet(e.target.value)}
               className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
             <input
               type="text"
               placeholder="Card name"
               value={card}
-              onChange={e => setCard(e.target.value)}
+              onChange={(e) => setCard(e.target.value)}
               className="flex-1 bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#888888] focus:outline-none focus:border-[#D4AF37]/70"
             />
-            <button
-              type="submit"
-              className="btn-gold flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded"
-            >
+            <GradientButton as="button" type="submit" height="40px" className="gradient-btn-filled">
               <Search size={15} />
               Search →
-            </button>
+            </GradientButton>
           </form>
 
           {/* How it works */}
@@ -250,9 +248,7 @@ export default function PopulationPage() {
               <div className="w-10 h-10 border border-[#D4AF37]/40 rounded-lg flex items-center justify-center text-[#D4AF37] shrink-0">
                 <BarChart3 size={20} />
               </div>
-              <h3 className="text-lg font-sans font-bold text-[#1A1A1A] tracking-tight">
-                How Population Data Works
-              </h3>
+              <h3 className="text-lg font-sans font-bold text-[#1A1A1A] tracking-tight">How Population Data Works</h3>
             </div>
             <ul className="space-y-2">
               {[
@@ -279,9 +275,7 @@ export default function PopulationPage() {
           )}
 
           {isError && (
-            <p className="text-center text-red-600 text-sm py-10">
-              Failed to load population data. Please try again.
-            </p>
+            <p className="text-center text-red-600 text-sm py-10">Failed to load population data. Please try again.</p>
           )}
 
           {!isLoading && !isError && population.length === 0 && (
@@ -292,7 +286,6 @@ export default function PopulationPage() {
 
           {!isLoading && !isError && population.length > 0 && (
             <div data-testid="table-population">
-
               {/* ── Desktop table (sm+) ── */}
               <div className="hidden sm:block border border-[#D4AF37]/20 rounded-lg overflow-hidden">
                 <div className="overflow-x-auto">
@@ -300,14 +293,23 @@ export default function PopulationPage() {
                     <thead>
                       <tr className="border-b border-[#D4AF37]/20 bg-[#FFF9E6]">
                         <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Card</th>
-                        <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">Set</th>
-                        <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">Total</th>
-                        {GRADE_COLS.map(col => (
-                          <th key={col.key} className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
+                        <th className="text-left text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3 hidden md:table-cell">
+                          Set
+                        </th>
+                        <th className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3">
+                          Total
+                        </th>
+                        {GRADE_COLS.map((col) => (
+                          <th
+                            key={col.key}
+                            className="text-right text-[#D4AF37]/70 text-xs uppercase tracking-wider px-4 py-3"
+                          >
                             {col.label}
                           </th>
                         ))}
-                        <th className="px-4 py-3"><span className="sr-only">View certs</span></th>
+                        <th className="px-4 py-3">
+                          <span className="sr-only">View certs</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -319,15 +321,13 @@ export default function PopulationPage() {
                         >
                           <td className="px-4 py-3">
                             <div className="text-[#1A1A1A] font-semibold text-sm">{row.cardName ?? "—"}</div>
-                            {row.cardGame && (
-                              <div className="text-[#D4AF37]/40 text-xs">{row.cardGame}</div>
-                            )}
+                            {row.cardGame && <div className="text-[#D4AF37]/40 text-xs">{row.cardGame}</div>}
                           </td>
                           <td className="px-4 py-3 text-[#D4AF37]/60 text-sm hidden md:table-cell">
                             {row.setName ?? "—"}
                           </td>
                           <td className="px-4 py-3 text-[#1A1A1A] font-mono font-semibold text-right">{row.total}</td>
-                          {GRADE_COLS.map(col => (
+                          {GRADE_COLS.map((col) => (
                             <td key={col.key} className="px-4 py-3 font-mono text-right" style={{ color: col.color }}>
                               {(row[col.key] as number) || "—"}
                             </td>
@@ -362,12 +362,8 @@ export default function PopulationPage() {
                     <div className="flex items-start justify-between gap-2 mb-3">
                       <div>
                         <div className="text-[#1A1A1A] font-semibold text-sm">{row.cardName ?? "—"}</div>
-                        {row.setName && (
-                          <div className="text-[#888888] text-xs mt-0.5">{row.setName}</div>
-                        )}
-                        {row.cardGame && (
-                          <div className="text-[#D4AF37]/50 text-xs">{row.cardGame}</div>
-                        )}
+                        {row.setName && <div className="text-[#888888] text-xs mt-0.5">{row.setName}</div>}
+                        {row.cardGame && <div className="text-[#D4AF37]/50 text-xs">{row.cardGame}</div>}
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-[#1A1A1A] font-mono font-bold text-lg leading-none">{row.total}</div>
@@ -375,7 +371,7 @@ export default function PopulationPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {GRADE_COLS.map(col => {
+                      {GRADE_COLS.map((col) => {
                         const val = row[col.key] as number;
                         if (!val) return null;
                         return (
@@ -403,7 +399,6 @@ export default function PopulationPage() {
                   {population.length === 200 ? " (limit 200)" : ""}
                 </p>
               </div>
-
             </div>
           )}
         </div>

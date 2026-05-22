@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Menu, X, ChevronDown, HelpCircle, LayoutDashboard } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface DropdownItem {
   label: string;
@@ -18,25 +19,23 @@ const NAV_ITEMS: NavItem[] = [
   {
     label: "Grading",
     dropdown: [
-      { label: "Pricing",            href: "/pricing" },
-      { label: "Grading Scale",      href: "/grading-scale" },
-      { label: "Grading Glossary",   href: "/grading-glossary" },
-      { label: "Eligible Cards",     href: "/grading/eligible-cards" },
-      { label: "How Grading Works",  href: "/technology" },
+      { label: "Pricing", href: "/pricing" },
+      { label: "Grading Scale", href: "/grading-scale" },
+      { label: "Grading Glossary", href: "/grading-glossary" },
+      { label: "Eligible Cards", href: "/grading/eligible-cards" },
+      { label: "How Grading Works", href: "/technology" },
     ],
   },
   { label: "AI Pre-Grade", href: "/pre-grade" },
-  { label: "Vault Club",   href: "/vault-club" },
-  { label: "Verify",       href: "/verify" },
-  { label: "Technology",   href: "/technology" },
-  { label: "MVGS",         href: "/standard" },
-  { label: "Registry",     href: "/registry" },
-  { label: "Journal",      href: "/journal" },
+  { label: "Vault Club", href: "/vault-club" },
+  { label: "Verify", href: "/verify" },
+  { label: "Technology", href: "/technology" },
+  { label: "MVGS", href: "/standard" },
+  { label: "Registry", href: "/registry" },
+  { label: "Journal", href: "/journal" },
 ];
 
-const UTILITY_LINKS = [
-  { label: "Help", href: "/help/faq", icon: HelpCircle },
-];
+const UTILITY_LINKS = [{ label: "Help", href: "/help/faq", icon: HelpCircle }];
 
 interface AuthMe {
   id: string;
@@ -54,7 +53,9 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
   const itemRefs = useRef<(HTMLAnchorElement | null)[]>([]);
 
   // Close on route change
-  useEffect(() => { setOpen(false); }, [location]);
+  useEffect(() => {
+    setOpen(false);
+  }, [location]);
 
   // Click outside + Escape + ArrowUp/Down navigation
   useEffect(() => {
@@ -63,15 +64,18 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setOpen(false); return; }
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       e.preventDefault();
       const current = document.activeElement as HTMLAnchorElement | null;
-      const idx = itemRefs.current.findIndex(el => el === current);
+      const idx = itemRefs.current.findIndex((el) => el === current);
       const len = itemRefs.current.length;
       let next = idx;
       if (e.key === "ArrowDown") next = idx < len - 1 ? idx + 1 : 0;
-      else                       next = idx > 0      ? idx - 1 : len - 1;
+      else next = idx > 0 ? idx - 1 : len - 1;
       itemRefs.current[next]?.focus();
     }
     document.addEventListener("mousedown", onDocClick);
@@ -90,7 +94,7 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
     closeTimer.current = setTimeout(() => setOpen(false), 150);
   }
 
-  const isActive = item.dropdown!.some(sub => sub.href === location);
+  const isActive = item.dropdown!.some((sub) => sub.href === location);
 
   return (
     <div ref={containerRef} className="relative" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
@@ -98,7 +102,7 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
         type="button"
         aria-expanded={open}
         aria-haspopup="true"
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 font-body text-sm font-medium transition-colors"
         style={{ color: isActive ? "var(--v2-gold)" : "var(--v2-ink-soft)" }}
       >
@@ -131,7 +135,9 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
             <a
               key={sub.label}
               role="menuitem"
-              ref={el => { itemRefs.current[i] = el; }}
+              ref={(el) => {
+                itemRefs.current[i] = el;
+              }}
               href={sub.href}
               tabIndex={open ? 0 : -1}
               onClick={(e) => {
@@ -141,8 +147,12 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
               }}
               className="block px-5 py-3 font-body text-sm no-underline transition-colors"
               style={{ color: active ? "var(--v2-gold)" : "var(--v2-ink)" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "var(--v2-gold)"; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = active ? "var(--v2-gold)" : "var(--v2-ink)"; }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.color = "var(--v2-gold)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.color = active ? "var(--v2-gold)" : "var(--v2-ink)";
+              }}
             >
               {sub.label}
             </a>
@@ -154,11 +164,7 @@ function DropdownNavItem({ item, location }: { item: NavItem; location: string }
 }
 
 // ── Mobile expandable nav item ───────────────────────────────────────────────
-function MobileNavItem({
-  item, location, onNavigate,
-}: {
-  item: NavItem; location: string; onNavigate: () => void;
-}) {
+function MobileNavItem({ item, location, onNavigate }: { item: NavItem; location: string; onNavigate: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!item.dropdown) {
@@ -177,14 +183,14 @@ function MobileNavItem({
     );
   }
 
-  const activeSub = item.dropdown.some(sub => sub.href === location);
+  const activeSub = item.dropdown.some((sub) => sub.href === location);
 
   return (
     <div className="border-b" style={{ borderColor: "var(--v2-line-soft)" }}>
       <button
         type="button"
         aria-expanded={expanded}
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between py-4"
         style={{ color: activeSub ? "var(--v2-gold)" : "var(--v2-ink)" }}
       >
@@ -197,7 +203,7 @@ function MobileNavItem({
       </button>
       {expanded && (
         <div className="pl-4 pb-3 flex flex-col gap-1">
-          {item.dropdown.map(sub => (
+          {item.dropdown.map((sub) => (
             <Link
               key={sub.label}
               href={sub.href}
@@ -233,7 +239,9 @@ export default function HeaderV2() {
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
+    return () => {
+      document.body.style.overflow = "";
+    };
   }, [mobileOpen]);
 
   return (
@@ -245,32 +253,38 @@ export default function HeaderV2() {
         <div className="mx-auto max-w-7xl flex items-center justify-between px-6 h-16">
           {/* Logo */}
           <Link href="/" className="flex items-baseline gap-0.5 no-underline">
-            <span className="font-body text-lg font-bold tracking-tight" style={{ color: "var(--v2-ink)" }}>Mint</span>
-            <span className="text-lg" style={{ color: "var(--v2-ink-mute)" }}>&middot;</span>
-            <span className="font-display italic text-lg font-medium" style={{ color: "var(--v2-ink)" }}>Vault</span>
+            <span className="font-body text-lg font-bold tracking-tight" style={{ color: "var(--v2-ink)" }}>
+              Mint
+            </span>
+            <span className="text-lg" style={{ color: "var(--v2-ink-mute)" }}>
+              &middot;
+            </span>
+            <span className="font-display italic text-lg font-medium" style={{ color: "var(--v2-ink)" }}>
+              Vault
+            </span>
           </Link>
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-6">
-            {NAV_ITEMS.map(item =>
-              item.dropdown
-                ? <DropdownNavItem key={item.label} item={item} location={location} />
-                : (
-                  <Link
-                    key={item.label}
-                    href={item.href!}
-                    className="font-body text-sm font-medium no-underline transition-colors"
-                    style={{ color: location === item.href ? "var(--v2-gold)" : "var(--v2-ink-soft)" }}
-                  >
-                    {item.label}
-                  </Link>
-                )
+            {NAV_ITEMS.map((item) =>
+              item.dropdown ? (
+                <DropdownNavItem key={item.label} item={item} location={location} />
+              ) : (
+                <Link
+                  key={item.label}
+                  href={item.href!}
+                  className="font-body text-sm font-medium no-underline transition-colors"
+                  style={{ color: location === item.href ? "var(--v2-gold)" : "var(--v2-ink-soft)" }}
+                >
+                  {item.label}
+                </Link>
+              )
             )}
           </nav>
 
           {/* Utility row */}
           <div className="flex items-center gap-4">
-            {UTILITY_LINKS.map(link => {
+            {UTILITY_LINKS.map((link) => {
               const Icon = link.icon;
               return (
                 <Link
@@ -305,13 +319,10 @@ export default function HeaderV2() {
               </Link>
             )}
 
-            <Link
-              href="/pricing"
-              className="hidden md:inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2 rounded-full transition-colors"
-              style={{ backgroundColor: "#D4AF37", color: "var(--v2-panel-dark)" }}
-            >
-              Pricing
-              <ArrowRight size={14} />
+            <Link href="/pricing" className="hidden md:inline-flex no-underline">
+              <GradientButton height="36px" className="gradient-btn-filled">
+                Pricing <ArrowRight size={14} />
+              </GradientButton>
             </Link>
 
             {/* Mobile hamburger */}
@@ -332,11 +343,20 @@ export default function HeaderV2() {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 z-[100] md:hidden flex flex-col" style={{ backgroundColor: "var(--v2-paper)" }}>
-          <div className="flex items-center justify-between px-6 h-16 border-b" style={{ borderColor: "var(--v2-line)" }}>
+          <div
+            className="flex items-center justify-between px-6 h-16 border-b"
+            style={{ borderColor: "var(--v2-line)" }}
+          >
             <Link href="/" className="flex items-baseline gap-0.5 no-underline" onClick={() => setMobileOpen(false)}>
-              <span className="font-body text-lg font-bold tracking-tight" style={{ color: "var(--v2-ink)" }}>Mint</span>
-              <span className="text-lg" style={{ color: "var(--v2-ink-mute)" }}>&middot;</span>
-              <span className="font-display italic text-lg font-medium" style={{ color: "var(--v2-ink)" }}>Vault</span>
+              <span className="font-body text-lg font-bold tracking-tight" style={{ color: "var(--v2-ink)" }}>
+                Mint
+              </span>
+              <span className="text-lg" style={{ color: "var(--v2-ink-mute)" }}>
+                &middot;
+              </span>
+              <span className="font-display italic text-lg font-medium" style={{ color: "var(--v2-ink)" }}>
+                Vault
+              </span>
             </Link>
             <button
               type="button"
@@ -350,17 +370,12 @@ export default function HeaderV2() {
           </div>
 
           <nav className="flex-1 px-6 py-8 flex flex-col gap-0 overflow-y-auto">
-            {NAV_ITEMS.map(item => (
-              <MobileNavItem
-                key={item.label}
-                item={item}
-                location={location}
-                onNavigate={() => setMobileOpen(false)}
-              />
+            {NAV_ITEMS.map((item) => (
+              <MobileNavItem key={item.label} item={item} location={location} onNavigate={() => setMobileOpen(false)} />
             ))}
 
             <div className="mt-6 pt-4 border-t" style={{ borderColor: "var(--v2-line)" }}>
-              {UTILITY_LINKS.map(link => {
+              {UTILITY_LINKS.map((link) => {
                 const Icon = link.icon;
                 return (
                   <Link
@@ -390,13 +405,10 @@ export default function HeaderV2() {
           </nav>
 
           <div className="px-6 py-6 border-t flex flex-col gap-3" style={{ borderColor: "var(--v2-line)" }}>
-            <Link
-              href="/pricing"
-              onClick={() => setMobileOpen(false)}
-              className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full"
-              style={{ backgroundColor: "#D4AF37", color: "var(--v2-panel-dark)" }}
-            >
-              Pricing <ArrowRight size={14} />
+            <Link href="/pricing" onClick={() => setMobileOpen(false)} className="no-underline">
+              <GradientButton height="44px" className="gradient-btn-filled w-full">
+                Pricing <ArrowRight size={14} />
+              </GradientButton>
             </Link>
             {!isAuthed && (
               <Link

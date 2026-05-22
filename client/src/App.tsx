@@ -108,7 +108,8 @@ function GoldBurstEffect() {
 
       if (interactive.closest("[data-no-burst]")) return;
 
-      const isPrimary = interactive.classList.contains("btn-gold");
+      const isPrimary =
+        interactive.classList.contains("gradient-btn-filled") || interactive.classList.contains("btn-gold");
 
       const el = document.createElement("div");
       el.className = isPrimary ? "gold-burst" : "gold-burst gold-burst-soft";

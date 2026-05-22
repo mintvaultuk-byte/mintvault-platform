@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { Shield, Mail, CheckCircle, AlertCircle, Loader2, Key, ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import GradientButton from "@/components/ui/gradient-button";
 import { apiRequest } from "@/lib/queryClient";
 import CertIdInput from "@/components/cert-id-input";
 
@@ -13,13 +13,15 @@ export default function ClaimPage() {
   const [fullName, setFullName] = useState("");
   const [declaredNew, setDeclaredNew] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ type: "success" | "error"; message: string; showBuyerInit?: boolean } | null>(null);
+  const [result, setResult] = useState<{ type: "success" | "error"; message: string; showBuyerInit?: boolean } | null>(
+    null
+  );
   const [transferFlowLive, setTransferFlowLive] = useState(false);
 
   useEffect(() => {
     fetch("/api/config/public-flags")
-      .then(r => r.json())
-      .then(d => setTransferFlowLive(!!d?.transferFlowLive))
+      .then((r) => r.json())
+      .then((d) => setTransferFlowLive(!!d?.transferFlowLive))
       .catch(() => {});
   }, []);
 
@@ -30,7 +32,10 @@ export default function ClaimPage() {
     const verifiedCertId = params.get("certId");
 
     if (success === "true" && verifiedCertId) {
-      setResult({ type: "success", message: `Ownership of certificate ${verifiedCertId} has been successfully registered and linked to your email.` });
+      setResult({
+        type: "success",
+        message: `Ownership of certificate ${verifiedCertId} has been successfully registered and linked to your email.`,
+      });
       window.history.replaceState({}, "", "/claim");
     } else if (error) {
       setResult({ type: "error", message: decodeURIComponent(error) });
@@ -78,24 +83,25 @@ export default function ClaimPage() {
           <h1 className="text-3xl font-sans font-bold text-[#1A1A1A] tracking-tight" data-testid="text-claim-title">
             Claim Your Card
           </h1>
-          <p className="text-[#666666] mt-2">
-            Register first-time ownership of your MintVault graded card
-          </p>
+          <p className="text-[#666666] mt-2">Register first-time ownership of your MintVault graded card</p>
         </div>
 
         {result && (
-          <div className={`mb-6 flex items-start gap-3 p-4 rounded-lg border ${
-            result.type === "success"
-              ? "bg-green-950/30 border-green-600"
-              : "bg-red-100 border-red-300"
-          }`}>
+          <div
+            className={`mb-6 flex items-start gap-3 p-4 rounded-lg border ${
+              result.type === "success" ? "bg-green-950/30 border-green-600" : "bg-red-100 border-red-300"
+            }`}
+          >
             {result.type === "success" ? (
               <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
             ) : (
               <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
             )}
             <div className="flex-1">
-              <p className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`} data-testid="text-claim-result">
+              <p
+                className={`text-sm font-medium ${result.type === "success" ? "text-green-300" : "text-red-800"}`}
+                data-testid="text-claim-result"
+              >
                 {result.message}
               </p>
               {result.showBuyerInit && (
@@ -116,7 +122,9 @@ export default function ClaimPage() {
           <div>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="certId" className="text-[#444444]">Certificate Number</Label>
+                <Label htmlFor="certId" className="text-[#444444]">
+                  Certificate Number
+                </Label>
                 <CertIdInput
                   id="certId"
                   testId="input-cert-id"
@@ -147,12 +155,15 @@ export default function ClaimPage() {
                   spellCheck={false}
                 />
                 <p className="text-xs text-[#999999]">
-                  Found on the certificate insert card included with your returned slab. This code is unique to your certificate.
+                  Found on the certificate insert card included with your returned slab. This code is unique to your
+                  certificate.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="fullName" className="text-[#444444]">Your Full Name</Label>
+                <Label htmlFor="fullName" className="text-[#444444]">
+                  Your Full Name
+                </Label>
                 <Input
                   id="fullName"
                   data-testid="input-claim-name"
@@ -163,13 +174,13 @@ export default function ClaimPage() {
                   className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                   autoComplete="name"
                 />
-                <p className="text-xs text-[#999999]">
-                  Your name will appear on your Certificate of Authenticity PDF.
-                </p>
+                <p className="text-xs text-[#999999]">Your name will appear on your Certificate of Authenticity PDF.</p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-[#444444]">Your Email Address</Label>
+                <Label htmlFor="email" className="text-[#444444]">
+                  Your Email Address
+                </Label>
                 <Input
                   id="email"
                   data-testid="input-claim-email"
@@ -179,9 +190,7 @@ export default function ClaimPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-white border-[#D4AF37]/30 text-[#1A1A1A] placeholder:text-[#999999]"
                 />
-                <p className="text-xs text-[#999999]">
-                  We'll send a verification link to confirm your ownership.
-                </p>
+                <p className="text-xs text-[#999999]">We'll send a verification link to confirm your ownership.</p>
               </div>
 
               <label className="flex items-start gap-3 pt-2 cursor-pointer select-none">
@@ -201,24 +210,26 @@ export default function ClaimPage() {
                 </span>
               </label>
 
-              <Button
+              <GradientButton
+                as="button"
                 type="submit"
                 data-testid="button-submit-claim"
                 disabled={loading || !certId.trim() || !claimCode.trim() || !email.trim()}
-                className="btn-gold w-full text-[#1A1400] font-bold tracking-wide"
+                height="48px"
+                className="gradient-btn-filled w-full"
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                     Submitting...
                   </>
                 ) : (
                   <>
-                    <Mail className="w-4 h-4 mr-2" />
+                    <Mail className="w-4 h-4" />
                     REGISTER OWNERSHIP
                   </>
                 )}
-              </Button>
+              </GradientButton>
             </form>
 
             <div className="mt-6 pt-5">
@@ -230,11 +241,14 @@ export default function ClaimPage() {
                 <li>Click the link to confirm and register ownership</li>
               </ol>
               <p className="text-xs text-[#999999] mt-4">
-                Your claim code is printed on the certificate insert included with every returned slab. If you have lost your insert, contact MintVault support.
+                Your claim code is printed on the certificate insert included with every returned slab. If you have lost
+                your insert, contact MintVault support.
               </p>
               <p className="text-xs text-[#999999] mt-3">
                 Already own this card and want to transfer it to a new owner?{" "}
-                <a href="/transfer" className="text-[#D4AF37] hover:underline">Transfer Ownership →</a>
+                <a href="/transfer" className="text-[#D4AF37] hover:underline">
+                  Transfer Ownership →
+                </a>
               </p>
             </div>
           </div>

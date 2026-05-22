@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Clock, CheckCircle, AlertTriangle, XCircle, Shield, Loader2, X } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface TransferRow {
   id: number;
@@ -22,28 +23,36 @@ interface TransferRow {
 }
 
 const STATUS_BADGES: Record<string, { label: string; color: string; icon: typeof Clock }> = {
-  pending_owner:    { label: "Awaiting Outgoing",   color: "text-amber-600 bg-amber-50 border-amber-200",     icon: Clock },
-  pending_incoming: { label: "Awaiting Incoming",   color: "text-blue-600 bg-blue-50 border-blue-200",        icon: Clock },
-  pending_dispute:  { label: "Dispute Window",      color: "text-purple-600 bg-purple-50 border-purple-200",  icon: Shield },
-  completed:        { label: "Completed",           color: "text-green-600 bg-green-50 border-green-200",     icon: CheckCircle },
-  disputed:         { label: "Disputed",            color: "text-red-600 bg-red-50 border-red-200",           icon: AlertTriangle },
-  cancelled:        { label: "Cancelled",           color: "text-gray-500 bg-gray-50 border-gray-200",        icon: XCircle },
-  expired:          { label: "Expired",             color: "text-gray-400 bg-gray-50 border-gray-200",        icon: XCircle },
+  pending_owner: { label: "Awaiting Outgoing", color: "text-amber-600 bg-amber-50 border-amber-200", icon: Clock },
+  pending_incoming: { label: "Awaiting Incoming", color: "text-blue-600 bg-blue-50 border-blue-200", icon: Clock },
+  pending_dispute: { label: "Dispute Window", color: "text-purple-600 bg-purple-50 border-purple-200", icon: Shield },
+  completed: { label: "Completed", color: "text-green-600 bg-green-50 border-green-200", icon: CheckCircle },
+  disputed: { label: "Disputed", color: "text-red-600 bg-red-50 border-red-200", icon: AlertTriangle },
+  cancelled: { label: "Cancelled", color: "text-gray-500 bg-gray-50 border-gray-200", icon: XCircle },
+  expired: { label: "Expired", color: "text-gray-400 bg-gray-50 border-gray-200", icon: XCircle },
 };
 
 const ACTIONABLE_STATUSES = ["pending_owner", "pending_incoming", "pending_dispute", "disputed"];
 const FINALISABLE_STATUSES = ["pending_dispute", "disputed"];
 
 function StatusBadge({ status, flowVersion }: { status: string; flowVersion: string }) {
-  const badge = STATUS_BADGES[status] || { label: status, color: "text-gray-500 bg-gray-50 border-gray-200", icon: Clock };
+  const badge = STATUS_BADGES[status] || {
+    label: status,
+    color: "text-gray-500 bg-gray-50 border-gray-200",
+    icon: Clock,
+  };
   const Icon = badge.icon;
   return (
     <div className="flex items-center gap-2">
-      <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${badge.color}`}>
+      <span
+        className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${badge.color}`}
+      >
         <Icon size={10} /> {badge.label}
       </span>
       {flowVersion === "v1" && (
-        <span className="text-[9px] uppercase tracking-wider text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">Legacy</span>
+        <span className="text-[9px] uppercase tracking-wider text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+          Legacy
+        </span>
       )}
     </div>
   );
@@ -51,7 +60,13 @@ function StatusBadge({ status, flowVersion }: { status: string; flowVersion: str
 
 function formatDate(d: string | null): string {
   if (!d) return "\u2014";
-  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return new Date(d).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // ── Resolve modal ──────────────────────────────────────────────────────────────
@@ -66,7 +81,9 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
 
   const finaliseMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/admin/transfers/${transfer.id}/force-finalise`, { reason: finaliseReason });
+      const res = await apiRequest("POST", `/api/admin/transfers/${transfer.id}/force-finalise`, {
+        reason: finaliseReason,
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -75,14 +92,19 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
     },
     onError: async (err: any) => {
       let msg = "Force-finalise failed. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
+      try {
+        const b = await err.json?.();
+        if (b?.error) msg = b.error;
+      } catch {}
       setFinaliseError(msg);
     },
   });
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/admin/transfers/${transfer.id}/force-cancel`, { reason: cancelReason });
+      const res = await apiRequest("POST", `/api/admin/transfers/${transfer.id}/force-cancel`, {
+        reason: cancelReason,
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -91,7 +113,10 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
     },
     onError: async (err: any) => {
       let msg = "Cancel failed. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
+      try {
+        const b = await err.json?.();
+        if (b?.error) msg = b.error;
+      } catch {}
       setCancelError(msg);
     },
   });
@@ -127,7 +152,9 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
         <div className="px-6 py-4 border-b border-[#E8E4DC] space-y-2 text-sm">
           <div className="grid grid-cols-[80px_1fr] gap-x-3 gap-y-1">
             <span className="text-[#888888] text-xs uppercase tracking-wider">Status</span>
-            <div><StatusBadge status={transfer.status} flowVersion={transfer.flowVersion} /></div>
+            <div>
+              <StatusBadge status={transfer.status} flowVersion={transfer.flowVersion} />
+            </div>
             <span className="text-[#888888] text-xs uppercase tracking-wider">From</span>
             <span className="text-[#1A1A1A] font-mono text-xs">{transfer.fromEmail}</span>
             <span className="text-[#888888] text-xs uppercase tracking-wider">To</span>
@@ -160,8 +187,9 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
                     Certificate <span className="font-mono font-bold">{transfer.certId}</span> ownership will move:
                   </p>
                   <p className="text-xs text-[#1A1A1A] font-mono mt-1 ml-2">
-                    FROM: {transfer.fromEmail}<br />
-                    TO:   {transfer.toEmail}
+                    FROM: {transfer.fromEmail}
+                    <br />
+                    TO: {transfer.toEmail}
                   </p>
                   <p className="text-xs text-[#B8960C] font-semibold mt-2">This action cannot be reversed.</p>
                 </div>
@@ -171,24 +199,31 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
               </label>
               <textarea
                 value={finaliseReason}
-                onChange={(e) => { setFinaliseReason(e.target.value); setFinaliseError(null); }}
+                onChange={(e) => {
+                  setFinaliseReason(e.target.value);
+                  setFinaliseError(null);
+                }}
                 disabled={anyPending}
                 rows={3}
                 placeholder="e.g. Dispute reviewed, incoming keeper provided proof of delivery..."
                 className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37] disabled:opacity-60"
               />
-              {finaliseError && (
-                <p className="text-xs text-red-600 mt-2">{finaliseError}</p>
-              )}
-              <button
+              {finaliseError && <p className="text-xs text-red-600 mt-2">{finaliseError}</p>}
+              <GradientButton
+                as="button"
                 type="button"
                 onClick={() => finaliseMutation.mutate()}
                 disabled={finaliseReason.trim().length < 10 || anyPending}
-                className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-[#1A1400] btn-gold px-4 py-2 rounded-lg disabled:opacity-50"
+                height="36px"
+                className="gradient-btn-filled mt-3"
               >
-                {finaliseMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
+                {finaliseMutation.isPending ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <AlertTriangle size={12} />
+                )}
                 {finaliseMutation.isPending ? "Finalising..." : "Force Finalise →"}
-              </button>
+              </GradientButton>
             </div>
           )}
 
@@ -210,15 +245,16 @@ function ResolveModal({ transfer, onClose }: { transfer: TransferRow; onClose: (
             </label>
             <textarea
               value={cancelReason}
-              onChange={(e) => { setCancelReason(e.target.value); setCancelError(null); }}
+              onChange={(e) => {
+                setCancelReason(e.target.value);
+                setCancelError(null);
+              }}
               disabled={anyPending}
               rows={3}
               placeholder="e.g. Fraud suspected, abandoned by both parties, duplicate transfer..."
               className="w-full bg-white border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37] disabled:opacity-60"
             />
-            {cancelError && (
-              <p className="text-xs text-red-600 mt-2">{cancelError}</p>
-            )}
+            {cancelError && <p className="text-xs text-red-600 mt-2">{cancelError}</p>}
             <button
               type="button"
               onClick={() => cancelMutation.mutate()}
@@ -252,9 +288,9 @@ export default function AdminTransfers() {
   }
 
   const rows = transfers || [];
-  const active = rows.filter(t => ["pending_owner", "pending_incoming", "pending_dispute"].includes(t.status));
-  const completed = rows.filter(t => t.status === "completed");
-  const other = rows.filter(t => ["disputed", "cancelled", "expired"].includes(t.status));
+  const active = rows.filter((t) => ["pending_owner", "pending_incoming", "pending_dispute"].includes(t.status));
+  const completed = rows.filter((t) => t.status === "completed");
+  const other = rows.filter((t) => ["disputed", "cancelled", "expired"].includes(t.status));
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -296,7 +332,11 @@ export default function AdminTransfers() {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-8 text-[#999999] text-xs">No transfers found</td></tr>
+              <tr>
+                <td colSpan={7} className="text-center py-8 text-[#999999] text-xs">
+                  No transfers found
+                </td>
+              </tr>
             )}
             {rows.map((t) => {
               const actionable = ACTIONABLE_STATUSES.includes(t.status);
@@ -305,7 +345,9 @@ export default function AdminTransfers() {
                   <td className="px-4 py-2 font-mono text-xs text-[#D4AF37]">{t.certId}</td>
                   <td className="px-4 py-2 text-xs text-[#666666] max-w-[160px] truncate">{t.fromEmail}</td>
                   <td className="px-4 py-2 text-xs text-[#666666] max-w-[160px] truncate">{t.toEmail}</td>
-                  <td className="px-4 py-2"><StatusBadge status={t.status} flowVersion={t.flowVersion} /></td>
+                  <td className="px-4 py-2">
+                    <StatusBadge status={t.status} flowVersion={t.flowVersion} />
+                  </td>
                   <td className="px-4 py-2 text-xs text-[#888888]">{formatDate(t.disputeDeadline)}</td>
                   <td className="px-4 py-2 text-xs text-[#888888]">{formatDate(t.createdAt)}</td>
                   <td className="px-4 py-2">
@@ -329,24 +371,24 @@ export default function AdminTransfers() {
       </div>
 
       {/* Disputed transfers detail */}
-      {other.filter(t => t.status === "disputed").length > 0 && (
+      {other.filter((t) => t.status === "disputed").length > 0 && (
         <div className="bg-white border border-red-200 rounded-lg p-4">
           <h3 className="text-sm font-bold text-red-600 mb-3">Disputed Transfers</h3>
-          {other.filter(t => t.status === "disputed").map(t => (
-            <div key={t.id} className="border-t border-red-100 py-3 first:border-0 first:pt-0">
-              <p className="text-xs"><strong>{t.certId}</strong> — disputed by <strong>{t.disputedBy}</strong> on {formatDate(t.disputedAt)}</p>
-              {t.disputeReason && <p className="text-xs text-[#666666] mt-1">Reason: {t.disputeReason}</p>}
-            </div>
-          ))}
+          {other
+            .filter((t) => t.status === "disputed")
+            .map((t) => (
+              <div key={t.id} className="border-t border-red-100 py-3 first:border-0 first:pt-0">
+                <p className="text-xs">
+                  <strong>{t.certId}</strong> — disputed by <strong>{t.disputedBy}</strong> on{" "}
+                  {formatDate(t.disputedAt)}
+                </p>
+                {t.disputeReason && <p className="text-xs text-[#666666] mt-1">Reason: {t.disputeReason}</p>}
+              </div>
+            ))}
         </div>
       )}
 
-      {resolveTarget && (
-        <ResolveModal
-          transfer={resolveTarget}
-          onClose={() => setResolveTarget(null)}
-        />
-      )}
+      {resolveTarget && <ResolveModal transfer={resolveTarget} onClose={() => setResolveTarget(null)} />}
     </div>
   );
 }

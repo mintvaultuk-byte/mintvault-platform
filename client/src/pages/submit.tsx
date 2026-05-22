@@ -4,12 +4,31 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { apiRequest } from "@/lib/queryClient";
-import { pricingTiers, submissionTypes, calculateOrderTotals, getInsuranceTier, getInsuranceSurchargePerCard } from "@shared/schema";
+import {
+  pricingTiers,
+  submissionTypes,
+  calculateOrderTotals,
+  getInsuranceTier,
+  getInsuranceSurchargePerCard,
+} from "@shared/schema";
 import type { PricingTier } from "@shared/schema";
-import { ArrowLeft, ArrowRight, Check, Shield, CreditCard, AlertTriangle, Info, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Shield,
+  CreditCard,
+  AlertTriangle,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { Link } from "wouter";
 import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface CardItem {
   game: string;
@@ -32,10 +51,21 @@ const emptyCardItem = (): CardItem => ({
 });
 
 const cardGames = [
-  "Pokémon", "Yu-Gi-Oh!", "Magic: The Gathering", "Dragon Ball Super",
-  "One Piece", "Digimon", "Flesh and Blood", "Lorcana",
-  "Weiss Schwarz", "Cardfight!! Vanguard", "Final Fantasy TCG",
-  "Star Wars: Unlimited", "MetaZoo", "UniVersus", "Other",
+  "Pokémon",
+  "Yu-Gi-Oh!",
+  "Magic: The Gathering",
+  "Dragon Ball Super",
+  "One Piece",
+  "Digimon",
+  "Flesh and Blood",
+  "Lorcana",
+  "Weiss Schwarz",
+  "Cardfight!! Vanguard",
+  "Final Fantasy TCG",
+  "Star Wars: Unlimited",
+  "MetaZoo",
+  "UniVersus",
+  "Other",
 ];
 
 interface WizardState {
@@ -73,7 +103,10 @@ const WIZARD_LS_KEY = "mv-submit-wizard";
 
 function saveWizardState(state: WizardState, step?: number) {
   try {
-    localStorage.setItem(WIZARD_LS_KEY, JSON.stringify({ v: WIZARD_STATE_VERSION, state, step: step || 1, savedAt: Date.now() }));
+    localStorage.setItem(
+      WIZARD_LS_KEY,
+      JSON.stringify({ v: WIZARD_STATE_VERSION, state, step: step || 1, savedAt: Date.now() })
+    );
   } catch {}
 }
 
@@ -119,18 +152,15 @@ function StepIndicator({ step, accentColor = "#D4AF37" }: { step: number; accent
               i + 1 < step
                 ? { background: accentColor, color: "#000", borderColor: accentColor }
                 : i + 1 === step
-                ? { background: "transparent", color: accentColor, borderColor: accentColor }
-                : { background: "transparent", color: `${accentColor}4D`, borderColor: `${accentColor}33` }
+                  ? { background: "transparent", color: accentColor, borderColor: accentColor }
+                  : { background: "transparent", color: `${accentColor}4D`, borderColor: `${accentColor}33` }
             }
             data-testid={`step-indicator-${i + 1}`}
           >
             {i + 1 < step ? <Check size={14} /> : i + 1}
           </div>
           {i < stepLabels.length - 1 && (
-            <div
-              className="w-6 h-px mx-0.5"
-              style={{ background: i + 1 < step ? accentColor : `${accentColor}33` }}
-            />
+            <div className="w-6 h-px mx-0.5" style={{ background: i + 1 < step ? accentColor : `${accentColor}33` }} />
           )}
         </div>
       ))}
@@ -140,7 +170,7 @@ function StepIndicator({ step, accentColor = "#D4AF37" }: { step: number; accent
 
 function getEstimatedReturnDate(turnaroundDays: number): string {
   const date = new Date();
-  let workDays = 0;
+  const workDays = 0;
   let added = 0;
   while (added < turnaroundDays) {
     date.setDate(date.getDate() + 1);
@@ -153,25 +183,53 @@ function getEstimatedReturnDate(turnaroundDays: number): string {
 }
 
 const OTHER_SERVICES_INFO = [
-  { id: "reholder", name: "Reholder", price: "£15 / card", turnaround: "15 working days", desc: "New slab + VaultLock NFC chip for an existing graded card" },
-  { id: "crossover", name: "Crossover", price: "£35 / card", turnaround: "15 working days", desc: "Grade a card from another company (PSA, BGS, etc.)" },
-  { id: "authentication", name: "Authentication", price: "£15 / card", turnaround: "15 working days", desc: "Verify authenticity — no grade assigned" },
+  {
+    id: "reholder",
+    name: "Reholder",
+    price: "£15 / card",
+    turnaround: "15 working days",
+    desc: "New slab + VaultLock NFC chip for an existing graded card",
+  },
+  {
+    id: "crossover",
+    name: "Crossover",
+    price: "£35 / card",
+    turnaround: "15 working days",
+    desc: "Grade a card from another company (PSA, BGS, etc.)",
+  },
+  {
+    id: "authentication",
+    name: "Authentication",
+    price: "£15 / card",
+    turnaround: "15 working days",
+    desc: "Verify authenticity — no grade assigned",
+  },
 ];
 
-function Step1Tier({ state, setState, tiers, capacity }: {
+function Step1Tier({
+  state,
+  setState,
+  tiers,
+  capacity,
+}: {
   state: WizardState;
   setState: (s: WizardState) => void;
   tiers: PricingTier[];
   capacity?: Record<string, { active: number; max: number; full: boolean; forceOpen: boolean }>;
 }) {
-  const typeName = submissionTypes.find(t => t.id === state.type)?.name || state.type;
+  const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step1-title">
+      <h2
+        className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center"
+        data-testid="text-step1-title"
+      >
         Choose Service Level
       </h2>
-      <p className="text-[#888888] text-center mb-8 text-sm">Select your {typeName.toLowerCase()} speed and coverage tier</p>
+      <p className="text-[#888888] text-center mb-8 text-sm">
+        Select your {typeName.toLowerCase()} speed and coverage tier
+      </p>
 
       <div className="space-y-3">
         {tiers.map((tier) => {
@@ -205,7 +263,10 @@ function Step1Tier({ state, setState, tiers, capacity }: {
                   </div>
                   <p className="text-[#888888] text-sm mt-1">{tier.turnaround} from receipt</p>
                   {isSelected && estimatedReturn && (
-                    <p className="text-[#D4AF37]/70 text-xs mt-1.5 flex items-center gap-1" data-testid={`text-estimated-return-${tier.id}`}>
+                    <p
+                      className="text-[#D4AF37]/70 text-xs mt-1.5 flex items-center gap-1"
+                      data-testid={`text-estimated-return-${tier.id}`}
+                    >
                       <Check size={11} />
                       Est. return by {estimatedReturn}
                     </p>
@@ -226,9 +287,8 @@ function Step1Tier({ state, setState, tiers, capacity }: {
       {/* Deionization disclosure — sits between tier selection and the
           submit CTA so submitters see it before paying. */}
       <p className="text-[#888888] text-xs text-center mt-3 max-w-md mx-auto leading-relaxed">
-        Every card receives complimentary deionization before imaging — ionised air
-        removes loose dust and neutralises static charge. No contact with the card
-        surface. No chemicals. Cards are graded as-received.
+        Every card receives complimentary deionization before imaging — ionised air removes loose dust and neutralises
+        static charge. No contact with the card surface. No chemicals. Cards are graded as-received.
       </p>
 
       {/* Other Services — shown when browsing grading tiers */}
@@ -236,7 +296,9 @@ function Step1Tier({ state, setState, tiers, capacity }: {
         <div className="mt-8">
           <div className="relative flex items-center mb-4">
             <div className="flex-1 h-px bg-[#D4AF37]/20" />
-            <span className="mx-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]/50">Other Services</span>
+            <span className="mx-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[#D4AF37]/50">
+              Other Services
+            </span>
             <div className="flex-1 h-px bg-[#D4AF37]/20" />
           </div>
           <div className="space-y-2">
@@ -284,9 +346,13 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
           className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="select-crossover-company"
         >
-          <option value="" className="bg-white">Select company...</option>
+          <option value="" className="bg-white">
+            Select company...
+          </option>
           {GRADING_COMPANIES.map((c) => (
-            <option key={c} value={c} className="bg-white">{c}</option>
+            <option key={c} value={c} className="bg-white">
+              {c}
+            </option>
           ))}
         </select>
       </div>
@@ -330,7 +396,8 @@ function CrossoverFields({ state, setState }: { state: WizardState; setState: (s
       </div>
 
       <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/20 pt-3">
-        Crossover is subject to review. MintVault reserves the right to return cards that do not meet crossover standards.
+        Crossover is subject to review. MintVault reserves the right to return cards that do not meet crossover
+        standards.
       </p>
     </div>
   );
@@ -357,9 +424,13 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="select-reholder-company"
         >
-          <option value="" className="bg-white">Select company...</option>
+          <option value="" className="bg-white">
+            Select company...
+          </option>
           {SLAB_COMPANIES.map((c) => (
-            <option key={c} value={c} className="bg-white">{c}</option>
+            <option key={c} value={c} className="bg-white">
+              {c}
+            </option>
           ))}
         </select>
       </div>
@@ -374,15 +445,21 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
           className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="select-reholder-reason"
         >
-          <option value="" className="bg-white">Select reason...</option>
+          <option value="" className="bg-white">
+            Select reason...
+          </option>
           {REHOLDER_REASONS.map((r) => (
-            <option key={r} value={r} className="bg-white">{r}</option>
+            <option key={r} value={r} className="bg-white">
+              {r}
+            </option>
           ))}
         </select>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Existing Cert / Grade Number (optional)</label>
+        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+          Existing Cert / Grade Number (optional)
+        </label>
         <input
           type="text"
           value={state.reholderCertNumber}
@@ -394,7 +471,9 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Current Slab Condition (optional)</label>
+        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+          Current Slab Condition (optional)
+        </label>
         <input
           type="text"
           value={state.reholderCondition}
@@ -406,13 +485,20 @@ function ReholderFields({ state, setState }: { state: WizardState; setState: (s:
       </div>
 
       <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
-        Reholdering applies to MintVault slabs only. Cards from other grading companies are subject to review. The original grade is retained unless a new grading service is also requested.
+        Reholdering applies to MintVault slabs only. Cards from other grading companies are subject to review. The
+        original grade is retained unless a new grading service is also requested.
       </p>
     </div>
   );
 }
 
-const AUTH_REASONS = ["Counterfeit suspicion", "Pre-sale verification", "Insurance / valuation", "Personal peace of mind", "Other"];
+const AUTH_REASONS = [
+  "Counterfeit suspicion",
+  "Pre-sale verification",
+  "Insurance / valuation",
+  "Personal peace of mind",
+  "Other",
+];
 
 function AuthenticationFields({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
@@ -432,15 +518,21 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
           className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
           data-testid="select-auth-reason"
         >
-          <option value="" className="bg-white">Select reason...</option>
+          <option value="" className="bg-white">
+            Select reason...
+          </option>
           {AUTH_REASONS.map((r) => (
-            <option key={r} value={r} className="bg-white">{r}</option>
+            <option key={r} value={r} className="bg-white">
+              {r}
+            </option>
           ))}
         </select>
       </div>
 
       <div>
-        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">Authenticity Concerns (optional)</label>
+        <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1">
+          Authenticity Concerns (optional)
+        </label>
         <textarea
           value={state.authConcerns}
           onChange={(e) => setState({ ...state, authConcerns: e.target.value })}
@@ -452,7 +544,8 @@ function AuthenticationFields({ state, setState }: { state: WizardState; setStat
       </div>
 
       <p className="text-[#888888] text-xs leading-relaxed border-t border-[#D4AF37]/10 pt-3">
-        Authentication results in a certificate confirming the card is genuine. No condition grade is assigned. Cards found to be counterfeit will not be returned without prior arrangement.
+        Authentication results in a certificate confirming the card is genuine. No condition grade is assigned. Cards
+        found to be counterfeit will not be returned without prior arrangement.
       </p>
     </div>
   );
@@ -495,11 +588,19 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   };
 
   const cardItemsDeclaredSum = state.cardItems.reduce((sum, item) => sum + (item.declaredValue || 0), 0);
-  const hasMismatch = showCardDetails && state.cardItems.length > 0 && state.declaredValue > 0 && cardItemsDeclaredSum > 0 && Math.abs(cardItemsDeclaredSum - state.declaredValue) > 0.01;
+  const hasMismatch =
+    showCardDetails &&
+    state.cardItems.length > 0 &&
+    state.declaredValue > 0 &&
+    cardItemsDeclaredSum > 0 &&
+    Math.abs(cardItemsDeclaredSum - state.declaredValue) > 0.01;
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step2-title">
+      <h2
+        className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center"
+        data-testid="text-step2-title"
+      >
         How Many Cards?
       </h2>
       <p className="text-[#888888] text-center mb-8 text-sm">Enter the number of cards and total declared value</p>
@@ -510,9 +611,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
 
       <div className="max-w-sm mx-auto space-y-6">
         <div>
-          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">
-            Number of Cards
-          </label>
+          <label className="text-[#D4AF37]/70 text-sm uppercase tracking-wider block mb-2">Number of Cards</label>
           <input
             type="number"
             min="0"
@@ -554,7 +653,7 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                 <div className="flex items-center gap-2 text-sm" data-testid="text-insurance-surcharge">
                   <Shield size={14} className="text-[#D4AF37]" />
                   <span className="text-[#D4AF37]/80">
-                    Insurance protection: {surchargeInfo.label} (£{(declaredPerCard).toLocaleString()}/card avg)
+                    Insurance protection: {surchargeInfo.label} (£{declaredPerCard.toLocaleString()}/card avg)
                   </span>
                 </div>
               )}
@@ -587,18 +686,28 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
             <Plus size={16} className="text-[#D4AF37]" />
             <span className="text-[#D4AF37] font-medium text-sm tracking-wide">Add Card Details (Optional)</span>
           </div>
-          {showCardDetails ? <ChevronUp size={16} className="text-[#D4AF37]/60" /> : <ChevronDown size={16} className="text-[#D4AF37]/60" />}
+          {showCardDetails ? (
+            <ChevronUp size={16} className="text-[#D4AF37]/60" />
+          ) : (
+            <ChevronDown size={16} className="text-[#D4AF37]/60" />
+          )}
         </button>
 
         {showCardDetails && (
           <div className="mt-4 space-y-4">
-            <p className="text-[#888888] text-xs">Pre-fill card details to speed up processing. All fields are optional.</p>
+            <p className="text-[#888888] text-xs">
+              Pre-fill card details to speed up processing. All fields are optional.
+            </p>
 
             {hasMismatch && (
-              <div className="flex items-center gap-2 border border-yellow-500/30 rounded p-3 bg-yellow-500/5" data-testid="text-declared-value-mismatch">
+              <div
+                className="flex items-center gap-2 border border-yellow-500/30 rounded p-3 bg-yellow-500/5"
+                data-testid="text-declared-value-mismatch"
+              >
                 <AlertTriangle size={14} className="text-yellow-500 flex-shrink-0" />
                 <span className="text-yellow-400 text-xs">
-                  Per-card declared values sum to £{cardItemsDeclaredSum.toLocaleString()} but total declared value is £{state.declaredValue.toLocaleString()}
+                  Per-card declared values sum to £{cardItemsDeclaredSum.toLocaleString()} but total declared value is £
+                  {state.declaredValue.toLocaleString()}
                 </span>
               </div>
             )}
@@ -622,9 +731,13 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                       className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                       data-testid={`select-game-${index}`}
                     >
-                      <option value="" className="bg-white">Select game...</option>
+                      <option value="" className="bg-white">
+                        Select game...
+                      </option>
                       {cardGames.map((g) => (
-                        <option key={g} value={g} className="bg-white">{g}</option>
+                        <option key={g} value={g} className="bg-white">
+                          {g}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -673,7 +786,9 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                     />
                   </div>
                   <div>
-                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">Declared Value (£)</label>
+                    <label className="text-[#D4AF37]/50 text-xs uppercase tracking-wider block mb-1">
+                      Declared Value (£)
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40 text-sm">£</span>
                       <input
@@ -681,7 +796,9 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
                         min="0"
                         step="1"
                         value={item.declaredValue || ""}
-                        onChange={(e) => updateCardItem(index, "declaredValue", Math.max(0, parseFloat(e.target.value) || 0))}
+                        onChange={(e) =>
+                          updateCardItem(index, "declaredValue", Math.max(0, parseFloat(e.target.value) || 0))
+                        }
                         placeholder="0"
                         className="w-full bg-transparent border border-[#D4AF37]/30 rounded-lg pl-7 pr-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37]/60 transition-colors"
                         data-testid={`input-card-value-${index}`}
@@ -710,22 +827,39 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   );
 }
 
-function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { state: WizardState; setState: (s: WizardState) => void; tier: PricingTier | undefined; vcPercent?: number; vcTier?: string | null }) {
+function Step3Review({
+  state,
+  setState,
+  tier,
+  vcPercent = 0,
+  vcTier = null,
+}: {
+  state: WizardState;
+  setState: (s: WizardState) => void;
+  tier: PricingTier | undefined;
+  vcPercent?: number;
+  vcTier?: string | null;
+}) {
   const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
 
   const bulkPercent = totals.discountPercent;
   const effectivePercent = Math.max(vcPercent, bulkPercent);
-  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
+  const effectiveAmount =
+    effectivePercent > 0 ? Math.round(((tier?.pricePerCard || 0) * state.quantity * effectivePercent) / 100) : 0;
   const vcWins = vcPercent > bulkPercent && vcPercent > 0;
   const discountLabel = vcWins
     ? `${vcTier ? vcTier.charAt(0).toUpperCase() + vcTier.slice(1) : ""} Vault Club discount (${vcPercent}%)`
     : `Bulk discount (${bulkPercent}%)`;
-  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
+  const effectiveTotal =
+    (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step3-title">
+      <h2
+        className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center"
+        data-testid="text-step3-title"
+      >
         Order Summary
       </h2>
       <p className="text-[#888888] text-center mb-8 text-sm">Review your submission before proceeding</p>
@@ -738,10 +872,18 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           <SummaryRow label="Submission Type" value={typeName} testId="text-summary-type" />
           <SummaryRow label="Service Tier" value={tier?.name || ""} testId="text-summary-tier" />
           <SummaryRow label="Turnaround" value={tier?.turnaround || ""} testId="text-summary-turnaround" />
-          <SummaryRow label="Quantity" value={`${state.quantity} card${state.quantity > 1 ? "s" : ""}`} testId="text-summary-qty" />
+          <SummaryRow
+            label="Quantity"
+            value={`${state.quantity} card${state.quantity > 1 ? "s" : ""}`}
+            testId="text-summary-qty"
+          />
           <SummaryRow label="Price per Card" value={tier?.price || ""} testId="text-summary-price" />
           {state.declaredValue > 0 && (
-            <SummaryRow label="Declared Value" value={`£${state.declaredValue.toLocaleString()}`} testId="text-summary-declared-value" />
+            <SummaryRow
+              label="Declared Value"
+              value={`£${state.declaredValue.toLocaleString()}`}
+              testId="text-summary-declared-value"
+            />
           )}
           {state.submissionName && (
             <SummaryRow label="Submission Name" value={state.submissionName} testId="text-summary-name" />
@@ -756,10 +898,18 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
                 testId="text-summary-crossover-company"
               />
               {state.crossoverOriginalGrade && (
-                <SummaryRow label="Original Grade" value={state.crossoverOriginalGrade} testId="text-summary-crossover-grade" />
+                <SummaryRow
+                  label="Original Grade"
+                  value={state.crossoverOriginalGrade}
+                  testId="text-summary-crossover-grade"
+                />
               )}
               {state.crossoverCertNumber && (
-                <SummaryRow label="Certificate No." value={state.crossoverCertNumber} testId="text-summary-crossover-cert" />
+                <SummaryRow
+                  label="Certificate No."
+                  value={state.crossoverCertNumber}
+                  testId="text-summary-crossover-cert"
+                />
               )}
               <p className="text-[#888888] text-xs mt-2">Subject to review before crossover is accepted.</p>
             </div>
@@ -768,15 +918,27 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
           {state.type === "reholder" && state.reholderCompany && (
             <div className="border-t border-[#D4AF37]/10 pt-3 mt-1">
               <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Reholder Details</p>
-              <SummaryRow label="Current Slab Company" value={state.reholderCompany} testId="text-summary-reholder-company" />
+              <SummaryRow
+                label="Current Slab Company"
+                value={state.reholderCompany}
+                testId="text-summary-reholder-company"
+              />
               {state.reholderCertNumber && (
-                <SummaryRow label="Cert / Grade No." value={state.reholderCertNumber} testId="text-summary-reholder-cert" />
+                <SummaryRow
+                  label="Cert / Grade No."
+                  value={state.reholderCertNumber}
+                  testId="text-summary-reholder-cert"
+                />
               )}
               {state.reholderReason && (
                 <SummaryRow label="Reason" value={state.reholderReason} testId="text-summary-reholder-reason" />
               )}
               {state.reholderCondition && (
-                <SummaryRow label="Condition Notes" value={state.reholderCondition} testId="text-summary-reholder-condition" />
+                <SummaryRow
+                  label="Condition Notes"
+                  value={state.reholderCondition}
+                  testId="text-summary-reholder-condition"
+                />
               )}
             </div>
           )}
@@ -788,12 +950,18 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
               {state.authConcerns && (
                 <SummaryRow label="Concerns" value={state.authConcerns} testId="text-summary-auth-concerns" />
               )}
-              <p className="text-[#888888] text-xs mt-2">Authentication certificate only — no condition grade assigned.</p>
+              <p className="text-[#888888] text-xs mt-2">
+                Authentication certificate only — no condition grade assigned.
+              </p>
             </div>
           )}
 
           <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
-            <SummaryRow label="Service Fees" value={`£${(totals.subtotal / 100).toFixed(2)}`} testId="text-summary-subtotal" />
+            <SummaryRow
+              label="Service Fees"
+              value={`£${(totals.subtotal / 100).toFixed(2)}`}
+              testId="text-summary-subtotal"
+            />
             {effectivePercent > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-[#D4AF37]/80 text-sm">{discountLabel}</span>
@@ -802,16 +970,17 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
                 </span>
               </div>
             )}
-            {vcWins && (
-              <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>
-            )}
+            {vcWins && <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>}
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-shipping-label">
                   Fully Insured Return Shipping ({totals.shippingLabel})
                 </span>
               </div>
-              <span className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap" data-testid="text-summary-shipping">
+              <span
+                className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap"
+                data-testid="text-summary-shipping"
+              >
                 £{(totals.shipping / 100).toFixed(2)}
               </span>
             </div>
@@ -822,7 +991,10 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
                     Insurance Protection ({totals.insuranceSurchargeLabel})
                   </span>
                 </div>
-                <span className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap" data-testid="text-summary-insurance-fee">
+                <span
+                  className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap"
+                  data-testid="text-summary-insurance-fee"
+                >
                   £{(totals.totalInsuranceFee / 100).toFixed(2)}
                 </span>
               </div>
@@ -882,7 +1054,8 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
               <span className="text-[#D4AF37] font-bold text-xs uppercase tracking-widest ml-1">Free</span>
             </p>
             <p className="text-[#555555] text-xs mt-1 leading-relaxed">
-              Receive your slabs sealed in gold holographic foil — tear them open to reveal your grade like opening a pack. Perfect for filming unboxing content.
+              Receive your slabs sealed in gold holographic foil — tear them open to reveal your grade like opening a
+              pack. Perfect for filming unboxing content.
             </p>
           </div>
         </label>
@@ -894,15 +1067,22 @@ function Step3Review({ state, setState, tier, vcPercent = 0, vcTier = null }: { 
 function Step4Shipping({ state, setState }: { state: WizardState; setState: (s: WizardState) => void }) {
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step4-title">
+      <h2
+        className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center"
+        data-testid="text-step4-title"
+      >
         Return Shipping & Details
       </h2>
       <p className="text-[#888888] text-center mb-6 text-sm">Where should we return your cards?</p>
 
-      <div className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5" data-testid="text-shipping-notice">
+      <div
+        className="max-w-md mx-auto mb-5 flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5"
+        data-testid="text-shipping-notice"
+      >
         <Info size={14} className="text-[#D4AF37] flex-shrink-0 mt-0.5" />
         <span className="text-[#555555] text-xs leading-relaxed">
-          Important: You are responsible for insured shipping to MintVault. Please use tracked and insured delivery appropriate to your declared item value.
+          Important: You are responsible for insured shipping to MintVault. Please use tracked and insured delivery
+          appropriate to your declared item value.
         </span>
       </div>
 
@@ -1029,12 +1209,20 @@ function SummaryRow({ label, value, testId }: { label: string; value: string; te
   return (
     <div className="flex justify-between items-center">
       <span className="text-[#D4AF37]/60 text-sm">{label}</span>
-      <span className="text-[#1A1A1A] font-medium text-sm" data-testid={testId}>{value}</span>
+      <span className="text-[#1A1A1A] font-medium text-sm" data-testid={testId}>
+        {value}
+      </span>
     </div>
   );
 }
 
-function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: {
+function Step5Payment({
+  state,
+  tier,
+  onSuccess,
+  vcPercent = 0,
+  vcTier = null,
+}: {
   state: WizardState;
   tier: PricingTier | undefined;
   onSuccess: (submissionId: string, packingSlipToken?: string) => void;
@@ -1055,14 +1243,19 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
   const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
   const bulkPercent = totals.discountPercent;
   const effectivePercent = Math.max(vcPercent, bulkPercent);
-  const effectiveAmount = effectivePercent > 0 ? Math.round((tier?.pricePerCard || 0) * state.quantity * effectivePercent / 100) : 0;
-  const effectiveTotal = (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
+  const effectiveAmount =
+    effectivePercent > 0 ? Math.round(((tier?.pricePerCard || 0) * state.quantity * effectivePercent) / 100) : 0;
+  const effectiveTotal =
+    (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
 
   const createPaymentMutation = useMutation({
     mutationFn: async () => {
-      const crossoverCompanyFinal = state.type === "crossover"
-        ? (state.crossoverCompany === "Other" ? state.crossoverCompanyOther : state.crossoverCompany)
-        : undefined;
+      const crossoverCompanyFinal =
+        state.type === "crossover"
+          ? state.crossoverCompany === "Other"
+            ? state.crossoverCompanyOther
+            : state.crossoverCompany
+          : undefined;
       const res = await apiRequest("POST", "/api/create-payment-intent", {
         type: state.type,
         tier: state.tier,
@@ -1085,15 +1278,15 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
           county: state.county,
           postcode: state.postcode,
         },
-        crossoverCompany: state.type === "crossover" ? (crossoverCompanyFinal || undefined) : undefined,
-        crossoverOriginalGrade: state.type === "crossover" ? (state.crossoverOriginalGrade || undefined) : undefined,
-        crossoverCertNumber: state.type === "crossover" ? (state.crossoverCertNumber || undefined) : undefined,
-        reholderCompany: state.type === "reholder" ? (state.reholderCompany || undefined) : undefined,
-        reholderReason: state.type === "reholder" ? (state.reholderReason || undefined) : undefined,
-        reholderCondition: state.type === "reholder" ? (state.reholderCondition || undefined) : undefined,
-        reholderCertNumber: state.type === "reholder" ? (state.reholderCertNumber || undefined) : undefined,
-        authReason: state.type === "authentication" ? (state.authReason || undefined) : undefined,
-        authConcerns: state.type === "authentication" ? (state.authConcerns || undefined) : undefined,
+        crossoverCompany: state.type === "crossover" ? crossoverCompanyFinal || undefined : undefined,
+        crossoverOriginalGrade: state.type === "crossover" ? state.crossoverOriginalGrade || undefined : undefined,
+        crossoverCertNumber: state.type === "crossover" ? state.crossoverCertNumber || undefined : undefined,
+        reholderCompany: state.type === "reholder" ? state.reholderCompany || undefined : undefined,
+        reholderReason: state.type === "reholder" ? state.reholderReason || undefined : undefined,
+        reholderCondition: state.type === "reholder" ? state.reholderCondition || undefined : undefined,
+        reholderCertNumber: state.type === "reholder" ? state.reholderCertNumber || undefined : undefined,
+        authReason: state.type === "authentication" ? state.authReason || undefined : undefined,
+        authConcerns: state.type === "authentication" ? state.authConcerns || undefined : undefined,
         revealWrap: state.revealWrap,
         marketingFeatureConsent: marketingConsent,
       });
@@ -1151,7 +1344,10 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
 
   return (
     <div>
-      <h2 className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center" data-testid="text-step5-title">
+      <h2
+        className="text-2xl font-sans font-black text-[#D4AF37] tracking-tight mb-2 text-center"
+        data-testid="text-step5-title"
+      >
         Secure Payment
       </h2>
       <p className="text-[#1A1A1A]/50 text-center mb-8 text-sm">Complete your order</p>
@@ -1160,11 +1356,15 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
         <div className="border border-[#D4AF37]/20 rounded-2xl p-4 bg-[#D4AF37]/5 space-y-1">
           <div className="flex justify-between text-sm">
             <span className="text-[#D4AF37]/60">Shipping to</span>
-            <span className="text-[#1A1A1A]">{state.firstName} {state.lastName}</span>
+            <span className="text-[#1A1A1A]">
+              {state.firstName} {state.lastName}
+            </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#D4AF37]/60">Address</span>
-            <span className="text-[#1A1A1A] text-right">{state.addressLine1}, {state.city}, {state.postcode}</span>
+            <span className="text-[#1A1A1A] text-right">
+              {state.addressLine1}, {state.city}, {state.postcode}
+            </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-[#D4AF37]/60">Email</span>
@@ -1195,42 +1395,99 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
               <ul className="text-[#555555] text-xs leading-relaxed space-y-1.5 list-disc pl-4">
                 <li>Grading is a professional opinion, not a guaranteed outcome.</li>
                 <li>Declared Value must be honest and accurate. Under-declaring limits your cover.</li>
-                <li>Our liability for loss or damage is capped by your Declared Value and selected Value Protection tier.</li>
+                <li>
+                  Our liability for loss or damage is capped by your Declared Value and selected Value Protection tier.
+                </li>
                 <li>You have 14 days from delivery to inspect and report any issues.</li>
-                <li>We may refuse to grade, return raw, or retain for investigation if a Card appears altered, counterfeit, or subject to a dispute.</li>
+                <li>
+                  We may refuse to grade, return raw, or retain for investigation if a Card appears altered,
+                  counterfeit, or subject to a dispute.
+                </li>
               </ul>
             </div>
             <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-              <input type="checkbox" id="legal-accept" checked={termsAccepted && liabilityAccepted}
-                onChange={(e) => { setTermsAccepted(e.target.checked); setLiabilityAccepted(e.target.checked); }}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-legal-combined" />
+              <input
+                type="checkbox"
+                id="legal-accept"
+                checked={termsAccepted && liabilityAccepted}
+                onChange={(e) => {
+                  setTermsAccepted(e.target.checked);
+                  setLiabilityAccepted(e.target.checked);
+                }}
+                className="mt-1 accent-[#D4AF37]"
+                data-testid="checkbox-legal-combined"
+              />
               <label htmlFor="legal-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I have read and accept the{" "}
-                <a href="/legal/website-terms" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Website Terms</a>,{" "}
-                <a href="/legal/submission-agreement" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Submission Agreement</a>, and{" "}
-                <a href="/legal/guarantee" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Guarantee &amp; Correction Policy</a>.
+                <a
+                  href="/legal/website-terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#D4AF37] underline"
+                >
+                  Website Terms
+                </a>
+                ,{" "}
+                <a
+                  href="/legal/submission-agreement"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#D4AF37] underline"
+                >
+                  Submission Agreement
+                </a>
+                , and{" "}
+                <a
+                  href="/legal/guarantee"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#D4AF37] underline"
+                >
+                  Guarantee &amp; Correction Policy
+                </a>
+                .
               </label>
             </div>
           </>
         ) : (
           <>
             <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-              <input type="checkbox" id="liability-accept" checked={liabilityAccepted}
+              <input
+                type="checkbox"
+                id="liability-accept"
+                checked={liabilityAccepted}
                 onChange={(e) => setLiabilityAccepted(e.target.checked)}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-liability" />
+                className="mt-1 accent-[#D4AF37]"
+                data-testid="checkbox-liability"
+              />
               <label htmlFor="liability-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I confirm I have read and agree to the{" "}
-                <Link href="/terms-and-conditions"><span className="text-[#D4AF37] underline">Liability & Shipping Policy</span></Link>.
-                I understand I am responsible for insured inbound shipping and that MintVault's liability is limited to the declared value of my submission.
+                <Link href="/terms-and-conditions">
+                  <span className="text-[#D4AF37] underline">Liability & Shipping Policy</span>
+                </Link>
+                . I understand I am responsible for insured inbound shipping and that MintVault's liability is limited
+                to the declared value of my submission.
               </label>
             </div>
             <div className="flex items-start gap-2 border border-[#D4AF37]/20 rounded p-3 bg-[#D4AF37]/5">
-              <input type="checkbox" id="terms-accept" checked={termsAccepted}
+              <input
+                type="checkbox"
+                id="terms-accept"
+                checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="mt-1 accent-[#D4AF37]" data-testid="checkbox-terms" />
+                className="mt-1 accent-[#D4AF37]"
+                data-testid="checkbox-terms"
+              />
               <label htmlFor="terms-accept" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
                 I confirm I have read and agree to the MintVault UK Ltd{" "}
-                <a href="/terms-and-conditions" target="_blank" rel="noopener noreferrer" className="text-[#D4AF37] underline">Terms & Conditions</a>
+                <a
+                  href="/terms-and-conditions"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#D4AF37] underline"
+                >
+                  Terms & Conditions
+                </a>
               </label>
             </div>
           </>
@@ -1250,8 +1507,8 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
             data-testid="checkbox-marketing-consent"
           />
           <label htmlFor="marketing-consent" className="text-[#1A1A1A]/70 text-xs leading-relaxed cursor-pointer">
-            Feature this card in MintVault marketing (social videos, weekly highlights).
-            Your cert ID and grade may be shown publicly. You can withdraw anytime from your account.
+            Feature this card in MintVault marketing (social videos, weekly highlights). Your cert ID and grade may be
+            shown publicly. You can withdraw anytime from your account.
           </label>
         </div>
 
@@ -1274,18 +1531,22 @@ function Step5Payment({ state, tier, onSuccess, vcPercent = 0, vcTier = null }: 
         </div>
 
         {error && (
-          <p className="text-red-400 text-sm" data-testid="text-payment-error">{error}</p>
+          <p className="text-red-400 text-sm" data-testid="text-payment-error">
+            {error}
+          </p>
         )}
 
-        <button
+        <GradientButton
+          as="button"
           type="submit"
           disabled={isPending || !stripe || !liabilityAccepted || !termsAccepted}
-          className="gold-shimmer w-full py-3.5 rounded-xl font-black tracking-widest text-sm active:scale-95 transition-transform disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          height="48px"
+          className="gradient-btn-filled w-full"
           data-testid="button-pay"
         >
           <CreditCard size={18} />
           {isPending ? "Processing..." : `Pay £${(effectiveTotal / 100).toFixed(2)} Securely`}
-        </button>
+        </GradientButton>
       </form>
     </div>
   );
@@ -1340,9 +1601,7 @@ function TypeSelector({ onSelect }: { onSelect: (type: string) => void }) {
             className="border border-[#D4AF37]/20 hover:border-[#D4AF37]/60 bg-[#FAFAF8] hover:bg-[#D4AF37]/5 rounded-2xl p-5 text-left transition-all group"
             data-testid={`button-type-${opt.id}`}
           >
-            <h3 className="text-[#D4AF37] font-black text-lg tracking-tighter mb-1">
-              {opt.name}
-            </h3>
+            <h3 className="text-[#D4AF37] font-black text-lg tracking-tighter mb-1">{opt.name}</h3>
             <p className="text-[#1A1A1A]/70 text-sm font-medium mb-2">{opt.desc}</p>
             <p className="text-[#1A1A1A]/40 text-xs leading-relaxed">{opt.detail}</p>
           </button>
@@ -1361,7 +1620,9 @@ function SubmitWizardInner() {
       if (parsed.v !== "mv-wizard-v4") return 1;
       if (parsed.savedAt && Date.now() - parsed.savedAt > 24 * 60 * 60 * 1000) return 1;
       return parsed.step || 1;
-    } catch { return 1; }
+    } catch {
+      return 1;
+    }
   });
   const [, navigate] = useLocation();
 
@@ -1426,7 +1687,7 @@ function SubmitWizardInner() {
         // Never restore type from localStorage — always require the user to choose a service
         // on a fresh visit. Type can still be set via URL param (?type=reholder etc.)
         type: resolvedType,
-        tier: resolvedType ? (urlTier || saved.state.tier) : resolvedTier,
+        tier: resolvedType ? urlTier || saved.state.tier : resolvedTier,
       };
     }
     return defaultState;
@@ -1450,7 +1711,9 @@ function SubmitWizardInner() {
   const activeTiers = fetchedTiers || pricingTiers;
 
   // Capacity data — used to grey out full tiers on step 1
-  const { data: capacityData } = useQuery<Record<string, { active: number; max: number; full: boolean; forceOpen: boolean }>>({
+  const { data: capacityData } = useQuery<
+    Record<string, { active: number; max: number; full: boolean; forceOpen: boolean }>
+  >({
     queryKey: ["/api/capacity"],
     queryFn: async () => {
       const res = await fetch("/api/capacity");
@@ -1467,7 +1730,7 @@ function SubmitWizardInner() {
   }, [urlTier, activeTiers]);
 
   useEffect(() => {
-    if (state.tier && activeTiers.length > 0 && !activeTiers.some(t => t.id === state.tier)) {
+    if (state.tier && activeTiers.length > 0 && !activeTiers.some((t) => t.id === state.tier)) {
       setState((s) => ({ ...s, tier: "" }));
     }
   }, [state.type, activeTiers]);
@@ -1476,11 +1739,13 @@ function SubmitWizardInner() {
 
   const canNext = () => {
     switch (step) {
-      case 1: return !!state.tier;
+      case 1:
+        return !!state.tier;
       case 2: {
         if (state.quantity <= 0 || state.declaredValue <= 0) return false;
         if (state.type === "crossover") {
-          const company = state.crossoverCompany === "Other" ? state.crossoverCompanyOther.trim() : state.crossoverCompany;
+          const company =
+            state.crossoverCompany === "Other" ? state.crossoverCompanyOther.trim() : state.crossoverCompany;
           if (!company) return false;
         }
         if (state.type === "reholder") {
@@ -1491,9 +1756,19 @@ function SubmitWizardInner() {
         }
         return true;
       }
-      case 3: return true;
-      case 4: return !!state.email && !!state.firstName && !!state.lastName && !!state.addressLine1 && !!state.city && !!state.postcode;
-      default: return false;
+      case 3:
+        return true;
+      case 4:
+        return (
+          !!state.email &&
+          !!state.firstName &&
+          !!state.lastName &&
+          !!state.addressLine1 &&
+          !!state.city &&
+          !!state.postcode
+        );
+      default:
+        return false;
     }
   };
 
@@ -1503,18 +1778,24 @@ function SubmitWizardInner() {
     navigate(`/submit/success?id=${submissionId}${tokenParam}`);
   };
 
-  const typeName = submissionTypes.find(t => t.id === state.type)?.name || state.type;
+  const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
 
   if (!state.type) {
-    return <TypeSelector onSelect={(type) => setState((s) => ({
-      ...s,
-      type,
-      tier: "",
-      crossoverCompany: "",
-      crossoverCompanyOther: "",
-      crossoverOriginalGrade: "",
-      crossoverCertNumber: "",
-    }))} />;
+    return (
+      <TypeSelector
+        onSelect={(type) =>
+          setState((s) => ({
+            ...s,
+            type,
+            tier: "",
+            crossoverCompany: "",
+            crossoverCompanyOther: "",
+            crossoverOriginalGrade: "",
+            crossoverCertNumber: "",
+          }))
+        }
+      />
+    );
   }
 
   return (
@@ -1525,13 +1806,23 @@ function SubmitWizardInner() {
         </span>
       </div>
 
-      <StepIndicator step={step} accentColor={gameAccentColor(state.cardItems.find(c => c.game)?.game ?? "")} />
+      <StepIndicator step={step} accentColor={gameAccentColor(state.cardItems.find((c) => c.game)?.game ?? "")} />
 
       {step === 1 && <Step1Tier state={state} setState={setState} tiers={activeTiers} capacity={capacityData} />}
       {step === 2 && <Step2Cards state={state} setState={setState} />}
-      {step === 3 && <Step3Review state={state} setState={setState} tier={selectedTier} vcPercent={vcPercent} vcTier={vcTier} />}
+      {step === 3 && (
+        <Step3Review state={state} setState={setState} tier={selectedTier} vcPercent={vcPercent} vcTier={vcTier} />
+      )}
       {step === 4 && <Step4Shipping state={state} setState={setState} />}
-      {step === 5 && <Step5Payment state={state} tier={selectedTier} onSuccess={handleSuccess} vcPercent={vcPercent} vcTier={vcTier} />}
+      {step === 5 && (
+        <Step5Payment
+          state={state}
+          tier={selectedTier}
+          onSuccess={handleSuccess}
+          vcPercent={vcPercent}
+          vcTier={vcTier}
+        />
+      )}
 
       <div className="flex justify-between mt-8 max-w-md mx-auto">
         {step > 1 && step < 5 && (
@@ -1554,25 +1845,29 @@ function SubmitWizardInner() {
         )}
 
         {step < 4 && (
-          <button
+          <GradientButton
+            as="button"
             onClick={() => canNext() && setStep(step + 1)}
             disabled={!canNext()}
-            className="gold-shimmer ml-auto flex items-center gap-1.5 px-6 py-2.5 rounded-xl font-black tracking-widest text-sm active:scale-95 transition-transform disabled:cursor-not-allowed"
+            height="42px"
+            className="gradient-btn-filled ml-auto"
             data-testid="button-next"
           >
             Next <ArrowRight size={16} />
-          </button>
+          </GradientButton>
         )}
 
         {step === 4 && (
-          <button
+          <GradientButton
+            as="button"
             onClick={() => canNext() && setStep(5)}
             disabled={!canNext()}
-            className="gold-shimmer ml-auto flex items-center gap-1.5 px-6 py-2.5 rounded-xl font-black tracking-widest text-sm active:scale-95 transition-transform disabled:cursor-not-allowed"
+            height="42px"
+            className="gradient-btn-filled ml-auto"
             data-testid="button-proceed-payment"
           >
             Proceed to Payment <ArrowRight size={16} />
-          </button>
+          </GradientButton>
         )}
       </div>
     </div>

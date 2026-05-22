@@ -36,6 +36,7 @@ import {
   type UnifiedOption,
 } from "@/lib/unifiedCardOptions";
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
   certificate: CertificateRecord | null;
@@ -2078,15 +2079,17 @@ export default function CertificateForm({
           </p>
         )}
 
-        <button
+        <GradientButton
+          as="button"
           type="submit"
           disabled={mutation.isPending}
-          className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          height="48px"
+          className="w-full"
           data-testid="button-save-cert"
         >
           <Save size={16} />
           {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Save Certificate"}
-        </button>
+        </GradientButton>
       </form>
     </div>
   );

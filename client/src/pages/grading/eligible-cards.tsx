@@ -1,15 +1,28 @@
 import { Link } from "wouter";
 import { ArrowRight, Check, X } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 const ELIGIBLE = [
-  { game: "Pokémon TCG", desc: "All sets from Base Set to current releases. English, Japanese, and other languages welcome." },
-  { game: "Magic: The Gathering", desc: "All sets from Alpha to current. Includes vintage, modern, and Commander cards." },
+  {
+    game: "Pokémon TCG",
+    desc: "All sets from Base Set to current releases. English, Japanese, and other languages welcome.",
+  },
+  {
+    game: "Magic: The Gathering",
+    desc: "All sets from Alpha to current. Includes vintage, modern, and Commander cards.",
+  },
   { game: "Yu-Gi-Oh!", desc: "All TCG and OCG cards. English, Japanese, Asian English, Korean." },
   { game: "One Piece TCG", desc: "All Bandai-licensed sets." },
   { game: "Lorcana", desc: "All Disney Lorcana sets." },
-  { game: "Sports Cards", desc: "Football, basketball, baseball, hockey, soccer, F1, UFC. Topps, Panini, Upper Deck, and more." },
-  { game: "Other TCGs", desc: "Digimon, Dragon Ball Super, Weiss Schwarz, Cardfight Vanguard, and others. Contact us if your card type isn't listed." },
+  {
+    game: "Sports Cards",
+    desc: "Football, basketball, baseball, hockey, soccer, F1, UFC. Topps, Panini, Upper Deck, and more.",
+  },
+  {
+    game: "Other TCGs",
+    desc: "Digimon, Dragon Ball Super, Weiss Schwarz, Cardfight Vanguard, and others. Contact us if your card type isn't listed.",
+  },
 ];
 
 const INELIGIBLE = [
@@ -41,7 +54,6 @@ export default function EligibleCardsPage() {
       </section>
 
       <div className="max-w-3xl mx-auto px-6 py-16 space-y-16">
-
         {/* Currently grading */}
         <section>
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-6">Currently Grading</p>
@@ -68,7 +80,10 @@ export default function EligibleCardsPage() {
               <div
                 key={item}
                 className="flex items-center gap-4 px-5 py-3.5"
-                style={{ background: i % 2 === 0 ? "#fff" : "#FAFAF8", borderBottom: i < INELIGIBLE.length - 1 ? "1px solid #E8E4DC" : "none" }}
+                style={{
+                  background: i % 2 === 0 ? "#fff" : "#FAFAF8",
+                  borderBottom: i < INELIGIBLE.length - 1 ? "1px solid #E8E4DC" : "none",
+                }}
               >
                 <X size={14} className="text-[#CC4444] flex-shrink-0" />
                 <span className="text-sm text-[#1a1a1a]">{item}</span>
@@ -81,7 +96,8 @@ export default function EligibleCardsPage() {
         <section className="p-6 rounded-2xl bg-[#FFF9E6] border border-[#D4AF37]/20 no-text-shadow">
           <p className="text-[#B8960C] text-xs font-bold uppercase tracking-[0.2em] mb-3">Card Conditions Accepted</p>
           <p className="text-[#1a1a1a] text-base leading-relaxed">
-            We grade cards in any condition from grade 1 to grade 10 Pristine 10P. Even heavily played cards can be graded for population reports and authentication purposes.
+            We grade cards in any condition from grade 1 to grade 10 Pristine 10P. Even heavily played cards can be
+            graded for population reports and authentication purposes.
           </p>
         </section>
       </div>
@@ -89,13 +105,11 @@ export default function EligibleCardsPage() {
       {/* CTA */}
       <section className="border-t border-[#E8E4DC] bg-[#FAFAF8] px-6 py-16">
         <div className="max-w-xl mx-auto text-center space-y-6">
-          <h2 className="text-2xl font-black text-[#1A1A1A]">
-            Ready to submit?
-          </h2>
-          <Link href="/submit">
-            <button className="gold-shimmer inline-flex items-center gap-2 font-bold text-sm px-8 py-4 rounded-xl">
+          <h2 className="text-2xl font-black text-[#1A1A1A]">Ready to submit?</h2>
+          <Link href="/submit" className="no-underline">
+            <GradientButton height="48px" className="gradient-btn-filled">
               Submit Your Cards <ArrowRight size={15} />
-            </button>
+            </GradientButton>
           </Link>
         </div>
       </section>

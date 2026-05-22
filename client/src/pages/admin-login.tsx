@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { Shield, LogIn, KeyRound, Eye, EyeOff } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
   onLogin?: () => void;
@@ -120,18 +121,22 @@ export default function AdminLoginPage({ onLogin }: Props) {
             </div>
 
             {error && (
-              <p className="text-red-400 text-sm" data-testid="text-login-error">{error}</p>
+              <p className="text-red-400 text-sm" data-testid="text-login-error">
+                {error}
+              </p>
             )}
 
-            <button
+            <GradientButton
+              as="button"
               type="submit"
               disabled={loading}
-              className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              height="48px"
+              className="w-full"
               data-testid="button-admin-login"
             >
               <LogIn size={16} />
               {loading ? "Verifying..." : "Continue"}
-            </button>
+            </GradientButton>
           </form>
         ) : (
           <form onSubmit={handlePinSubmit} className="space-y-4" data-testid="form-pin">
@@ -166,22 +171,30 @@ export default function AdminLoginPage({ onLogin }: Props) {
             </div>
 
             {error && (
-              <p className="text-red-400 text-sm" data-testid="text-login-error">{error}</p>
+              <p className="text-red-400 text-sm" data-testid="text-login-error">
+                {error}
+              </p>
             )}
 
-            <button
+            <GradientButton
+              as="button"
               type="submit"
               disabled={loading || pin.length < 6}
-              className="w-full border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] py-3 rounded font-bold tracking-widest text-sm transition-all btn-gold-glow hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              height="48px"
+              className="w-full"
               data-testid="button-admin-pin-submit"
             >
               <KeyRound size={16} />
               {loading ? "Verifying..." : "Unlock"}
-            </button>
+            </GradientButton>
 
             <button
               type="button"
-              onClick={() => { setStep("password"); setPin(""); setError(""); }}
+              onClick={() => {
+                setStep("password");
+                setPin("");
+                setError("");
+              }}
               className="w-full text-[#999999] text-xs hover:text-[#D4AF37] transition-colors"
               data-testid="button-back-to-password"
             >

@@ -1,4 +1,5 @@
 import { Swords, Flame, Zap, Trophy, Star, Target, Crown, Gem } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 const tcgList = [
   {
@@ -77,19 +78,15 @@ export default function TcgPage() {
       </div>
 
       <div className="border border-[#D4AF37]/20 rounded-lg p-6 mt-10 text-center" data-testid="card-tcg-cta">
-        <h3 className="text-[#D4AF37] font-semibold text-lg mb-2 glow-gold-sm">
-          Don't see your TCG?
-        </h3>
+        <h3 className="text-[#D4AF37] font-semibold text-lg mb-2 glow-gold-sm">Don't see your TCG?</h3>
         <p className="text-gray-400 text-sm mb-4">
-          We're always expanding our grading capabilities. Get in touch and we'll let you know
-          if we can grade your cards.
+          We're always expanding our grading capabilities. Get in touch and we'll let you know if we can grade your
+          cards.
         </p>
-        <a
-          href="mailto:info@mintvaultuk.co.uk"
-          className="inline-block border border-[#D4AF37] bg-black text-[#D4AF37] px-6 py-2.5 rounded font-medium tracking-wide transition-all btn-gold-glow hover:bg-[#D4AF37]/10"
-          data-testid="button-contact-tcg"
-        >
-          Contact Us
+        <a href="mailto:info@mintvaultuk.co.uk" className="no-underline inline-block">
+          <GradientButton height="42px" data-testid="button-contact-tcg">
+            Contact Us
+          </GradientButton>
         </a>
       </div>
     </div>

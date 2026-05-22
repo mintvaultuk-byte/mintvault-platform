@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
   children: ReactNode;
@@ -28,12 +29,9 @@ export default class ErrorBoundary extends Component<Props, State> {
             <p className="text-[#d4d4d4] text-sm mb-6">
               An unexpected error occurred. Please refresh the page to continue.
             </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="btn-gold px-6 py-2 rounded-lg text-sm font-semibold"
-            >
+            <GradientButton height="42px" className="gradient-btn-filled" onClick={() => window.location.reload()}>
               Refresh page
-            </button>
+            </GradientButton>
           </div>
         </div>
       );

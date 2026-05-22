@@ -6,6 +6,7 @@ import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
+import GradientButton from "@/components/ui/gradient-button";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -39,9 +40,9 @@ interface HomepageStats {
 // same Fraunces display + sans body conventions as the rest of section B.
 
 const PROCESS_STEPS: { num: string; title: string; desc: string }[] = [
-  { num: "01", title: "Submit",  desc: "Send your card insured to our UK grading facility." },
-  { num: "02", title: "Grade",   desc: "Our team grades, photographs, and slabs your card." },
-  { num: "03", title: "Track",   desc: "Every slab links to a live logbook with NFC." },
+  { num: "01", title: "Submit", desc: "Send your card insured to our UK grading facility." },
+  { num: "02", title: "Grade", desc: "Our team grades, photographs, and slabs your card." },
+  { num: "03", title: "Track", desc: "Every slab links to a live logbook with NFC." },
 ];
 
 function FoundingMembersStrip() {
@@ -90,7 +91,10 @@ function FoundingMembersStrip() {
         <p className="font-body text-[10px] md:text-xs uppercase tracking-widest mb-3" style={{ color: "#ffffff" }}>
           Founding members &middot; Limited cohort
         </p>
-        <h3 className="font-display italic font-medium text-2xl md:text-3xl leading-tight mb-3" style={{ color: "var(--v2-ink)" }}>
+        <h3
+          className="font-display italic font-medium text-2xl md:text-3xl leading-tight mb-3"
+          style={{ color: "var(--v2-ink)" }}
+        >
           Founding member submissions now open
         </h3>
         <p className="font-body text-sm md:text-base leading-relaxed mb-5" style={{ color: "var(--v2-ink-soft)" }}>
@@ -102,7 +106,10 @@ function FoundingMembersStrip() {
             inputMode="email"
             autoComplete="email"
             value={email}
-            onChange={(e) => { setEmail(e.target.value); if (status.kind !== "idle") setStatus({ kind: "idle" }); }}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (status.kind !== "idle") setStatus({ kind: "idle" });
+            }}
             placeholder="you@email.com"
             disabled={submitting}
             data-testid="input-waitlist-email"
@@ -171,7 +178,9 @@ function FadeIn({ children, className = "" }: { children: React.ReactNode; class
   useEffect(() => {
     if (!ref.current) return;
     const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      ([entry]) => {
+        if (entry.isIntersecting) setVisible(true);
+      },
       { threshold: 0.1 }
     );
     observer.observe(ref.current);
@@ -218,47 +227,44 @@ export default function HomeV2() {
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative vault-hero-section">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
-            <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#D4AF37" }}
-            >
-              Est. Kent &middot; MintVault UK
-            </p>
-            <h1
-              className="font-display font-medium leading-[0.95] mb-6"
-              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
-            >
-              The standard for<br />graded collectibles.
-            </h1>
-            <p
-              className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"
-              style={{ color: "var(--v2-ink-soft)" }}
-            >
-              AI-powered precision grading with NFC-linked certification.
-              Every grade logged, every slab traceable.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
-              <Link
-                href="/submit"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+          <p
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+            style={{ color: "#D4AF37" }}
+          >
+            Est. Kent &middot; MintVault UK
+          </p>
+          <h1
+            className="font-display font-medium leading-[0.95] mb-6"
+            style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+          >
+            The standard for
+            <br />
+            graded collectibles.
+          </h1>
+          <p
+            className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"
+            style={{ color: "var(--v2-ink-soft)" }}
+          >
+            AI-powered precision grading with NFC-linked certification. Every grade logged, every slab traceable.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-4 mb-5">
+            <Link href="/submit" className="no-underline">
+              <GradientButton height="44px" className="gradient-btn-filled">
                 Submit a card <ArrowRight size={14} />
-              </Link>
-              <Link
-                href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+              </GradientButton>
+            </Link>
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton height="44px">
                 Try AI Pre-Grade <ArrowRight size={14} />
-              </Link>
-            </div>
-            <p
-              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
-              style={{ color: "var(--v2-ink-mute)" }}
-            >
-              From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
-            </p>
+              </GradientButton>
+            </Link>
+          </div>
+          <p
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
+            style={{ color: "var(--v2-ink-mute)" }}
+          >
+            From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
+          </p>
         </div>
       </section>
 
@@ -270,18 +276,28 @@ export default function HomeV2() {
                 Replaces the original stats trio (2026-04-27). */}
             <FoundingMembersStrip />
 
-
             {/* Promises row */}
-            <div className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8" style={{ borderColor: "var(--v2-line)" }}>
+            <div
+              className="border-t pt-10 md:pt-12 grid grid-cols-2 md:grid-cols-3 gap-6 md:gap-8"
+              style={{ borderColor: "var(--v2-line)" }}
+            >
               {[
                 { icon: Cpu, title: "NFC-tracked", desc: "Every slab links to a live logbook" },
                 { icon: MapPin, title: "UK-based", desc: "Graded in Kent \u00b7 shipped across the UK" },
-                { icon: RefreshCw, title: "Ownership tracked", desc: "Each transfer recorded with a new reference number" },
+                {
+                  icon: RefreshCw,
+                  title: "Ownership tracked",
+                  desc: "Each transfer recorded with a new reference number",
+                },
               ].map(({ icon: Icon, title, desc }) => (
                 <div key={title}>
                   <Icon size={18} style={{ color: "var(--v2-gold)" }} className="mb-2" />
-                  <p className="font-body text-sm font-semibold mb-1" style={{ color: "var(--v2-ink)" }}>{title}</p>
-                  <p className="font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>{desc}</p>
+                  <p className="font-body text-sm font-semibold mb-1" style={{ color: "var(--v2-ink)" }}>
+                    {title}
+                  </p>
+                  <p className="font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>
+                    {desc}
+                  </p>
                 </div>
               ))}
             </div>
@@ -294,17 +310,26 @@ export default function HomeV2() {
         <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
           <DarkSectionGlow />
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
+            <p
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4"
+              style={{ color: "#D4AF37" }}
+            >
               I &middot; Grading Tiers
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-                Three tiers.<br /><span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One standard.</span>
+              <h2
+                className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+                style={{ color: "#FFFFFF" }}
+              >
+                Three tiers.
+                <br />
+                <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
+                  One standard.
+                </span>
               </h2>
               <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-                Every card, regardless of service level, passes the same four-point
-                inspection (centering, corners, edges, surface). Tier only changes
-                how quickly you see it back.
+                Every card, regardless of service level, passes the same four-point inspection (centering, corners,
+                edges, surface). Tier only changes how quickly you see it back.
               </p>
             </div>
 
@@ -313,16 +338,43 @@ export default function HomeV2() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
                 {[
                   {
-                    name: "Vault Queue", price: "19", days: "45 day", featured: false,
-                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Value up to \u00a3500"],
+                    name: "Vault Queue",
+                    price: "19",
+                    days: "45 day",
+                    featured: false,
+                    features: [
+                      "Same 4-point grading inspection",
+                      "NFC ownership chip",
+                      "Registry listing",
+                      "Value up to \u00a3500",
+                    ],
                   },
                   {
-                    name: "Standard", price: "25", days: "21 day", featured: true,
-                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Value up to \u00a32,500"],
+                    name: "Standard",
+                    price: "25",
+                    days: "21 day",
+                    featured: true,
+                    features: [
+                      "Same 4-point grading inspection",
+                      "NFC ownership chip",
+                      "Registry listing",
+                      "Photographic report",
+                      "Value up to \u00a32,500",
+                    ],
                   },
                   {
-                    name: "Express", price: "45", days: "5 day", featured: false,
-                    features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Priority handling", "Value up to \u00a310,000"],
+                    name: "Express",
+                    price: "45",
+                    days: "5 day",
+                    featured: false,
+                    features: [
+                      "Same 4-point grading inspection",
+                      "NFC ownership chip",
+                      "Registry listing",
+                      "Photographic report",
+                      "Priority handling",
+                      "Value up to \u00a310,000",
+                    ],
                   },
                 ].map((tier) => (
                   <div
@@ -392,8 +444,14 @@ export default function HomeV2() {
                     {/* Feature bullets — em-dash prefix */}
                     <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                       {tier.features.map((f) => (
-                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
-                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
+                        <li
+                          key={f}
+                          className="flex items-start gap-3 font-body text-sm"
+                          style={{ color: "var(--v2-ink-soft)" }}
+                        >
+                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>
+                            &mdash;
+                          </span>
                           {f}
                         </li>
                       ))}
@@ -427,68 +485,126 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
+            <p
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4"
+              style={{ color: "#D4AF37" }}
+            >
               II &middot; Infrastructure
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              <h2
+                className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 Three pieces of quiet infrastructure.
               </h2>
-              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-                Grading is the visible part. What makes a MintVault slab worth
-                more is what happens around it.
+              <p
+                className="font-body text-sm md:text-base leading-relaxed self-end"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                Grading is the visible part. What makes a MintVault slab worth more is what happens around it.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {/* Card 1 — NFC */}
               <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-panel-dark)" }}>
-                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+                <p
+                  className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4"
+                  style={{ color: "var(--v2-gold)" }}
+                >
                   01 &middot; NFC Ownership
                 </p>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "#FFFFFF" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4"
+                  style={{ color: "#FFFFFF" }}
+                >
                   Every slab knows who owns it.
                 </h3>
                 <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "#ffffff" }}>
-                  A sub-millimetre NFC chip inside each slab links to an ownership
-                  registry. Tap with any phone &mdash; instantly see provenance and
-                  transfer history. Slabs reported stolen flag publicly on the cert
-                  page.
+                  A sub-millimetre NFC chip inside each slab links to an ownership registry. Tap with any phone &mdash;
+                  instantly see provenance and transfer history. Slabs reported stolen flag publicly on the cert page.
                 </p>
                 {/* Radar ring visual */}
                 <div className="flex items-center justify-center h-24">
                   <div className="relative w-16 h-16">
-                    <div className="absolute inset-0 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.15, animationDuration: "2s" }} />
-                    <div className="absolute inset-2 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.25, animationDuration: "2s", animationDelay: "0.3s" }} />
-                    <div className="absolute inset-4 rounded-full border animate-ping" style={{ borderColor: "var(--v2-gold)", opacity: 0.4, animationDuration: "2s", animationDelay: "0.6s" }} />
+                    <div
+                      className="absolute inset-0 rounded-full border animate-ping"
+                      style={{ borderColor: "var(--v2-gold)", opacity: 0.15, animationDuration: "2s" }}
+                    />
+                    <div
+                      className="absolute inset-2 rounded-full border animate-ping"
+                      style={{
+                        borderColor: "var(--v2-gold)",
+                        opacity: 0.25,
+                        animationDuration: "2s",
+                        animationDelay: "0.3s",
+                      }}
+                    />
+                    <div
+                      className="absolute inset-4 rounded-full border animate-ping"
+                      style={{
+                        borderColor: "var(--v2-gold)",
+                        opacity: 0.4,
+                        animationDuration: "2s",
+                        animationDelay: "0.6s",
+                      }}
+                    />
                     <div className="absolute inset-[26px] rounded-full" style={{ backgroundColor: "var(--v2-gold)" }} />
                   </div>
                 </div>
               </div>
 
               {/* Card 2 — AI Pre-Grade */}
-              <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}>
-                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+              <div
+                className="rounded-xl p-6 md:p-8 flex flex-col"
+                style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}
+              >
+                <p
+                  className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4"
+                  style={{ color: "var(--v2-gold)" }}
+                >
                   02 &middot; AI Pre-Grade
                 </p>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   Know your grade before you post.
                 </h3>
                 <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "var(--v2-ink-soft)" }}>
-                  Upload two photos. Our centering, corner, edge and surface model
-                  returns a likely grade in under 10 seconds. Trained on {stats?.unique_cards ?? 114} unique cards
-                  across {uniqueSets} sets. Free.
+                  Upload two photos. Our centering, corner, edge and surface model returns a likely grade in under 10
+                  seconds. Trained on {stats?.unique_cards ?? 114} unique cards across {uniqueSets} sets. Free.
                 </p>
                 {/* Mono readout */}
-                <div className="rounded-lg p-4 font-mono-v2 text-[10px] leading-relaxed" style={{ backgroundColor: "var(--v2-paper-sunk)", color: "var(--v2-ink-soft)" }}>
+                <div
+                  className="rounded-lg p-4 font-mono-v2 text-[10px] leading-relaxed"
+                  style={{ backgroundColor: "var(--v2-paper-sunk)", color: "var(--v2-ink-soft)" }}
+                >
                   <p style={{ color: "var(--v2-ink)" }}>1999 Holo Charizard #4</p>
                   <div className="mt-2 space-y-0.5">
-                    <div className="flex justify-between"><span>Centering</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
-                    <div className="flex justify-between"><span>Corners</span><span style={{ color: "var(--v2-ink)" }}>9</span></div>
-                    <div className="flex justify-between"><span>Edges</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
-                    <div className="flex justify-between"><span>Surface</span><span style={{ color: "var(--v2-ink)" }}>10</span></div>
-                    <div className="flex justify-between border-t pt-1 mt-1 font-semibold" style={{ borderColor: "var(--v2-line)", color: "var(--v2-gold)" }}>
-                      <span>Predicted</span><span>MV 9</span>
+                    <div className="flex justify-between">
+                      <span>Centering</span>
+                      <span style={{ color: "var(--v2-ink)" }}>10</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Corners</span>
+                      <span style={{ color: "var(--v2-ink)" }}>9</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Edges</span>
+                      <span style={{ color: "var(--v2-ink)" }}>10</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Surface</span>
+                      <span style={{ color: "var(--v2-ink)" }}>10</span>
+                    </div>
+                    <div
+                      className="flex justify-between border-t pt-1 mt-1 font-semibold"
+                      style={{ borderColor: "var(--v2-line)", color: "var(--v2-gold)" }}
+                    >
+                      <span>Predicted</span>
+                      <span>MV 9</span>
                     </div>
                   </div>
                 </div>
@@ -502,25 +618,40 @@ export default function HomeV2() {
               </div>
 
               {/* Card 3 — Vault Club (Silver only at launch) */}
-              <div className="rounded-xl p-6 md:p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line-soft)" }}>
-                <p className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4" style={{ color: "var(--v2-gold)" }}>
+              <div
+                className="rounded-xl p-6 md:p-8 flex flex-col"
+                style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line-soft)" }}
+              >
+                <p
+                  className="font-mono-v2 text-[9px] uppercase tracking-[0.2em] mb-4"
+                  style={{ color: "var(--v2-gold)" }}
+                >
                   03 &middot; Vault Club
                 </p>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-tight mb-4"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   Membership for the serious.
                 </h3>
                 <p className="font-body text-xs leading-relaxed mb-6 flex-1" style={{ color: "var(--v2-ink-soft)" }}>
-                  Grading discounts, higher AI Pre-Grade allowance, priority queue,
-                  and a reserved username on the public registry.
+                  Grading discounts, higher AI Pre-Grade allowance, priority queue, and a reserved username on the
+                  public registry.
                 </p>
                 <div className="space-y-2 mb-5">
-                  <div className="flex items-center justify-between font-body text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>
+                  <div
+                    className="flex items-center justify-between font-body text-sm font-semibold"
+                    style={{ color: "var(--v2-ink)" }}
+                  >
                     <span>Silver</span>
                     <div className="text-right">
                       <span className="font-mono-v2 text-[11px]">&pound;9.99/mo</span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between font-body text-xs" style={{ color: "var(--v2-ink-mute)" }}>
+                  <div
+                    className="flex items-center justify-between font-body text-xs"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
                     <span></span>
                     <span className="font-mono-v2 text-[10px]">&pound;99/year</span>
                   </div>
@@ -542,24 +673,38 @@ export default function HomeV2() {
       <FadeIn>
         <section className="frost-paper-sunk">
           <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
-            <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
+            <p
+              className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4"
+              style={{ color: "#D4AF37" }}
+            >
               III &middot; Population Registry
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-              <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+              <h2
+                className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 The open population record.
               </h2>
-              <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-                Every card we grade, visible to the public. Populations, grade
-                distributions, last known sale. Collectors deserve to see the market
-                they trade in.
+              <p
+                className="font-body text-sm md:text-base leading-relaxed self-end"
+                style={{ color: "var(--v2-ink-soft)" }}
+              >
+                Every card we grade, visible to the public. Populations, grade distributions, last known sale.
+                Collectors deserve to see the market they trade in.
               </p>
             </div>
 
             {/* Ticker strip */}
             {recentCerts.length > 0 && (
-              <div className="overflow-hidden mb-10 rounded-lg py-3 px-4" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}>
-                <div className="flex items-center gap-6 animate-marquee whitespace-nowrap font-mono-v2 text-[10px]" style={{ color: "var(--v2-ink-mute)" }}>
+              <div
+                className="overflow-hidden mb-10 rounded-lg py-3 px-4"
+                style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}
+              >
+                <div
+                  className="flex items-center gap-6 animate-marquee whitespace-nowrap font-mono-v2 text-[10px]"
+                  style={{ color: "var(--v2-ink-mute)" }}
+                >
                   {[...recentCerts, ...recentCerts].map((cert, i) => (
                     <span key={i} className="flex items-center gap-2">
                       <span style={{ color: "var(--v2-gold)" }}>{cert.cert_number}</span>
@@ -581,19 +726,56 @@ export default function HomeV2() {
                 <table className="w-full text-left">
                   <thead>
                     <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
-                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>#</th>
-                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Card</th>
-                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Grade</th>
-                      <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>Set</th>
+                      <th
+                        className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
+                        #
+                      </th>
+                      <th
+                        className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
+                        Card
+                      </th>
+                      <th
+                        className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
+                        Grade
+                      </th>
+                      <th
+                        className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
+                        Set
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {recentCerts.map((cert, i) => (
-                      <tr key={cert.id} style={{ borderBottom: i < recentCerts.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
-                        <td className="font-mono-v2 text-[10px] py-3 px-4" style={{ color: "var(--v2-gold)" }}>{cert.cert_number}</td>
-                        <td className="font-body text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>{cert.card_name}</td>
-                        <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{cert.grade}</td>
-                        <td className="font-body text-xs py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>{cert.set_name}</td>
+                      <tr
+                        key={cert.id}
+                        style={{
+                          borderBottom: i < recentCerts.length - 1 ? "1px solid var(--v2-line-soft)" : undefined,
+                          backgroundColor: "var(--v2-paper-raised)",
+                        }}
+                      >
+                        <td className="font-mono-v2 text-[10px] py-3 px-4" style={{ color: "var(--v2-gold)" }}>
+                          {cert.cert_number}
+                        </td>
+                        <td className="font-body text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                          {cert.card_name}
+                        </td>
+                        <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                          {cert.grade}
+                        </td>
+                        <td
+                          className="font-body text-xs py-3 px-4 hidden md:table-cell"
+                          style={{ color: "var(--v2-ink-mute)" }}
+                        >
+                          {cert.set_name}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -624,29 +806,33 @@ export default function HomeV2() {
       >
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
-          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4" style={{ color: "#D4AF37" }}>
+          <p
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-[0.25em] no-text-shadow mb-4"
+            style={{ color: "#D4AF37" }}
+          >
             IV &middot; Submit
           </p>
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
-            Submit a card.<br />See yourself on the registry.
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6"
+            style={{ color: "#FFFFFF" }}
+          >
+            Submit a card.
+            <br />
+            See yourself on the registry.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             From &pound;19. UK-based. Insured in transit.
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-            <Link
-              href="/submit"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Submit a card <ArrowRight size={14} />
+          <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
+            <Link href="/submit" className="no-underline">
+              <GradientButton height="44px" className="gradient-btn-filled">
+                Submit a card <ArrowRight size={14} />
+              </GradientButton>
             </Link>
-            <Link
-              href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Try AI Pre-Grade (free) <ArrowRight size={14} />
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton height="44px">
+                Try AI Pre-Grade (free) <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
           <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-widest" style={{ color: "#ffffff" }}>

@@ -2,12 +2,36 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  LayoutDashboard, Mail, Loader2, CheckCircle, AlertCircle,
-  Package, Award, ArrowRightLeft, LogOut, ExternalLink, Download, Lock,
-  ChevronRight, Clock, Truck, Box, Settings, RefreshCw,
-  Globe, Copy, Check, Sparkles, Shield, Zap, TrendingDown,
-  Camera, MapPin, X,
+  LayoutDashboard,
+  Mail,
+  Loader2,
+  CheckCircle,
+  AlertCircle,
+  Package,
+  Award,
+  ArrowRightLeft,
+  LogOut,
+  ExternalLink,
+  Download,
+  Lock,
+  ChevronRight,
+  Clock,
+  Truck,
+  Box,
+  Settings,
+  RefreshCw,
+  Globe,
+  Copy,
+  Check,
+  Sparkles,
+  Shield,
+  Zap,
+  TrendingDown,
+  Camera,
+  MapPin,
+  X,
 } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 import VaultClubBadge from "@/components/vault-club-badge";
 import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
@@ -109,13 +133,13 @@ function SubgradeChip({ label, value }: { label: string; value: string | null })
 
 // ── Submission tracking helpers ────────────────────────────────────────────────
 const TRACKING_STEPS: Array<{ key: string; label: string; shortLabel: string }> = [
-  { key: "awaiting",     label: "Awaiting Your Card",  shortLabel: "Awaiting" },
-  { key: "received",     label: "Card Received",        shortLabel: "Received" },
-  { key: "queued",       label: "In Grading Queue",     shortLabel: "Queued" },
-  { key: "grading",      label: "Being Graded",         shortLabel: "Grading" },
-  { key: "encapsulating",label: "Encapsulating",        shortLabel: "Sealing" },
-  { key: "shipped",      label: "Shipped Back",         shortLabel: "Shipped" },
-  { key: "delivered",    label: "Delivered",            shortLabel: "Delivered" },
+  { key: "awaiting", label: "Awaiting Your Card", shortLabel: "Awaiting" },
+  { key: "received", label: "Card Received", shortLabel: "Received" },
+  { key: "queued", label: "In Grading Queue", shortLabel: "Queued" },
+  { key: "grading", label: "Being Graded", shortLabel: "Grading" },
+  { key: "encapsulating", label: "Encapsulating", shortLabel: "Sealing" },
+  { key: "shipped", label: "Shipped Back", shortLabel: "Shipped" },
+  { key: "delivered", label: "Delivered", shortLabel: "Delivered" },
 ];
 
 function getStepIndex(sub: CustomerSubmission): number {
@@ -145,14 +169,26 @@ function SubmissionProgress({ sub }: { sub: CustomerSubmission }) {
         return (
           <div key={step.key} className="flex items-center">
             <div className="flex flex-col items-center min-w-[42px]">
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] border transition-all ${
-                active ? "border-[#D4AF37] bg-[#D4AF37]/20 text-[#D4AF37] ring-2 ring-[#D4AF37]/30 ring-offset-1"
-                : done ? "border-[#D4AF37] bg-[#D4AF37]/15 text-[#D4AF37]"
-                : "border-[#E0DBD0] bg-transparent text-[#BBBBBB]"
-              }`}>
-                {done ? <Check size={10} /> : active ? <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" /> : <div className="w-1.5 h-1.5 rounded-full bg-[#D4DC]" />}
+              <div
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] border transition-all ${
+                  active
+                    ? "border-[#D4AF37] bg-[#D4AF37]/20 text-[#D4AF37] ring-2 ring-[#D4AF37]/30 ring-offset-1"
+                    : done
+                      ? "border-[#D4AF37] bg-[#D4AF37]/15 text-[#D4AF37]"
+                      : "border-[#E0DBD0] bg-transparent text-[#BBBBBB]"
+                }`}
+              >
+                {done ? (
+                  <Check size={10} />
+                ) : active ? (
+                  <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
+                ) : (
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#D4DC]" />
+                )}
               </div>
-              <span className={`text-[8px] mt-0.5 tracking-wide uppercase text-center leading-tight ${done || active ? "text-[#B8960C]" : "text-[#AAAAAA]"}`}>
+              <span
+                className={`text-[8px] mt-0.5 tracking-wide uppercase text-center leading-tight ${done || active ? "text-[#B8960C]" : "text-[#AAAAAA]"}`}
+              >
                 {step.shortLabel}
               </span>
             </div>
@@ -192,7 +228,11 @@ function SubmissionTimeline({ sub }: { sub: CustomerSubmission }) {
 function receiptPhotos(sub: CustomerSubmission): string[] {
   const raw = sub.on_receipt_photo_urls ?? sub.onReceiptPhotoUrls;
   if (!raw) return [];
-  try { return JSON.parse(raw); } catch { return []; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
 }
 
 function outboundTracking(sub: CustomerSubmission): string | null {
@@ -227,7 +267,8 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
   const preReceived = stepIdx === 0;
 
   const tierLabel: Record<string, string> = { standard: "Standard", priority: "Priority", express: "Express" };
-  const tierDisplay = tierLabel[(sub.serviceTier ?? sub.tier ?? "").toLowerCase()] ?? sub.serviceTier ?? sub.tier ?? "—";
+  const tierDisplay =
+    tierLabel[(sub.serviceTier ?? sub.tier ?? "").toLowerCase()] ?? sub.serviceTier ?? sub.tier ?? "—";
   const totalGbp = ((sub.totalAmount ?? 0) / 100).toFixed(2);
 
   return (
@@ -237,7 +278,9 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
         <div>
           <span className="font-mono text-[#D4AF37] text-sm font-bold">{sub.submissionId}</span>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            <span className="text-xs text-[#888888]">{sub.cardCount} card{sub.cardCount !== 1 ? "s" : ""}</span>
+            <span className="text-xs text-[#888888]">
+              {sub.cardCount} card{sub.cardCount !== 1 ? "s" : ""}
+            </span>
             <span className="text-[#CCCCCC]">·</span>
             <span className="text-xs text-[#888888]">{tierDisplay}</span>
             <span className="text-[#CCCCCC]">·</span>
@@ -253,7 +296,9 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
         {sub.estimatedCompletionDate && stepIdx < 6 && (
           <div className="flex items-center gap-1.5 text-xs text-[#B8960C] bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg px-3 py-2 mb-3">
             <Clock size={11} className="shrink-0" />
-            <span>Estimated completion: <strong>{fmtDate(sub.estimatedCompletionDate)}</strong></span>
+            <span>
+              Estimated completion: <strong>{fmtDate(sub.estimatedCompletionDate)}</strong>
+            </span>
           </div>
         )}
 
@@ -288,13 +333,14 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
 
             <div>
               <label className="block text-[10px] font-bold text-[#888888] uppercase tracking-wider mb-1">
-                Your Royal Mail tracking number <span className="font-normal text-[#CCCCCC] normal-case">(optional)</span>
+                Your Royal Mail tracking number{" "}
+                <span className="font-normal text-[#CCCCCC] normal-case">(optional)</span>
               </label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={trackingInput}
-                  onChange={e => setTrackingInput(e.target.value)}
+                  onChange={(e) => setTrackingInput(e.target.value)}
                   placeholder="e.g. AB123456789GB"
                   className="flex-1 border border-[#E8E4DC] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
                 />
@@ -304,11 +350,11 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                   className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-50 flex items-center gap-1 transition-all"
                   style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
                 >
-                  {trackingMutation.isPending
-                    ? <Loader2 size={10} className="animate-spin" />
-                    : trackingSaved
-                    ? <Check size={10} />
-                    : null}
+                  {trackingMutation.isPending ? (
+                    <Loader2 size={10} className="animate-spin" />
+                  ) : trackingSaved ? (
+                    <Check size={10} />
+                  ) : null}
                   {trackingSaved ? "Saved" : "Save"}
                 </button>
               </div>
@@ -354,7 +400,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
 
         {/* Timeline toggle */}
         <button
-          onClick={() => setShowTimeline(v => !v)}
+          onClick={() => setShowTimeline((v) => !v)}
           className="mt-4 flex items-center gap-1 text-[10px] text-[#AAAAAA] hover:text-[#888888] transition-colors"
         >
           <ChevronRight size={11} className={`transition-transform ${showTimeline ? "rotate-90" : ""}`} />
@@ -372,7 +418,8 @@ function GradeBadge({ cert }: { cert: CustomerCert }) {
   const grade = cert.gradeOverall;
   if (!grade) return <span className="text-[#999999] text-xs">—</span>;
   const num = parseFloat(grade);
-  const colour = num >= 10 ? "text-emerald-500" : num >= 9 ? "text-[#D4AF37]" : num >= 8 ? "text-blue-500" : "text-[#999999]";
+  const colour =
+    num >= 10 ? "text-emerald-500" : num >= 9 ? "text-[#D4AF37]" : num >= 8 ? "text-blue-500" : "text-[#999999]";
   return (
     <span className={`font-bold ${isNonNum ? "text-[#D4AF37] text-xs" : `${colour} text-lg`}`}>
       {isNonNum ? grade : num}
@@ -394,7 +441,10 @@ function LoginForm() {
       setSent(true);
     } catch (err: any) {
       let msg = "Failed to send login link. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
+      try {
+        const b = await err.json?.();
+        if (b?.error) msg = b.error;
+      } catch {}
       setError(msg);
     }
   }
@@ -405,11 +455,10 @@ function LoginForm() {
         <CheckCircle className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
         <h2 className="text-xl font-sans font-bold text-[#1A1A1A] tracking-tight mb-2">Check your inbox</h2>
         <p className="text-[#666666] text-sm">
-          We sent a login link to <strong className="text-[#1A1A1A]">{email}</strong>. Click it to access your dashboard.
+          We sent a login link to <strong className="text-[#1A1A1A]">{email}</strong>. Click it to access your
+          dashboard.
         </p>
-        <p className="text-[#999999] text-xs mt-4">
-          The link expires in 24 hours and can only be used once.
-        </p>
+        <p className="text-[#999999] text-xs mt-4">The link expires in 24 hours and can only be used once.</p>
       </div>
     );
   }
@@ -419,9 +468,7 @@ function LoginForm() {
       <div className="text-center mb-8">
         <LayoutDashboard className="w-12 h-12 text-[#D4AF37] mx-auto mb-4" />
         <h1 className="text-2xl font-sans font-bold text-[#1A1A1A] tracking-tight mb-2">Customer Dashboard</h1>
-        <p className="text-[#666666] text-sm">
-          Enter your email to receive a secure login link. No password needed.
-        </p>
+        <p className="text-[#666666] text-sm">Enter your email to receive a secure login link. No password needed.</p>
       </div>
       <div className="border border-[#D4AF37]/20 bg-white rounded-xl p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -443,13 +490,10 @@ function LoginForm() {
               {error}
             </div>
           )}
-          <button
-            type="submit"
-            className="btn-gold w-full py-2.5 rounded-lg font-bold tracking-wide text-[#1A1400] flex items-center justify-center gap-2"
-          >
+          <GradientButton as="button" type="submit" height="44px" className="gradient-btn-filled w-full">
             <Mail size={15} />
             Send Login Link
-          </button>
+          </GradientButton>
         </form>
         <p className="text-xs text-[#999999] mt-4 text-center">
           We'll send a one-click login link — no password required.
@@ -462,14 +506,16 @@ function LoginForm() {
 // ── Username suggestion helper ────────────────────────────────────────────────
 function suggestUsername(displayName: string | null, email: string): string {
   const source = displayName || email.split("@")[0];
-  return source
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/--+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 20) || "collector";
+  return (
+    source
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/--+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 20) || "collector"
+  );
 }
 
 // ── Vault Club section ────────────────────────────────────────────────────────
@@ -483,7 +529,13 @@ interface VaultClubMe {
   ai_credits_monthly: number;
 }
 
-function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; email: string; display_name: string | null; email_verified: boolean }; vcMe?: VaultClubMe | null }) {
+function VaultClubSection({
+  authMe,
+  vcMe: vcMeProp,
+}: {
+  authMe: { id: string; email: string; display_name: string | null; email_verified: boolean };
+  vcMe?: VaultClubMe | null;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   // Falls back to its own fetch if the parent didn't provide vcMe.
@@ -540,9 +592,8 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
   const renewsDate = vcMe?.renews_at
     ? new Date(vcMe.renews_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
     : null;
-  const creditPercent = vcMe && vcMe.ai_credits_monthly > 0
-    ? Math.round((vcMe.ai_credits_balance / vcMe.ai_credits_monthly) * 100)
-    : 0;
+  const creditPercent =
+    vcMe && vcMe.ai_credits_monthly > 0 ? Math.round((vcMe.ai_credits_balance / vcMe.ai_credits_monthly) * 100) : 0;
 
   if (!isMember) {
     return (
@@ -568,14 +619,16 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
 
   const tierColour: Record<string, string> = { bronze: "#CD7F32", silver: "#C0C0C0", gold: "#D4AF37" };
   const colour = vcMe!.tier ? tierColour[vcMe!.tier] : "#D4AF37";
-  const statusLabel: Record<string, string> = { active: "Active", trialing: "Free Trial", past_due: "Payment Due", grace: "Grace Period" };
+  const statusLabel: Record<string, string> = {
+    active: "Active",
+    trialing: "Free Trial",
+    past_due: "Payment Due",
+    grace: "Grace Period",
+  };
   const discountLabel: Record<string, string> = { silver: "10%" };
 
   return (
-    <div
-      className="border rounded-xl p-5 mb-6"
-      style={{ borderColor: `${colour}40`, background: `${colour}08` }}
-    >
+    <div className="border rounded-xl p-5 mb-6" style={{ borderColor: `${colour}40`, background: `${colour}08` }}>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <VaultClubBadge tier={vcMe!.tier} size="md" />
@@ -611,7 +664,10 @@ function VaultClubSection({ authMe, vcMe: vcMeProp }: { authMe: { id: string; em
           <p className="text-sm font-black text-[#1A1A1A]">{vcMe!.ai_credits_balance}</p>
           <p className="text-[10px] text-[#AAAAAA]">AI Credits</p>
           <div className="mt-1.5 h-1 bg-[#F0EDE6] rounded-full overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${creditPercent}%`, background: "linear-gradient(90deg,#B8960C,#D4AF37)" }} />
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${creditPercent}%`, background: "linear-gradient(90deg,#B8960C,#D4AF37)" }}
+            />
           </div>
         </div>
         <div className="bg-white/80 border border-[#E8E4DC]/60 rounded-lg p-2.5 text-center">
@@ -637,7 +693,11 @@ interface ShowroomMeData {
   showroom_claimed_at: string | null;
 }
 
-function ShowroomSection({ authMe }: { authMe: { id: string; email: string; display_name: string | null; email_verified: boolean } }) {
+function ShowroomSection({
+  authMe,
+}: {
+  authMe: { id: string; email: string; display_name: string | null; email_verified: boolean };
+}) {
   const queryClient = useQueryClient();
   const [usernameInput, setUsernameInput] = useState(() => suggestUsername(authMe.display_name, authMe.email));
   const [checkResult, setCheckResult] = useState<{ available: boolean; reason: string | null } | null>(null);
@@ -660,13 +720,18 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
 
   // Debounced availability check
   useEffect(() => {
-    if (!usernameInput || usernameInput.length < 3) { setCheckResult(null); return; }
+    if (!usernameInput || usernameInput.length < 3) {
+      setCheckResult(null);
+      return;
+    }
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/showroom/check-username?username=${encodeURIComponent(usernameInput)}`);
         const data = await res.json();
         setCheckResult(data);
-      } catch { setCheckResult(null); }
+      } catch {
+        setCheckResult(null);
+      }
     }, 300);
     return () => clearTimeout(t);
   }, [usernameInput]);
@@ -676,7 +741,9 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/showroom-me"] });
     },
-    onError: (err: Error) => { /* error handled by checkResult */ },
+    onError: (err: Error) => {
+      /* error handled by checkResult */
+    },
   });
 
   const bioMutation = useMutation({
@@ -727,7 +794,11 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
           >
             {showroomUrl}
           </a>
-          <button onClick={handleCopy} className="text-[#AAAAAA] hover:text-[#666666] transition-colors" title="Copy link">
+          <button
+            onClick={handleCopy}
+            className="text-[#AAAAAA] hover:text-[#666666] transition-colors"
+            title="Copy link"
+          >
             {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
           </button>
         </div>
@@ -748,7 +819,13 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             </span>
           ) : (
             <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
-              Reserved · <a href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist" className="font-semibold hover:text-amber-800">Join the Vault Club waitlist →</a>
+              Reserved ·{" "}
+              <a
+                href="mailto:support@mintvaultuk.com?subject=Vault%20Club%20waitlist"
+                className="font-semibold hover:text-amber-800"
+              >
+                Join the Vault Club waitlist →
+              </a>
             </span>
           )}
         </div>
@@ -756,11 +833,14 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
         {/* Bio */}
         <div>
           <label className="block text-[10px] font-bold text-[#888888] uppercase tracking-wider mb-1">
-            Bio <span className="text-[#CCCCCC] font-normal normal-case">({bio.length || currentBio.length}/280 · No URLs)</span>
+            Bio{" "}
+            <span className="text-[#CCCCCC] font-normal normal-case">
+              ({bio.length || currentBio.length}/280 · No URLs)
+            </span>
           </label>
           <textarea
             value={bio || currentBio}
-            onChange={e => setBio(e.target.value.slice(0, 280))}
+            onChange={(e) => setBio(e.target.value.slice(0, 280))}
             placeholder="Tell collectors about yourself…"
             rows={2}
             className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
@@ -772,7 +852,11 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
             className="mt-2 px-4 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-60 flex items-center gap-1 transition-all"
             style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
           >
-            {bioMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : bioSaved ? <Check size={11} /> : null}
+            {bioMutation.isPending ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : bioSaved ? (
+              <Check size={11} />
+            ) : null}
             {bioSaved ? "Saved" : "Save Bio"}
           </button>
         </div>
@@ -794,28 +878,39 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
         <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Claim Your Showroom</h2>
       </div>
       <p className="text-xs text-[#888888] mb-4">
-        Get your own public collection page at <span className="text-[#B8960C] font-semibold">mintvaultuk.com/showroom/[your-name]</span>. Show off your verified graded cards to the world.
+        Get your own public collection page at{" "}
+        <span className="text-[#B8960C] font-semibold">mintvaultuk.com/showroom/[your-name]</span>. Show off your
+        verified graded cards to the world.
       </p>
 
       <div className="space-y-3">
         <div>
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#AAAAAA] pointer-events-none select-none">showroom/</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#AAAAAA] pointer-events-none select-none">
+              showroom/
+            </span>
             <input
               type="text"
               value={usernameInput}
-              onChange={e => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
               placeholder="your-username"
               maxLength={20}
               className="w-full pl-[76px] pr-4 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
             />
           </div>
           {usernameInput.length >= 3 && checkResult && (
-            <p className={`text-xs mt-1 flex items-center gap-1 ${checkResult.available ? "text-emerald-600" : "text-red-600"}`}>
-              {checkResult.available
-                ? <><Check size={11} /> Available</>
-                : <><span className="font-bold">✕</span> {reasonLabel[checkResult.reason as string] || "Not available"}</>
-              }
+            <p
+              className={`text-xs mt-1 flex items-center gap-1 ${checkResult.available ? "text-emerald-600" : "text-red-600"}`}
+            >
+              {checkResult.available ? (
+                <>
+                  <Check size={11} /> Available
+                </>
+              ) : (
+                <>
+                  <span className="font-bold">✕</span> {reasonLabel[checkResult.reason as string] || "Not available"}
+                </>
+              )}
             </p>
           )}
           {usernameInput.length > 0 && usernameInput.length < 3 && (
@@ -838,7 +933,9 @@ function ShowroomSection({ authMe }: { authMe: { id: string; email: string; disp
         </button>
 
         {claimMutation.isError && (
-          <p className="text-xs text-red-600">{(claimMutation.error as Error)?.message || "Failed to claim. Try again."}</p>
+          <p className="text-xs text-red-600">
+            {(claimMutation.error as Error)?.message || "Failed to claim. Try again."}
+          </p>
         )}
       </div>
     </div>
@@ -872,9 +969,7 @@ function AccountBanner({ authMe }: { authMe: AuthMe }) {
     <div className="mb-6 flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
       <div className="flex items-start gap-2">
         <AlertCircle size={14} className="text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-800 font-medium">
-          Please verify your email address to unlock all features.
-        </p>
+        <p className="text-xs text-amber-800 font-medium">Please verify your email address to unlock all features.</p>
       </div>
       {resendSent ? (
         <span className="text-xs text-emerald-700 font-semibold whitespace-nowrap">Link sent!</span>
@@ -947,7 +1042,11 @@ export default function DashboardPage() {
     staleTime: 30_000,
     enabled: !!authMe,
   });
-  const isMember = !!(vcMe?.tier === "silver" && vcMe?.status && (vcMe.status === "active" || vcMe.status === "trialing"));
+  const isMember = !!(
+    vcMe?.tier === "silver" &&
+    vcMe?.status &&
+    (vcMe.status === "active" || vcMe.status === "trialing")
+  );
 
   // Showroom username — lifted to page level so MemberHeader can render the
   // user's full display name as a gold link to their Showroom. ShowroomSection
@@ -1042,222 +1141,222 @@ export default function DashboardPage() {
           overflow: "hidden",
         }}
       >
-      {/* Banner — vault-club-room photograph at top of dashboard */}
-      <div
-        className="w-full h-[200px] md:h-[280px] bg-cover bg-center bg-[#0a0e1a]"
-        style={{ backgroundImage: "url('/images/vault-club-room.webp')" }}
-        aria-hidden="true"
-      />
-      <div className="max-w-3xl mx-auto px-4 pt-0 pb-8" style={{ position: "relative", zIndex: 1 }}>
-
-        {/* Premium / standard header — switches on Vault Club Silver membership */}
-        <MemberHeader
-          me={me}
-          authMe={authMe ?? null}
-          vcMe={vcMe ?? null}
-          isMember={isMember}
-          onLogout={() => logoutMutation.mutate()}
-          showroomUsername={showroomMe?.username ?? null}
+        {/* Banner — vault-club-room photograph at top of dashboard */}
+        <div
+          className="w-full h-[200px] md:h-[280px] bg-cover bg-center bg-[#0a0e1a]"
+          style={{ backgroundImage: "url('/images/vault-club-room.webp')" }}
+          aria-hidden="true"
         />
+        <div className="max-w-3xl mx-auto px-4 pt-0 pb-8" style={{ position: "relative", zIndex: 1 }}>
+          {/* Premium / standard header — switches on Vault Club Silver membership */}
+          <MemberHeader
+            me={me}
+            authMe={authMe ?? null}
+            vcMe={vcMe ?? null}
+            isMember={isMember}
+            onLogout={() => logoutMutation.mutate()}
+            showroomUsername={showroomMe?.username ?? null}
+          />
 
-        {/* Account welcome + verification banner */}
-        {authMe && <AccountBanner authMe={authMe} />}
+          {/* Account welcome + verification banner */}
+          {authMe && <AccountBanner authMe={authMe} />}
 
-        {/* Vault Club section — shown for email+password account users */}
-        {authMe && <VaultClubSection authMe={authMe} vcMe={vcMe ?? null} />}
+          {/* Vault Club section — shown for email+password account users */}
+          {authMe && <VaultClubSection authMe={authMe} vcMe={vcMe ?? null} />}
 
-        {/* Showroom section — only shown for email+password account users */}
-        {authMe && <ShowroomSection authMe={authMe} />}
+          {/* Showroom section — only shown for email+password account users */}
+          {authMe && <ShowroomSection authMe={authMe} />}
 
-        {loginSuccess && (
-          <div className="mb-6 flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-300 rounded-lg px-4 py-3">
-            <CheckCircle size={15} className="shrink-0" />
-            {switchedAccounts && me?.email
-              ? `You're now signed in as ${me.email}. The previous account has been signed out on this device.`
-              : "Logged in successfully."}
-          </div>
-        )}
-
-        {/* ── Section 1: My Submissions ──────────────────────────────────── */}
-        <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Package size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">My Submissions</h2>
-          </div>
-
-          {subsLoading ? (
-            <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
-          ) : !submissions?.length ? (
-            <div className="border border-white/10 rounded-xl p-8 text-center">
-              <Package size={32} className="text-[#D4AF37]/20 mx-auto mb-3" />
-              <p className="text-white/60 text-sm mb-1">You haven't submitted any cards yet.</p>
-              <Link href="/submit">
-                <button className="btn-gold mt-4 px-5 py-2 rounded-lg text-[#1A1400] text-xs font-bold tracking-wide">
-                  Submit Your First Card →
-                </button>
-              </Link>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {submissions.map((sub) => (
-                <SubmissionCard key={sub.id} sub={sub} />
-              ))}
+          {loginSuccess && (
+            <div className="mb-6 flex items-center gap-2 text-sm text-green-600 bg-green-50 border border-green-300 rounded-lg px-4 py-3">
+              <CheckCircle size={15} className="shrink-0" />
+              {switchedAccounts && me?.email
+                ? `You're now signed in as ${me.email}. The previous account has been signed out on this device.`
+                : "Logged in successfully."}
             </div>
           )}
-        </section>
 
-        {/* ── Section 2: Graded Cards ────────────────────────────────────── */}
-        <section className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            <Award size={16} className="text-[#D4AF37]" />
-            <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Your Cards</h2>
-          </div>
-
-          {certsLoading ? (
-            <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
-          ) : !linkedCerts.length ? (
-            <div className="border border-white/10 rounded-xl p-6 text-center">
-              <p className="text-white/60 text-sm">No graded cards found for this email yet.</p>
+          {/* ── Section 1: My Submissions ──────────────────────────────────── */}
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Package size={16} className="text-[#D4AF37]" />
+              <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">My Submissions</h2>
             </div>
-          ) : (
-            <div>
-              {linkedCerts.map((cert) => {
-                // Same logic as the old `ownedCerts` filter — viewer is the
-                // current registered owner of this cert.
-                const isOwnedByViewer =
-                  cert.ownershipStatus === "claimed" &&
-                  cert.ownerEmail?.toLowerCase() === me.email?.toLowerCase();
-                // Cert was linked to viewer (e.g. they were the submitter)
-                // but ownership has since transferred elsewhere.
-                const transferredAway =
-                  !isOwnedByViewer && cert.ownershipStatus === "claimed";
-                const isStolen = cert.stolenStatus === "reported_stolen";
-                return (
-                  <div
-                    key={cert.certId}
-                    onClick={() => setLocation(`/cert/${cert.certId}`)}
-                    className={`block transition-colors rounded-xl p-4 mb-3 group cursor-pointer ${
-                      isStolen
-                        ? "bg-red-50 hover:bg-red-100 border-2 border-red-600 stolen-card-glow"
-                        : "bg-[#FAFAF8] hover:bg-[#F5F1E8] border border-[#E8E4DC]"
-                    }`}
-                  >
-                    <div className="flex gap-4">
-                      {/* 90×124 card thumbnail */}
-                      <div className="relative flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
-                        {cert.frontImageUrl ? (
-                          <img
-                            src={cert.frontImageUrl}
-                            alt={cert.cardName ?? cert.certId}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[10px] text-[#888] tracking-wider">
-                            NO IMAGE
-                          </div>
-                        )}
-                        {isStolen && (
-                          <span className="absolute top-1 left-1 bg-red-600 text-white text-[8px] font-black tracking-widest px-1.5 py-0.5 rounded shadow" role="alert">
-                            STOLEN
-                          </span>
-                        )}
-                      </div>
 
-                      {/* Body */}
-                      <div className="flex-1 min-w-0 flex flex-col">
-                        <div className="flex items-start justify-between gap-3 mb-1">
-                          <div className="min-w-0">
-                            <p className="text-base font-medium text-[#1A1A1A] truncate">
-                              {cert.cardName ?? "Unnamed card"}
-                            </p>
-                            <p className="text-xs text-[#888] mt-0.5">
-                              {[cert.setName, cert.cardNumber && `#${cert.cardNumber}`, cert.year].filter(Boolean).join(" · ")}
-                            </p>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className="text-2xl font-medium text-[#D4AF37] leading-none">
-                              {cert.gradeOverall ?? "–"}
+            {subsLoading ? (
+              <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
+            ) : !submissions?.length ? (
+              <div className="border border-white/10 rounded-xl p-8 text-center">
+                <Package size={32} className="text-[#D4AF37]/20 mx-auto mb-3" />
+                <p className="text-white/60 text-sm mb-1">You haven't submitted any cards yet.</p>
+                <Link href="/submit" className="no-underline">
+                  <GradientButton height="36px" className="gradient-btn-filled mt-4">
+                    Submit Your First Card →
+                  </GradientButton>
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {submissions.map((sub) => (
+                  <SubmissionCard key={sub.id} sub={sub} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* ── Section 2: Graded Cards ────────────────────────────────────── */}
+          <section className="mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <Award size={16} className="text-[#D4AF37]" />
+              <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Your Cards</h2>
+            </div>
+
+            {certsLoading ? (
+              <div className="animate-pulse h-28 bg-[#D4AF37]/5 rounded-xl border border-[#D4AF37]/10" />
+            ) : !linkedCerts.length ? (
+              <div className="border border-white/10 rounded-xl p-6 text-center">
+                <p className="text-white/60 text-sm">No graded cards found for this email yet.</p>
+              </div>
+            ) : (
+              <div>
+                {linkedCerts.map((cert) => {
+                  // Same logic as the old `ownedCerts` filter — viewer is the
+                  // current registered owner of this cert.
+                  const isOwnedByViewer =
+                    cert.ownershipStatus === "claimed" && cert.ownerEmail?.toLowerCase() === me.email?.toLowerCase();
+                  // Cert was linked to viewer (e.g. they were the submitter)
+                  // but ownership has since transferred elsewhere.
+                  const transferredAway = !isOwnedByViewer && cert.ownershipStatus === "claimed";
+                  const isStolen = cert.stolenStatus === "reported_stolen";
+                  return (
+                    <div
+                      key={cert.certId}
+                      onClick={() => setLocation(`/cert/${cert.certId}`)}
+                      className={`block transition-colors rounded-xl p-4 mb-3 group cursor-pointer ${
+                        isStolen
+                          ? "bg-red-50 hover:bg-red-100 border-2 border-red-600 stolen-card-glow"
+                          : "bg-[#FAFAF8] hover:bg-[#F5F1E8] border border-[#E8E4DC]"
+                      }`}
+                    >
+                      <div className="flex gap-4">
+                        {/* 90×124 card thumbnail */}
+                        <div className="relative flex-shrink-0 w-[90px] h-[124px] rounded-lg overflow-hidden bg-[#F1EFE8] border border-[#E8E4DC]">
+                          {cert.frontImageUrl ? (
+                            <img
+                              src={cert.frontImageUrl}
+                              alt={cert.cardName ?? cert.certId}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-[10px] text-[#888] tracking-wider">
+                              NO IMAGE
                             </div>
-                            <div className="text-[9px] tracking-widest text-[#888] font-medium mt-1">
-                              {gradeLabel(cert.gradeOverall)}
-                            </div>
-                          </div>
+                          )}
+                          {isStolen && (
+                            <span
+                              className="absolute top-1 left-1 bg-red-600 text-white text-[8px] font-black tracking-widest px-1.5 py-0.5 rounded shadow"
+                              role="alert"
+                            >
+                              STOLEN
+                            </span>
+                          )}
                         </div>
 
-                        {/* Subgrade chips — only render if at least one is set */}
-                        {(cert.gradeCentering || cert.gradeCorners || cert.gradeEdges || cert.gradeSurface) && (
-                          <div className="flex gap-1.5 mt-2 flex-wrap">
-                            <SubgradeChip label="CEN" value={cert.gradeCentering} />
-                            <SubgradeChip label="COR" value={cert.gradeCorners} />
-                            <SubgradeChip label="EDG" value={cert.gradeEdges} />
-                            <SubgradeChip label="SUR" value={cert.gradeSurface} />
+                        {/* Body */}
+                        <div className="flex-1 min-w-0 flex flex-col">
+                          <div className="flex items-start justify-between gap-3 mb-1">
+                            <div className="min-w-0">
+                              <p className="text-base font-medium text-[#1A1A1A] truncate">
+                                {cert.cardName ?? "Unnamed card"}
+                              </p>
+                              <p className="text-xs text-[#888] mt-0.5">
+                                {[cert.setName, cert.cardNumber && `#${cert.cardNumber}`, cert.year]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <div className="text-2xl font-medium text-[#D4AF37] leading-none">
+                                {cert.gradeOverall ?? "–"}
+                              </div>
+                              <div className="text-[9px] tracking-widest text-[#888] font-medium mt-1">
+                                {gradeLabel(cert.gradeOverall)}
+                              </div>
+                            </div>
                           </div>
-                        )}
 
-                        {/* Footer: cert ID + issue date */}
-                        <div className="mt-auto pt-3 flex items-center justify-between">
-                          <span className="text-[11px] text-[#B8960C] font-medium tracking-wide group-hover:text-[#D4AF37]">
-                            {cert.certId} <ExternalLink size={10} className="inline" />
-                          </span>
-                          <span className="text-[10px] text-[#888]">
-                            issued {formatDate(cert.createdAt)}
-                          </span>
+                          {/* Subgrade chips — only render if at least one is set */}
+                          {(cert.gradeCentering || cert.gradeCorners || cert.gradeEdges || cert.gradeSurface) && (
+                            <div className="flex gap-1.5 mt-2 flex-wrap">
+                              <SubgradeChip label="CEN" value={cert.gradeCentering} />
+                              <SubgradeChip label="COR" value={cert.gradeCorners} />
+                              <SubgradeChip label="EDG" value={cert.gradeEdges} />
+                              <SubgradeChip label="SUR" value={cert.gradeSurface} />
+                            </div>
+                          )}
+
+                          {/* Footer: cert ID + issue date */}
+                          <div className="mt-auto pt-3 flex items-center justify-between">
+                            <span className="text-[11px] text-[#B8960C] font-medium tracking-wide group-hover:text-[#D4AF37]">
+                              {cert.certId} <ExternalLink size={10} className="inline" />
+                            </span>
+                            <span className="text-[10px] text-[#888]">issued {formatDate(cert.createdAt)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Owner-action footer (owned-by-viewer only). Wrapped in
+                      {/* Owner-action footer (owned-by-viewer only). Wrapped in
                         a stopPropagation onClick so the inner buttons/links
                         don't trigger the outer card-navigation handler. */}
-                    {isOwnedByViewer && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-3 pt-3 border-t border-black/[0.08] flex items-center justify-between gap-2.5 flex-wrap"
-                      >
-                        <a
-                          href={`/logbook/${cert.certId}/owner.pdf`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[12px] text-[#B8960C] hover:text-[#D4AF37] font-medium inline-flex items-center gap-1.5"
+                      {isOwnedByViewer && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-3 pt-3 border-t border-black/[0.08] flex items-center justify-between gap-2.5 flex-wrap"
                         >
-                          <Lock size={11} />
-                          Download Owner Copy
-                        </a>
-                        <span className="text-[10px] text-[#888] italic flex-1 text-right min-w-0">
-                          Includes your reference number — keep private
-                        </span>
-                        <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
-                          <a className="text-[11px] text-[#B8960C] hover:bg-[#FAF7F0] border border-[#D4AF37]/40 rounded-md py-1.5 px-3 font-medium transition-colors inline-flex items-center gap-1.5">
-                            <ArrowRightLeft size={11} />
-                            Transfer
+                          <a
+                            href={`/logbook/${cert.certId}/owner.pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[12px] text-[#B8960C] hover:text-[#D4AF37] font-medium inline-flex items-center gap-1.5"
+                          >
+                            <Lock size={11} />
+                            Download Owner Copy
                           </a>
-                        </Link>
-                      </div>
-                    )}
+                          <span className="text-[10px] text-[#888] italic flex-1 text-right min-w-0">
+                            Includes your reference number — keep private
+                          </span>
+                          <Link href={`/transfer?certId=${encodeURIComponent(cert.certId)}`}>
+                            <a className="text-[11px] text-[#B8960C] hover:bg-[#FAF7F0] border border-[#D4AF37]/40 rounded-md py-1.5 px-3 font-medium transition-colors inline-flex items-center gap-1.5">
+                              <ArrowRightLeft size={11} />
+                              Transfer
+                            </a>
+                          </Link>
+                        </div>
+                      )}
 
-                    {/* Transferred-away note (linked-but-not-owned). */}
-                    {transferredAway && (
-                      <div className="mt-3 pt-3 border-t border-black/[0.08]">
-                        <span className="text-[10px] text-[#888] italic">
-                          submitted by you · transferred to another owner
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                      {/* Transferred-away note (linked-but-not-owned). */}
+                      {transferredAway && (
+                        <div className="mt-3 pt-3 border-t border-black/[0.08]">
+                          <span className="text-[10px] text-[#888] italic">
+                            submitted by you · transferred to another owner
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
-        {/* ── Section 3: Ownership & Transfers — REMOVED.
+          {/* ── Section 3: Ownership & Transfers — REMOVED.
               Owner-action footer (Download Owner Copy + Transfer) is now
               rendered conditionally at the bottom of each cert card in
               "Your Cards" above. The standalone OwnedCertRow component +
               the duplicated cert metadata it displayed were collapsed in
               favour of one card per cert. ──────────────────────────── */}
-      </div>
+        </div>
       </div>
     </>
   );
