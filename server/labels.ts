@@ -793,7 +793,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
   // Left — "GRADED UNDER".
   ctx.save();
-  ctx.font = "bold 10px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "left";
@@ -832,7 +832,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // Right — "MINTVAULT GRADING STANDARD".
   ctx.save();
-  ctx.font = "bold 10px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "right";
