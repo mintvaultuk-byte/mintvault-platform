@@ -454,7 +454,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const grade     = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
-  const FRONT_BANNER_H = 28;                  // dark strip across the inner top
+  const BANNER_H = 60;                        // matches the back-label MVGS banner
   const PANEL_W = 148;                        // right grade panel (≈ 18%, -5.7%)
   const STRIP_H = 44;                         // v432: 28→44 — taller strip hosts rarity (left) + cert ID (right) at matched main-line size.
   const panelX  = I_RIGHT - PANEL_W;          // 651
@@ -465,24 +465,79 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const textLeft = I_LEFT + TXT_PAD;          // 47
   const textMaxW = panelX - textLeft - 6;     // 495
 
-  // Vertical content zone — starts BELOW the front banner so the wordmark
+  // Vertical content zone — starts BELOW the MVGS banner so the wordmark
   // lockup, grade panel, and text block all sit clear of the dark strip.
-  const contentT = I_TOP + FRONT_BANNER_H;
+  const contentT = I_TOP + BANNER_H;
   const contentB = stripY;
 
-  // ── 0. TOP BANNER — full inner width dark strip ───────────────────────────
-  // Drawn first so subsequent content (artwork, panel, wordmark) renders
-  // into the post-banner zone via the shifted contentT / panelY origins.
-  ctx.fillStyle = "#1A1A1A";
-  ctx.fillRect(I_LEFT, I_TOP, I_W, FRONT_BANNER_H);
+  // ── 0. TOP BANNER — MVGS attribution strip (matches drawBack) ─────────────
+  // Front has no left gold panel and no QR, so the corridor spans the full
+  // inner width: PANEL_RIGHT = I_LEFT, qrX = I_RIGHT.
+  {
+    const PANEL_RIGHT    = I_LEFT;
+    const qrX            = I_RIGHT;
+    const corridorCentre = (PANEL_RIGHT + qrX) / 2;
+    const bannerMidY     = I_TOP + BANNER_H / 2;
+
+    // Banner fill (full inner width).
+    ctx.fillStyle = "#1A1A1A";
+    ctx.fillRect(I_LEFT, I_TOP, I_W, BANNER_H);
+
+    // Left — "GRADED UNDER", centred in the gap between PANEL_RIGHT and the
+    // corridor centre (matching the back-label x position).
+    ctx.save();
+    ctx.font = "900 12px Arial, Helvetica, sans-serif";
+    (ctx as any).letterSpacing = "1.5px";
+    ctx.fillStyle    = "#FFFFFF";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("GRADED UNDER", PANEL_RIGHT + (corridorCentre - PANEL_RIGHT) / 2, bannerMidY);
+    ctx.restore();
+
+    // Centre — MVGS mark (rectangle + text). Hard-clamped + integer-rounded
+    // + image smoothing off, mirroring the drawBack implementation.
+    ctx.save();
+    (ctx as any).imageSmoothingEnabled = false;
+    const markFontSize = 22;
+    ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
+    (ctx as any).letterSpacing = "2px";
+    const markTextW = ctx.measureText("MVGS").width;
+    const markPadX  = 20;
+    const markPadY  = 8;
+    const markRectW = Math.round(markTextW + markPadX * 2);
+    const markRectH = Math.round(markFontSize + markPadY * 2);
+    let markRectX   = Math.round(corridorCentre - markRectW / 2);
+    const minMarkX  = Math.round(PANEL_RIGHT + 10);
+    if (markRectX < minMarkX) markRectX = minMarkX;
+    const markRectY = Math.round(bannerMidY - markRectH / 2);
+    const markTextX = Math.round(markRectX + markRectW / 2);
+    const markTextY = Math.round(markRectY + markPadY + markFontSize * 0.85);
+    ctx.strokeStyle = "#D4AF37";
+    ctx.lineWidth   = 3;
+    ctx.strokeRect(markRectX, markRectY, markRectW, markRectH);
+    ctx.fillStyle   = "#D4AF37";
+    ctx.textAlign   = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("MVGS", markTextX, markTextY);
+    ctx.restore();
+
+    // Right — "MINTVAULT GRADING STANDARD", right-anchored at qrX - 14.
+    ctx.save();
+    ctx.font = "900 12px Arial, Helvetica, sans-serif";
+    (ctx as any).letterSpacing = "1.5px";
+    ctx.fillStyle    = "#FFFFFF";
+    ctx.textAlign    = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 14, bannerMidY);
+    ctx.restore();
+  }
 
   // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
   // If artwork is available, draw it then add a white wash overlay so dark
-  // text remains legible on any card image. No dark overlays — white bg design.
-  // Artwork now occupies the inner area BELOW the banner (y starts at
-  // contentT, height = I_H - FRONT_BANNER_H).
+  // text remains legible on any card image. Artwork occupies the inner area
+  // BELOW the banner (y starts at contentT, height = I_H - BANNER_H).
   const artworkUrl = (cert as any).frontImageUrl;
-  const artH = I_H - FRONT_BANNER_H;
+  const artH = I_H - BANNER_H;
   if (artworkUrl) {
     try {
       const artImg = await loadImage(artworkUrl);
@@ -606,8 +661,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   }
 
   // ── 3. BOTTOM STRIP ───────────────────────────────────────────────────────
-  ctx.fillStyle = labelBg;
-  ctx.fillRect(I_LEFT, stripY, I_W, STRIP_H);
+  // Strip background fill removed — the strip now inherits whatever was
+  // drawn below it (artwork + wash, or the canvas base). Cert ID + rarity
+  // text continue to render directly on top.
 
   // ── GRADE PANEL cert ID — right-anchored 8px from inner gold border ────────
   {
