@@ -759,204 +759,146 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // the cert ID). Nothing more to draw in the white panel.
 }
 
-async function drawBack(ctx: any, cert: CertificateRecord, logo: any, loadImage: any, labelBg = WHITE, labelFg = "#1A1A1A") {
-  // ── Layout constants — declared up front so the top banner can centre
-  //    its MVGS mark relative to the left gold panel and the QR. Both
-  //    blocks below (QR + panel) re-use these references; do not redeclare.
-  const PANEL_W = 50;
-  const PANEL_X = I_LEFT;
-  const qrSize  = 160;
-  const qrX     = I_RIGHT - qrSize;
+async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage: any, _labelBg = WHITE, _labelFg = "#1A1A1A") {
+  // ── Layout constants ─────────────────────────────────────────────────────
+  const PANEL_X      = I_LEFT;                  // 18
+  const PANEL_W      = 58;
+  const PANEL_RIGHT  = PANEL_X + PANEL_W;       // 76
+  const BANNER_H     = 60;
+  const BANNER_BG    = "#1A1A1A";
+  const BANNER_MUTED = "#666666";
+  const GOLD_MARK    = GOLD_LIGHT;              // #D4AF37
+  const INK          = "#1A1A1A";
+  const bannerY      = I_TOP;
+  const bannerMidY   = I_TOP + BANNER_H / 2;
+  const qrSize       = 160;
+  const qrX          = I_RIGHT - qrSize;
+  const qrY          = I_TOP;
+  const centreX      = (PANEL_RIGHT + qrX) / 2;
 
-  // ── TOP BANNER — MVGS attribution strip ──────────────────────────────────
-  // Full inner-width dark banner. The QR (drawn below) overlays the right
-  // portion since its white box flushes to the top-right corner — the right
-  // text is positioned before the QR's left edge so it stays visible.
-  // Applies to both Black Label and Standard (white) label variants.
-  const BANNER_H = 48;
-  const BANNER_BG = "#1A1A1A";
-  const BANNER_MUTED_FG = "#888888";
-  const BANNER_MARK_FG = GOLD_LIGHT;
-  const bannerY = I_TOP;
-  const bannerMidY = bannerY + BANNER_H / 2;
+  // ── 1. WHITE BACKGROUND FILL ─────────────────────────────────────────────
+  // Overpaints the inner area white regardless of label variant. The back
+  // is uniformly white-bg with dark text + gold accents for both Black
+  // Label and Standard variants.
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
 
+  // ── 2. BANNER fillRect ───────────────────────────────────────────────────
+  // Banner spans from the panel's right edge to I_RIGHT (NOT full inner
+  // width) so the gold panel (drawn later, step 4) sits on top of nothing
+  // dark and bleeds cleanly into the inner frame.
   ctx.fillStyle = BANNER_BG;
-  ctx.fillRect(I_LEFT, bannerY, I_W, BANNER_H);
+  ctx.fillRect(PANEL_RIGHT, I_TOP, I_RIGHT - PANEL_RIGHT, BANNER_H);
 
-  // Centre — MVGS mark (rectangle border with "MVGS" inside). Centred in
-  // the corridor between the left gold panel and the QR — not the full
-  // inner width — so the doubled mark cannot overlap the panel.
+  // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
+  // Left — "GRADED UNDER".
   ctx.save();
-  const markFontSize = 40;
+  ctx.font = "9px Arial, Helvetica, sans-serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle    = BANNER_MUTED;
+  ctx.textAlign    = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("GRADED UNDER", PANEL_RIGHT + 14, bannerMidY);
+  ctx.restore();
+
+  // Centre — MVGS mark (rectangle + text). Hard-clamped so the rect's
+  // left edge cannot encroach on the gold panel.
+  ctx.save();
+  const markFontSize = 28;
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
-  const markPadX = 20;
-  const markPadY = 12;
+  const markPadX  = 20;
+  const markPadY  = 8;
   const markRectW = Math.round(markTextW + markPadX * 2);
   const markRectH = markFontSize + markPadY * 2;
-  // Mid-point between the panel's right edge and the QR's left edge.
-  const corridorCenterX = (PANEL_X + PANEL_W + qrX) / 2;
-  let markRectX = Math.round(corridorCenterX - markRectW / 2);
-  // Hard floor — the rect's left edge must never sit on or past the gold
-  // panel. If centring would put it too close, shift right.
-  const minMarkRectX = PANEL_X + PANEL_W + 10;
-  if (markRectX < minMarkRectX) markRectX = minMarkRectX;
+  let markRectX   = Math.round(centreX - markRectW / 2);
+  const minMarkX  = PANEL_RIGHT + 10;
+  if (markRectX < minMarkX) markRectX = minMarkX;
   const markRectY = Math.round(bannerMidY - markRectH / 2);
-  // The text follows the (possibly clamped) rect so the glyph stays centred
-  // inside the box, not inside the original corridor mid-point.
-  const markTextX = markRectX + markRectW / 2;
-  ctx.strokeStyle = BANNER_MARK_FG;
-  ctx.lineWidth = 2.5;
-  ctx.strokeRect(markRectX + 0.5, markRectY + 0.5, markRectW - 1, markRectH - 1);
-  ctx.fillStyle = BANNER_MARK_FG;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("MVGS", markTextX, bannerMidY);
+  ctx.strokeStyle = GOLD_MARK;
+  ctx.lineWidth   = 3;
+  ctx.strokeRect(markRectX, markRectY, markRectW, markRectH);
+  ctx.fillStyle   = GOLD_MARK;
+  ctx.textAlign   = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("MVGS", markRectX + markRectW / 2, markRectY + markPadY + markFontSize * 0.85);
   ctx.restore();
 
-  // Left — "GRADED UNDER" small caps, muted.
+  // Right — "MINTVAULT GRADING STANDARD".
   ctx.save();
-  ctx.font = "10px Arial, Helvetica, sans-serif";
+  ctx.font = "9px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle = BANNER_MUTED_FG;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText("GRADED UNDER", I_LEFT + 10, bannerMidY);
-  ctx.restore();
-
-  // Right — "MINTVAULT GRADING STANDARD" small caps, muted. Right-anchored
-  // BEFORE the QR's left edge so it remains visible after the QR overlays
-  // the top-right corner of the banner below.
-  ctx.save();
-  ctx.font = "10px Arial, Helvetica, sans-serif";
-  (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle = BANNER_MUTED_FG;
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 10, bannerMidY);
-  ctx.restore();
-
-  // ── QR CODE — top-right corner, flush to inner gold borders ──────────────
-  // Clean white background, no border, no framing — high contrast for scanning.
-  // v425 — QR shrunk 187→160 and cert font max 28→24. Post-v424 the inner
-  // height (I_H=200) couldn't fit a 187px QR + 28px cert ID line below it,
-  // so the cert text was bleeding into the bottom of the QR. New geometry:
-  // QR ends y=178, cert ID centred at y=198 (text spans 186-210), 8px
-  // breathing room above and below.
-  // qrSize and qrX are lifted to the top of drawBack so the banner can
-  // centre its mark in the panel↔QR corridor; declared here only:
-  const qrPad  = 0;                          // QR's internal margin:1 (~6px) provides quiet zone — no external pad needed
-  const qrY    = I_TOP;                      // flush to top inner border
-  const qrCenterX = qrX + qrSize / 2;
-
-  // White box matches QR dimensions exactly (no external pad).
-  const wbLeft   = qrX - qrPad;
-  const wbTop    = I_TOP;
-  const wbW      = qrSize + qrPad;
-  const wbH      = qrSize + qrPad;
-  const wbBottom = wbTop + wbH;
-
-  // Cert ID: visually centred between the QR image bottom and the inner
-  // gold border. With qrPad=0, wbBottom == qrY+qrSize.
-  const certFontH  = 24;
-  const certMidY   = Math.round((qrY + qrSize + I_BOTTOM) / 2);
-
-  // Left edge of the QR zone (used for NFC_ICON_CX midpoint calculation below)
-  const gfLeft = wbLeft;                    // 645 — alias kept for layout calc
-
-  const certUrl = getCertUrl(cert.certId);
-  const qrBuf   = await generateQRBuffer(certUrl, qrSize);
-  const qrImg   = await loadImage(qrBuf);
-
-  // White box
-  ctx.fillStyle = WHITE;
-  ctx.fillRect(wbLeft, wbTop, wbW, wbH);
-
-  // QR image on white background
-  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
-
-  // Cert ID — readable below the QR box, right-anchored against the inner
-  // gold border so it grows leftward as cert IDs lengthen. The visual render
-  // strips the "MV" prefix (cert.certId stays "MV42" everywhere else — only
-  // the printed glyphs differ).
+  ctx.fillStyle    = BANNER_MUTED;
   ctx.textAlign    = "right";
   ctx.textBaseline = "middle";
-  const certBackFit = fitFontSize(ctx, cert.certId.replace(/^MV/, ""), wbW - 8, certFontH, 14);
-  ctx.font          = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
-  ctx.fillStyle     = labelFg;
-  ctx.shadowBlur    = 0;
-  ctx.shadowColor   = "transparent";
-  ctx.fillText(cert.certId.replace(/^MV/, ""), qrX + qrSize - 8, certMidY);
+  ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 14, bannerMidY);
+  ctx.restore();
 
-  // ── THREE-ZONE LAYOUT ────────────────────────────────────────────
-  //
-  //   LEFT   — Gold panel + rotated "MINTVAULT" wordmark
-  //   CENTRE — NFC waves + URL + tap text
-  //   RIGHT  — QR code (flush top-right; overlays banner's right portion)
-  //
-  // Left gold panel — sits below the banner, runs to the inner bottom.
-  // Replaces the previous shield logo image with a serif "MINTVAULT"
-  // wordmark rotated 90° (reads bottom-to-top).
-  // PANEL_X / PANEL_W are lifted to the top of drawBack so the banner can
-  // reference them; only PANEL_Y / PANEL_H are declared here.
-  const PANEL_Y = I_TOP + BANNER_H;
-  const PANEL_H = I_BOTTOM - PANEL_Y;
-
+  // ── 4. GOLD PANEL fillRect ───────────────────────────────────────────────
+  // Drawn AFTER the banner so the panel cleanly covers the banner's left
+  // edge if any rendering drifted. Full inner height — not just below the
+  // banner — so the wordmark has the full vertical canvas to centre in.
   ctx.fillStyle = GOLD_LIGHT;
-  ctx.fillRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H);
+  ctx.fillRect(PANEL_X, I_TOP, PANEL_W, I_BOTTOM - I_TOP);
 
-  // Rotated wordmark — counterclockwise 90° rotation makes "MINTVAULT"
-  // read from bottom of the panel up to the top.
+  // ── 5. MINTVAULT ROTATED TEXT ────────────────────────────────────────────
   ctx.save();
-  ctx.translate(PANEL_X + PANEL_W / 2, PANEL_Y + PANEL_H / 2);
+  ctx.translate(PANEL_X + PANEL_W / 2, (I_TOP + I_BOTTOM) / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = "#1A1A1A";
-  ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
+  ctx.font = "bold 22px Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "4px";
-  ctx.textAlign = "center";
+  ctx.fillStyle    = INK;
+  ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("MINTVAULT", 0, 0);
   ctx.restore();
 
-  // Redraw gold frame so the panel + banner never bleed into the border.
+  // ── 6. URL ───────────────────────────────────────────────────────────────
+  ctx.save();
+  ctx.font = "bold 30px 'Cinzel', Georgia, 'Times New Roman', serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle    = INK;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("mintvaultuk.com", centreX, I_TOP + BANNER_H + 38);
+  ctx.restore();
+
+  // ── 7. TAP NFC TEXT ──────────────────────────────────────────────────────
+  ctx.save();
+  ctx.font = "bold 22px Georgia, 'Times New Roman', serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle    = INK;
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText("Tap NFC to verify", centreX, I_BOTTOM - 28);
+  ctx.restore();
+
+  // ── 8. QR CODE ───────────────────────────────────────────────────────────
+  const certUrl = getCertUrl(cert.certId);
+  const qrBuf   = await generateQRBuffer(certUrl, qrSize);
+  const qrImg   = await loadImage(qrBuf);
+  // White box behind QR — covers the banner in the top-right corner.
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(qrX, qrY, qrSize, qrSize);
+  ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+
+  // ── 9. CERT NUMBER ───────────────────────────────────────────────────────
+  // Right-anchored below the QR, between QR bottom and inner-frame bottom.
+  ctx.save();
+  const certFontH = 24;
+  const certMidY  = Math.round((qrY + qrSize + I_BOTTOM) / 2);
+  ctx.textAlign    = "right";
+  ctx.textBaseline = "middle";
+  const certBackFit = fitFontSize(ctx, cert.certId.replace(/^MV/, ""), qrSize - 8, certFontH, 14);
+  ctx.font      = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
+  ctx.fillStyle = INK;
+  ctx.fillText(cert.certId.replace(/^MV/, ""), qrX + qrSize - 8, certMidY);
+  ctx.restore();
+
+  // ── 10. GOLD FRAME (last) ────────────────────────────────────────────────
+  // Painted last so nothing can bleed into the border.
   drawGoldFrame(ctx);
-
-  // NFC zone centred between the panel's right edge and the QR's left edge.
-  const panelRightX  = PANEL_X + PANEL_W;
-  const NFC_ICON_CX  = Math.round((panelRightX + gfLeft) / 2);
-
-  // ── CENTRE TOP: website URL ───────────────────────────────────────────────
-  // v6: white-label uses black text for inkjet legibility on white background;
-  // Black Label keeps GOLD_LIGHT for the premium gold-on-black treatment.
-  // Pushed below the new top banner so the URL doesn't overlap the strip.
-  {
-    const urlY    = I_TOP + BANNER_H + 22;
-    const urlSz   = 32;
-    (ctx as any).letterSpacing = "1.5px";
-    ctx.font             = `bold ${urlSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
-    ctx.textAlign        = "center";
-    ctx.textBaseline     = "middle";
-    ctx.shadowBlur       = 0;
-    ctx.shadowColor      = "transparent";
-    ctx.fillText("mintvaultuk.com", NFC_ICON_CX, urlY);
-  }
-
-  // ── CENTRE BOTTOM: tap instruction ────────────────────────────────────────
-  // v6: white-label black, Black Label GOLD_LIGHT.
-  {
-    const nfcY    = I_BOTTOM - 31;
-    const nfcSz   = 34;
-    (ctx as any).letterSpacing = "1.5px";
-    ctx.font             = `bold ${nfcSz}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle        = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
-    ctx.textAlign        = "center";
-    ctx.textBaseline     = "middle";
-    ctx.shadowBlur       = 0;
-    ctx.shadowColor      = "transparent";
-    ctx.fillText("Tap NFC to verify", NFC_ICON_CX, nfcY);
-  }
 
   ctx.textAlign    = "left";
   ctx.textBaseline = "alphabetic";
