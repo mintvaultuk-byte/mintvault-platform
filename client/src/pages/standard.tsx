@@ -218,7 +218,7 @@ export default function StandardPage() {
               {[
                 "Measure card dimensions: standard Pokémon/TCG = 63mm × 88mm (±0.5mm).",
                 "Inspect under UV/blacklight — counterfeit cards fluoresce differently.",
-                "Check card weight if scales available — fakes are measurably lighter.",
+                "Check card weight if scales available: genuine Pokémon/TCG cards weigh 1.69–1.80g. Fakes are measurably lighter or heavier.",
                 "Visual inspection for trimming, re-backing, or alteration.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
@@ -240,6 +240,7 @@ export default function StandardPage() {
                 "Scan front and back separately.",
                 "File format: TIFF preferred, JPEG at quality 85+ acceptable.",
                 "Both front and back scans are mandatory before grading begins.",
+                "Do not compress or resize the scan before upload.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
                   {bulletDot}
