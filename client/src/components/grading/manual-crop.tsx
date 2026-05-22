@@ -10,8 +10,16 @@ interface Props {
   onCancel: () => void;
 }
 
-interface Point { x: number; y: number; }
-interface CropQuad { tl: Point; tr: Point; br: Point; bl: Point; }
+interface Point {
+  x: number;
+  y: number;
+}
+interface CropQuad {
+  tl: Point;
+  tr: Point;
+  br: Point;
+  bl: Point;
+}
 
 const CORNER_KEYS: (keyof CropQuad)[] = ["tl", "tr", "br", "bl"];
 const DEFAULT_QUAD: CropQuad = {
@@ -21,7 +29,9 @@ const DEFAULT_QUAD: CropQuad = {
   bl: { x: 5, y: 95 },
 };
 
-function clamp(v: number, min = 0, max = 100) { return Math.max(min, Math.min(max, v)); }
+function clamp(v: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, v));
+}
 
 /** Compute bounding box of quad for backend crop */
 function quadBounds(q: CropQuad) {
@@ -51,9 +61,11 @@ function pointInQuad(px: number, py: number, q: CropQuad): boolean {
   const pts = [q.tl, q.tr, q.br, q.bl];
   let inside = false;
   for (let i = 0, j = 3; i < 4; j = i++) {
-    const xi = pts[i].x, yi = pts[i].y;
-    const xj = pts[j].x, yj = pts[j].y;
-    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+    const xi = pts[i].x,
+      yi = pts[i].y;
+    const xj = pts[j].x,
+      yj = pts[j].y;
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
       inside = !inside;
     }
   }
@@ -67,7 +79,12 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   const [rotation, setRotation] = useState(0);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
-  const [drag, setDrag] = useState<null | { type: "corner" | "body"; corner?: keyof CropQuad; startMouse: Point; startQuad: CropQuad }>(null);
+  const [drag, setDrag] = useState<null | {
+    type: "corner" | "body";
+    corner?: keyof CropQuad;
+    startMouse: Point;
+    startQuad: CropQuad;
+  }>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
@@ -87,7 +104,12 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     if (Date.now() - lastTouchAtRef.current < 500) return;
     e.stopPropagation();
     e.preventDefault();
-    setDrag({ type: "corner", corner, startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+    setDrag({
+      type: "corner",
+      corner,
+      startMouse: { x: e.clientX, y: e.clientY },
+      startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } },
+    });
   }
 
   function startCornerTouch(corner: keyof CropQuad, e: React.TouchEvent) {
@@ -95,7 +117,12 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     lastTouchAtRef.current = Date.now();
     const t = e.touches[0];
     if (!t) return;
-    setDrag({ type: "corner", corner, startMouse: { x: t.clientX, y: t.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+    setDrag({
+      type: "corner",
+      corner,
+      startMouse: { x: t.clientX, y: t.clientY },
+      startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } },
+    });
   }
 
   function startBodyDrag(e: React.MouseEvent) {
@@ -105,7 +132,11 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     // Only start body drag if click is inside the quad
     const pt = toPct(e);
     if (!pt || !pointInQuad(pt.x, pt.y, quad)) return;
-    setDrag({ type: "body", startMouse: { x: e.clientX, y: e.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+    setDrag({
+      type: "body",
+      startMouse: { x: e.clientX, y: e.clientY },
+      startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } },
+    });
   }
 
   function startBodyTouch(e: React.TouchEvent) {
@@ -118,7 +149,11 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     const px = clamp(((t.clientX - r.left) / r.width) * 100);
     const py = clamp(((t.clientY - r.top) / r.height) * 100);
     if (!pointInQuad(px, py, quad)) return;
-    setDrag({ type: "body", startMouse: { x: t.clientX, y: t.clientY }, startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } } });
+    setDrag({
+      type: "body",
+      startMouse: { x: t.clientX, y: t.clientY },
+      startQuad: { ...quad, tl: { ...quad.tl }, tr: { ...quad.tr }, br: { ...quad.br }, bl: { ...quad.bl } },
+    });
   }
 
   useEffect(() => {
@@ -145,7 +180,9 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         setQuad(newQuad);
       }
     }
-    function onMove(e: MouseEvent) { applyDelta(e.clientX, e.clientY); }
+    function onMove(e: MouseEvent) {
+      applyDelta(e.clientX, e.clientY);
+    }
     function onTouchMove(e: TouchEvent) {
       if (e.touches.length === 0) return;
       // Suppress page scroll / pinch-zoom while we own a drag
@@ -153,7 +190,9 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       const t = e.touches[0];
       applyDelta(t.clientX, t.clientY);
     }
-    function onUp() { setDrag(null); }
+    function onUp() {
+      setDrag(null);
+    }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     window.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -173,13 +212,15 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === "Escape") onCancel();
       else if (e.key === "Enter") handleApply();
-      else if (e.key === "r" || e.key === "R") { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }
-      else if (e.key === "a" || e.key === "A") handleAutoDetect();
+      else if (e.key === "r" || e.key === "R") {
+        setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } });
+        setRotation(0);
+      } else if (e.key === "a" || e.key === "A") handleAutoDetect();
       else if (e.key === "0") setRotation(0);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [quad, rotation]);
 
   async function handleApply() {
@@ -189,10 +230,11 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       const bounds = quadBounds(quad);
       const autoRotation = rotation || quadRotation(quad);
       // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
-      const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : (Math.abs(autoRotation) > 0.3 ? autoRotation : 0);
+      const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : Math.abs(autoRotation) > 0.3 ? autoRotation : 0;
 
       const r = await fetch(`/api/admin/certificates/${certId}/recrop`, {
-        method: "POST", credentials: "include",
+        method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           side,
@@ -206,7 +248,9 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Recrop failed");
-      toast({ title: `${side} image cropped${Math.abs(effectiveRotation) > 0.1 ? ` and rotated ${effectiveRotation.toFixed(1)}\u00B0` : ""}, variants regenerated` });
+      toast({
+        title: `${side} image cropped${Math.abs(effectiveRotation) > 0.1 ? ` and rotated ${effectiveRotation.toFixed(1)}\u00B0` : ""}, variants regenerated`,
+      });
       onDone();
     } catch (e: any) {
       toast({ title: "Crop failed", description: e.message, variant: "destructive" });
@@ -219,7 +263,8 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     setDetecting(true);
     try {
       const r = await fetch(`/api/admin/certificates/${certId}/detect-card-bounds`, {
-        method: "POST", credentials: "include",
+        method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ side }),
       });
@@ -234,7 +279,11 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
         });
         toast({ title: "Card detected \u2014 quad fitted to edges" });
       } else {
-        toast({ title: "Auto-detect failed", description: j.message || "Drag corners manually", variant: "destructive" });
+        toast({
+          title: "Auto-detect failed",
+          description: j.message || "Drag corners manually",
+          variant: "destructive",
+        });
       }
     } catch (e: any) {
       toast({ title: "Auto-detect error", description: e.message, variant: "destructive" });
@@ -254,23 +303,46 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Perspective Crop \u2014 {side}
           </p>
-          <p className="text-[#555555] text-[10px]">Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.</p>
+          <p className="text-[#555555] text-[10px]">
+            Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.
+          </p>
         </div>
-        <button type="button" onClick={onCancel} className="text-[#555555] hover:text-[#1A1A1A] p-1"><X size={20} /></button>
+        <button type="button" onClick={onCancel} className="text-[#555555] hover:text-[#1A1A1A] p-1">
+          <X size={20} />
+        </button>
       </div>
 
       {/* Image area */}
       <div className="flex-1 flex items-center justify-center p-0 sm:p-4 min-h-0 overflow-auto">
         <div className="relative max-h-[90vh] sm:max-h-[85vh] max-w-[100vw]">
-          <div style={{ transform: `rotate(${rotation}deg)`, transformOrigin: "center center", transition: drag ? "none" : "transform 0.2s ease" }}>
+          <div
+            style={{
+              transform: `rotate(${rotation}deg)`,
+              transformOrigin: "center center",
+              transition: drag ? "none" : "transform 0.2s ease",
+            }}
+          >
             {/* Image + overlay container — NO overflow-hidden so handles aren't clipped */}
-            <div ref={containerRef} className="relative rounded-lg bg-[#F7F7F5]"
-              onMouseDown={startBodyDrag} onTouchStart={startBodyTouch}>
-              <img src={rawImageUrl} alt={`${side} raw`} className="block max-h-[88vh] sm:max-h-[80vh] max-w-[100vw] w-auto" draggable={false} />
+            <div
+              ref={containerRef}
+              className="relative rounded-lg bg-[#F7F7F5]"
+              onMouseDown={startBodyDrag}
+              onTouchStart={startBodyTouch}
+            >
+              <img
+                src={rawImageUrl}
+                alt={`${side} raw`}
+                className="block max-h-[88vh] sm:max-h-[80vh] max-w-[100vw] w-auto"
+                draggable={false}
+              />
 
               {/* Layer 1: SVG overlay — dark mask + edge lines — NO pointer events */}
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none"
-                style={{ pointerEvents: "none", zIndex: 10 }}>
+              <svg
+                className="absolute inset-0 w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{ pointerEvents: "none", zIndex: 10 }}
+              >
                 <defs>
                   <mask id="quadMask">
                     <rect width="100" height="100" fill="white" />
@@ -284,7 +356,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
 
             {/* Layer 2: Corner handles — OUTSIDE the container div, positioned relative to it */}
             {/* Uses the same parent (rotation wrapper) so coordinates align with the image */}
-            {CORNER_KEYS.map(k => {
+            {CORNER_KEYS.map((k) => {
               // Position relative to containerRef bounds
               const cw = containerRef.current?.clientWidth || 0;
               const ch = containerRef.current?.clientHeight || 0;
@@ -307,8 +379,10 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                     onTouchStart={(e) => startCornerTouch(k, e)}
                   >
                     {/* Visible 20px handle centered inside */}
-                    <div className="absolute bg-[#D4AF37] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
-                      style={{ inset: 12, pointerEvents: "none" }} />
+                    <div
+                      className="absolute bg-[#D4AF37] border-2 border-[#1A1A1A] rounded-sm shadow-lg hover:scale-125 transition-transform"
+                      style={{ inset: 12, pointerEvents: "none" }}
+                    />
                     {/* Label */}
                     <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] text-[#D4AF37] font-bold pointer-events-none select-none">
                       {CORNER_LABELS[k]}
@@ -325,41 +399,76 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[#D4D0C8] space-y-1.5 sm:space-y-3">
         {/* Row 1: Quick actions */}
         <div className="flex items-center gap-2">
-          <button type="button" onClick={handleAutoDetect} disabled={detecting}
-            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors">
+          <button
+            type="button"
+            onClick={handleAutoDetect}
+            disabled={detecting}
+            className="flex items-center gap-1.5 text-[#D4AF37] text-xs border border-[#D4AF37]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors"
+          >
             {detecting ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
             {detecting ? "Detecting..." : "Auto-Detect"} <span className="text-[#555555] text-[9px]">A</span>
           </button>
-          <button type="button" onClick={() => { setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } }); setRotation(0); }}
-            className="flex items-center gap-1 text-[#555555] text-xs border border-[#D4D0C8] px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#E8E4DC] transition-colors">
+          <button
+            type="button"
+            onClick={() => {
+              setQuad({ tl: { x: 0, y: 0 }, tr: { x: 100, y: 0 }, br: { x: 100, y: 100 }, bl: { x: 0, y: 100 } });
+              setRotation(0);
+            }}
+            className="flex items-center gap-1 text-[#555555] text-xs border border-[#D4D0C8] px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[#E8E4DC] transition-colors"
+          >
             <RotateCcw size={12} /> Reset <span className="text-[#555555] text-[9px]">R</span>
           </button>
           <div className="flex-1" />
-          <span className="text-[#555555] text-xs font-mono">{Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%</span>
-          {Math.abs(derivedAngle) > 0.3 && <span className="text-[#D4AF37]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>}
+          <span className="text-[#555555] text-xs font-mono">
+            {Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%
+          </span>
+          {Math.abs(derivedAngle) > 0.3 && (
+            <span className="text-[#D4AF37]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>
+          )}
         </div>
 
         {/* Row 2: Rotation slider */}
         <div className="flex items-center gap-2 text-xs">
           <span className="text-[#555555]">Rotate</span>
-          <input type="range" min="-15" max="15" step="0.5" value={rotation}
+          <input
+            type="range"
+            min="-15"
+            max="15"
+            step="0.5"
+            value={rotation}
             onChange={(e) => setRotation(Number(e.target.value))}
-            className="flex-1 max-w-[200px] accent-[#D4AF37]" />
+            className="flex-1 max-w-[200px] accent-[#D4AF37]"
+          />
           <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
           {Math.abs(rotation) > 0.1 && (
-            <button type="button" onClick={() => setRotation(0)} className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline">Zero <span className="text-[#555555]">0</span></button>
+            <button
+              type="button"
+              onClick={() => setRotation(0)}
+              className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
+            >
+              Zero <span className="text-[#555555]">0</span>
+            </button>
           )}
         </div>
 
         {/* Row 3: Cancel + Apply */}
         <div className="flex items-center justify-between">
-          <button type="button" onClick={onCancel} className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]"
+          >
             Cancel <span className="text-[#555555] text-[9px]">Esc</span>
           </button>
-          <button type="button" onClick={handleApply} disabled={saving}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
+          <button
+            type="button"
+            onClick={handleApply}
+            disabled={saving}
+            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50"
+          >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Crop size={13} />}
-            {saving ? "Cropping..." : "Apply Crop"} <span className="text-[#1A1400]/50 text-[9px] normal-case">\u21B5</span>
+            {saving ? "Cropping..." : "Apply Crop"}{" "}
+            <span className="text-[#1A1400]/50 text-[9px] normal-case">\u21B5</span>
           </button>
         </div>
       </div>

@@ -16,7 +16,10 @@ export default function VerifyEmailPage() {
 
   // Auto-consume the token on mount
   useEffect(() => {
-    if (!token) { setStatus("error"); return; }
+    if (!token) {
+      setStatus("error");
+      return;
+    }
 
     fetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`, {
       method: "GET",
@@ -32,7 +35,7 @@ export default function VerifyEmailPage() {
         }
       })
       .catch(() => setStatus("error"));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, []);
 
   const resendMutation = useMutation({
@@ -50,15 +53,12 @@ export default function VerifyEmailPage() {
       />
       <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center px-4 py-16">
         <div className="w-full max-w-md bg-white rounded-2xl border border-[#E8E4DC] shadow-lg p-8 md:p-10 text-center">
-
           {status === "pending" && (
             <>
               <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
                 <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
               </div>
-              <h1 className="text-xl font-black text-[#1A1A1A] mb-2">
-                Verifying…
-              </h1>
+              <h1 className="text-xl font-black text-[#1A1A1A] mb-2">Verifying…</h1>
               <p className="text-sm text-[#888888]">Just a moment while we confirm your email.</p>
             </>
           )}
@@ -68,9 +68,7 @@ export default function VerifyEmailPage() {
               <div className="w-14 h-14 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto mb-5">
                 <CheckCircle size={24} className="text-[#D4AF37]" />
               </div>
-              <h1 className="text-xl font-black text-[#1A1A1A] mb-3">
-                Email Verified
-              </h1>
+              <h1 className="text-xl font-black text-[#1A1A1A] mb-3">Email Verified</h1>
               <p className="text-sm text-[#666666] mb-6">
                 Your email address has been confirmed. Your account is fully active.
               </p>
@@ -90,9 +88,7 @@ export default function VerifyEmailPage() {
               <div className="w-14 h-14 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto mb-5">
                 <XCircle size={24} className="text-red-500" />
               </div>
-              <h1 className="text-xl font-black text-[#1A1A1A] mb-3">
-                Link Expired or Invalid
-              </h1>
+              <h1 className="text-xl font-black text-[#1A1A1A] mb-3">Link Expired or Invalid</h1>
               <p className="text-sm text-[#666666] mb-6">
                 This verification link has expired or has already been used. Request a new one below.
               </p>
@@ -131,7 +127,6 @@ export default function VerifyEmailPage() {
               </p>
             </>
           )}
-
         </div>
       </div>
     </>

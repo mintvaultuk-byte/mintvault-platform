@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "wouter";
-import {
-  Upload, Loader2, ArrowRight, AlertTriangle,
-} from "lucide-react";
+import { Upload, Loader2, ArrowRight, AlertTriangle } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 
@@ -30,9 +28,9 @@ interface EstimateResult {
   };
   subgrades?: {
     centering: { score: number; confidence: string; note: string };
-    corners:   { score: number; confidence: string; note: string };
-    edges:     { score: number; confidence: string; note: string };
-    surface:   { score: number; confidence: string; note: string };
+    corners: { score: number; confidence: string; note: string };
+    edges: { score: number; confidence: string; note: string };
+    surface: { score: number; confidence: string; note: string };
   };
   overall_grade_estimate?: {
     low: number;
@@ -47,29 +45,24 @@ type StateKey = "idle-empty" | "idle-previewed" | "loading" | "result" | "paywal
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const PACKS = [
-  { id: "5",   credits: "5 estimates",   price: "£2",  perUnit: "40p each", featured: false },
-  { id: "15",  credits: "15 estimates",  price: "£4",  perUnit: "27p each", featured: false },
-  { id: "100", credits: "100 estimates", price: "£10", perUnit: "10p each", featured: true  },
+  { id: "5", credits: "5 estimates", price: "£2", perUnit: "40p each", featured: false },
+  { id: "15", credits: "15 estimates", price: "£4", perUnit: "27p each", featured: false },
+  { id: "100", credits: "100 estimates", price: "£10", perUnit: "10p each", featured: true },
 ];
 
-const LOADING_STAGES = [
-  "Reading image…",
-  "Identifying card…",
-  "Scoring subgrades…",
-  "Drafting report…",
-];
+const LOADING_STAGES = ["Reading image…", "Identifying card…", "Scoring subgrades…", "Drafting report…"];
 
 const TIPS = [
-  { label: "Remove from sleeve",      body: "Glare from plastic confuses the AI" },
+  { label: "Remove from sleeve", body: "Glare from plastic confuses the AI" },
   { label: "Good lighting, no glare", body: "Even daylight works best" },
-  { label: "Card fills the frame",    body: "Crop out the background" },
+  { label: "Card fills the frame", body: "Crop out the background" },
 ];
 
 // Mono confidence-pill palette. Colours chosen to read as accents on paper backgrounds.
 const CONF_COLOURS: Record<string, { fg: string; bg: string; border: string }> = {
-  high:   { fg: "#1a7a3c", bg: "rgba(26, 122, 60, 0.08)",   border: "rgba(26, 122, 60, 0.35)" },
-  medium: { fg: "#b8860b", bg: "rgba(184, 134, 11, 0.08)",  border: "rgba(184, 134, 11, 0.35)" },
-  low:    { fg: "var(--v2-ink-mute)", bg: "rgba(107, 100, 84, 0.08)", border: "var(--v2-line)" },
+  high: { fg: "#1a7a3c", bg: "rgba(26, 122, 60, 0.08)", border: "rgba(26, 122, 60, 0.35)" },
+  medium: { fg: "#b8860b", bg: "rgba(184, 134, 11, 0.08)", border: "rgba(184, 134, 11, 0.35)" },
+  low: { fg: "var(--v2-ink-mute)", bg: "rgba(107, 100, 84, 0.08)", border: "var(--v2-line)" },
 };
 
 function ConfidencePill({ value }: { value: string }) {
@@ -112,19 +105,22 @@ export default function ToolsEstimateV2() {
 
   // Derived state
   let stateKey: StateKey;
-  if (loading)      stateKey = "loading";
-  else if (error)   stateKey = "error";
-  else if (result)  stateKey = "result";
+  if (loading) stateKey = "loading";
+  else if (error) stateKey = "error";
+  else if (result) stateKey = "result";
   else if (showPaywall) stateKey = "paywall";
-  else if (file)    stateKey = "idle-previewed";
-  else              stateKey = "idle-empty";
+  else if (file) stateKey = "idle-previewed";
+  else stateKey = "idle-empty";
 
   // ── Effects ────────────────────────────────────────────────────────────
 
   // Cycle loading stage text every 1500ms while loading.
   useEffect(() => {
-    if (!loading) { setLoadingStage(0); return; }
-    const id = setInterval(() => setLoadingStage(s => (s + 1) % LOADING_STAGES.length), 1500);
+    if (!loading) {
+      setLoadingStage(0);
+      return;
+    }
+    const id = setInterval(() => setLoadingStage((s) => (s + 1) % LOADING_STAGES.length), 1500);
     return () => clearInterval(id);
   }, [loading]);
 
@@ -135,16 +131,20 @@ export default function ToolsEstimateV2() {
     if (e && isValidEmail(e)) {
       setEmail(e);
       fetch(`/api/tools/estimate/credits?email=${encodeURIComponent(e.toLowerCase())}`)
-        .then(r => r.json())
-        .then(d => { if (typeof d.credits === "number") setCredits(d.credits); })
+        .then((r) => r.json())
+        .then((d) => {
+          if (typeof d.credits === "number") setCredits(d.credits);
+        })
         .catch(() => {});
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, []);
 
   // Revoke preview object URLs when the file changes or the page unmounts.
   useEffect(() => {
-    return () => { if (preview) URL.revokeObjectURL(preview); };
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
   }, [preview]);
 
   // ── Handlers ───────────────────────────────────────────────────────────
@@ -228,7 +228,9 @@ export default function ToolsEstimateV2() {
     setRestoreLoading(true);
     setRestoreError(null);
     try {
-      const r = await fetch(`/api/tools/estimate/credits?email=${encodeURIComponent(restoreEmail.trim().toLowerCase())}`);
+      const r = await fetch(
+        `/api/tools/estimate/credits?email=${encodeURIComponent(restoreEmail.trim().toLowerCase())}`
+      );
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Failed");
       if (typeof d.credits !== "number" || d.credits <= 0) {
@@ -299,16 +301,24 @@ export default function ToolsEstimateV2() {
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
           <div
             className={stateKey === "idle-empty" ? "relative" : "relative rounded-xl p-6 md:p-10"}
-            style={stateKey === "idle-empty" ? undefined : {
-              backgroundColor: "var(--v2-paper-raised)",
-              border: "1px solid var(--v2-line)",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-            }}
+            style={
+              stateKey === "idle-empty"
+                ? undefined
+                : {
+                    backgroundColor: "var(--v2-paper-raised)",
+                    border: "1px solid var(--v2-line)",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  }
+            }
           >
             {credits !== null && (
               <span
                 className="absolute top-4 right-4 font-mono-v2 text-[9px] uppercase tracking-widest px-2.5 py-1 rounded-full"
-                style={{ color: "var(--v2-gold)", borderColor: "var(--v2-gold-soft)", backgroundColor: "rgba(212,175,55,0.06)" }}
+                style={{
+                  color: "var(--v2-gold)",
+                  borderColor: "var(--v2-gold-soft)",
+                  backgroundColor: "rgba(212,175,55,0.06)",
+                }}
               >
                 {credits} credits left
               </span>
@@ -319,7 +329,10 @@ export default function ToolsEstimateV2() {
               <div>
                 <label
                   htmlFor="mv-file-input"
-                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragging(true);
+                  }}
                   onDragLeave={() => setDragging(false)}
                   onDrop={handleDrop}
                   className={`slab-scanner${dragging ? " scanner-beam--dragover" : ""}`}
@@ -351,9 +364,15 @@ export default function ToolsEstimateV2() {
                   <div className="slab-scanner__window">
                     <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
                     <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
-                    <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 600DPI</span>
-                    <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">Z &middot; 1.0&times;</span>
-                    <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
+                    <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">
+                      REFL &middot; 600DPI
+                    </span>
+                    <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">
+                      Z &middot; 1.0&times;
+                    </span>
+                    <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">
+                      MODE &middot; PRE-GRADE
+                    </span>
                     <div className="slab-scanner__content">
                       <Upload size={52} strokeWidth={1.5} color="#c9a96e" />
                       <p className="slab-scanner__title">Slot your card</p>
@@ -366,7 +385,9 @@ export default function ToolsEstimateV2() {
                     <span className="slab-scanner__footer-left">CERT &middot; PENDING</span>
                     <span className="slab-scanner__footer-center">Awaiting</span>
                     <span className="slab-scanner__qr" aria-hidden="true">
-                      {Array.from({ length: 25 }).map((_, i) => <span key={i} />)}
+                      {Array.from({ length: 25 }).map((_, i) => (
+                        <span key={i} />
+                      ))}
                     </span>
                   </footer>
                 </label>
@@ -428,10 +449,7 @@ export default function ToolsEstimateV2() {
             {stateKey === "loading" && (
               <div className="py-16 text-center" role="status" aria-live="polite">
                 <Loader2 size={48} className="mx-auto animate-spin" style={{ color: "var(--v2-gold)" }} />
-                <p
-                  className="font-display italic text-xl mt-6 min-h-[2rem]"
-                  style={{ color: "var(--v2-ink)" }}
-                >
+                <p className="font-display italic text-xl mt-6 min-h-[2rem]" style={{ color: "var(--v2-ink)" }}>
                   {LOADING_STAGES[loadingStage]}
                 </p>
                 <p className="font-body text-sm mt-2" style={{ color: "var(--v2-ink-mute)" }}>
@@ -452,22 +470,25 @@ export default function ToolsEstimateV2() {
                       color: "var(--v2-ink)",
                     }}
                   >
-                    {(result.overall_grade_estimate?.low ?? result.estimated_grade_low)}
+                    {result.overall_grade_estimate?.low ?? result.estimated_grade_low}
                     <span style={{ color: "var(--v2-ink-mute)" }}>&ndash;</span>
-                    {(result.overall_grade_estimate?.high ?? result.estimated_grade_high)}
+                    {result.overall_grade_estimate?.high ?? result.estimated_grade_high}
                   </p>
                   <div className="md:text-right">
-                    <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                      style={{ color: "var(--v2-ink-mute)" }}
+                    >
                       Overall
                     </p>
-                    <p
-                      className="font-display italic text-xl mt-1"
-                      style={{ color: "var(--v2-ink)" }}
-                    >
+                    <p className="font-display italic text-xl mt-1" style={{ color: "var(--v2-ink)" }}>
                       {result.overall_grade_estimate?.label ?? result.grade_label_high ?? "—"}
                     </p>
                     {result.overall_grade_estimate?.most_likely !== undefined && (
-                      <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-1" style={{ color: "var(--v2-ink-mute)" }}>
+                      <p
+                        className="font-mono-v2 text-[10px] uppercase tracking-widest mt-1"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
                         Most likely: {result.overall_grade_estimate.most_likely}
                       </p>
                     )}
@@ -482,18 +503,19 @@ export default function ToolsEstimateV2() {
                   <div className="mt-8 pt-6" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                       <div>
-                        <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+                        <p
+                          className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                          style={{ color: "var(--v2-ink-mute)" }}
+                        >
                           Identified
                         </p>
                         <p className="font-display italic text-xl mt-1" style={{ color: "var(--v2-ink)" }}>
                           {result.card_identified.name}
                         </p>
                         <p className="font-body text-sm mt-1" style={{ color: "var(--v2-ink-soft)" }}>
-                          {[
-                            result.card_identified.set,
-                            result.card_identified.year,
-                            result.card_identified.rarity,
-                          ].filter(Boolean).join(" · ")}
+                          {[result.card_identified.set, result.card_identified.year, result.card_identified.rarity]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       </div>
                       <div className="md:text-right">
@@ -505,7 +527,10 @@ export default function ToolsEstimateV2() {
 
                 {/* Subgrades */}
                 <div className="mt-8 pt-6" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
-                  <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+                  <p
+                    className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
                     Subgrades
                   </p>
                   <div className="mt-4">
@@ -521,7 +546,10 @@ export default function ToolsEstimateV2() {
                           className="grid grid-cols-[1fr_auto] md:grid-cols-[140px_100px_120px_1fr] gap-x-4 gap-y-1 py-3"
                           style={{ borderTop: i === 0 ? undefined : "1px solid var(--v2-line-soft)" }}
                         >
-                          <p className="font-mono-v2 text-sm uppercase tracking-wider" style={{ color: "var(--v2-ink)" }}>
+                          <p
+                            className="font-mono-v2 text-sm uppercase tracking-wider"
+                            style={{ color: "var(--v2-ink)" }}
+                          >
                             {key}
                           </p>
                           <p
@@ -536,7 +564,10 @@ export default function ToolsEstimateV2() {
                           <div className="hidden md:block">
                             <ConfidencePill value={confidence} />
                           </div>
-                          <p className="font-body text-xs col-span-2 md:col-span-1" style={{ color: "var(--v2-ink-soft)" }}>
+                          <p
+                            className="font-body text-xs col-span-2 md:col-span-1"
+                            style={{ color: "var(--v2-ink-soft)" }}
+                          >
                             {note}
                           </p>
                         </div>
@@ -548,16 +579,25 @@ export default function ToolsEstimateV2() {
                 {/* Potential issues */}
                 {result.potential_issues && result.potential_issues.length > 0 && (
                   <div className="mt-8 pt-6" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
-                    <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                      style={{ color: "var(--v2-ink-mute)" }}
+                    >
                       Flagged
                     </p>
                     <ul className="mt-3 space-y-2">
                       {result.potential_issues.map((issue, i) => {
-                        const text = typeof issue === "string" ? issue : (issue.description || issue.area || "");
+                        const text = typeof issue === "string" ? issue : issue.description || issue.area || "";
                         return (
                           <li key={i} className="flex items-start gap-2">
-                            <AlertTriangle size={14} style={{ color: "var(--v2-ink-mute)" }} className="mt-1 shrink-0" />
-                            <span className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>{text}</span>
+                            <AlertTriangle
+                              size={14}
+                              style={{ color: "var(--v2-ink-mute)" }}
+                              className="mt-1 shrink-0"
+                            />
+                            <span className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                              {text}
+                            </span>
                           </li>
                         );
                       })}
@@ -574,7 +614,10 @@ export default function ToolsEstimateV2() {
                       border: "1px solid var(--v2-gold-soft)",
                     }}
                   >
-                    <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-gold)" }}>
+                    <p
+                      className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                      style={{ color: "var(--v2-gold)" }}
+                    >
                       Recommendation
                     </p>
                     <p className="font-body text-sm mt-1" style={{ color: "var(--v2-ink)" }}>
@@ -656,7 +699,10 @@ export default function ToolsEstimateV2() {
                             Best
                           </span>
                         )}
-                        <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+                        <p
+                          className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                          style={{ color: "var(--v2-ink-mute)" }}
+                        >
                           {p.credits}
                         </p>
                         <p
@@ -694,7 +740,10 @@ export default function ToolsEstimateV2() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
                   />
-                  <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-2" style={{ color: "var(--v2-ink-mute)" }}>
+                  <p
+                    className="font-mono-v2 text-[10px] uppercase tracking-widest mt-2"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
                     We email your credits &mdash; no password, no account.
                   </p>
                 </div>
@@ -708,7 +757,7 @@ export default function ToolsEstimateV2() {
                 >
                   {checkoutLoading && <Loader2 size={14} className="animate-spin" />}
                   {selectedPack
-                    ? `Continue with ${PACKS.find(p => p.id === selectedPack)?.credits} pack`
+                    ? `Continue with ${PACKS.find((p) => p.id === selectedPack)?.credits} pack`
                     : "Select a pack"}
                   {!checkoutLoading && selectedPack && <ArrowRight size={14} />}
                 </button>
@@ -718,7 +767,7 @@ export default function ToolsEstimateV2() {
                     Already bought credits?{" "}
                     <button
                       type="button"
-                      onClick={() => setShowRestore(v => !v)}
+                      onClick={() => setShowRestore((v) => !v)}
                       className="underline"
                       style={{ color: "var(--v2-ink)" }}
                     >
@@ -754,7 +803,9 @@ export default function ToolsEstimateV2() {
                     </div>
                   )}
                   {restoreError && (
-                    <p className="font-body text-xs mt-2" style={{ color: "#c44" }}>{restoreError}</p>
+                    <p className="font-body text-xs mt-2" style={{ color: "#c44" }}>
+                      {restoreError}
+                    </p>
                   )}
                 </div>
               </div>
@@ -768,10 +819,7 @@ export default function ToolsEstimateV2() {
                 style={{ border: "1px solid #c44", backgroundColor: "#fef5f5" }}
               >
                 <AlertTriangle size={24} style={{ color: "#c44" }} />
-                <p
-                  className="font-display italic text-xl mt-3"
-                  style={{ color: "var(--v2-ink)" }}
-                >
+                <p className="font-display italic text-xl mt-3" style={{ color: "var(--v2-ink)" }}>
                   Something went wrong
                 </p>
                 <p className="font-body text-sm mt-2" style={{ color: "var(--v2-ink-soft)" }}>
@@ -797,17 +845,14 @@ export default function ToolsEstimateV2() {
           <p className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
             Honesty
           </p>
-          <h2
-            className="font-display italic font-medium text-xl md:text-2xl mt-2"
-            style={{ color: "var(--v2-ink)" }}
-          >
+          <h2 className="font-display italic font-medium text-xl md:text-2xl mt-2" style={{ color: "var(--v2-ink)" }}>
             What this is &mdash; and what it isn&rsquo;t.
           </h2>
           <p className="font-body text-sm md:text-base mt-4 leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-            This is an AI-assisted first-look estimate from a single photo. Full MintVault grading
-            uses a high-resolution scanner, multiple image variants (greyscale, high-contrast,
-            angled), and physical inspection under magnification. Treat the estimate as directional,
-            not definitive. This tool does not authenticate cards or detect counterfeits.
+            This is an AI-assisted first-look estimate from a single photo. Full MintVault grading uses a
+            high-resolution scanner, multiple image variants (greyscale, high-contrast, angled), and physical inspection
+            under magnification. Treat the estimate as directional, not definitive. This tool does not authenticate
+            cards or detect counterfeits.
           </p>
           <p className="font-mono-v2 text-[11px] uppercase tracking-widest mt-5 flex flex-wrap gap-x-3 gap-y-1">
             <Link href="/pricing" className="hover:underline" style={{ color: "var(--v2-gold)" }}>

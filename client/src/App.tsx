@@ -1,50 +1,127 @@
 import { Switch, Route, useLocation } from "wouter";
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/layout";
+import ErrorBoundary from "@/components/error-boundary";
 import { FeatureFlagsContext, useFeatureFlagsQuery } from "@/hooks/use-feature-flags";
-import LegalPage from "@/pages/legal-page";
 import CookieBanner from "@/components/cookie-banner";
+import VaultVideoBg from "@/components/v2/vault-video-bg";
 
-/* ─── Gold press burst — fires on every button/link press ───────────────────
- * Uses a global pointerdown listener so it covers all buttons automatically.
- * Creates a DOM element at the exact tap/click point, animates, then removes.
- * Navigation is never blocked — the burst plays over the top asynchronously.
- */
+// Critical-path pages — eagerly loaded
+import Home from "@/pages/home";
+import Verify from "@/pages/verify";
+import LogbookPage from "@/pages/logbook";
+import NotFound from "@/pages/not-found";
+
+// Lazy-loaded pages
+const LegalPage = lazy(() => import("@/pages/legal-page"));
+const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
+const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
+const LabelsPage = lazy(() => import("@/pages/labels"));
+const ReportsPage = lazy(() => import("@/pages/reports"));
+const TcgPage = lazy(() => import("@/pages/tcg"));
+const SubmitPage = lazy(() => import("@/pages/submit"));
+const SubmitSuccessPage = lazy(() => import("@/pages/submit-success"));
+const TrackPage = lazy(() => import("@/pages/track"));
+const TermsPage = lazy(() => import("@/pages/terms"));
+const LiabilityPage = lazy(() => import("@/pages/liability"));
+const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
+const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
+const ReelsPage = lazy(() => import("@/pages/reels"));
+const ShareReelPage = lazy(() => import("@/pages/share-reel"));
+const StandardPage = lazy(() => import("@/pages/standard"));
+const MvgsJoinPage = lazy(() => import("@/pages/mvgs-join"));
+const CustomerLoginPage = lazy(() => import("@/pages/customer-login"));
+const PinSetupPage = lazy(() => import("@/pages/auth/pin-setup"));
+const PinForgotPage = lazy(() => import("@/pages/auth/pin-forgot"));
+const PokemonCardGradingUkPage = lazy(() => import("@/pages/seo/pokemon-card-grading-uk"));
+const TradingCardGradingUkPage = lazy(() => import("@/pages/seo/trading-card-grading-uk"));
+const CardGradingServiceUkPage = lazy(() => import("@/pages/seo/card-grading-service-uk"));
+const PsaAlternativeUkPage = lazy(() => import("@/pages/seo/psa-alternative-uk"));
+const HowToGradePokemonCardsPage = lazy(() => import("@/pages/seo/how-to-grade-pokemon-cards"));
+const TcgGradingUkPage = lazy(() => import("@/pages/seo/tcg-grading-uk"));
+const YugiohCardGradingUkPage = lazy(() => import("@/pages/seo/yugioh-card-grading-uk"));
+const OnePieceCardGradingUkPage = lazy(() => import("@/pages/seo/one-piece-card-grading-uk"));
+const SportsCardGradingUkPage = lazy(() => import("@/pages/seo/sports-card-grading-uk"));
+const MtgCardGradingUkPage = lazy(() => import("@/pages/seo/mtg-card-grading-uk"));
+const BestCardGradingUkPage = lazy(() => import("@/pages/seo/best-card-grading-uk"));
+const CardGradingCostUkPage = lazy(() => import("@/pages/seo/card-grading-cost-uk"));
+const CardGradingNearMePage = lazy(() => import("@/pages/seo/card-grading-near-me"));
+const NfcRedirectPage = lazy(() => import("@/pages/nfc-redirect"));
+const StolenCardProtectionPage = lazy(() => import("@/pages/stolen-card-protection"));
+const ClaimPage = lazy(() => import("@/pages/claim"));
+const TransferPage = lazy(() => import("@/pages/transfer"));
+const TransferAcceptPage = lazy(() => import("@/pages/transfer-accept"));
+const TransferClaimByCodePage = lazy(() => import("@/pages/transfer-claim-by-code"));
+const OwnershipPage = lazy(() => import("@/pages/ownership"));
+const DashboardPage = lazy(() => import("@/pages/dashboard"));
+const PopulationPage = lazy(() => import("@/pages/population"));
+const PopCertsPage = lazy(() => import("@/pages/pop-certs"));
+const ApiDocsPage = lazy(() => import("@/pages/api-docs"));
+const GradingScalePage = lazy(() => import("@/pages/grading-scale"));
+const GradingGlossaryPage = lazy(() => import("@/pages/grading-glossary"));
+const GradingReportPage = lazy(() => import("@/pages/grading-report"));
+const MobileUploadPage = lazy(() => import("@/pages/mobile-upload"));
+const VaultReportPage = lazy(() => import("@/pages/vault-report"));
+const OurStoryPage = lazy(() => import("@/pages/about/our-story"));
+const EligibleCardsPage = lazy(() => import("@/pages/grading/eligible-cards"));
+const VaultReportsAboutPage = lazy(() => import("@/pages/vault-reports/about"));
+const HowToReadVaultPage = lazy(() => import("@/pages/vault-reports/how-to-read"));
+const FAQPage = lazy(() => import("@/pages/help/faq"));
+const ContactPage = lazy(() => import("@/pages/help/contact"));
+const LoginPage = lazy(() => import("@/pages/login"));
+const AdminLoginPage = lazy(() => import("@/pages/admin-login"));
+const HomeV2Integrated = lazy(() => import("@/pages/home-v2-integrated"));
+const HowItWorksV2 = lazy(() => import("@/pages/how-it-works-v2"));
+const HomeV3 = lazy(() => import("@/pages/home-v3"));
+const HomeV4 = lazy(() => import("@/pages/home-v4"));
+const PricingV2Mockup = lazy(() => import("@/pages/pricing-v2"));
+const Pricing = lazy(() => import("@/pages/pricing"));
+const VaultClub = lazy(() => import("@/pages/vault-club"));
+const AiPreGrade = lazy(() => import("@/pages/ai-pre-grade"));
+const PreGradePage = lazy(() => import("@/pages/pre-grade"));
+const ToolsEstimate = lazy(() => import("@/pages/tools-estimate"));
+const Journal = lazy(() => import("@/pages/journal"));
+const JournalDetail = lazy(() => import("@/pages/journal-detail"));
+const Technology = lazy(() => import("@/pages/technology"));
+const Registry = lazy(() => import("@/pages/registry"));
+const SignupPage = lazy(() => import("@/pages/signup"));
+const ForgotPasswordPage = lazy(() => import("@/pages/forgot-password"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password"));
+const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
+const AccountSettingsPage = lazy(() => import("@/pages/account-settings"));
+const ShowroomPage = lazy(() => import("@/pages/showroom"));
+const ShowroomsListPage = lazy(() => import("@/pages/showrooms"));
+
 function GoldBurstEffect() {
   useEffect(() => {
     function handlePointerDown(e: PointerEvent) {
       const target = e.target as Element | null;
       if (!target) return;
 
-      // Fire on buttons AND internal navigation links (<a href="/">)
-      const interactive = target.closest(
-        'button:not([disabled]), [role="button"], a[href^="/"]'
-      );
+      const interactive = target.closest('button:not([disabled]), [role="button"], a[href^="/"]');
       if (!interactive) return;
 
-      // Opt-out escape hatch — add data-no-burst to any element to suppress
       if (interactive.closest("[data-no-burst]")) return;
 
-      // Primary gold CTAs get the full burst + outer ring
       const isPrimary = interactive.classList.contains("btn-gold");
 
       const el = document.createElement("div");
       el.className = isPrimary ? "gold-burst" : "gold-burst gold-burst-soft";
       el.style.left = `${e.clientX}px`;
-      el.style.top  = `${e.clientY}px`;
+      el.style.top = `${e.clientY}px`;
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 480);
 
-      // Secondary outer energy ring — primary CTAs only
       if (isPrimary) {
         const outer = document.createElement("div");
         outer.className = "gold-burst-outer";
         outer.style.left = `${e.clientX}px`;
-        outer.style.top  = `${e.clientY}px`;
+        outer.style.top = `${e.clientY}px`;
         document.body.appendChild(outer);
         setTimeout(() => outer.remove(), 500);
       }
@@ -57,11 +134,6 @@ function GoldBurstEffect() {
   return null;
 }
 
-/* ─── Global scroll-reveal observer ─────────────────────────────────────────
- * Watches all .reveal-on-scroll elements and adds .revealed when they enter
- * the viewport. Re-observes on route change (ScrollToTop fires first, then
- * new page elements are mounted). Single observer instance, low overhead.
- */
 function ScrollReveal() {
   const [pathname] = useLocation();
   useEffect(() => {
@@ -70,19 +142,19 @@ function ScrollReveal() {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             entry.target.classList.add("revealed");
-            observer.unobserve(entry.target); // fire once
+            observer.unobserve(entry.target);
           }
         });
       },
       { threshold: 0.12 }
     );
-    // Small delay so new page elements are painted before we observe
     const id = setTimeout(() => {
-      document.querySelectorAll(".reveal-on-scroll:not(.revealed)").forEach((el) =>
-        observer.observe(el)
-      );
+      document.querySelectorAll(".reveal-on-scroll:not(.revealed)").forEach((el) => observer.observe(el));
     }, 60);
-    return () => { clearTimeout(id); observer.disconnect(); };
+    return () => {
+      clearTimeout(id);
+      observer.disconnect();
+    };
   }, [pathname]);
   return null;
 }
@@ -99,96 +171,20 @@ function ScrollToTop() {
   return null;
 }
 
-import CertDetailPage from "@/pages/cert-detail";
-import WhyMintVaultPage from "@/pages/why-mintvault";
-import LabelsPage from "@/pages/labels";
-import ReportsPage from "@/pages/reports";
-import TcgPage from "@/pages/tcg";
-import SubmitPage from "@/pages/submit";
-import SubmitSuccessPage from "@/pages/submit-success";
-import TrackPage from "@/pages/track";
-import TermsPage from "@/pages/terms";
-import LiabilityPage from "@/pages/liability";
-import AdminPage from "@/pages/admin";
-import AdminInstagramPage from "@/pages/admin-instagram";
-import AdminWeeklyReelPage from "@/pages/admin-weekly-reel";
-import ReelsPage from "@/pages/reels";
-import ShareReelPage from "@/pages/share-reel";
-import StandardPage from "@/pages/standard";
-import MvgsJoinPage from "@/pages/mvgs-join";
-import CustomerLoginPage from "@/pages/customer-login";
-import PinSetupPage from "@/pages/auth/pin-setup";
-import PinForgotPage from "@/pages/auth/pin-forgot";
-import NotFound from "@/pages/not-found";
-import PokemonCardGradingUkPage from "@/pages/seo/pokemon-card-grading-uk";
-import TradingCardGradingUkPage from "@/pages/seo/trading-card-grading-uk";
-import CardGradingServiceUkPage from "@/pages/seo/card-grading-service-uk";
-import PsaAlternativeUkPage from "@/pages/seo/psa-alternative-uk";
-import HowToGradePokemonCardsPage from "@/pages/seo/how-to-grade-pokemon-cards";
-import TcgGradingUkPage from "@/pages/seo/tcg-grading-uk";
-import YugiohCardGradingUkPage from "@/pages/seo/yugioh-card-grading-uk";
-import OnePieceCardGradingUkPage from "@/pages/seo/one-piece-card-grading-uk";
-import SportsCardGradingUkPage from "@/pages/seo/sports-card-grading-uk";
-import MtgCardGradingUkPage from "@/pages/seo/mtg-card-grading-uk";
-import BestCardGradingUkPage from "@/pages/seo/best-card-grading-uk";
-import CardGradingCostUkPage from "@/pages/seo/card-grading-cost-uk";
-import CardGradingNearMePage from "@/pages/seo/card-grading-near-me";
-import NfcRedirectPage from "@/pages/nfc-redirect";
-import StolenCardProtectionPage from "@/pages/stolen-card-protection";
-import ClaimPage from "@/pages/claim";
-import TransferPage from "@/pages/transfer";
-import TransferAcceptPage from "@/pages/transfer-accept";
-import TransferClaimByCodePage from "@/pages/transfer-claim-by-code";
-import OwnershipPage from "@/pages/ownership";
-import DashboardPage from "@/pages/dashboard";
-import PopulationPage from "@/pages/population";
-import PopCertsPage from "@/pages/pop-certs";
-import ApiDocsPage from "@/pages/api-docs";
-import GradingScalePage from "@/pages/grading-scale";
-import GradingGlossaryPage from "@/pages/grading-glossary";
-import GradingReportPage from "@/pages/grading-report";
-import MobileUploadPage from "@/pages/mobile-upload";
-import VaultReportPage from "@/pages/vault-report";
-import LogbookPage from "@/pages/logbook";
-import OurStoryPage from "@/pages/about/our-story";
-import EligibleCardsPage from "@/pages/grading/eligible-cards";
-import VaultReportsAboutPage from "@/pages/vault-reports/about";
-import HowToReadVaultPage from "@/pages/vault-reports/how-to-read";
-import FAQPage from "@/pages/help/faq";
-import ContactPage from "@/pages/help/contact";
-import LoginPage from "@/pages/login";
-import AdminLoginPage from "@/pages/admin-login";
-import HomeV2Integrated from "@/pages/home-v2-integrated";
-import HowItWorksV2 from "@/pages/how-it-works-v2";
-import HomeV3 from "@/pages/home-v3";
-import HomeV4 from "@/pages/home-v4";
-import PricingV2Mockup from "@/pages/pricing-v2";
-import SignupPage from "@/pages/signup";
-import ForgotPasswordPage from "@/pages/forgot-password";
-import ResetPasswordPage from "@/pages/reset-password";
-import VerifyEmailPage from "@/pages/verify-email";
-import AccountSettingsPage from "@/pages/account-settings";
-import ShowroomPage from "@/pages/showroom";
-import ShowroomsListPage from "@/pages/showrooms";
-import Home from "@/pages/home";
-import Pricing from "@/pages/pricing";
-import VaultClub from "@/pages/vault-club";
-import Verify from "@/pages/verify";
-import AiPreGrade from "@/pages/ai-pre-grade";
-import PreGradePage from "@/pages/pre-grade";
-import ToolsEstimate from "@/pages/tools-estimate";
-import Journal from "@/pages/journal";
-import JournalDetail from "@/pages/journal-detail";
-import Technology from "@/pages/technology";
-import Registry from "@/pages/registry";
-import VaultVideoBg from "@/components/v2/vault-video-bg";
-
-// Redirect helper — wouter has no built-in redirect, so we replace the URL
-// on mount and render nothing. Used for legacy URLs that moved during cutover.
 function Redirect({ to }: { to: string }) {
   const [, setLocation] = useLocation();
-  useEffect(() => { setLocation(to, { replace: true }); }, [to, setLocation]);
+  useEffect(() => {
+    setLocation(to, { replace: true });
+  }, [to, setLocation]);
   return null;
+}
+
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#0a0e1a]">
+      <div className="w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 }
 
 function Router() {
@@ -197,136 +193,117 @@ function Router() {
       <VaultVideoBg />
       <ScrollToTop />
       <ScrollReveal />
-      <Switch>
-        <Route path="/admin/login">
-          <AdminLoginPage />
-        </Route>
-        <Route path="/home-v2-integrated">
-          <HomeV2Integrated />
-        </Route>
-        <Route path="/how-it-works-v2">
-          <HowItWorksV2 />
-        </Route>
-        <Route path="/home-v3">
-          <HomeV3 />
-        </Route>
-        <Route path="/home-v4">
-          <HomeV4 />
-        </Route>
-        <Route path="/pricing-v2">
-          <PricingV2Mockup />
-        </Route>
-        <Route path="/admin">
-          <AdminPage />
-        </Route>
-        <Route path="/admin/instagram">
-          <AdminInstagramPage />
-        </Route>
-        <Route path="/admin/weekly-reel">
-          <AdminWeeklyReelPage />
-        </Route>
-        <Route path="/reels">
-          <ReelsPage />
-        </Route>
-        <Route path="/share/reel/:date/:certNumber">
-          <ShareReelPage />
-        </Route>
-        <Route path="/standard">
-          <StandardPage />
-        </Route>
-        <Route path="/grading-standard">
-          <StandardPage />
-        </Route>
-        <Route path="/mvgs/join">
-          <MvgsJoinPage />
-        </Route>
-        {/* Admin alias to LogbookPage — same component the public /cert/:id route
-            renders. Added in batch 7 follow-up so the IG admin's thumbnail
-            click + focusId nav doesn't 404. Server-side admin auth applies the
-            same as the rest of /admin/* (the page itself doesn't gate UX — the
-            APIs it calls do). */}
-        <Route path="/admin/cert/:id" component={LogbookPage} />
-        <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
-        <Route path="/nfc/:certId" component={NfcRedirectPage} />
-        <Route path="/cert/:id/report" component={GradingReportPage} />
-        <Route path="/cert/:id" component={LogbookPage} />
-        <Route path="/vault/:certId" component={LogbookPage} />
-        <Route path="/" component={Home} />
-        <Route path="/pricing" component={Pricing} />
-        <Route path="/vault-club" component={VaultClub} />
-        <Route path="/verify" component={Verify} />
-        <Route path="/ai-pre-grade" component={AiPreGrade} />
-        <Route path="/pre-grade" component={PreGradePage} />
-        <Route path="/tools/estimate" component={ToolsEstimate} />
-        <Route path="/journal" component={Journal} />
-        <Route path="/journal/:slug" component={JournalDetail} />
-        <Route path="/technology" component={Technology} />
-        <Route path="/registry" component={Registry} />
-        <Route>
-          <Layout>
-            <Switch>
-              <Route path="/cert"><Redirect to="/verify" /></Route>
-              <Route path="/why-mintvault" component={WhyMintVaultPage} />
-              <Route path="/labels" component={LabelsPage} />
-              <Route path="/reports" component={ReportsPage} />
-              <Route path="/tcg" component={TcgPage} />
-              <Route path="/submit" component={SubmitPage} />
-              <Route path="/submit/success" component={SubmitSuccessPage} />
-              <Route path="/track" component={TrackPage} />
-              <Route path="/terms-and-conditions" component={TermsPage} />
-              <Route path="/liability-and-insurance" component={LiabilityPage} />
-              <Route path="/guides"><Redirect to="/journal" /></Route>
-              <Route path="/guides/:slug">{(params) => <Redirect to={`/journal/${(params as { slug: string }).slug}`} />}</Route>
-              <Route path="/pokemon-card-grading-uk" component={PokemonCardGradingUkPage} />
-              <Route path="/trading-card-grading-uk" component={TradingCardGradingUkPage} />
-              <Route path="/card-grading-service-uk" component={CardGradingServiceUkPage} />
-              <Route path="/psa-alternative-uk" component={PsaAlternativeUkPage} />
-              <Route path="/how-to-grade-pokemon-cards" component={HowToGradePokemonCardsPage} />
-              <Route path="/tcg-grading-uk" component={TcgGradingUkPage} />
-              <Route path="/yugioh-card-grading-uk" component={YugiohCardGradingUkPage} />
-              <Route path="/one-piece-card-grading-uk" component={OnePieceCardGradingUkPage} />
-              <Route path="/sports-card-grading-uk" component={SportsCardGradingUkPage} />
-              <Route path="/mtg-card-grading-uk" component={MtgCardGradingUkPage} />
-              <Route path="/best-card-grading-uk" component={BestCardGradingUkPage} />
-              <Route path="/card-grading-cost-uk" component={CardGradingCostUkPage} />
-              <Route path="/card-grading-near-me" component={CardGradingNearMePage} />
-              <Route path="/stolen-card-protection" component={StolenCardProtectionPage} />
-              <Route path="/ownership" component={OwnershipPage} />
-              <Route path="/claim" component={ClaimPage} />
-              <Route path="/transfer" component={TransferPage} />
-              <Route path="/transfer/accept" component={TransferAcceptPage} />
-              <Route path="/transfer/claim-by-code" component={TransferClaimByCodePage} />
-              <Route path="/dashboard" component={DashboardPage} />
-              <Route path="/population" component={PopulationPage} />
-              <Route path="/population/certs" component={PopCertsPage} />
-              <Route path="/api-docs" component={ApiDocsPage} />
-              <Route path="/grading-scale" component={GradingScalePage} />
-              <Route path="/grading-glossary" component={GradingGlossaryPage} />
-              <Route path="/how-it-works"><Redirect to="/technology" /></Route>
-              <Route path="/legal/:slug" component={LegalPage} />
-              <Route path="/about/our-story" component={OurStoryPage} />
-              <Route path="/about/the-mintvault-slab"><Redirect to="/technology" /></Route>
-              <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
-              <Route path="/vault-reports/about" component={VaultReportsAboutPage} />
-              <Route path="/vault-reports/how-to-read" component={HowToReadVaultPage} />
-              <Route path="/help/faq" component={FAQPage} />
-              <Route path="/help/contact" component={ContactPage} />
-              <Route path="/login" component={LoginPage} />
-              <Route path="/customer-login" component={CustomerLoginPage} />
-              <Route path="/auth/pin/setup" component={PinSetupPage} />
-              <Route path="/auth/pin/forgot" component={PinForgotPage} />
-              <Route path="/signup" component={SignupPage} />
-              <Route path="/forgot-password" component={ForgotPasswordPage} />
-              <Route path="/reset-password" component={ResetPasswordPage} />
-              <Route path="/verify-email" component={VerifyEmailPage} />
-              <Route path="/account/settings" component={AccountSettingsPage} />
-              <Route path="/showrooms" component={ShowroomsListPage} />
-              <Route path="/showroom/:username" component={ShowroomPage} />
-              <Route component={NotFound} />
-            </Switch>
-          </Layout>
-        </Route>
-      </Switch>
+      <Suspense fallback={<PageLoader />}>
+        <Switch>
+          <Route path="/admin/login">
+            <AdminLoginPage />
+          </Route>
+          <Route path="/home-v2-integrated" component={HomeV2Integrated} />
+          <Route path="/how-it-works-v2" component={HowItWorksV2} />
+          <Route path="/home-v3" component={HomeV3} />
+          <Route path="/home-v4" component={HomeV4} />
+          <Route path="/pricing-v2" component={PricingV2Mockup} />
+          <Route path="/admin" component={AdminPage} />
+          <Route path="/admin/instagram" component={AdminInstagramPage} />
+          <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
+          <Route path="/reels" component={ReelsPage} />
+          <Route path="/share/reel/:date/:certNumber" component={ShareReelPage} />
+          <Route path="/standard" component={StandardPage} />
+          <Route path="/grading-standard" component={StandardPage} />
+          <Route path="/mvgs/join" component={MvgsJoinPage} />
+          <Route path="/admin/cert/:id" component={LogbookPage} />
+          <Route path="/upload/:certId/:imageType" component={MobileUploadPage} />
+          <Route path="/nfc/:certId" component={NfcRedirectPage} />
+          <Route path="/cert/:id/report" component={GradingReportPage} />
+          <Route path="/cert/:id" component={LogbookPage} />
+          <Route path="/vault/:certId" component={LogbookPage} />
+          <Route path="/" component={Home} />
+          <Route path="/pricing" component={Pricing} />
+          <Route path="/vault-club" component={VaultClub} />
+          <Route path="/verify" component={Verify} />
+          <Route path="/ai-pre-grade" component={AiPreGrade} />
+          <Route path="/pre-grade" component={PreGradePage} />
+          <Route path="/tools/estimate" component={ToolsEstimate} />
+          <Route path="/journal" component={Journal} />
+          <Route path="/journal/:slug" component={JournalDetail} />
+          <Route path="/technology" component={Technology} />
+          <Route path="/registry" component={Registry} />
+          <Route>
+            <Layout>
+              <Switch>
+                <Route path="/cert">
+                  <Redirect to="/verify" />
+                </Route>
+                <Route path="/why-mintvault" component={WhyMintVaultPage} />
+                <Route path="/labels" component={LabelsPage} />
+                <Route path="/reports" component={ReportsPage} />
+                <Route path="/tcg" component={TcgPage} />
+                <Route path="/submit" component={SubmitPage} />
+                <Route path="/submit/success" component={SubmitSuccessPage} />
+                <Route path="/track" component={TrackPage} />
+                <Route path="/terms-and-conditions" component={TermsPage} />
+                <Route path="/liability-and-insurance" component={LiabilityPage} />
+                <Route path="/guides">
+                  <Redirect to="/journal" />
+                </Route>
+                <Route path="/guides/:slug">
+                  {(params) => <Redirect to={`/journal/${(params as { slug: string }).slug}`} />}
+                </Route>
+                <Route path="/pokemon-card-grading-uk" component={PokemonCardGradingUkPage} />
+                <Route path="/trading-card-grading-uk" component={TradingCardGradingUkPage} />
+                <Route path="/card-grading-service-uk" component={CardGradingServiceUkPage} />
+                <Route path="/psa-alternative-uk" component={PsaAlternativeUkPage} />
+                <Route path="/how-to-grade-pokemon-cards" component={HowToGradePokemonCardsPage} />
+                <Route path="/tcg-grading-uk" component={TcgGradingUkPage} />
+                <Route path="/yugioh-card-grading-uk" component={YugiohCardGradingUkPage} />
+                <Route path="/one-piece-card-grading-uk" component={OnePieceCardGradingUkPage} />
+                <Route path="/sports-card-grading-uk" component={SportsCardGradingUkPage} />
+                <Route path="/mtg-card-grading-uk" component={MtgCardGradingUkPage} />
+                <Route path="/best-card-grading-uk" component={BestCardGradingUkPage} />
+                <Route path="/card-grading-cost-uk" component={CardGradingCostUkPage} />
+                <Route path="/card-grading-near-me" component={CardGradingNearMePage} />
+                <Route path="/stolen-card-protection" component={StolenCardProtectionPage} />
+                <Route path="/ownership" component={OwnershipPage} />
+                <Route path="/claim" component={ClaimPage} />
+                <Route path="/transfer" component={TransferPage} />
+                <Route path="/transfer/accept" component={TransferAcceptPage} />
+                <Route path="/transfer/claim-by-code" component={TransferClaimByCodePage} />
+                <Route path="/dashboard" component={DashboardPage} />
+                <Route path="/population" component={PopulationPage} />
+                <Route path="/population/certs" component={PopCertsPage} />
+                <Route path="/api-docs" component={ApiDocsPage} />
+                <Route path="/grading-scale" component={GradingScalePage} />
+                <Route path="/grading-glossary" component={GradingGlossaryPage} />
+                <Route path="/how-it-works">
+                  <Redirect to="/technology" />
+                </Route>
+                <Route path="/legal/:slug" component={LegalPage} />
+                <Route path="/about/our-story" component={OurStoryPage} />
+                <Route path="/about/the-mintvault-slab">
+                  <Redirect to="/technology" />
+                </Route>
+                <Route path="/grading/eligible-cards" component={EligibleCardsPage} />
+                <Route path="/vault-reports/about" component={VaultReportsAboutPage} />
+                <Route path="/vault-reports/how-to-read" component={HowToReadVaultPage} />
+                <Route path="/help/faq" component={FAQPage} />
+                <Route path="/help/contact" component={ContactPage} />
+                <Route path="/login" component={LoginPage} />
+                <Route path="/customer-login" component={CustomerLoginPage} />
+                <Route path="/auth/pin/setup" component={PinSetupPage} />
+                <Route path="/auth/pin/forgot" component={PinForgotPage} />
+                <Route path="/signup" component={SignupPage} />
+                <Route path="/forgot-password" component={ForgotPasswordPage} />
+                <Route path="/reset-password" component={ResetPasswordPage} />
+                <Route path="/verify-email" component={VerifyEmailPage} />
+                <Route path="/account/settings" component={AccountSettingsPage} />
+                <Route path="/showrooms" component={ShowroomsListPage} />
+                <Route path="/showroom/:username" component={ShowroomPage} />
+                <Route component={NotFound} />
+              </Switch>
+            </Layout>
+          </Route>
+        </Switch>
+      </Suspense>
     </>
   );
 }
@@ -334,24 +311,24 @@ function Router() {
 function FeatureFlagsProvider({ children }: { children: React.ReactNode }) {
   const { data } = useFeatureFlagsQuery();
   return (
-    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false }}>
-      {children}
-    </FeatureFlagsContext.Provider>
+    <FeatureFlagsContext.Provider value={data || { legalPagesLive: false }}>{children}</FeatureFlagsContext.Provider>
   );
 }
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <FeatureFlagsProvider>
-        <TooltipProvider>
-          <GoldBurstEffect />
-          <Toaster />
-          <Router />
-          <CookieBanner />
-        </TooltipProvider>
-      </FeatureFlagsProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <FeatureFlagsProvider>
+          <TooltipProvider>
+            <GoldBurstEffect />
+            <Toaster />
+            <Router />
+            <CookieBanner />
+          </TooltipProvider>
+        </FeatureFlagsProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -1,14 +1,54 @@
-import type { Express, Request as ExpressRequest, Response as ExpressResponse, NextFunction as ExpressNextFunction } from "express";
+import type {
+  Express,
+  Request as ExpressRequest,
+  Response as ExpressResponse,
+  NextFunction as ExpressNextFunction,
+} from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { BUILD_STAMP, pricingTiers, calculateOrderTotals, getVaultClubDiscountPercent, gradeLabel, gradeLabelFull, isNonNumericGrade, SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS, serviceTierToPricingTier, auditLog } from "@shared/schema";
+import { registerPublicRoutes } from "./routes/public";
+import { registerAuthRoutes } from "./routes/auth";
+import { registerSubmissionRoutes } from "./routes/submissions";
+import { registerAdminSubmissionRoutes } from "./routes/admin-submissions";
+import { registerAdminConfigRoutes } from "./routes/admin-config";
+import { registerTransferRoutes } from "./routes/transfers";
+import { registerPreGradeRoutes } from "./routes/pre-grade";
+import { registerStolenRoutes } from "./routes/stolen";
+import { registerEmbeddingRoutes } from "./routes/embedding";
+import {
+  BUILD_STAMP,
+  pricingTiers,
+  calculateOrderTotals,
+  getVaultClubDiscountPercent,
+  gradeLabel,
+  gradeLabelFull,
+  isNonNumericGrade,
+  SUBMISSION_STATUS_TRANSITIONS,
+  SUBMISSION_STATUS_LABELS,
+  serviceTierToPricingTier,
+  auditLog,
+} from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { verifyAdminPassword, requireAdmin, isLoginRateLimited, isPinRateLimited, recordFailedLogin, recordFailedPin, clearLoginAttempts, clearPinAttempts, isPendingAdminValid, clearPendingAdmin, ADMIN_EMAIL, FAILED_LOGIN_DELAY_MS } from "./auth";
+import {
+  verifyAdminPassword,
+  requireAdmin,
+  isLoginRateLimited,
+  isPinRateLimited,
+  recordFailedLogin,
+  recordFailedPin,
+  clearLoginAttempts,
+  clearPinAttempts,
+  isPendingAdminValid,
+  clearPendingAdmin,
+  ADMIN_EMAIL,
+  FAILED_LOGIN_DELAY_MS,
+} from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
 import multer from "multer";
+import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -16,26 +56,72 @@ import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyF
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql, inArray } from "drizzle-orm";
-import { sendSubmissionConfirmation, sendSubmissionConfirmationV2, sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered, sendClaimVerification, sendTransferOwnerConfirmation, sendTransferNewOwnerConfirmation, sendTransferV2OutgoingConfirmation, sendTransferV2IncomingConfirmation, sendTransferV2DisputeWindowStarted, sendTransferV2Completed, sendTransferV2Cancelled, sendTransferV2Disputed, sendTransferV2OwnerInvitedByBuyer, sendTransferV2BuyerInitOwnerConfirmed, sendTransferV2BuyerInitOwnerRejected, sendCertificatePdf, sendMagicLink, sendPinResetLink, sendStolenVerificationEmail } from "./email";
+import {
+  sendSubmissionConfirmation,
+  sendSubmissionConfirmationV2,
+  sendCardsReceived,
+  sendGradingComplete,
+  sendShipped,
+  sendSubmissionDelivered,
+  sendClaimVerification,
+  sendTransferOwnerConfirmation,
+  sendTransferNewOwnerConfirmation,
+  sendTransferV2OutgoingConfirmation,
+  sendTransferV2IncomingConfirmation,
+  sendTransferV2DisputeWindowStarted,
+  sendTransferV2Completed,
+  sendTransferV2Cancelled,
+  sendTransferV2Disputed,
+  sendTransferV2OwnerInvitedByBuyer,
+  sendTransferV2BuyerInitOwnerConfirmed,
+  sendTransferV2BuyerInitOwnerRejected,
+  sendCertificatePdf,
+  sendMagicLink,
+  sendPinResetLink,
+  sendStolenVerificationEmail,
+} from "./email";
 import { getOwnerChain } from "./ownership-service";
 import { generateCertificateDocument } from "./certificate-document";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "./customer-auth";
-import { identifyCard, identifyCardFromBuffer, verifyAndEnrichCardData, analyzeCard, identifyAndAnalyze, autoCropCard, analyzeCardFromBuffers, generateImageVariants, verifyPokemonCardWithTcgApi, resizeForClaude, normaliseCardName, type ImageKeys } from "./ai-grading-service";
+import {
+  identifyCard,
+  identifyCardFromBuffer,
+  verifyAndEnrichCardData,
+  analyzeCard,
+  identifyAndAnalyze,
+  autoCropCard,
+  analyzeCardFromBuffers,
+  generateImageVariants,
+  verifyPokemonCardWithTcgApi,
+  resizeForClaude,
+  normaliseCardName,
+  type ImageKeys,
+} from "./ai-grading-service";
 import { anthropicFetch } from "./anthropic-fetch";
 import { APP_BASE_URL } from "./app-url";
 import { getCachedOrFreshEbayPrices, buildCardKey } from "./ebay";
 import {
-  hashPassword, verifyPassword, validatePassword,
-  createEmailVerificationToken, createPasswordResetToken, createAccountMagicLinkToken,
-  findUserByEmail, findUserById,
-  countRecentFailedAttempts, logLoginAttempt, writeAuthAudit,
+  hashPassword,
+  verifyPassword,
+  validatePassword,
+  createEmailVerificationToken,
+  createPasswordResetToken,
+  createAccountMagicLinkToken,
+  findUserByEmail,
+  findUserById,
+  countRecentFailedAttempts,
+  logLoginAttempt,
+  writeAuthAudit,
   migrateAccountSchema,
 } from "./account-auth";
 import { migrateMarketplaceSchema } from "./marketplace-schema";
 import {
-  sendWelcomeVerificationEmail, sendAccountMagicLinkEmail,
-  sendPasswordResetEmail, sendPasswordChangedEmail,
-  sendEmailChangedNotification, sendAccountDeletedEmail,
+  sendWelcomeVerificationEmail,
+  sendAccountMagicLinkEmail,
+  sendPasswordResetEmail,
+  sendPasswordChangedEmail,
+  sendEmailChangedNotification,
+  sendAccountDeletedEmail,
 } from "./email";
 import { requireAuth } from "./middleware/auth";
 import { requireScannerOrAdmin } from "./lib/scanner-auth";
@@ -73,11 +159,15 @@ async function consumeCredit(userId: string, creditType: string, submissionId: n
 function extractJson<T = any>(raw: string, label: string): T {
   const cleaned = raw.replace(/```json|```/g, "").trim();
   // Attempt 1: direct parse
-  try { return JSON.parse(cleaned); } catch {}
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
   // Attempt 2: extract outermost JSON object from prose
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (match) {
-    try { return JSON.parse(match[0]); } catch (e2: any) {
+    try {
+      return JSON.parse(match[0]);
+    } catch (e2: any) {
       console.error(`[${label}] regex-extracted JSON failed to parse:`, e2.message);
       console.error(`[${label}] extracted (first 500):`, match[0].slice(0, 500));
     }
@@ -91,7 +181,9 @@ function extractJson<T = any>(raw: string, label: string): T {
     const closes = (partial.match(/\}/g) || []).length;
     if (opens > closes) {
       const repaired = partial + "}".repeat(opens - closes);
-      try { return JSON.parse(repaired); } catch (e3: any) {
+      try {
+        return JSON.parse(repaired);
+      } catch (e3: any) {
         console.error(`[${label}] truncation repair failed:`, e3.message);
       }
     }
@@ -108,31 +200,62 @@ function getSignedUrlSecret(): string {
 }
 
 const RARITY_LABELS: Record<string, string> = {
-  COMMON: "Common", UNCOMMON: "Uncommon", RARE: "Rare", HOLO: "Holo", RARE_HOLO: "Holo Rare",
-  REVERSE_HOLO: "Reverse Holo", DOUBLE_RARE: "Double Rare (ex/V)", ULTRA_RARE: "Ultra Rare (Full Art)",
-  ILLUSTRATION_RARE: "Illustration Rare (IR)", SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare (SIR)",
-  HYPER_RARE: "Hyper Rare (Gold)", SECRET_RARE: "Secret Rare", SHINY_RARE: "Shiny Rare",
-  SHINY_ULTRA_RARE: "Shiny Ultra Rare", RADIANT: "Radiant", AMAZING_RARE: "Amazing Rare",
-  ACE_SPEC: "ACE SPEC", TRAINER_GALLERY: "Trainer Gallery (TG)", GALAR_GALLERY: "Galarian Gallery (GG)",
-  GOLD_STAR: "★ Gold Star", DOUBLE_GOLD_STAR: "★★ Double Gold Star",
-  PROMO_RARITY: "Promo (Rarity Unknown)", OTHER: "Other (manual)",
-};
-
-const COLLECTION_LABELS: Record<string, string> = {
-  CLASSIC_COLLECTION: "Classic Collection", COLLECTION_GENERIC: "Collection (generic)",
-  BLACK_STAR_PROMO: "Black Star Promo", PROMO_GENERIC: "Promo (generic)",
-  FIRST_EDITION: "1st Edition", UNLIMITED: "Unlimited", SHADOWLESS: "Shadowless",
-  FOURTH_PRINT: "4th Print", NO_RARITY_SYMBOL: "No Rarity Symbol",
-  ERROR_MISPRINT: "Error / Misprint", TROPHY_PRIZE: "Trophy / Prize",
-  TRAINER_GALLERY: "Trainer Gallery (TG)", GALARIAN_GALLERY: "Galarian Gallery (GG)",
-  RADIANT_COLLECTION: "Radiant Collection (RC)", SHINY_VAULT: "Shiny Vault (SV)",
-  ILLUSTRATION_RARE: "Illustration Rare (IR)", SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare (SIR)",
-  CHARACTER_RARE: "Character Rare (CHR)", CHARACTER_SUPER_RARE: "Character Super Rare (CSR)",
-  PRISM_STAR: "Prism Star", AMAZING_RARE: "Amazing Rare", SECRET_RARE: "Secret Rare",
+  COMMON: "Common",
+  UNCOMMON: "Uncommon",
+  RARE: "Rare",
+  HOLO: "Holo",
+  RARE_HOLO: "Holo Rare",
+  REVERSE_HOLO: "Reverse Holo",
+  DOUBLE_RARE: "Double Rare (ex/V)",
+  ULTRA_RARE: "Ultra Rare (Full Art)",
+  ILLUSTRATION_RARE: "Illustration Rare (IR)",
+  SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare (SIR)",
+  HYPER_RARE: "Hyper Rare (Gold)",
+  SECRET_RARE: "Secret Rare",
+  SHINY_RARE: "Shiny Rare",
+  SHINY_ULTRA_RARE: "Shiny Ultra Rare",
+  RADIANT: "Radiant",
+  AMAZING_RARE: "Amazing Rare",
+  ACE_SPEC: "ACE SPEC",
+  TRAINER_GALLERY: "Trainer Gallery (TG)",
+  GALAR_GALLERY: "Galarian Gallery (GG)",
+  GOLD_STAR: "★ Gold Star",
+  DOUBLE_GOLD_STAR: "★★ Double Gold Star",
+  PROMO_RARITY: "Promo (Rarity Unknown)",
   OTHER: "Other (manual)",
 };
 
-function collectionDisplayLabel(code: string | null | undefined, other: string | null | undefined, legacyCollection?: string | null): string | null {
+const COLLECTION_LABELS: Record<string, string> = {
+  CLASSIC_COLLECTION: "Classic Collection",
+  COLLECTION_GENERIC: "Collection (generic)",
+  BLACK_STAR_PROMO: "Black Star Promo",
+  PROMO_GENERIC: "Promo (generic)",
+  FIRST_EDITION: "1st Edition",
+  UNLIMITED: "Unlimited",
+  SHADOWLESS: "Shadowless",
+  FOURTH_PRINT: "4th Print",
+  NO_RARITY_SYMBOL: "No Rarity Symbol",
+  ERROR_MISPRINT: "Error / Misprint",
+  TROPHY_PRIZE: "Trophy / Prize",
+  TRAINER_GALLERY: "Trainer Gallery (TG)",
+  GALARIAN_GALLERY: "Galarian Gallery (GG)",
+  RADIANT_COLLECTION: "Radiant Collection (RC)",
+  SHINY_VAULT: "Shiny Vault (SV)",
+  ILLUSTRATION_RARE: "Illustration Rare (IR)",
+  SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare (SIR)",
+  CHARACTER_RARE: "Character Rare (CHR)",
+  CHARACTER_SUPER_RARE: "Character Super Rare (CSR)",
+  PRISM_STAR: "Prism Star",
+  AMAZING_RARE: "Amazing Rare",
+  SECRET_RARE: "Secret Rare",
+  OTHER: "Other (manual)",
+};
+
+function collectionDisplayLabel(
+  code: string | null | undefined,
+  other: string | null | undefined,
+  legacyCollection?: string | null
+): string | null {
   if (!code) {
     return legacyCollection?.trim() || null;
   }
@@ -141,16 +264,33 @@ function collectionDisplayLabel(code: string | null | undefined, other: string |
 }
 
 const VARIANT_LABELS: Record<string, string> = {
-  NONE: "None / Regular", HOLO: "Holo", REVERSE_HOLO: "Reverse Holo",
-  COSMOS_HOLO: "Cosmos Holo", CRACKED_ICE_HOLO: "Cracked Ice Holo",
-  MIRROR_HOLO: "Mirror Holo", GLITTER_HOLO: "Glitter Holo", PATTERN_HOLO: "Pattern Holo",
-  TEXTURED: "Textured", FULL_ART: "Full Art", ALT_ART: "Alt Art", SPECIAL_ART: "Special Art",
-  RAINBOW: "Rainbow", GOLD: "Gold", SHINY: "Shiny", RADIANT: "Radiant",
-  TRAINER_GALLERY: "Trainer Gallery", GALARIAN_GALLERY: "Galarian Gallery",
-  CHARACTER_RARE: "Character Rare (CHR)", CHARACTER_SUPER_RARE: "Character Super Rare (CSR)",
-  SECRET_RARE: "Secret Rare", ILLUSTRATION_RARE: "Illustration Rare",
-  SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare", PROMO: "Promo",
-  FIRST_EDITION: "1st Edition", SHADOWLESS: "Shadowless", UNLIMITED: "Unlimited",
+  NONE: "None / Regular",
+  HOLO: "Holo",
+  REVERSE_HOLO: "Reverse Holo",
+  COSMOS_HOLO: "Cosmos Holo",
+  CRACKED_ICE_HOLO: "Cracked Ice Holo",
+  MIRROR_HOLO: "Mirror Holo",
+  GLITTER_HOLO: "Glitter Holo",
+  PATTERN_HOLO: "Pattern Holo",
+  TEXTURED: "Textured",
+  FULL_ART: "Full Art",
+  ALT_ART: "Alt Art",
+  SPECIAL_ART: "Special Art",
+  RAINBOW: "Rainbow",
+  GOLD: "Gold",
+  SHINY: "Shiny",
+  RADIANT: "Radiant",
+  TRAINER_GALLERY: "Trainer Gallery",
+  GALARIAN_GALLERY: "Galarian Gallery",
+  CHARACTER_RARE: "Character Rare (CHR)",
+  CHARACTER_SUPER_RARE: "Character Super Rare (CSR)",
+  SECRET_RARE: "Secret Rare",
+  ILLUSTRATION_RARE: "Illustration Rare",
+  SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare",
+  PROMO: "Promo",
+  FIRST_EDITION: "1st Edition",
+  SHADOWLESS: "Shadowless",
+  UNLIMITED: "Unlimited",
   OTHER: "Other (manual)",
 };
 
@@ -161,9 +301,15 @@ function variantDisplayLabel(code: string | null | undefined, variantOther: stri
 }
 
 const DESIGNATION_LABELS: Record<string, string> = {
-  PROMO: "Promo", TOURNAMENT_STAMP: "Tournament / Event Stamp", PRERELEASE: "Prerelease",
-  STAFF: "Staff", ERROR_MISCUT: "Error / Miscut / Misprint", FIRST_EDITION: "1st Edition",
-  SHADOWLESS: "Shadowless", UNLIMITED: "Unlimited", JAPANESE_PRINT: "Japanese Print",
+  PROMO: "Promo",
+  TOURNAMENT_STAMP: "Tournament / Event Stamp",
+  PRERELEASE: "Prerelease",
+  STAFF: "Staff",
+  ERROR_MISCUT: "Error / Miscut / Misprint",
+  FIRST_EDITION: "1st Edition",
+  SHADOWLESS: "Shadowless",
+  UNLIMITED: "Unlimited",
+  JAPANESE_PRINT: "Japanese Print",
   OTHER_LANGUAGE: "Other Language",
 };
 
@@ -178,7 +324,7 @@ function rarityDisplayLabel(code: string | null | undefined, rarityOther: string
 }
 
 function designationCodesToLabels(codes: string[]): string[] {
-  return codes.map(c => DESIGNATION_LABELS[c] || c);
+  return codes.map((c) => DESIGNATION_LABELS[c] || c);
 }
 
 function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
@@ -205,10 +351,42 @@ const upload = multer({
   },
 });
 
-function normalizeCertId(raw: string): string {
+export function normalizeCertId(raw: string): string {
   const m = raw.match(/^MV-?0*(\d+)$/i);
   if (m) return `MV${m[1]}`;
   return raw;
+}
+
+const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff"]);
+
+async function validateImageMagicBytes(file: Express.Multer.File): Promise<boolean> {
+  const detected = await fileTypeFromBuffer(file.buffer);
+  if (!detected) return false;
+  return ALLOWED_IMAGE_MIMES.has(detected.mime);
+}
+
+export async function rejectInvalidUploads(files: Express.Multer.File[]): Promise<string | null> {
+  for (const f of files) {
+    const valid = await validateImageMagicBytes(f);
+    if (!valid) return `File "${f.originalname}" failed content-type validation`;
+  }
+  return null;
+}
+
+export async function findCertByIdFlex(certId: string) {
+  let dbCert = await storage.getCertificateByCertId(certId);
+  if (dbCert) return dbCert;
+
+  const numMatch = certId.match(/^MV-?0*(\d+)$/i);
+  if (numMatch) {
+    const num = numMatch[1];
+    dbCert = await storage.getCertificateByCertId(`MV${num}`);
+    if (dbCert) return dbCert;
+    dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
+    if (dbCert) return dbCert;
+  }
+
+  return null;
 }
 
 async function certToPublic(c: any, viewerUserId?: string | null): Promise<PublicCertificate> {
@@ -219,10 +397,20 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   let frontUrl: string | null = null;
   let backUrl: string | null = null;
   if (c.frontImagePath) {
-    try { frontUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (front):", c.frontImagePath, e); frontUrl = null; }
+    try {
+      frontUrl = await getR2SignedUrl(c.frontImagePath, 3600);
+    } catch (e) {
+      console.error("R2 sign failed (front):", c.frontImagePath, e);
+      frontUrl = null;
+    }
   }
   if (c.backImagePath) {
-    try { backUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (back):", c.backImagePath, e); backUrl = null; }
+    try {
+      backUrl = await getR2SignedUrl(c.backImagePath, 3600);
+    } catch (e) {
+      console.error("R2 sign failed (back):", c.backImagePath, e);
+      backUrl = null;
+    }
   }
 
   return {
@@ -254,9 +442,12 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
     nfcEnabled: c.nfcEnabled ?? null,
     nfcScanCount: c.nfcScanCount != null ? Number(c.nfcScanCount) : null,
     ownershipStatus: c.ownershipStatus || "unclaimed",
-    ownershipRef: c.ownershipStatus === "claimed" && c.certId
-      ? `MV-REG-${String(c.certId).replace(/^MV-?0*/, "").padStart(10, "0")}`
-      : null,
+    ownershipRef:
+      c.ownershipStatus === "claimed" && c.certId
+        ? `MV-REG-${String(c.certId)
+            .replace(/^MV-?0*/, "")
+            .padStart(10, "0")}`
+        : null,
     gradingReport: c.gradingReport && Object.keys(c.gradingReport).length > 0 ? c.gradingReport : null,
     isOwnedByViewer: !!(viewerUserId && c.currentOwnerUserId && viewerUserId === c.currentOwnerUserId),
     stolenStatus: c.stolenStatus || null,
@@ -300,21 +491,87 @@ async function migrateServiceTiersV213() {
     sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS tagline TEXT`,
     sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS most_popular BOOLEAN NOT NULL DEFAULT FALSE`,
   ]) {
-    try { await db.execute(stmt); }
-    catch (e: any) { console.error("[v213-migrate] ALTER service_tiers failed:", e.message); }
+    try {
+      await db.execute(stmt);
+    } catch (e: any) {
+      console.error("[v213-migrate] ALTER service_tiers failed:", e.message);
+    }
   }
 
   // ── Phase 2: Seed rows that don't yet exist (ON CONFLICT DO NOTHING) ──────
   // These only insert if the tier_id doesn't already exist in the table.
   // On a branched DB with existing data, every INSERT will be skipped — that's expected.
   const seeds = [
-    { serviceType: "grading",        tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
-    { serviceType: "grading",        tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
-    { serviceType: "grading",        tierId: "express",        name: "EXPRESS",            pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
-    { serviceType: "grading",        tierId: "gold",           name: "BLACK LABEL REVIEW", pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
-    { serviceType: "reholder",       tierId: "reholder",       name: "REHOLDER",           pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { serviceType: "crossover",      tierId: "crossover",      name: "CROSSOVER",          pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
-    { serviceType: "authentication", tierId: "authentication", name: "AUTHENTICATION",     pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    {
+      serviceType: "grading",
+      tierId: "standard",
+      name: "VAULT QUEUE",
+      pricePerCard: 1900,
+      turnaroundDays: 40,
+      turnaroundLabel: "40 working days",
+      maxValueGbp: 500,
+      sortOrder: 1,
+    },
+    {
+      serviceType: "grading",
+      tierId: "priority",
+      name: "STANDARD",
+      pricePerCard: 2500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1500,
+      sortOrder: 2,
+    },
+    {
+      serviceType: "grading",
+      tierId: "express",
+      name: "EXPRESS",
+      pricePerCard: 4500,
+      turnaroundDays: 5,
+      turnaroundLabel: "5 working days",
+      maxValueGbp: 3000,
+      sortOrder: 3,
+    },
+    {
+      serviceType: "grading",
+      tierId: "gold",
+      name: "BLACK LABEL REVIEW",
+      pricePerCard: 7500,
+      turnaroundDays: 10,
+      turnaroundLabel: "10 working days",
+      maxValueGbp: 7500,
+      sortOrder: 4,
+    },
+    {
+      serviceType: "reholder",
+      tierId: "reholder",
+      name: "REHOLDER",
+      pricePerCard: 1500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1000,
+      sortOrder: 1,
+    },
+    {
+      serviceType: "crossover",
+      tierId: "crossover",
+      name: "CROSSOVER",
+      pricePerCard: 3500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1500,
+      sortOrder: 1,
+    },
+    {
+      serviceType: "authentication",
+      tierId: "authentication",
+      name: "AUTHENTICATION",
+      pricePerCard: 1500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1000,
+      sortOrder: 1,
+    },
   ];
   for (const t of seeds) {
     try {
@@ -323,7 +580,9 @@ async function migrateServiceTiersV213() {
         VALUES (${t.serviceType}, ${t.tierId}, ${t.name}, ${t.pricePerCard}, ${t.turnaroundDays}, ${t.turnaroundLabel}, ${t.maxValueGbp}, true, ${t.sortOrder})
         ON CONFLICT DO NOTHING
       `);
-    } catch (e: any) { console.error(`[v213-migrate] seed ${t.tierId} failed:`, e.message); }
+    } catch (e: any) {
+      console.error(`[v213-migrate] seed ${t.tierId} failed:`, e.message);
+    }
   }
 
   // ── Phase 3a: UPDATE core columns that definitely exist (name, price, turnaround, etc.) ──
@@ -331,13 +590,69 @@ async function migrateServiceTiersV213() {
   // Rollback reference (old prices): standard=1200, priority=1500, express=2000, gold=8500, gold-elite=12500
   // Ancillary old prices: reholder=800, crossover=1500, authentication=1000
   const coreUpdates = [
-    { tierId: "standard",       name: "VAULT QUEUE",        pricePerCard: 1900,  turnaroundDays: 40, turnaroundLabel: "40 working days",  maxValueGbp: 500,  sortOrder: 1 },
-    { tierId: "priority",       name: "STANDARD",           pricePerCard: 2500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 2 },
-    { tierId: "express",        name: "EXPRESS",             pricePerCard: 4500,  turnaroundDays: 5,  turnaroundLabel: "5 working days",   maxValueGbp: 3000, sortOrder: 3 },
-    { tierId: "gold",           name: "BLACK LABEL REVIEW",  pricePerCard: 7500,  turnaroundDays: 10, turnaroundLabel: "10 working days",  maxValueGbp: 7500, sortOrder: 4 },
-    { tierId: "reholder",       name: "REHOLDER",            pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
-    { tierId: "crossover",      name: "CROSSOVER",           pricePerCard: 3500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1500, sortOrder: 1 },
-    { tierId: "authentication", name: "AUTHENTICATION",      pricePerCard: 1500,  turnaroundDays: 15, turnaroundLabel: "15 working days",  maxValueGbp: 1000, sortOrder: 1 },
+    {
+      tierId: "standard",
+      name: "VAULT QUEUE",
+      pricePerCard: 1900,
+      turnaroundDays: 40,
+      turnaroundLabel: "40 working days",
+      maxValueGbp: 500,
+      sortOrder: 1,
+    },
+    {
+      tierId: "priority",
+      name: "STANDARD",
+      pricePerCard: 2500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1500,
+      sortOrder: 2,
+    },
+    {
+      tierId: "express",
+      name: "EXPRESS",
+      pricePerCard: 4500,
+      turnaroundDays: 5,
+      turnaroundLabel: "5 working days",
+      maxValueGbp: 3000,
+      sortOrder: 3,
+    },
+    {
+      tierId: "gold",
+      name: "BLACK LABEL REVIEW",
+      pricePerCard: 7500,
+      turnaroundDays: 10,
+      turnaroundLabel: "10 working days",
+      maxValueGbp: 7500,
+      sortOrder: 4,
+    },
+    {
+      tierId: "reholder",
+      name: "REHOLDER",
+      pricePerCard: 1500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1000,
+      sortOrder: 1,
+    },
+    {
+      tierId: "crossover",
+      name: "CROSSOVER",
+      pricePerCard: 3500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1500,
+      sortOrder: 1,
+    },
+    {
+      tierId: "authentication",
+      name: "AUTHENTICATION",
+      pricePerCard: 1500,
+      turnaroundDays: 15,
+      turnaroundLabel: "15 working days",
+      maxValueGbp: 1000,
+      sortOrder: 1,
+    },
   ];
   for (const u of coreUpdates) {
     try {
@@ -353,20 +668,57 @@ async function migrateServiceTiersV213() {
         WHERE tier_id = ${u.tierId}
       `);
       console.log(`[v213-migrate] core UPDATE ${u.tierId}: ${result.rowCount} row(s)`);
-    } catch (e: any) { console.error(`[v213-migrate] core UPDATE ${u.tierId} failed:`, e.message); }
+    } catch (e: any) {
+      console.error(`[v213-migrate] core UPDATE ${u.tierId} failed:`, e.message);
+    }
   }
 
   // ── Phase 3b: UPDATE new columns (display_name, tagline, most_popular) ──
   // These depend on Phase 1 ALTERs succeeding. If the columns don't exist, each UPDATE
   // will fail and log the error — but Phase 3a prices are already applied.
   const metaUpdates = [
-    { tierId: "standard",       displayName: "Vault Queue",        tagline: "For patient collectors. Full Vault treatment, longer queue.",         mostPopular: false },
-    { tierId: "priority",       displayName: "Standard",           tagline: "Our most popular tier. Professional grading, solid turnaround.",     mostPopular: true },
-    { tierId: "express",        displayName: "Express",            tagline: "Fast-tracked grading for time-sensitive submissions.",               mostPopular: false },
-    { tierId: "gold",           displayName: "Black Label Review", tagline: "Premium service for high-value and investment-grade cards.",         mostPopular: false },
-    { tierId: "reholder",       displayName: "Reholder",           tagline: "New MintVault slab with updated NFC and certificate.",              mostPopular: false },
-    { tierId: "crossover",      displayName: "Crossover",          tagline: "Re-grade a card from PSA, BGS, CGC, or another company.",           mostPopular: false },
-    { tierId: "authentication", displayName: "Authentication",     tagline: "Verify authenticity and check for alterations.",                    mostPopular: false },
+    {
+      tierId: "standard",
+      displayName: "Vault Queue",
+      tagline: "For patient collectors. Full Vault treatment, longer queue.",
+      mostPopular: false,
+    },
+    {
+      tierId: "priority",
+      displayName: "Standard",
+      tagline: "Our most popular tier. Professional grading, solid turnaround.",
+      mostPopular: true,
+    },
+    {
+      tierId: "express",
+      displayName: "Express",
+      tagline: "Fast-tracked grading for time-sensitive submissions.",
+      mostPopular: false,
+    },
+    {
+      tierId: "gold",
+      displayName: "Black Label Review",
+      tagline: "Premium service for high-value and investment-grade cards.",
+      mostPopular: false,
+    },
+    {
+      tierId: "reholder",
+      displayName: "Reholder",
+      tagline: "New MintVault slab with updated NFC and certificate.",
+      mostPopular: false,
+    },
+    {
+      tierId: "crossover",
+      displayName: "Crossover",
+      tagline: "Re-grade a card from PSA, BGS, CGC, or another company.",
+      mostPopular: false,
+    },
+    {
+      tierId: "authentication",
+      displayName: "Authentication",
+      tagline: "Verify authenticity and check for alterations.",
+      mostPopular: false,
+    },
   ];
   for (const u of metaUpdates) {
     try {
@@ -377,14 +729,18 @@ async function migrateServiceTiersV213() {
           most_popular = ${u.mostPopular}
         WHERE tier_id = ${u.tierId}
       `);
-    } catch (e: any) { console.error(`[v213-migrate] meta UPDATE ${u.tierId} failed:`, e.message); }
+    } catch (e: any) {
+      console.error(`[v213-migrate] meta UPDATE ${u.tierId} failed:`, e.message);
+    }
   }
 
   // ── Phase 4: Deactivate gold-elite (no longer offered) ─────────────────────
   try {
     const r = await db.execute(sql`UPDATE service_tiers SET is_active = false WHERE tier_id = 'gold-elite'`);
     console.log(`[v213-migrate] deactivate gold-elite: ${r.rowCount} row(s)`);
-  } catch (e: any) { console.error("[v213-migrate] deactivate gold-elite failed:", e.message); }
+  } catch (e: any) {
+    console.error("[v213-migrate] deactivate gold-elite failed:", e.message);
+  }
 
   // ── Phase 5: Create value_protection_tiers table ────────────────────────────
   try {
@@ -408,13 +764,19 @@ async function migrateServiceTiersV213() {
       `);
       console.log("[v213-migrate] value_protection_tiers seeded with 3 rows");
     }
-  } catch (e: any) { console.error("[v213-migrate] value_protection_tiers failed:", e.message); }
+  } catch (e: any) {
+    console.error("[v213-migrate] value_protection_tiers failed:", e.message);
+  }
 
   // ── Phase 6: Add credit_type column to member_credits (formerly reholder_credits) ──
   try {
-    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'member'`);
+    await db.execute(
+      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'member'`
+    );
     console.log("[v213-migrate] member_credits.credit_type column ensured");
-  } catch (e: any) { console.error("[v213-migrate] ALTER member_credits failed:", e.message); }
+  } catch (e: any) {
+    console.error("[v213-migrate] ALTER member_credits failed:", e.message);
+  }
 
   console.log("[startup] migrateServiceTiersV213 complete");
 
@@ -432,7 +794,9 @@ async function migrateServiceTiersV213() {
     await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_version INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_last_issued_at TIMESTAMPTZ`);
     console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
-  } catch (e: any) { console.error("[v229-migrate] ownership schema failed:", e.message); }
+  } catch (e: any) {
+    console.error("[v229-migrate] ownership schema failed:", e.message);
+  }
 
   // ── Public-name toggle (per-user). Idempotent additive nullable→default false.
   // Distinct from ownership_history.public_name (per-event, dormant). Audit-log
@@ -459,7 +823,9 @@ async function migrateServiceTiersV213() {
       `);
       console.log("[public-name-migrate] users.public_name added + audit logged");
     }
-  } catch (e: any) { console.error("[public-name-migrate] failed:", e.message); }
+  } catch (e: any) {
+    console.error("[public-name-migrate] failed:", e.message);
+  }
 
   // ── Cold-archive timestamp + candidate index. Idempotent additive nullable.
   // Audit-log the first run only — information_schema gate prevents duplicate
@@ -493,9 +859,13 @@ async function migrateServiceTiersV213() {
             note: "Phase 1 cold-archive marker; see server/workers/r2-to-b2-archival.ts.",
           })}::jsonb)
       `);
-      console.log("[archival-b2-migrate] certificates.archived_to_b2_at + idx_certificates_archive_candidates added + audit logged");
+      console.log(
+        "[archival-b2-migrate] certificates.archived_to_b2_at + idx_certificates_archive_candidates added + audit logged"
+      );
     }
-  } catch (e: any) { console.error("[archival-b2-migrate] failed:", e.message); }
+  } catch (e: any) {
+    console.error("[archival-b2-migrate] failed:", e.message);
+  }
 
   // ── Contact-form inbox table. Idempotent CREATE TABLE IF NOT EXISTS.
   // Audit-log the first run only via information_schema gate.
@@ -538,7 +908,9 @@ async function migrateServiceTiersV213() {
       `);
       console.log("[contact-inquiries-migrate] contact_inquiries table + index added + audit logged");
     }
-  } catch (e: any) { console.error("[contact-inquiries-migrate] failed:", e.message); }
+  } catch (e: any) {
+    console.error("[contact-inquiries-migrate] failed:", e.message);
+  }
 
   // ── v525 — audit_log lookup index for print-batch idempotency checks +
   // operational reprint history queries. Additive, idempotent, safe on cold
@@ -566,43 +938,75 @@ async function migrateServiceTiersV213() {
       `);
       console.log("[audit-log-index-migrate] idx_audit_log_entity_action created + audit logged");
     }
-  } catch (e: any) { console.error("[audit-log-index-migrate] failed:", e.message); }
+  } catch (e: any) {
+    console.error("[audit-log-index-migrate] failed:", e.message);
+  }
 
   // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
   try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`);
-  } catch (e: any) { console.error("[transfer-v2] flow_version:", e.message); }
+    await db.execute(
+      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`
+    );
+  } catch (e: any) {
+    console.error("[transfer-v2] flow_version:", e.message);
+  }
   try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(30) NOT NULL DEFAULT 'pending_owner'`);
-  } catch (e: any) { console.error("[transfer-v2] transfer_status:", e.message); }
+    await db.execute(
+      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(30) NOT NULL DEFAULT 'pending_owner'`
+    );
+  } catch (e: any) {
+    console.error("[transfer-v2] transfer_status:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS reference_number_provided TEXT`);
-  } catch (e: any) { console.error("[transfer-v2] reference_number_provided:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] reference_number_provided:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS outgoing_keeper_user_id VARCHAR`);
-  } catch (e: any) { console.error("[transfer-v2] outgoing_keeper_user_id:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] outgoing_keeper_user_id:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_keeper_user_id VARCHAR`);
-  } catch (e: any) { console.error("[transfer-v2] incoming_keeper_user_id:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] incoming_keeper_user_id:", e.message);
+  }
   try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_confirm_deadline TIMESTAMPTZ`);
-  } catch (e: any) { console.error("[transfer-v2] incoming_confirm_deadline:", e.message); }
+    await db.execute(
+      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_confirm_deadline TIMESTAMPTZ`
+    );
+  } catch (e: any) {
+    console.error("[transfer-v2] incoming_confirm_deadline:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_by VARCHAR(10)`);
-  } catch (e: any) { console.error("[transfer-v2] disputed_by:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] disputed_by:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ`);
-  } catch (e: any) { console.error("[transfer-v2] finalised_at:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] finalised_at:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`);
-  } catch (e: any) { console.error("[transfer-v2] cancelled_at:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] cancelled_at:", e.message);
+  }
   try {
     await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`);
-  } catch (e: any) { console.error("[transfer-v2] cancellation_reason:", e.message); }
+  } catch (e: any) {
+    console.error("[transfer-v2] cancellation_reason:", e.message);
+  }
   // Index for cron jobs: find v2 transfers in dispute window that need finalising
   try {
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_transfer_v2_status ON transfer_verifications (transfer_status) WHERE flow_version = 'v2'`);
-  } catch (e: any) { console.error("[transfer-v2] index:", e.message); }
+    await db.execute(
+      sql`CREATE INDEX IF NOT EXISTS idx_transfer_v2_status ON transfer_verifications (transfer_status) WHERE flow_version = 'v2'`
+    );
+  } catch (e: any) {
+    console.error("[transfer-v2] index:", e.message);
+  }
   console.log("[transfer-v2] schema migration complete");
 
   // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
@@ -639,13 +1043,15 @@ async function migrateServiceTiersV213() {
         }
         await db.execute(sql`
           INSERT INTO ownership_history (cert_id, from_user_id, to_user_id, to_email, event_type, notes, created_at)
-          VALUES (${row.certificate_number}, NULL, '', ${email}, 'auto_submission', ${name ? `Original submitter: ${name}` : 'Auto-assigned from submission'}, ${row.issued_at || new Date().toISOString()})
+          VALUES (${row.certificate_number}, NULL, '', ${email}, 'auto_submission', ${name ? `Original submitter: ${name}` : "Auto-assigned from submission"}, ${row.issued_at || new Date().toISOString()})
         `);
         backfilled++;
       } catch {}
     }
     if (backfilled > 0) console.log(`[v229-migrate] backfilled owner 1 for ${backfilled} certs`);
-  } catch (e: any) { console.error("[v229-migrate] backfill failed:", e.message); }
+  } catch (e: any) {
+    console.error("[v229-migrate] backfill failed:", e.message);
+  }
 }
 
 async function addRevealWrapColumn() {
@@ -673,8 +1079,8 @@ async function seedEstimateCreditsTable() {
 }
 
 const ESTIMATE_PACKAGES: Record<string, { credits: number; pricePence: number; label: string }> = {
-  "5":   { credits: 5,   pricePence: 200,  label: "5 estimates" },
-  "15":  { credits: 15,  pricePence: 400,  label: "15 estimates" },
+  "5": { credits: 5, pricePence: 200, label: "5 estimates" },
+  "15": { credits: 15, pricePence: 400, label: "15 estimates" },
   "100": { credits: 100, pricePence: 1000, label: "100 estimates" },
 };
 
@@ -773,7 +1179,7 @@ function invalidateCapacityCache(tierSlug?: string) {
   if (tierSlug) {
     delete _capacityCache[tierSlug];
   } else {
-    Object.keys(_capacityCache).forEach(k => delete _capacityCache[k]);
+    Object.keys(_capacityCache).forEach((k) => delete _capacityCache[k]);
   }
 }
 
@@ -789,7 +1195,11 @@ async function seedTierCapacityTable() {
       )
     `);
     // Seed default capacities — ON CONFLICT DO NOTHING so admin overrides are preserved
-    for (const [slug, max] of [["standard", 500], ["priority", 150], ["express", 40]] as [string, number][]) {
+    for (const [slug, max] of [
+      ["standard", 500],
+      ["priority", 150],
+      ["express", 40],
+    ] as [string, number][]) {
       await db.execute(sql`
         INSERT INTO tier_capacity (tier_slug, max_active) VALUES (${slug}, ${max}) ON CONFLICT DO NOTHING
       `);
@@ -842,10 +1252,7 @@ async function createEbayPriceCacheTable() {
   } catch {}
 }
 
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
+export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
   migrateServiceTiersV213().catch(() => {});
   recordLabelArtworkV424Audit().catch(() => {});
@@ -863,14 +1270,29 @@ export async function registerRoutes(
 
   // Reference number backfill — async, fire-and-forget, never blocks boot
   if (process.env.SKIP_BACKFILL !== "true") {
-    import("./reference-number").then(({ backfillReferenceNumbers }) =>
-      backfillReferenceNumbers()
-        .then(() => console.log("[startup] reference number backfill complete"))
-        .catch(err => console.error("[startup] reference number backfill failed — will retry on next boot:", err.message))
-    ).catch(() => {});
+    import("./reference-number")
+      .then(({ backfillReferenceNumbers }) =>
+        backfillReferenceNumbers()
+          .then(() => console.log("[startup] reference number backfill complete"))
+          .catch((err) =>
+            console.error("[startup] reference number backfill failed — will retry on next boot:", err.message)
+          )
+      )
+      .catch(() => {});
   } else {
     console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
   }
+
+  // ── Domain route modules ───────────────────────────────────────────────────
+  registerPublicRoutes(app);
+  registerAuthRoutes(app);
+  registerSubmissionRoutes(app);
+  registerAdminSubmissionRoutes(app);
+  registerAdminConfigRoutes(app);
+  registerTransferRoutes(app);
+  registerPreGradeRoutes(app);
+  registerStolenRoutes(app);
+  registerEmbeddingRoutes(app);
 
   // ── Health check — no auth, no DB, no shared state. First registered so
   // it answers even if downstream middleware throws. Used by deploy smoke
@@ -928,7 +1350,7 @@ export async function registerRoutes(
         unique_sets: parseInt(stats.unique_sets || "0"),
         avg_grade: parseFloat(stats.avg_grade || "0"),
         claimed_count: parseInt(stats.claimed_count || "0"),
-        recent_certs: (recentResult.rows as any[]).map(r => ({
+        recent_certs: (recentResult.rows as any[]).map((r) => ({
           id: r.id,
           card_name: r.card_name,
           set_name: r.set_name,
@@ -971,9 +1393,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Please enter a valid email address." });
       }
 
-      const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
-        || req.socket.remoteAddress
-        || null;
+      const ip =
+        (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        null;
       const userAgent = (req.headers["user-agent"] as string | undefined) || null;
 
       // Atomic insert. The partial unique index on LOWER(email) WHERE
@@ -1032,7 +1455,11 @@ export async function registerRoutes(
     name: z.string().trim().min(1, "Name is required").max(100, "Name too long"),
     email: z.string().trim().email("Invalid email address").max(200, "Email too long"),
     topic: z.enum(["submission", "grading", "cert-vault", "ownership", "returns-shipping", "payment", "other"]),
-    message: z.string().trim().min(10, "Message too short (min 10 characters)").max(5000, "Message too long (max 5000 characters)"),
+    message: z
+      .string()
+      .trim()
+      .min(10, "Message too short (min 10 characters)")
+      .max(5000, "Message too long (max 5000 characters)"),
   });
 
   app.post("/api/contact", contactRateLimit, async (req, res) => {
@@ -1047,7 +1474,7 @@ export async function registerRoutes(
       }
       const { name, email, topic, message } = parsed.data;
 
-      const ipAddress = ((req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()) || req.ip || "unknown";
+      const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
       const userAgent = (req.headers["user-agent"] as string)?.slice(0, 500) || null;
 
       // Write BEFORE send so the message survives any Resend failure.
@@ -1063,7 +1490,10 @@ export async function registerRoutes(
       const { sendContactInquiry } = await import("./email");
       try {
         await sendContactInquiry({
-          name, email, topic, message,
+          name,
+          email,
+          topic,
+          message,
           submittedAt: new Date(),
           inquiryId,
         });
@@ -1099,7 +1529,7 @@ export async function registerRoutes(
 
   const mvgsInterestSchema = z.object({
     company: z.string().trim().min(1, "Company name is required").max(200, "Company name too long"),
-    email:   z.string().trim().email("Invalid email address").max(254, "Email too long"),
+    email: z.string().trim().email("Invalid email address").max(254, "Email too long"),
     message: z.string().trim().max(2000, "Message too long").optional(),
   });
 
@@ -1111,9 +1541,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: firstIssue?.message || "Invalid submission" });
       }
       const { company, email, message } = parsed.data;
-      const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
-        || req.socket.remoteAddress
-        || null;
+      const ip =
+        (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        null;
       const { mvgsInterest } = await import("@shared/schema");
       await db.insert(mvgsInterest).values({
         company,
@@ -1133,7 +1564,10 @@ export async function registerRoutes(
     const { FEATURE_FLAGS } = require("./config/feature-flags");
     if (!FEATURE_FLAGS.LEGAL_PAGES_LIVE) return res.status(404).json({ error: "Not found" });
 
-    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as { LEGAL_SLUGS: readonly string[]; LEGAL_ALIASES: Record<string, string> };
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as {
+      LEGAL_SLUGS: readonly string[];
+      LEGAL_ALIASES: Record<string, string>;
+    };
     const slug = String(req.params.slug);
     if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
 
@@ -1162,7 +1596,10 @@ export async function registerRoutes(
 
   // Admin preview — always available regardless of flag
   app.get("/api/admin/legal/:slug", requireAdmin, (req, res) => {
-    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as { LEGAL_SLUGS: readonly string[]; LEGAL_ALIASES: Record<string, string> };
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = require("./config/legal") as {
+      LEGAL_SLUGS: readonly string[];
+      LEGAL_ALIASES: Record<string, string>;
+    };
     const slug = String(req.params.slug);
     if (!LEGAL_SLUGS.includes(slug)) return res.status(404).json({ error: "Not found" });
 
@@ -1205,50 +1642,62 @@ export async function registerRoutes(
   app.get("/guides/:slug", (req, res) => res.redirect(301, `/journal/${req.params.slug}`));
 
   // ── Legal route aliases → /legal/<slug> (SEO 301s) ────────────────────────
-  app.get("/privacy",                         (_req, res) => res.redirect(301, "/legal/privacy-policy"));
-  app.get("/cookies",                         (_req, res) => res.redirect(301, "/legal/cookies"));
-  app.get("/shipping-requirements",           (_req, res) => res.redirect(301, "/legal/shipping-requirements"));
-  app.get("/grading-standards",               (_req, res) => res.redirect(301, "/standard"));
-  app.get("/cancel",                          (_req, res) => res.redirect(301, "/legal/cancel"));
-  app.get("/adr",                             (_req, res) => res.redirect(301, "/legal/adr"));
-  app.get("/website-terms",                   (_req, res) => res.redirect(301, "/legal/website-terms"));
-  app.get("/submission-agreement",            (_req, res) => res.redirect(301, "/legal/submission-agreement"));
-  app.get("/guarantee-and-correction-policy", (_req, res) => res.redirect(301, "/legal/guarantee-and-correction-policy"));
+  app.get("/privacy", (_req, res) => res.redirect(301, "/legal/privacy-policy"));
+  app.get("/cookies", (_req, res) => res.redirect(301, "/legal/cookies"));
+  app.get("/shipping-requirements", (_req, res) => res.redirect(301, "/legal/shipping-requirements"));
+  app.get("/grading-standards", (_req, res) => res.redirect(301, "/standard"));
+  app.get("/cancel", (_req, res) => res.redirect(301, "/legal/cancel"));
+  app.get("/adr", (_req, res) => res.redirect(301, "/legal/adr"));
+  app.get("/website-terms", (_req, res) => res.redirect(301, "/legal/website-terms"));
+  app.get("/submission-agreement", (_req, res) => res.redirect(301, "/legal/submission-agreement"));
+  app.get("/guarantee-and-correction-policy", (_req, res) =>
+    res.redirect(301, "/legal/guarantee-and-correction-policy")
+  );
   // Legacy slug → canonical
   app.get("/legal/guarantee", (_req, res) => res.redirect(301, "/legal/guarantee-and-correction-policy"));
 
   // ── Cookie consent acknowledgment (strictly-necessary-only model) ─────────
   const cookieAckRateLimit = rateLimit({
-    windowMs: 5 * 60 * 1000, max: 1,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 5 * 60 * 1000,
+    max: 1,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many requests." },
   });
   // Payment endpoints — generous for legit users retrying declined cards
   const paymentRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000, max: 10,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
   });
 
   // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
   const stolenReportRateLimit = rateLimit({
-    windowMs: 24 * 60 * 60 * 1000, max: 20,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 24 * 60 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Daily report limit reached. Contact support@mintvaultuk.com if you need to file more." },
   });
 
   // Transfer dispute/cancel — same pattern as existing transferV2RateLimit
   const transferActionRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000, max: 5,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many transfer actions — please try again later." },
   });
 
   // Rate limit for owner-triggered logbook reissue — belt-and-braces behind
   // owner auth. Admin bypass via x-mv-admin-email header (for support cases).
   const reissueRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000, max: 5,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many reissue requests — please try again later." },
     skip: (req) => {
       const adminEmail = (req.header("x-mv-admin-email") || "").trim().toLowerCase();
@@ -1260,8 +1709,10 @@ export async function registerRoutes(
   // (paid). Tight cap is deliberate; expect VPN abuse to bypass over
   // time and add captcha / signed-token gating if it materialises.
   const preGradeRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000, max: 3,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "AI pre-grade is limited to 3 requests per hour per IP. Try again later." },
   });
 
@@ -1270,8 +1721,10 @@ export async function registerRoutes(
   // TIFFs for front + back can preview both sides without spending
   // grading quota. Still capped to deter abuse of the public endpoint.
   const preGradePreviewRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000, max: 20,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many preview requests. Try again later." },
   });
 
@@ -1300,7 +1753,7 @@ export async function registerRoutes(
     preGradeRateLimit,
     preGradeUpload.fields([
       { name: "front", maxCount: 1 },
-      { name: "back",  maxCount: 1 },
+      { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
       try {
@@ -1313,6 +1766,9 @@ export async function registerRoutes(
         if (!backFile) {
           return res.status(400).json({ error: "Back image required (multipart field: 'back')." });
         }
+
+        const uploadErr = await rejectInvalidUploads([frontFile, backFile]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
 
         const { generateImageVariants, gradeCardFromBuffer } = await import("./ai-grading-service");
         const { tightenForDisplay, maskRoundedCorners } = await import("./image-processing");
@@ -1330,7 +1786,9 @@ export async function registerRoutes(
           return await maskRoundedCorners(tight);
         };
 
-        console.log(`[pre-grade] processing front=${(frontFile.buffer.length / 1024).toFixed(0)}KB back=${(backFile.buffer.length / 1024).toFixed(0)}KB`);
+        console.log(
+          `[pre-grade] processing front=${(frontFile.buffer.length / 1024).toFixed(0)}KB back=${(backFile.buffer.length / 1024).toFixed(0)}KB`
+        );
         const [frontProcessed, backProcessed] = await Promise.all([
           processOne(frontFile.buffer, "front"),
           processOne(backFile.buffer, "back"),
@@ -1357,31 +1815,26 @@ export async function registerRoutes(
   // previewing doesn't eat the user's 3/hour grading quota — sharp
   // resize + JPEG encode is cheap and ~10× preview headroom matches
   // realistic use (front + back × a few replacements).
-  app.post(
-    "/api/pre-grade/preview",
-    preGradePreviewRateLimit,
-    preGradeUpload.single("image"),
-    async (req, res) => {
-      try {
-        const file = req.file;
-        if (!file) {
-          return res.status(400).json({ error: "Image required (multipart field: 'image')." });
-        }
-        const sharp = (await import("sharp")).default;
-        const jpeg = await sharp(file.buffer)
-          .rotate()
-          .resize(800, undefined, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 70, progressive: true })
-          .toBuffer();
-        res.set("Content-Type", "image/jpeg");
-        res.set("Cache-Control", "no-store");
-        res.send(jpeg);
-      } catch (err: any) {
-        console.error("[pre-grade/preview] failed:", err.message);
-        res.status(500).json({ error: err.message || "Preview generation failed." });
+  app.post("/api/pre-grade/preview", preGradePreviewRateLimit, preGradeUpload.single("image"), async (req, res) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ error: "Image required (multipart field: 'image')." });
       }
+      const sharp = (await import("sharp")).default;
+      const jpeg = await sharp(file.buffer)
+        .rotate()
+        .resize(800, undefined, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 70, progressive: true })
+        .toBuffer();
+      res.set("Content-Type", "image/jpeg");
+      res.set("Cache-Control", "no-store");
+      res.send(jpeg);
+    } catch (err: any) {
+      console.error("[pre-grade/preview] failed:", err.message);
+      res.status(500).json({ error: err.message || "Preview generation failed." });
     }
-  );
+  });
 
   // Rate limit for unauthenticated public lookup endpoints — protects against
   // enumeration scrapers (cert IDs are sequential MV1, MV2, ...).
@@ -1422,8 +1875,8 @@ export async function registerRoutes(
 
   app.post("/api/cookies/acknowledge", cookieAckRateLimit, async (req, res) => {
     try {
-      const userAgent = (req.headers["user-agent"] as string || "").slice(0, 500);
-      const ipRaw = (req.headers["x-forwarded-for"] as string || req.ip || "").split(",")[0].trim();
+      const userAgent = ((req.headers["user-agent"] as string) || "").slice(0, 500);
+      const ipRaw = ((req.headers["x-forwarded-for"] as string) || req.ip || "").split(",")[0].trim();
       const ipHash = ipRaw ? crypto.createHash("sha256").update(ipRaw).digest("hex").slice(0, 32) : null;
       await db.insert(auditLog).values({
         entityType: "cookie_consent",
@@ -1447,10 +1900,11 @@ export async function registerRoutes(
 
   app.get("/api/cards/autofill", async (req, res) => {
     try {
-      const setId = (req.query.setId as string || "").trim();
-      const number = (req.query.number as string || "").trim();
-      const language = (req.query.language as string || "English").trim();
-      const allowFallbackLanguage = req.query.allowFallbackLanguage === "1" || req.query.allowFallbackLanguage === "true";
+      const setId = ((req.query.setId as string) || "").trim();
+      const number = ((req.query.number as string) || "").trim();
+      const language = ((req.query.language as string) || "English").trim();
+      const allowFallbackLanguage =
+        req.query.allowFallbackLanguage === "1" || req.query.allowFallbackLanguage === "true";
 
       if (!setId || !number) {
         return res.status(400).json({ error: "setId and number are required" });
@@ -1478,7 +1932,7 @@ export async function registerRoutes(
 
   app.get("/api/cards/sets", async (req, res) => {
     try {
-      const game = (req.query.game as string || "").trim() || undefined;
+      const game = ((req.query.game as string) || "").trim() || undefined;
       const sets = await storage.getCardSets(game);
       res.json(sets);
     } catch (error: any) {
@@ -1487,21 +1941,7 @@ export async function registerRoutes(
     }
   });
 
-  async function findCertByIdFlex(certId: string) {
-    let dbCert = await storage.getCertificateByCertId(certId);
-    if (dbCert) return dbCert;
-
-    const numMatch = certId.match(/^MV-?0*(\d+)$/i);
-    if (numMatch) {
-      const num = numMatch[1];
-      dbCert = await storage.getCertificateByCertId(`MV${num}`);
-      if (dbCert) return dbCert;
-      dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
-      if (dbCert) return dbCert;
-    }
-
-    return null;
-  }
+  // findCertByIdFlex is exported at module level (below registerRoutes)
 
   app.get("/api/cert/:id", lookupRateLimit, async (req, res) => {
     const certId = String(req.params.id);
@@ -1609,7 +2049,11 @@ export async function registerRoutes(
         rows.map(async (row) => {
           let frontImageUrl: string | null = null;
           if (row.front_image_path) {
-            try { frontImageUrl = await getR2SignedUrl(row.front_image_path, 3600); } catch { /* ignore */ }
+            try {
+              frontImageUrl = await getR2SignedUrl(row.front_image_path, 3600);
+            } catch {
+              /* ignore */
+            }
           }
           if (!frontImageUrl) return null;
           return {
@@ -1646,7 +2090,7 @@ export async function registerRoutes(
   });
 
   app.get("/api/certs/search", async (req, res) => {
-    const q = (req.query.q as string || "").trim();
+    const q = ((req.query.q as string) || "").trim();
     if (!q) {
       return res.json([]);
     }
@@ -1659,7 +2103,7 @@ export async function registerRoutes(
         const altNew = await storage.searchCertificates(`MV${num}`);
         const altOld = await storage.searchCertificates(`MV-${num.padStart(10, "0")}`);
         const seen = new Set<number>();
-        dbResults = [...altNew, ...altOld].filter(c => {
+        dbResults = [...altNew, ...altOld].filter((c) => {
           if (seen.has(c.id)) return false;
           seen.add(c.id);
           return true;
@@ -1703,8 +2147,10 @@ export async function registerRoutes(
       const pricingData = tiers.map(serviceTierToPricingTier);
 
       // Enrich with capacity status
-      const capacityRows = await db.execute(sql`SELECT tier_id, status, paused_until, paused_message FROM tier_capacity`);
-      const capacityMap = new Map((capacityRows.rows as any[]).map(r => [r.tier_id, r]));
+      const capacityRows = await db.execute(
+        sql`SELECT tier_id, status, paused_until, paused_message FROM tier_capacity`
+      );
+      const capacityMap = new Map((capacityRows.rows as any[]).map((r) => [r.tier_id, r]));
 
       const enriched = pricingData.map((tier: any) => {
         const cap = capacityMap.get(tier.tierId) || capacityMap.get(tier.id);
@@ -1742,26 +2188,54 @@ export async function registerRoutes(
   app.post("/api/create-payment-intent", paymentRateLimit, async (req, res) => {
     try {
       const {
-        type, tier, quantity, declaredValue, notes, submissionName,
-        email, firstName, lastName, shippingAddress, phone, cardItems,
-        crossoverCompany, crossoverOriginalGrade, crossoverCertNumber,
-        reholderCompany, reholderReason, reholderCondition,
-        authReason, authConcerns, revealWrap,
+        type,
+        tier,
+        quantity,
+        declaredValue,
+        notes,
+        submissionName,
+        email,
+        firstName,
+        lastName,
+        shippingAddress,
+        phone,
+        cardItems,
+        crossoverCompany,
+        crossoverOriginalGrade,
+        crossoverCertNumber,
+        reholderCompany,
+        reholderReason,
+        reholderCondition,
+        authReason,
+        authConcerns,
+        revealWrap,
         marketingFeatureConsent,
-        applyCredit, creditType: requestedCreditType,
+        applyCredit,
+        creditType: requestedCreditType,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
       if (!type || !VALID_SERVICE_TYPES.includes(type)) {
-        return res.status(400).json({ error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}` });
+        return res
+          .status(400)
+          .json({
+            error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}`,
+          });
       }
 
       // Check tier capacity — block paused tiers
       if (tier) {
-        const capRow = await db.execute(sql`SELECT status, paused_message FROM tier_capacity WHERE tier_id = ${tier} LIMIT 1`);
+        const capRow = await db.execute(
+          sql`SELECT status, paused_message FROM tier_capacity WHERE tier_id = ${tier} LIMIT 1`
+        );
         const cap = capRow.rows[0] as any;
         if (cap?.status === "paused") {
-          return res.status(403).json({ error: cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.` });
+          return res
+            .status(403)
+            .json({
+              error:
+                cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.`,
+            });
         }
       }
 
@@ -1770,7 +2244,9 @@ export async function registerRoutes(
       }
 
       if (type === "reholder" && (!reholderCompany || !reholderReason)) {
-        return res.status(400).json({ error: "Current slab company and reason are required for reholder submissions." });
+        return res
+          .status(400)
+          .json({ error: "Current slab company and reason are required for reholder submissions." });
       }
 
       if (type === "authentication" && !authReason) {
@@ -1789,14 +2265,24 @@ export async function registerRoutes(
       const tierData = serviceTierToPricingTier(dbTier);
 
       if (!tierData.pricePerCard || tierData.pricePerCard <= 0) {
-        return res.status(400).json({ error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.` });
+        return res
+          .status(400)
+          .json({
+            error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.`,
+          });
       }
 
       // Capacity gating — only applied to grading submissions (reholder/crossover/auth have no tier capacity)
       if (serviceType === "grading") {
         const capacity = await getTierCapacity(tier).catch(() => null);
         if (capacity && capacity.full) {
-          return res.status(409).json({ error: "tier_full", tier, message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.` });
+          return res
+            .status(409)
+            .json({
+              error: "tier_full",
+              tier,
+              message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.`,
+            });
         }
       }
 
@@ -1827,7 +2313,9 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Terms acceptance required" });
         }
         if (clientTermsVersion && clientTermsVersion !== TERMS_VERSION) {
-          return res.status(400).json({ error: `Terms version mismatch. Expected ${TERMS_VERSION}, got ${clientTermsVersion}` });
+          return res
+            .status(400)
+            .json({ error: `Terms version mismatch. Expected ${TERMS_VERSION}, got ${clientTermsVersion}` });
         }
       } else {
         // Legacy flow — separate checkboxes
@@ -1841,7 +2329,9 @@ export async function registerRoutes(
 
       if (Array.isArray(cardItems) && cardItems.length > 0) {
         if (cardItems.length !== quantity) {
-          return res.status(400).json({ error: `Card details count (${cardItems.length}) must match quantity (${quantity})` });
+          return res
+            .status(400)
+            .json({ error: `Card details count (${cardItems.length}) must match quantity (${quantity})` });
         }
         for (let i = 0; i < cardItems.length; i++) {
           const ci = cardItems[i];
@@ -1885,13 +2375,9 @@ export async function registerRoutes(
 
       const bulkPercent = totals.discountPercent;
       const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent);
-      const effectiveDiscountAmount = Math.round(
-        tierData.pricePerCard * quantity * effectiveDiscountPercent / 100
-      );
+      const effectiveDiscountAmount = Math.round((tierData.pricePerCard * quantity * effectiveDiscountPercent) / 100);
       const discountType: string | null =
-        vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" :
-        bulkPercent > 0 ? "bulk" :
-        null;
+        vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
       const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
@@ -1919,8 +2405,8 @@ export async function registerRoutes(
 
       const turnaroundDays = tierData.turnaround ? parseInt(tierData.turnaround) : null;
 
-      const clientIp = req.headers["x-forwarded-for"]?.toString()?.split(",")[0]?.trim()
-        || req.socket?.remoteAddress || "unknown";
+      const clientIp =
+        req.headers["x-forwarded-for"]?.toString()?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
 
       const submission = await storage.createSubmission({
         submissionId,
@@ -2008,9 +2494,7 @@ export async function registerRoutes(
           await db.insert(auditLog).values({
             entityType: "submission",
             entityId: String(submission.id),
-            action: discountType === "vault_club_silver"
-              ? "vault_club_discount_applied"
-              : "bulk_discount_applied",
+            action: discountType === "vault_club_silver" ? "vault_club_discount_applied" : "bulk_discount_applied",
             adminUser: null,
             details: {
               user_id: (req.session as any)?.userId ?? null,
@@ -2048,21 +2532,33 @@ export async function registerRoutes(
           shippingInsurance: totals.shippingLabel,
           insuranceFee: String(totals.totalInsuranceFee),
           highValue: String(highValueFlag),
-          ...(creditApplied ? { creditApplied: "true", creditType: creditTypeApplied || "", creditAmountPence: String(creditAmountPence) } : {}),
-          ...(type === "crossover" && crossoverCompany ? {
-            crossoverCompany: crossoverCompany,
-            crossoverOriginalGrade: crossoverOriginalGrade || "",
-            crossoverCertNumber: crossoverCertNumber || "",
-          } : {}),
-          ...(type === "reholder" && reholderCompany ? {
-            reholderCompany: reholderCompany,
-            reholderReason: reholderReason || "",
-            reholderCondition: reholderCondition || "",
-          } : {}),
-          ...(type === "authentication" && authReason ? {
-            authReason: authReason,
-            authConcerns: authConcerns || "",
-          } : {}),
+          ...(creditApplied
+            ? {
+                creditApplied: "true",
+                creditType: creditTypeApplied || "",
+                creditAmountPence: String(creditAmountPence),
+              }
+            : {}),
+          ...(type === "crossover" && crossoverCompany
+            ? {
+                crossoverCompany: crossoverCompany,
+                crossoverOriginalGrade: crossoverOriginalGrade || "",
+                crossoverCertNumber: crossoverCertNumber || "",
+              }
+            : {}),
+          ...(type === "reholder" && reholderCompany
+            ? {
+                reholderCompany: reholderCompany,
+                reholderReason: reholderReason || "",
+                reholderCondition: reholderCondition || "",
+              }
+            : {}),
+          ...(type === "authentication" && authReason
+            ? {
+                authReason: authReason,
+                authConcerns: authConcerns || "",
+              }
+            : {}),
         },
         receipt_email: email,
       });
@@ -2071,7 +2567,7 @@ export async function registerRoutes(
         stripePaymentId: paymentIntent.id,
       });
 
-      const submissionDbId = typeof submission.id === 'string' ? parseInt(submission.id, 10) : submission.id;
+      const submissionDbId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
       const perCardDeclaredValue = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
       const itemRows = [];
 
@@ -2083,7 +2579,10 @@ export async function registerRoutes(
             cardSet: typeof item.setName === "string" && item.setName.trim() ? item.setName.trim() : null,
             cardNumber: typeof item.cardNumber === "string" && item.cardNumber.trim() ? item.cardNumber.trim() : null,
             year: typeof item.year === "string" && item.year.trim() ? item.year.trim() : null,
-            declaredValue: typeof item.declaredValue === "number" && item.declaredValue > 0 ? item.declaredValue : perCardDeclaredValue,
+            declaredValue:
+              typeof item.declaredValue === "number" && item.declaredValue > 0
+                ? item.declaredValue
+                : perCardDeclaredValue,
             notes: typeof item.notes === "string" && item.notes.trim() ? item.notes.trim() : null,
           });
         }
@@ -2106,15 +2605,20 @@ export async function registerRoutes(
         clientSecret: paymentIntent.client_secret,
         submissionId: submission.submissionId,
         total,
-        discount: effectiveDiscountPercent > 0 ? {
-          type: discountType,
-          percent: effectiveDiscountPercent,
-          amount_pence: effectiveDiscountAmount,
-        } : null,
-        credit: creditApplied ? {
-          type: creditTypeApplied,
-          amount_pence: creditAmountPence,
-        } : null,
+        discount:
+          effectiveDiscountPercent > 0
+            ? {
+                type: discountType,
+                percent: effectiveDiscountPercent,
+                amount_pence: effectiveDiscountAmount,
+              }
+            : null,
+        credit: creditApplied
+          ? {
+              type: creditTypeApplied,
+              amount_pence: creditAmountPence,
+            }
+          : null,
         freeShipping: false,
       });
     } catch (error: any) {
@@ -2138,8 +2642,17 @@ export async function registerRoutes(
       if (paymentIntent.status === "succeeded") {
         if (submission.paymentStatus === "paid") {
           // Already processed (e.g. webhook fired first) — return success without re-processing
-          const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
-          return res.json({ success: true, submissionId: submission.submissionId, status: submission.status, packingSlipToken });
+          const packingSlipToken = crypto
+            .createHmac("sha256", getSignedUrlSecret())
+            .update(submission.submissionId)
+            .digest("hex")
+            .slice(0, 16);
+          return res.json({
+            success: true,
+            submissionId: submission.submissionId,
+            status: submission.status,
+            packingSlipToken,
+          });
         }
         await storage.markSubmissionAsPaid(Number(submission.id));
         storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
@@ -2171,7 +2684,11 @@ export async function registerRoutes(
           });
         }
 
-        const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(submission.submissionId).digest("hex").slice(0, 16);
+        const packingSlipToken = crypto
+          .createHmac("sha256", getSignedUrlSecret())
+          .update(submission.submissionId)
+          .digest("hex")
+          .slice(0, 16);
 
         const { FEATURE_FLAGS: FF2 } = await import("./config/feature-flags");
         const { TERMS_VERSION: TV2 } = await import("./config/legal");
@@ -2290,7 +2807,7 @@ export async function registerRoutes(
       const valid = await verifyAdminPassword(password);
       if (!valid) {
         recordFailedLogin(req);
-        await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
@@ -2319,7 +2836,7 @@ export async function registerRoutes(
       const valid = await verifyAdminPassword(password);
       if (!valid) {
         recordFailedLogin(req);
-        await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
@@ -2359,7 +2876,7 @@ export async function registerRoutes(
 
       const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
       if (!adminUser) {
-        await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
       }
       if (!(adminUser as any).pinHash) {
@@ -2382,7 +2899,7 @@ export async function registerRoutes(
         await logPinEvent(ADMIN_EMAIL, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
         recordFailedPin(req); // session-level counter retained for back-compat
         req.session.pinFailures = (req.session.pinFailures || 0) + 1;
-        await new Promise(resolve => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+        await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
 
         if (post.locked || req.session.pinFailures >= 5) {
           clearPendingAdmin(req);
@@ -2446,16 +2963,16 @@ export async function registerRoutes(
       const serverTime = timeResult.rows[0]?.server_time;
 
       const cmResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM card_master WHERE is_deleted = false`);
-      const cardMasterActive = parseInt(cmResult.rows[0]?.cnt as string || "0", 10);
+      const cardMasterActive = parseInt((cmResult.rows[0]?.cnt as string) || "0", 10);
 
       const csResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM card_sets WHERE is_deleted = false`);
-      const cardSetsActive = parseInt(csResult.rows[0]?.cnt as string || "0", 10);
+      const cardSetsActive = parseInt((csResult.rows[0]?.cnt as string) || "0", 10);
 
       const certResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM certificates WHERE deleted_at IS NULL`);
-      const certificatesCount = parseInt(certResult.rows[0]?.cnt as string || "0", 10);
+      const certificatesCount = parseInt((certResult.rows[0]?.cnt as string) || "0", 10);
 
       const voidedResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM certificates WHERE status = 'voided'`);
-      const voidedCount = parseInt(voidedResult.rows[0]?.cnt as string || "0", 10);
+      const voidedCount = parseInt((voidedResult.rows[0]?.cnt as string) || "0", 10);
 
       const lastIssued = await storage.getLastIssuedMvNumber();
 
@@ -2490,13 +3007,18 @@ export async function registerRoutes(
       const headers = Object.keys(rows[0]);
       const csvLines = [headers.join(",")];
       for (const row of rows) {
-        csvLines.push(headers.map(h => {
-          const val = row[h];
-          if (val === null || val === undefined) return "";
-          const str = String(val);
-          return str.includes(",") || str.includes('"') || str.includes("\n")
-            ? `"${str.replace(/"/g, '""')}"` : str;
-        }).join(","));
+        csvLines.push(
+          headers
+            .map((h) => {
+              const val = row[h];
+              if (val === null || val === undefined) return "";
+              const str = String(val);
+              return str.includes(",") || str.includes('"') || str.includes("\n")
+                ? `"${str.replace(/"/g, '""')}"`
+                : str;
+            })
+            .join(",")
+        );
       }
       const csvContent = csvLines.join("\n");
 
@@ -2507,7 +3029,9 @@ export async function registerRoutes(
       await uploadToR2(r2Key, Buffer.from(csvContent, "utf-8"), "text/csv");
 
       await storage.writeAuditLog("backup", "card_master", "backup_created", req.session.adminEmail || "admin", {
-        r2Key, rowCount: rows.length, timestamp: now.toISOString(),
+        r2Key,
+        rowCount: rows.length,
+        timestamp: now.toISOString(),
       });
 
       res.json({ success: true, r2Key, rowCount: rows.length, timestamp: now.toISOString() });
@@ -2538,10 +3062,14 @@ export async function registerRoutes(
       const parsedTurnaround = turnaroundDays !== undefined ? parseInt(turnaroundDays, 10) : undefined;
       const parsedMaxValue = maxValueGbp !== undefined ? parseInt(maxValueGbp, 10) : undefined;
 
-      if ((parsedPrice !== undefined && (isNaN(parsedPrice) || parsedPrice < 1)) ||
-          (parsedTurnaround !== undefined && (isNaN(parsedTurnaround) || parsedTurnaround < 1)) ||
-          (parsedMaxValue !== undefined && (isNaN(parsedMaxValue) || parsedMaxValue < 0))) {
-        return res.status(400).json({ error: "Invalid numeric values. Price and turnaround must be positive integers." });
+      if (
+        (parsedPrice !== undefined && (isNaN(parsedPrice) || parsedPrice < 1)) ||
+        (parsedTurnaround !== undefined && (isNaN(parsedTurnaround) || parsedTurnaround < 1)) ||
+        (parsedMaxValue !== undefined && (isNaN(parsedMaxValue) || parsedMaxValue < 0))
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Invalid numeric values. Price and turnaround must be positive integers." });
       }
 
       const updated = await storage.updateServiceTier(id, {
@@ -2555,7 +3083,10 @@ export async function registerRoutes(
       if (!updated) return res.status(404).json({ error: "Tier not found" });
 
       await storage.writeAuditLog("service_tier", String(id), "update", req.session.adminEmail || "admin", {
-        pricePerCard, turnaroundDays, maxValueGbp, isActive,
+        pricePerCard,
+        turnaroundDays,
+        maxValueGbp,
+        isActive,
       });
 
       res.json(updated);
@@ -2597,7 +3128,9 @@ export async function registerRoutes(
       }
 
       // Fetch images from R2 and convert to base64
-      async function getImageBase64(key: string | null | undefined): Promise<{ data: string; mediaType: string } | null> {
+      async function getImageBase64(
+        key: string | null | undefined
+      ): Promise<{ data: string; mediaType: string } | null> {
         if (!key) return null;
         try {
           const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -2626,10 +3159,16 @@ export async function registerRoutes(
 
       const contentParts: any[] = [];
       if (frontImg) {
-        contentParts.push({ type: "image", source: { type: "base64", media_type: frontImg.mediaType, data: frontImg.data } });
+        contentParts.push({
+          type: "image",
+          source: { type: "base64", media_type: frontImg.mediaType, data: frontImg.data },
+        });
       }
       if (backImg) {
-        contentParts.push({ type: "image", source: { type: "base64", media_type: backImg.mediaType, data: backImg.data } });
+        contentParts.push({
+          type: "image",
+          source: { type: "base64", media_type: backImg.mediaType, data: backImg.data },
+        });
       }
       contentParts.push({ type: "text", text: "Legacy endpoint disabled." });
 
@@ -2641,7 +3180,7 @@ export async function registerRoutes(
             max_tokens: 4096,
             messages: [{ role: "user", content: contentParts }],
           },
-          { apiKey, timeoutMs: 30_000 },
+          { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
         if (err?.name === "AbortError") {
@@ -2662,7 +3201,10 @@ export async function registerRoutes(
       let analysis: any;
       try {
         // Strip any accidental markdown fences
-        const cleaned = rawText.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
+        const cleaned = rawText
+          .replace(/^```[a-z]*\n?/i, "")
+          .replace(/\n?```$/i, "")
+          .trim();
         analysis = JSON.parse(cleaned);
       } catch {
         console.error("AI response parse failed:", rawText.slice(0, 500));
@@ -2686,8 +3228,8 @@ export async function registerRoutes(
           ai_draft_grade     = ${analysis.overall_grade ?? null},
           centering_front_lr = ${analysis.centering?.front_left_right ?? null},
           centering_front_tb = ${analysis.centering?.front_top_bottom ?? null},
-          centering_back_lr  = ${analysis.centering?.back_left_right  ?? null},
-          centering_back_tb  = ${analysis.centering?.back_top_bottom  ?? null},
+          centering_back_lr  = ${analysis.centering?.back_left_right ?? null},
+          centering_back_tb  = ${analysis.centering?.back_top_bottom ?? null},
           defects            = ${JSON.stringify(analysis.defects ?? [])}::jsonb,
           ai_defects         = ${JSON.stringify(aiDefectsNorm)}::jsonb,
           updated_at         = NOW()
@@ -2712,15 +3254,13 @@ export async function registerRoutes(
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
       const finalOverall = isNonNum ? null : parseFloat(overall);
-      const computedLabel = (!isNonNum && finalOverall === 10) ? "black" : "Standard";
+      const computedLabel = !isNonNum && finalOverall === 10 ? "black" : "Standard";
 
       // Cap at 1800s (30 min) so a grader leaving the tab open all day doesn't
       // skew the dashboard average. Anything over 30 min gets clamped — keeps
       // honest sessions intact while flattening coffee-break outliers.
       const rawTime = Number(grading_time_seconds);
-      const clampedTime = Number.isFinite(rawTime) && rawTime > 0
-        ? Math.min(1800, Math.round(rawTime))
-        : null;
+      const clampedTime = Number.isFinite(rawTime) && rawTime > 0 ? Math.min(1800, Math.round(rawTime)) : null;
 
       // P0 preservation helper — see /grade handler for rationale.
       const num = (v: unknown): number | null => {
@@ -2749,13 +3289,13 @@ export async function registerRoutes(
         const r = computeMvgsScore({
           centeringFrontLr: (cert as any).centeringFrontLr ?? null,
           centeringFrontTb: (cert as any).centeringFrontTb ?? null,
-          centeringBackLr:  (cert as any).centeringBackLr ?? null,
-          centeringBackTb:  (cert as any).centeringBackTb ?? null,
+          centeringBackLr: (cert as any).centeringBackLr ?? null,
+          centeringBackTb: (cert as any).centeringBackTb ?? null,
           defects: mvgsPins,
           // Per-side flags. Fall back to the legacy dark_border column for
           // rows that pre-date the split (treated as both-sides dark).
           darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-          darkBorderBack:  (cert as any).darkBorderBack  ?? !!(cert as any).darkBorder,
+          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
           eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
         });
         mvgsScore = r.score;
@@ -2791,7 +3331,13 @@ export async function registerRoutes(
       `);
 
       await storage.writeAuditLog("certificate", cert.certId, "approve_grade", req.session.adminEmail || "admin", {
-        centering, corners, edges, surface, overall, gradeType, labelType: computedLabel,
+        centering,
+        corners,
+        edges,
+        surface,
+        overall,
+        gradeType,
+        labelType: computedLabel,
         grading_time_seconds: clampedTime,
       });
 
@@ -2820,23 +3366,29 @@ export async function registerRoutes(
       // Signed image URLs — grading variants
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
+        try {
+          return await getR2SignedUrl(key, 3600);
+        } catch (e) {
+          console.error("R2 sign failed:", key, e);
+          return null;
+        }
       }
 
-      const [frontUrl, backUrl, fGrey, fHC, fEdge, fInv, bGrey, bHC, bEdge, bInv, angledUrl, closeupUrl] = await Promise.all([
-        signedOrNull(c.gradingFrontCropped   || c.gradingFrontOriginal   || c.frontImagePath),
-        signedOrNull(c.gradingBackCropped    || c.gradingBackOriginal    || c.backImagePath),
-        signedOrNull(c.gradingFrontGreyscale),
-        signedOrNull(c.gradingFrontHighcontrast),
-        signedOrNull(c.gradingFrontEdgeenhanced),
-        signedOrNull(c.gradingFrontInverted),
-        signedOrNull(c.gradingBackGreyscale),
-        signedOrNull(c.gradingBackHighcontrast),
-        signedOrNull(c.gradingBackEdgeenhanced),
-        signedOrNull(c.gradingBackInverted),
-        signedOrNull(c.gradingAngledCropped  || c.gradingAngledOriginal),
-        signedOrNull(c.gradingCloseupCropped || c.gradingCloseupOriginal),
-      ]);
+      const [frontUrl, backUrl, fGrey, fHC, fEdge, fInv, bGrey, bHC, bEdge, bInv, angledUrl, closeupUrl] =
+        await Promise.all([
+          signedOrNull(c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath),
+          signedOrNull(c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath),
+          signedOrNull(c.gradingFrontGreyscale),
+          signedOrNull(c.gradingFrontHighcontrast),
+          signedOrNull(c.gradingFrontEdgeenhanced),
+          signedOrNull(c.gradingFrontInverted),
+          signedOrNull(c.gradingBackGreyscale),
+          signedOrNull(c.gradingBackHighcontrast),
+          signedOrNull(c.gradingBackEdgeenhanced),
+          signedOrNull(c.gradingBackInverted),
+          signedOrNull(c.gradingAngledCropped || c.gradingAngledOriginal),
+          signedOrNull(c.gradingCloseupCropped || c.gradingCloseupOriginal),
+        ]);
 
       // Population data
       let population = { totalGraded: 0, sameGradeCount: 0, higherGradeCount: 0, percentile: 0 };
@@ -2846,13 +3398,17 @@ export async function registerRoutes(
           WHERE card_name = ${c.cardName} AND set_name = ${c.setName} AND card_game = ${c.cardGame}
             AND status = 'active' AND deleted_at IS NULL AND grade IS NOT NULL
         `);
-        const grades: number[] = (popRows.rows || []).map((r: any) => parseFloat(r.grade)).filter((g: number) => !isNaN(g));
+        const grades: number[] = (popRows.rows || [])
+          .map((r: any) => parseFloat(r.grade))
+          .filter((g: number) => !isNaN(g));
         const totalGraded = grades.length;
-        const sameGradeCount = grades.filter(g => g === gradeNum).length;
-        const higherGradeCount = grades.filter(g => g > gradeNum).length;
+        const sameGradeCount = grades.filter((g) => g === gradeNum).length;
+        const higherGradeCount = grades.filter((g) => g > gradeNum).length;
         const percentile = totalGraded > 0 ? Math.round(((totalGraded - higherGradeCount) / totalGraded) * 100) : 0;
         population = { totalGraded, sameGradeCount, higherGradeCount, percentile };
-      } catch { /* non-critical */ }
+      } catch {
+        /* non-critical */
+      }
 
       // v417 — sanitise free-text descriptions on the way out (defence-in-depth
       // against admin paste-of-PII into a public-surface field).
@@ -2898,38 +3454,40 @@ export async function registerRoutes(
           approvedAt: c.gradeApprovedAt || null,
         },
         subgrades: {
-          centering: c.centeringScore   != null ? parseFloat(c.centeringScore)   : null,
-          corners:   c.cornersScore     != null ? parseFloat(c.cornersScore)     : null,
-          edges:     c.edgesScore       != null ? parseFloat(c.edgesScore)       : null,
-          surface:   c.surfaceScore     != null ? parseFloat(c.surfaceScore)     : null,
+          centering: c.centeringScore != null ? parseFloat(c.centeringScore) : null,
+          corners: c.cornersScore != null ? parseFloat(c.cornersScore) : null,
+          edges: c.edgesScore != null ? parseFloat(c.edgesScore) : null,
+          surface: c.surfaceScore != null ? parseFloat(c.surfaceScore) : null,
         },
         centering: {
           frontLR: c.centeringFrontLr || null,
           frontTB: c.centeringFrontTb || null,
-          backLR:  c.centeringBackLr  || null,
-          backTB:  c.centeringBackTb  || null,
+          backLR: c.centeringBackLr || null,
+          backTB: c.centeringBackTb || null,
         },
         corners: c.cornerValues || null,
-        edges:   c.edgeValues   || null,
-        surface: c.surfaceValues ? { front: (c.surfaceValues as any).front, back: (c.surfaceValues as any).back } : null,
+        edges: c.edgeValues || null,
+        surface: c.surfaceValues
+          ? { front: (c.surfaceValues as any).front, back: (c.surfaceValues as any).back }
+          : null,
         defects,
         authentication: {
           status: c.authStatus || "genuine",
           // v417 — auth notes are free-text; sanitise on public surface.
-          notes:  stripEmailsR(c.authNotes || ai.authentication_notes || "") || null,
+          notes: stripEmailsR(c.authNotes || ai.authentication_notes || "") || null,
         },
         images: {
           front: frontUrl,
-          back:  backUrl,
-          frontGreyscale:    fGrey,
+          back: backUrl,
+          frontGreyscale: fGrey,
           frontHighcontrast: fHC,
-          frontEdge:         fEdge,
-          frontInverted:     fInv,
-          backGreyscale:     bGrey,
-          backHighcontrast:  bHC,
-          backEdge:          bEdge,
-          backInverted:      bInv,
-          angled:  angledUrl,
+          frontEdge: fEdge,
+          frontInverted: fInv,
+          backGreyscale: bGrey,
+          backHighcontrast: bHC,
+          backEdge: bEdge,
+          backInverted: bInv,
+          angled: angledUrl,
           closeup: closeupUrl,
         },
         population,
@@ -2961,7 +3519,9 @@ export async function registerRoutes(
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
       const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
       const gLabel = isNonNum
-        ? (gradeType === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL")
+        ? gradeType === "authentic_altered"
+          ? "AUTHENTIC ALTERED"
+          : "NOT ORIGINAL"
         : gradeLabel(gradeNum);
 
       const PDFDocument = (await import("pdfkit")).default;
@@ -2973,7 +3533,7 @@ export async function registerRoutes(
 
       const GOLD = "#D4AF37";
       const DARK = isBlack ? "#FFFFFF" : "#1A1A1A";
-      const BG   = isBlack ? "#0A0A0A" : "#FFFFFF";
+      const BG = isBlack ? "#0A0A0A" : "#FFFFFF";
 
       if (isBlack) {
         doc.rect(0, 0, doc.page.width, doc.page.height).fill(BG);
@@ -2990,14 +3550,23 @@ export async function registerRoutes(
       doc.moveDown(0.8);
 
       // Card identity
-      doc.fontSize(18).fillColor(DARK).text(c.cardName || "—", { align: "left" });
-      doc.fontSize(10).fillColor(isBlack ? "#AAAAAA" : "#666666")
+      doc
+        .fontSize(18)
+        .fillColor(DARK)
+        .text(c.cardName || "—", { align: "left" });
+      doc
+        .fontSize(10)
+        .fillColor(isBlack ? "#AAAAAA" : "#666666")
         .text(`${c.setName || ""}${c.year ? ` · ${c.year}` : ""}${c.cardNumber ? ` · #${c.cardNumber}` : ""}`)
         .text(`${c.cardGame || ""} · ${c.language || "English"}`);
       if (c.rarity) doc.text(`Rarity: ${rarityDisplayLabel(c.rarity, c.rarityOther) || c.rarity}`);
       doc.moveDown(0.3);
-      const gradedDateFmt = c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }) : "—";
-      doc.fontSize(9).fillColor(isBlack ? "#888888" : "#888888")
+      const gradedDateFmt = c.createdAt
+        ? new Date(c.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })
+        : "—";
+      doc
+        .fontSize(9)
+        .fillColor(isBlack ? "#888888" : "#888888")
         // v417 — public DGR PDF: brand only, no individual grader name.
         .text(`Graded: ${gradedDateFmt}  ·  By: MintVault UK`);
       doc.moveDown(0.8);
@@ -3006,20 +3575,26 @@ export async function registerRoutes(
       doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(GOLD).lineWidth(0.5).stroke();
       doc.moveDown(0.5);
       if (isBlack) doc.fontSize(9).fillColor(GOLD).text("★ BLACK LABEL ★", { align: "center" });
-      doc.fontSize(48).fillColor(GOLD).text(isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : String(gradeNum), { align: "center" });
+      doc
+        .fontSize(48)
+        .fillColor(GOLD)
+        .text(isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : String(gradeNum), { align: "center" });
       doc.fontSize(14).fillColor(DARK).text(gLabel, { align: "center" });
       doc.moveDown(0.5);
 
       if (c.gradeExplanation) {
         doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor(GOLD).lineWidth(0.5).stroke();
         doc.moveDown(0.5);
-        doc.fontSize(9).fillColor(isBlack ? "#AAAAAA" : "#444444").text(`"${c.gradeExplanation}"`, { align: "left" });
+        doc
+          .fontSize(9)
+          .fillColor(isBlack ? "#AAAAAA" : "#444444")
+          .text(`"${c.gradeExplanation}"`, { align: "left" });
         doc.moveDown(0.5);
       }
 
       // Images — fetch from R2 and embed
       const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
-      const backKey  = c.gradingBackCropped  || c.gradingBackOriginal  || c.backImagePath;
+      const backKey = c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath;
 
       async function fetchBuffer(key: string | null | undefined): Promise<Buffer | null> {
         if (!key) return null;
@@ -3031,23 +3606,42 @@ export async function registerRoutes(
           const chunks: Buffer[] = [];
           for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));
           return Buffer.concat(chunks);
-        } catch { return null; }
+        } catch {
+          return null;
+        }
       }
 
       const [frontBuf, backBuf] = await Promise.all([fetchBuffer(frontKey), fetchBuffer(backKey)]);
 
       if (frontBuf || backBuf) {
         doc.moveDown(0.5);
-        const imgW = 210, imgH = 294;
+        const imgW = 210,
+          imgH = 294;
         const pageW = doc.page.width - 100;
         const startX = 50;
 
         if (frontBuf && backBuf) {
-          try { doc.image(frontBuf, startX, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
-          try { doc.image(backBuf, startX + imgW + 20, doc.y - (doc.y > 50 ? 0 : 0), { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
+          try {
+            doc.image(frontBuf, startX, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] });
+          } catch {
+            /* skip */
+          }
+          try {
+            doc.image(backBuf, startX + imgW + 20, doc.y - (doc.y > 50 ? 0 : 0), {
+              width: imgW,
+              height: imgH,
+              fit: [imgW, imgH],
+            });
+          } catch {
+            /* skip */
+          }
           doc.y += imgH + 10;
         } else if (frontBuf) {
-          try { doc.image(frontBuf, startX + (pageW - imgW) / 2, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] }); } catch { /* skip */ }
+          try {
+            doc.image(frontBuf, startX + (pageW - imgW) / 2, doc.y, { width: imgW, height: imgH, fit: [imgW, imgH] });
+          } catch {
+            /* skip */
+          }
           doc.y += imgH + 10;
         }
         doc.moveDown(0.5);
@@ -3062,20 +3656,29 @@ export async function registerRoutes(
 
       const subs = [
         { label: "Centering", val: c.centeringScore },
-        { label: "Corners",   val: c.cornersScore },
-        { label: "Edges",     val: c.edgesScore },
-        { label: "Surface",   val: c.surfaceScore },
+        { label: "Corners", val: c.cornersScore },
+        { label: "Edges", val: c.edgesScore },
+        { label: "Surface", val: c.surfaceScore },
       ];
-      const boxW = 110, boxH = 55, gap = 10;
+      const boxW = 110,
+        boxH = 55,
+        gap = 10;
       const totalW = subs.length * boxW + (subs.length - 1) * gap;
       let bx = (doc.page.width - totalW) / 2;
       const by = doc.y;
       for (const s of subs) {
         const val = s.val != null ? parseFloat(s.val) : null;
-        const bColor = val === null ? "#555555" : val >= 9.5 ? "#D4AF37" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
+        const bColor =
+          val === null ? "#555555" : val >= 9.5 ? "#D4AF37" : val >= 8 ? "#16A34A" : val >= 6 ? "#CA8A04" : "#DC2626";
         doc.rect(bx, by, boxW, boxH).fillColor(bColor).fill();
-        doc.fontSize(7).fillColor("#FFFFFF").text(s.label.toUpperCase(), bx, by + 6, { width: boxW, align: "center" });
-        doc.fontSize(22).fillColor("#FFFFFF").text(val !== null ? String(val) : "—", bx, by + 16, { width: boxW, align: "center" });
+        doc
+          .fontSize(7)
+          .fillColor("#FFFFFF")
+          .text(s.label.toUpperCase(), bx, by + 6, { width: boxW, align: "center" });
+        doc
+          .fontSize(22)
+          .fillColor("#FFFFFF")
+          .text(val !== null ? String(val) : "—", bx, by + 16, { width: boxW, align: "center" });
         bx += boxW + gap;
       }
       doc.y = by + boxH + 15;
@@ -3084,8 +3687,12 @@ export async function registerRoutes(
       // Centering ratios
       if (c.centeringFrontLr || c.centeringFrontTb) {
         doc.fontSize(9).fillColor(GOLD).text("Centering Measurements");
-        doc.fontSize(8).fillColor(isBlack ? "#AAAAAA" : "#444444")
-          .text(`Front L/R: ${c.centeringFrontLr || "—"}   Front T/B: ${c.centeringFrontTb || "—"}   Back L/R: ${c.centeringBackLr || "—"}   Back T/B: ${c.centeringBackTb || "—"}`);
+        doc
+          .fontSize(8)
+          .fillColor(isBlack ? "#AAAAAA" : "#444444")
+          .text(
+            `Front L/R: ${c.centeringFrontLr || "—"}   Front T/B: ${c.centeringFrontTb || "—"}   Back L/R: ${c.centeringBackLr || "—"}   Back T/B: ${c.centeringBackTb || "—"}`
+          );
         doc.moveDown(0.5);
       }
 
@@ -3095,11 +3702,21 @@ export async function registerRoutes(
       doc.fontSize(9).fillColor(GOLD).text("IDENTIFIED DEFECTS");
       doc.moveDown(0.3);
       if (defects.length === 0) {
-        doc.fontSize(8).fillColor(isBlack ? "#22C55E" : "#16A34A").text("No defects identified — this card is in exceptional condition.");
+        doc
+          .fontSize(8)
+          .fillColor(isBlack ? "#22C55E" : "#16A34A")
+          .text("No defects identified — this card is in exceptional condition.");
       } else {
         for (const d of defects) {
-          doc.fontSize(8).fillColor(DARK).text(`${d.type} · ${d.severity?.toUpperCase()} · ${d.location || ""}`);
-          if (d.description) doc.fontSize(7).fillColor(isBlack ? "#AAAAAA" : "#666666").text(`  ${d.description}`);
+          doc
+            .fontSize(8)
+            .fillColor(DARK)
+            .text(`${d.type} · ${d.severity?.toUpperCase()} · ${d.location || ""}`);
+          if (d.description)
+            doc
+              .fontSize(7)
+              .fillColor(isBlack ? "#AAAAAA" : "#666666")
+              .text(`  ${d.description}`);
         }
       }
       doc.moveDown(0.5);
@@ -3107,21 +3724,38 @@ export async function registerRoutes(
       // Authentication
       doc.fontSize(9).fillColor(GOLD).text("AUTHENTICATION");
       const authStatus = c.authStatus || "genuine";
-      doc.fontSize(8).fillColor(isBlack ? "#AAAAAA" : "#444444")
-        .text(authStatus === "genuine"
-          ? "This card has been authenticated as genuine by MintVault UK."
-          : authStatus === "authentic_altered"
-            ? "This card has been identified as AUTHENTIC ALTERED."
-            : "This card has been identified as NOT ORIGINAL.");
-      if (c.authNotes) doc.fontSize(7).fillColor(isBlack ? "#888888" : "#666666").text(c.authNotes);
+      doc
+        .fontSize(8)
+        .fillColor(isBlack ? "#AAAAAA" : "#444444")
+        .text(
+          authStatus === "genuine"
+            ? "This card has been authenticated as genuine by MintVault UK."
+            : authStatus === "authentic_altered"
+              ? "This card has been identified as AUTHENTIC ALTERED."
+              : "This card has been identified as NOT ORIGINAL."
+        );
+      if (c.authNotes)
+        doc
+          .fontSize(7)
+          .fillColor(isBlack ? "#888888" : "#666666")
+          .text(c.authNotes);
       doc.moveDown(0.5);
 
       // Footer
-      doc.moveTo(50, doc.page.height - 70).lineTo(545, doc.page.height - 70).strokeColor(GOLD).lineWidth(0.5).stroke();
-      doc.fontSize(7).fillColor(isBlack ? "#666666" : "#999999")
+      doc
+        .moveTo(50, doc.page.height - 70)
+        .lineTo(545, doc.page.height - 70)
+        .strokeColor(GOLD)
+        .lineWidth(0.5)
+        .stroke();
+      doc
+        .fontSize(7)
+        .fillColor(isBlack ? "#666666" : "#999999")
         .text(`Graded by MintVault UK · Kent · mintvaultuk.com`, 50, doc.page.height - 60, { align: "center" })
         .text(`Verify at mintvaultuk.com/cert/${certId}/report`, 50, doc.page.height - 50, { align: "center" })
-        .text(`© 2026 MintVault UK — This report is permanent and cannot be altered.`, 50, doc.page.height - 40, { align: "center" });
+        .text(`© 2026 MintVault UK — This report is permanent and cannot be altered.`, 50, doc.page.height - 40, {
+          align: "center",
+        });
 
       doc.end();
     } catch (error: any) {
@@ -3171,9 +3805,10 @@ export async function registerRoutes(
       if (!dbCert || dbCert.status === "voided") {
         return res.status(404).json({ error: "Certificate not found" });
       }
-      const certUpdatedAt = (dbCert as any).updatedAt instanceof Date
-        ? (dbCert as any).updatedAt
-        : new Date((dbCert as any).updatedAt || 0);
+      const certUpdatedAt =
+        (dbCert as any).updatedAt instanceof Date
+          ? (dbCert as any).updatedAt
+          : new Date((dbCert as any).updatedAt || 0);
 
       // ── Cache read with auto-stale-check ─────────────────────────────────
       // Serve cached PDF only if cache exists AND cert hasn't been updated
@@ -3182,7 +3817,9 @@ export async function registerRoutes(
       if (!forceRegenerate) {
         const cachedHead = await headR2(cacheKey);
         const cacheIsFresh = !!cachedHead && certUpdatedAt <= cachedHead.lastModified;
-        console.log(`[logbook-cache] cert=${certId} certUpdated=${certUpdatedAt.toISOString()} cacheLastMod=${cachedHead?.lastModified.toISOString() || "none"} action=${cacheIsFresh ? "serve-cache" : "regenerate"}`);
+        console.log(
+          `[logbook-cache] cert=${certId} certUpdated=${certUpdatedAt.toISOString()} cacheLastMod=${cachedHead?.lastModified.toISOString() || "none"} action=${cacheIsFresh ? "serve-cache" : "regenerate"}`
+        );
         if (cacheIsFresh) {
           try {
             const cachedUrl = await getR2SignedUrl(cacheKey, 300);
@@ -3201,14 +3838,26 @@ export async function registerRoutes(
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
 
       // Cache to R2 (overwrites if regenerating)
-      try { await uploadToR2(cacheKey, pdf, "application/pdf"); } catch {}
+      try {
+        await uploadToR2(cacheKey, pdf, "application/pdf");
+      } catch {}
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="MintVault-Logbook-${certId}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
-      console.error(`[logbook-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
-      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
+      console.error(
+        `[logbook-pdf] generation failed for ${req.params.certId}:`,
+        err.message,
+        err.stack?.split("\n")[1]?.trim()
+      );
+      if (!res.headersSent)
+        res
+          .status(503)
+          .json({
+            error:
+              "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
+          });
     }
   });
 
@@ -3232,13 +3881,15 @@ export async function registerRoutes(
 
       const isOwner =
         certOwnerStatus === "claimed" &&
-        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
-        (
-          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
-           (req.session as any).userId === certOwnerUserId) ||
-          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
-           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
-        );
+        typeof certOwnerEmail === "string" &&
+        certOwnerEmail.trim() !== "" &&
+        (((req.session as any)?.userId &&
+          typeof certOwnerUserId === "string" &&
+          certOwnerUserId !== "" &&
+          (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail &&
+            typeof (req.session as any).customerEmail === "string" &&
+            (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase()));
 
       if (!isOwner) {
         return res.status(403).json({ error: "Only the current registered keeper can download the Owner Copy" });
@@ -3253,11 +3904,23 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("X-Robots-Tag", "noindex, nofollow");
-      console.log(`[logbook-owner-pdf] served owner copy for ${certId}, referenceNumberPresent=${!!(data as any).referenceNumber}`);
+      console.log(
+        `[logbook-owner-pdf] served owner copy for ${certId}, referenceNumberPresent=${!!(data as any).referenceNumber}`
+      );
       res.send(pdf);
     } catch (err: any) {
-      console.error(`[logbook-owner-pdf] generation failed for ${req.params.certId}:`, err.message, err.stack?.split("\n")[1]?.trim());
-      if (!res.headersSent) res.status(503).json({ error: "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com." });
+      console.error(
+        `[logbook-owner-pdf] generation failed for ${req.params.certId}:`,
+        err.message,
+        err.stack?.split("\n")[1]?.trim()
+      );
+      if (!res.headersSent)
+        res
+          .status(503)
+          .json({
+            error:
+              "Logbook temporarily unavailable. Please try again in a few minutes or contact support@mintvaultuk.com.",
+          });
     }
   });
 
@@ -3277,14 +3940,17 @@ export async function registerRoutes(
       const certOwnerEmail = (data as any).ownerEmail;
       const isOwner =
         certOwnerStatus === "claimed" &&
-        typeof certOwnerEmail === "string" && certOwnerEmail.trim() !== "" &&
-        (
-          ((req.session as any)?.userId && typeof certOwnerUserId === "string" && certOwnerUserId !== "" &&
-           (req.session as any).userId === certOwnerUserId) ||
-          ((req.session as any)?.customerEmail && typeof (req.session as any).customerEmail === "string" &&
-           (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase())
-        );
-      if (!isOwner) return res.status(403).json({ error: "Only the current registered keeper can reissue the logbook" });
+        typeof certOwnerEmail === "string" &&
+        certOwnerEmail.trim() !== "" &&
+        (((req.session as any)?.userId &&
+          typeof certOwnerUserId === "string" &&
+          certOwnerUserId !== "" &&
+          (req.session as any).userId === certOwnerUserId) ||
+          ((req.session as any)?.customerEmail &&
+            typeof (req.session as any).customerEmail === "string" &&
+            (req.session as any).customerEmail.trim().toLowerCase() === certOwnerEmail.trim().toLowerCase()));
+      if (!isOwner)
+        return res.status(403).json({ error: "Only the current registered keeper can reissue the logbook" });
 
       const { confirm, reason } = req.body || {};
       if (confirm !== true || !reason || typeof reason !== "string" || reason.trim().length < 5) {
@@ -3313,7 +3979,9 @@ export async function registerRoutes(
           ${JSON.stringify({ oldVersion, newVersion, reason: reason.trim() })}::jsonb, NOW())
       `);
 
-      console.log(`[logbook-reissue] ${certId}: v${oldVersion} -> v${newVersion}, referenceNumberPresent=true, reason="${reason.trim().slice(0, 50)}"`);
+      console.log(
+        `[logbook-reissue] ${certId}: v${oldVersion} -> v${newVersion}, referenceNumberPresent=true, reason="${reason.trim().slice(0, 50)}"`
+      );
       res.json({ newVersion, issuedAt: new Date().toISOString() });
     } catch (err: any) {
       console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
@@ -3363,12 +4031,17 @@ export async function registerRoutes(
 
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch (e) { console.error("R2 sign failed:", key, e); return null; }
+        try {
+          return await getR2SignedUrl(key, 3600);
+        } catch (e) {
+          console.error("R2 sign failed:", key, e);
+          return null;
+        }
       }
 
       const [frontUrl, backUrl] = await Promise.all([
         signedOrNull(c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath),
-        signedOrNull(c.gradingBackCropped  || c.gradingBackOriginal  || c.backImagePath),
+        signedOrNull(c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath),
       ]);
 
       // Population — grade distribution for this card
@@ -3396,7 +4069,9 @@ export async function registerRoutes(
           if (row.g === gradeNum) sameGrade = cnt;
         }
         population = { thisGrade: sameGrade, totalGraded: total, distribution: dist };
-      } catch { /* non-critical */ }
+      } catch {
+        /* non-critical */
+      }
 
       // Owner's Vault Club tier (for members-only visual treatment on the frontend)
       let ownerVaultClubTier: string | null = null;
@@ -3410,7 +4085,9 @@ export async function registerRoutes(
           if (owner && isActiveStatus(owner.vault_club_status)) {
             ownerVaultClubTier = owner.vault_club_tier || null;
           }
-        } catch { /* non-critical */ }
+        } catch {
+          /* non-critical */
+        }
       }
 
       // Ownership history — v417 PII fix.
@@ -3426,15 +4103,18 @@ export async function registerRoutes(
       try {
         const { getOwnerChain } = await import("./ownership-service");
         const chain = await getOwnerChain(certId);
-        ownership = chain.map(entry => ({
+        ownership = chain.map((entry) => ({
           owner: `Verified Owner #${entry.ownerNumber}`,
           date: entry.claimedAt ? entry.claimedAt.split("T")[0] : "",
-          method: (entry.claimMethod === "initial_claim" || entry.claimMethod === "auto_submission")
-            ? "Original Issuance"
-            : "Verified Transfer",
+          method:
+            entry.claimMethod === "initial_claim" || entry.claimMethod === "auto_submission"
+              ? "Original Issuance"
+              : "Verified Transfer",
           verified: true,
         }));
-      } catch { /* non-critical — empty array on failure, never falls back to raw history */ }
+      } catch {
+        /* non-critical — empty array on failure, never falls back to raw history */
+      }
 
       // Verified defects — prefer verifiedDefects column, fallback to defects column.
       // v417 — sanitise free-text descriptions on the way out (admin paste-of-PII
@@ -3491,9 +4171,9 @@ export async function registerRoutes(
         grades: {
           overall: isNonNum ? gradeType : gradeNum,
           centering: c.gradeCentering ? parseFloat(c.gradeCentering) : null,
-          corners:   c.gradeCorners   ? parseFloat(c.gradeCorners)   : null,
-          edges:     c.gradeEdges     ? parseFloat(c.gradeEdges)     : null,
-          surface:   c.gradeSurface   ? parseFloat(c.gradeSurface)   : null,
+          corners: c.gradeCorners ? parseFloat(c.gradeCorners) : null,
+          edges: c.gradeEdges ? parseFloat(c.gradeEdges) : null,
+          surface: c.gradeSurface ? parseFloat(c.gradeSurface) : null,
           isBlackLabel: isBlack,
           isNonNumeric: isNonNum,
           gradeLabel: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
@@ -3513,7 +4193,7 @@ export async function registerRoutes(
           // v417 — nfcUid is owner-scoped; non-owners get null. The chip's
           // hardware ID enables physical-scan correlation tracking, so it
           // shouldn't be public.
-          nfcUid: viewerIsOwner ? (c.nfcUid || null) : null,
+          nfcUid: viewerIsOwner ? c.nfcUid || null : null,
           qrVerified: true,
           certId,
           slabSerial: c.slabSerial || null,
@@ -3579,11 +4259,19 @@ export async function registerRoutes(
 
       // Ownership gate — unclaimed certs have no keeper to authenticate.
       if ((cert as any).ownershipStatus !== "claimed" || !(cert as any).ownerEmail) {
-        return res.status(403).json({ error: "This certificate has no registered keeper on file. Contact support@mintvaultuk.com." });
+        return res
+          .status(403)
+          .json({ error: "This certificate has no registered keeper on file. Contact support@mintvaultuk.com." });
       }
       const reporterLc = String(reporterEmail).toLowerCase().trim();
-      if (String((cert as any).ownerEmail).toLowerCase().trim() !== reporterLc) {
-        return res.status(403).json({ error: "Only the current registered keeper can report a certificate as stolen." });
+      if (
+        String((cert as any).ownerEmail)
+          .toLowerCase()
+          .trim() !== reporterLc
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Only the current registered keeper can report a certificate as stolen." });
       }
 
       const token = crypto.randomBytes(32).toString("hex");
@@ -3603,7 +4291,13 @@ export async function registerRoutes(
       // Send verification email
       const verifyUrl = `${req.protocol}://${req.get("host")}/api/stolen/verify/${token}`;
       try {
-        await sendStolenVerificationEmail(String(reporterEmail), String(reporterName), normalCertId, cert.cardName || "Unknown card", verifyUrl);
+        await sendStolenVerificationEmail(
+          String(reporterEmail),
+          String(reporterName),
+          normalCertId,
+          cert.cardName || "Unknown card",
+          verifyUrl
+        );
       } catch (emailErr: any) {
         console.error("[stolen] email send error:", emailErr.message);
       }
@@ -3725,14 +4419,13 @@ export async function registerRoutes(
       return res.json({
         standard: { active: standard.active, max: standard.max, full: standard.full, forceOpen: standard.forceOpen },
         priority: { active: priority.active, max: priority.max, full: priority.full, forceOpen: priority.forceOpen },
-        express:  { active: express_.active,  max: express_.max,  full: express_.full,  forceOpen: express_.forceOpen },
+        express: { active: express_.active, max: express_.max, full: express_.full, forceOpen: express_.forceOpen },
       });
     } catch (err: any) {
       console.error("[capacity] GET /api/capacity error:", err.message);
       return res.status(500).json({ error: "Failed to load capacity data" });
     }
   });
-
 
   // ── eBay price data for Vault report ─────────────────────────────────────
   // Returns current eBay UK fixed-price listings for the card on this cert.
@@ -3897,7 +4590,6 @@ export async function registerRoutes(
 
       // eBay cache — purge stale ungraded results so next load fetches graded-only data
       await db.execute(sql`DELETE FROM ebay_price_cache WHERE last_updated_at < NOW() - INTERVAL '1 second'`);
-
     } catch (err) {
       console.error("[migration] startup migration error:", err);
     }
@@ -3935,14 +4627,39 @@ export async function registerRoutes(
     try {
       const subs = await storage.listSubmissions();
       const headers = [
-        "Submission ID", "Status", "Service Type", "Tier", "Card Count",
-        "Total Price", "Declared Value", "Payment Status", "Payment Intent",
-        "Payment Amount", "Currency", "Shipping Cost", "Grading Cost",
-        "Insurance Tier", "First Name", "Last Name", "Email", "Phone",
-        "Address Line 1", "Address Line 2", "City", "County", "Postcode",
-        "Return Carrier", "Return Tracking", "Return Postage Cost",
-        "Notes", "Admin Notes", "Flagged",
-        "Created At", "Received At", "Shipped At", "Completed At",
+        "Submission ID",
+        "Status",
+        "Service Type",
+        "Tier",
+        "Card Count",
+        "Total Price",
+        "Declared Value",
+        "Payment Status",
+        "Payment Intent",
+        "Payment Amount",
+        "Currency",
+        "Shipping Cost",
+        "Grading Cost",
+        "Insurance Tier",
+        "First Name",
+        "Last Name",
+        "Email",
+        "Phone",
+        "Address Line 1",
+        "Address Line 2",
+        "City",
+        "County",
+        "Postcode",
+        "Return Carrier",
+        "Return Tracking",
+        "Return Postage Cost",
+        "Notes",
+        "Admin Notes",
+        "Flagged",
+        "Created At",
+        "Received At",
+        "Shipped At",
+        "Completed At",
       ];
       const rows = subs.map((s: any) => [
         s.submissionId || s.submission_id || "",
@@ -3981,10 +4698,13 @@ export async function registerRoutes(
       ]);
       const csvContent = [
         headers.join(","),
-        ...rows.map((r: any[]) => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+        ...rows.map((r: any[]) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")),
       ].join("\n");
       res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename="mintvault-submissions-${new Date().toISOString().split("T")[0]}.csv"`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="mintvault-submissions-${new Date().toISOString().split("T")[0]}.csv"`
+      );
       res.send(csvContent);
     } catch (error: any) {
       console.error("Export submissions CSV error:", error.message);
@@ -4034,12 +4754,18 @@ export async function registerRoutes(
         returnPostageCost: returnPostageCost ? parseInt(returnPostageCost, 10) : undefined,
       });
 
-      await storage.writeAuditLog("submission", submission.submissionId, `status_${status}`, req.session.adminEmail || "admin", {
-        fromStatus: currentStatus,
-        toStatus: status,
-        returnTracking,
-        returnCarrier,
-      });
+      await storage.writeAuditLog(
+        "submission",
+        submission.submissionId,
+        `status_${status}`,
+        req.session.adminEmail || "admin",
+        {
+          fromStatus: currentStatus,
+          toStatus: status,
+          returnTracking,
+          returnCarrier,
+        }
+      );
 
       const emailData = {
         email: submission.email || "",
@@ -4088,7 +4814,7 @@ export async function registerRoutes(
 
       const numSubId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
       const items = await storage.getSubmissionItems(numSubId);
-      const targetItem = items.find(i => i.id === itemId);
+      const targetItem = items.find((i) => i.id === itemId);
       if (!targetItem) {
         return res.status(404).json({ error: "Submission item not found" });
       }
@@ -4111,10 +4837,16 @@ export async function registerRoutes(
 
       const updated = await storage.updateSubmissionItem(itemId, updateData);
 
-      await storage.writeAuditLog("submission_item", String(itemId), "item_updated", req.session.adminEmail || "admin", {
-        submissionId: submission.submissionId,
-        changes: updateData,
-      });
+      await storage.writeAuditLog(
+        "submission_item",
+        String(itemId),
+        "item_updated",
+        req.session.adminEmail || "admin",
+        {
+          submissionId: submission.submissionId,
+          changes: updateData,
+        }
+      );
 
       res.json({ success: true, item: updated });
     } catch (error: any) {
@@ -4132,10 +4864,16 @@ export async function registerRoutes(
       const { notes, flagged } = req.body;
       const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
       await storage.updateAdminNotes(numId, notes ?? null, !!flagged);
-      await storage.writeAuditLog("submission", String(numId), "admin_notes_updated", req.session.adminEmail || "admin", {
-        submissionId: submission.submissionId,
-        flagged,
-      });
+      await storage.writeAuditLog(
+        "submission",
+        String(numId),
+        "admin_notes_updated",
+        req.session.adminEmail || "admin",
+        {
+          submissionId: submission.submissionId,
+          flagged,
+        }
+      );
       res.json({ success: true });
     } catch (error: any) {
       console.error("Update admin notes error:", error.message);
@@ -4166,9 +4904,17 @@ export async function registerRoutes(
         WHERE id = ${numId}
       `);
 
-      await storage.writeAuditLog("submission", submission.submissionId, "return_label_created", req.session.adminEmail || "admin", {
-        carrier, trackingNumber, postageCost,
-      });
+      await storage.writeAuditLog(
+        "submission",
+        submission.submissionId,
+        "return_label_created",
+        req.session.adminEmail || "admin",
+        {
+          carrier,
+          trackingNumber,
+          postageCost,
+        }
+      );
 
       res.json({ success: true });
     } catch (error: any) {
@@ -4379,23 +5125,57 @@ export async function registerRoutes(
   app.get("/api/admin/certificates/export-csv", requireAdmin, async (_req, res) => {
     try {
       const certs = await storage.listCertificates();
-      const headers = ["Cert ID", "Grade Type", "Card Game", "Set", "Collection/Subset", "Card Name", "Card Number", "Rarity", "Designations", "Variant", "Language", "Year", "Grade Overall", "Status", "Ownership", "Created"];
-      const rows = certs.map(c => {
+      const headers = [
+        "Cert ID",
+        "Grade Type",
+        "Card Game",
+        "Set",
+        "Collection/Subset",
+        "Card Name",
+        "Card Number",
+        "Rarity",
+        "Designations",
+        "Variant",
+        "Language",
+        "Year",
+        "Grade Overall",
+        "Status",
+        "Ownership",
+        "Created",
+      ];
+      const rows = certs.map((c) => {
         const gt = (c as any).gradeType || "numeric";
         const isNonNum = isNonNumericGrade(gt);
         return [
-          normalizeCertId(c.certId), gt, c.cardGame, c.setName, collectionDisplayLabel((c as any).collectionCode, (c as any).collectionOther, (c as any).collection) || "", c.cardName, c.cardNumber,
-          rarityDisplayLabel(c.rarity, (c as any).rarityOther) || "", designationCodesToLabels((c.designations as string[]) || []).join("; "), variantDisplayLabel(c.variant, (c as any).variantOther) || c.variant || "", c.language, c.year,
-          isNonNum ? gt : (c.gradeOverall || ""),
-          c.status, (c as any).ownershipStatus || "unclaimed",
+          normalizeCertId(c.certId),
+          gt,
+          c.cardGame,
+          c.setName,
+          collectionDisplayLabel((c as any).collectionCode, (c as any).collectionOther, (c as any).collection) || "",
+          c.cardName,
+          c.cardNumber,
+          rarityDisplayLabel(c.rarity, (c as any).rarityOther) || "",
+          designationCodesToLabels((c.designations as string[]) || []).join("; "),
+          variantDisplayLabel(c.variant, (c as any).variantOther) || c.variant || "",
+          c.language,
+          c.year,
+          isNonNum ? gt : c.gradeOverall || "",
+          c.status,
+          (c as any).ownershipStatus || "unclaimed",
           c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
         ];
       });
 
-      const csvContent = [headers.join(","), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+      const csvContent = [
+        headers.join(","),
+        ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")),
+      ].join("\n");
 
       res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename="mintvault-certificates-${new Date().toISOString().split("T")[0]}.csv"`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="mintvault-certificates-${new Date().toISOString().split("T")[0]}.csv"`
+      );
       res.send(csvContent);
     } catch (error: any) {
       res.status(500).json({ error: "Failed to export CSV" });
@@ -4405,8 +5185,20 @@ export async function registerRoutes(
   app.get("/api/admin/ownership-export", requireAdmin, async (_req, res) => {
     try {
       const certs = await storage.listCertificates();
-      const headers = ["Cert ID", "Card Name", "Card Game", "Set", "Grade", "Status", "Ownership Status", "Owner Email", "Owner User ID", "Claim Code Created At", "Claim Code Used At"];
-      const rows = certs.map(c => {
+      const headers = [
+        "Cert ID",
+        "Card Name",
+        "Card Game",
+        "Set",
+        "Grade",
+        "Status",
+        "Ownership Status",
+        "Owner Email",
+        "Owner User ID",
+        "Claim Code Created At",
+        "Claim Code Used At",
+      ];
+      const rows = certs.map((c) => {
         const ca = c as any;
         return [
           normalizeCertId(c.certId),
@@ -4422,9 +5214,15 @@ export async function registerRoutes(
           ca.claimCodeUsedAt ? new Date(ca.claimCodeUsedAt).toISOString() : "",
         ];
       });
-      const csvContent = [headers.join(","), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+      const csvContent = [
+        headers.join(","),
+        ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")),
+      ].join("\n");
       res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename="mintvault-ownership-${new Date().toISOString().split("T")[0]}.csv"`);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="mintvault-ownership-${new Date().toISOString().split("T")[0]}.csv"`
+      );
       res.send(csvContent);
     } catch (error: any) {
       res.status(500).json({ error: "Failed to export ownership CSV" });
@@ -4440,7 +5238,8 @@ export async function registerRoutes(
       if (req.query.dateFrom) filters.dateFrom = req.query.dateFrom as string;
       if (req.query.dateTo) filters.dateTo = req.query.dateTo as string;
       if (req.query.status && req.query.status !== "all") filters.status = req.query.status as string;
-      if (req.query.ownershipStatus && req.query.ownershipStatus !== "all") filters.ownershipStatus = req.query.ownershipStatus as string;
+      if (req.query.ownershipStatus && req.query.ownershipStatus !== "all")
+        filters.ownershipStatus = req.query.ownershipStatus as string;
 
       const allCerts = await storage.listCertificates(Object.keys(filters).length > 0 ? filters : undefined);
       // Hide empty drafts (no card name, no images, no grade) unless a specific ID is requested
@@ -4451,17 +5250,27 @@ export async function registerRoutes(
         if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
         return true;
       });
-      const certsWithUrls = await Promise.all(certs.map(async (c: any) => {
-        let frontImageUrl: string | null = null;
-        let backImageUrl: string | null = null;
-        if (c.frontImagePath) {
-          try { frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin front):", c.frontImagePath, e); }
-        }
-        if (c.backImagePath) {
-          try { backImageUrl = await getR2SignedUrl(c.backImagePath, 3600); } catch (e) { console.error("R2 sign failed (admin back):", c.backImagePath, e); }
-        }
-        return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
-      }));
+      const certsWithUrls = await Promise.all(
+        certs.map(async (c: any) => {
+          let frontImageUrl: string | null = null;
+          let backImageUrl: string | null = null;
+          if (c.frontImagePath) {
+            try {
+              frontImageUrl = await getR2SignedUrl(c.frontImagePath, 3600);
+            } catch (e) {
+              console.error("R2 sign failed (admin front):", c.frontImagePath, e);
+            }
+          }
+          if (c.backImagePath) {
+            try {
+              backImageUrl = await getR2SignedUrl(c.backImagePath, 3600);
+            } catch (e) {
+              console.error("R2 sign failed (admin back):", c.backImagePath, e);
+            }
+          }
+          return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
+        })
+      );
       res.json(certsWithUrls);
     } catch (error: any) {
       console.error("List certs error:", error.message, error.stack);
@@ -4522,6 +5331,12 @@ export async function registerRoutes(
         const frontImage = files?.frontImage?.[0];
         const backImage = files?.backImage?.[0];
 
+        const toValidate = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
+        if (toValidate.length > 0) {
+          const uploadErr = await rejectInvalidUploads(toValidate);
+          if (uploadErr) return res.status(400).json({ error: uploadErr });
+        }
+
         const gradeType = req.body.gradeType || "numeric";
         const isNonNum = isNonNumericGrade(gradeType);
 
@@ -4576,13 +5391,13 @@ export async function registerRoutes(
           cardName: req.body.cardName,
           cardNumber: req.body.cardNumber,
           rarity: req.body.rarity || null,
-          rarityOther: req.body.rarity === "OTHER" ? (req.body.rarityOther || null) : null,
+          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
           designations: parseDesignations(req.body.designations),
           variant: req.body.variant || null,
-          variantOther: req.body.variant === "OTHER" ? (req.body.variantOther || null) : null,
+          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
           collection: null,
           collectionCode: req.body.collectionCode || null,
-          collectionOther: req.body.collectionCode === "OTHER" ? (req.body.collectionOther?.trim() || null) : null,
+          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
           language: req.body.language || "English",
           year: req.body.year,
           notes: req.body.notes || null,
@@ -4604,7 +5419,10 @@ export async function registerRoutes(
         const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
 
         await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
-          cardName: data.cardName, setName: data.setName, cardNumber: data.cardNumber, gradeOverall: data.gradeOverall,
+          cardName: data.cardName,
+          setName: data.setName,
+          cardNumber: data.cardNumber,
+          gradeOverall: data.gradeOverall,
         });
 
         const realCertId = cert.certId;
@@ -4663,6 +5481,12 @@ export async function registerRoutes(
         const frontImage = files?.frontImage?.[0];
         const backImage = files?.backImage?.[0];
 
+        const toValidate2 = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
+        if (toValidate2.length > 0) {
+          const uploadErr = await rejectInvalidUploads(toValidate2);
+          if (uploadErr) return res.status(400).json({ error: uploadErr });
+        }
+
         const gradeTypeUpdate = req.body.gradeType || existing.gradeType || "numeric";
         const isNonNumUpdate = isNonNumericGrade(gradeTypeUpdate);
 
@@ -4684,13 +5508,13 @@ export async function registerRoutes(
           cardName: req.body.cardName,
           cardNumber: req.body.cardNumber,
           rarity: req.body.rarity || null,
-          rarityOther: req.body.rarity === "OTHER" ? (req.body.rarityOther || null) : null,
+          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
           designations: parseDesignations(req.body.designations, existing.designations as string[]),
           variant: req.body.variant || null,
-          variantOther: req.body.variant === "OTHER" ? (req.body.variantOther || null) : null,
+          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
           collection: null,
           collectionCode: req.body.collectionCode || null,
-          collectionOther: req.body.collectionCode === "OTHER" ? (req.body.collectionOther?.trim() || null) : null,
+          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
           language: req.body.language || "English",
           year: req.body.year,
           notes: req.body.notes || null,
@@ -4711,7 +5535,9 @@ export async function registerRoutes(
           const r2Key = r2KeyForImage(existing.certId, "front", ext || "jpg");
           await uploadToR2(r2Key, frontImage.buffer, frontImage.mimetype);
           if (existing.frontImagePath) {
-            try { await deleteFromR2(existing.frontImagePath); } catch {}
+            try {
+              await deleteFromR2(existing.frontImagePath);
+            } catch {}
           }
           data.frontImagePath = r2Key;
           await storage.addCertificateImage({
@@ -4726,7 +5552,9 @@ export async function registerRoutes(
           const r2Key = r2KeyForImage(existing.certId, "back", ext || "jpg");
           await uploadToR2(r2Key, backImage.buffer, backImage.mimetype);
           if (existing.backImagePath) {
-            try { await deleteFromR2(existing.backImagePath); } catch {}
+            try {
+              await deleteFromR2(existing.backImagePath);
+            } catch {}
           }
           data.backImagePath = r2Key;
           await storage.addCertificateImage({
@@ -4740,7 +5568,9 @@ export async function registerRoutes(
         const cert = await storage.updateCertificate(id, data);
 
         await storage.writeAuditLog("certificate", existing.certId, "update", req.session.adminEmail || "admin", {
-          cardName: data.cardName, setName: data.setName, gradeOverall: data.gradeOverall,
+          cardName: data.cardName,
+          setName: data.setName,
+          gradeOverall: data.gradeOverall,
         });
 
         res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);
@@ -4752,9 +5582,15 @@ export async function registerRoutes(
   );
 
   app.delete("/api/admin/certificates/:id", requireAdmin, async (req, res) => {
-    await storage.writeAuditLog("certificate", String(req.params.id), "delete_attempt_blocked", req.session.adminEmail || "admin", {
-      message: "Hard delete is disabled. Use void instead.",
-    });
+    await storage.writeAuditLog(
+      "certificate",
+      String(req.params.id),
+      "delete_attempt_blocked",
+      req.session.adminEmail || "admin",
+      {
+        message: "Hard delete is disabled. Use void instead.",
+      }
+    );
     res.status(405).json({ error: "DELETE is disabled. Certificates cannot be deleted — use Void instead." });
   });
 
@@ -4789,7 +5625,10 @@ export async function registerRoutes(
         reason: reason || "Voided by admin",
       });
 
-      res.json({ success: true, certificate: updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated });
+      res.json({
+        success: true,
+        certificate: updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated,
+      });
     } catch (error: any) {
       console.error("Void cert error:", error.message, error.stack);
       res.status(500).json({ error: `Failed to void certificate: ${error.message}` });
@@ -4814,13 +5653,19 @@ export async function registerRoutes(
       if (format === "png" && side !== "both") {
         const png = await generateLabelPNG(cert, side);
         res.setHeader("Content-Type", "image/png");
-        res.setHeader("Content-Disposition", `${disposition}; filename="${normalizeCertId(cert.certId)}-${side}-label.png"`);
+        res.setHeader(
+          "Content-Disposition",
+          `${disposition}; filename="${normalizeCertId(cert.certId)}-${side}-label.png"`
+        );
         return res.send(png);
       }
 
       const pdf = await generateLabelPDF(cert, side);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `${disposition}; filename="${normalizeCertId(cert.certId)}-${side === "both" ? "labels" : side + "-label"}.pdf"`);
+      res.setHeader(
+        "Content-Disposition",
+        `${disposition}; filename="${normalizeCertId(cert.certId)}-${side === "both" ? "labels" : side + "-label"}.pdf"`
+      );
       res.send(pdf);
     } catch (error: any) {
       console.error("Label generation error:", error.message);
@@ -4831,9 +5676,9 @@ export async function registerRoutes(
   // ── LABEL PRINTING ROUTES ────────────────────────────────────────────────
   app.get("/api/admin/printing/queue", requireAdmin, async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit as string || "200", 10);
+      const limit = parseInt((req.query.limit as string) || "200", 10);
       const certs = await storage.getAllCertificatesForPrinting(limit);
-      const printed   = certs.filter((c) => c.lastPrintedAt !== null).length;
+      const printed = certs.filter((c) => c.lastPrintedAt !== null).length;
       const unprinted = certs.filter((c) => c.lastPrintedAt === null).length;
       console.log(`[printing/queue] returning ${certs.length} certs (${printed} printed, ${unprinted} unprinted)`);
       res.json(certs);
@@ -4919,8 +5764,14 @@ export async function registerRoutes(
       const mintedFor: string[] = [];
       for (const id of ids) {
         const cert = allCerts.find((c: any) => c.certId === id);
-        if (!cert) { missing.push(id); continue; }
-        if ((cert as any).ownershipStatus !== "unclaimed") { claimed.push(id); continue; }
+        if (!cert) {
+          missing.push(id);
+          continue;
+        }
+        if ((cert as any).ownershipStatus !== "unclaimed") {
+          claimed.push(id);
+          continue;
+        }
         let code: string | undefined = (cert as any).claimCode || (cert as any).claim_code;
         if (!code) {
           code = await storage.getOrGenerateClaimCode(id);
@@ -4929,11 +5780,12 @@ export async function registerRoutes(
         items.push({ cert, claimCode: String(code) });
       }
       if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
-      if (claimed.length) return res.status(409).json({
-        error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")}). Use /api/admin/print-batch/reprint for claimed certs.`,
-        claimedCertIds: claimed,
-        code: "CLAIMED_CERTS_PRESENT",
-      });
+      if (claimed.length)
+        return res.status(409).json({
+          error: `Only unclaimed certs can be batched (claimed: ${claimed.join(", ")}). Use /api/admin/print-batch/reprint for claimed certs.`,
+          claimedCertIds: claimed,
+          code: "CLAIMED_CERTS_PRESENT",
+        });
 
       const adminUser = (req.session as any)?.adminEmail || "admin";
       const batchId = deriveBatchId(ids, adminUser);
@@ -5098,7 +5950,10 @@ export async function registerRoutes(
       const mintedFor: string[] = [];
       for (const id of ids) {
         const cert = allCerts.find((c: any) => c.certId === id);
-        if (!cert) { missing.push(id); continue; }
+        if (!cert) {
+          missing.push(id);
+          continue;
+        }
         let code: string | undefined = (cert as any).claimCode || (cert as any).claim_code;
         if (!code) {
           // A claimed cert without a claim code shouldn't normally exist
@@ -5374,7 +6229,8 @@ export async function registerRoutes(
       if (!cert) {
         return res.status(404).json({ error: "Certificate not found" });
       }
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || undefined;
+      const ip =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || undefined;
       await storage.recordNfcScan(certId, ip);
       res.json({
         certId: cert.certId,
@@ -5435,25 +6291,30 @@ export async function registerRoutes(
       if (!cert) {
         // Generic error — do not confirm or deny whether the cert exists to avoid enumeration
         console.warn(`[claim] Failed attempt — cert not found: ${normalizedId} from IP ${req.ip}`);
-        return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
+        return res
+          .status(400)
+          .json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
       if ((cert as any).stolenStatus === "reported_stolen") {
         return res.status(403).json({
-          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+          error:
+            "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
         });
       }
       if (cert.ownershipStatus === "claimed") {
         // v435 — surface a machine-readable code so the client can offer
         // the buyer-init transfer path when TRANSFER_FLOW_LIVE is true.
         return res.status(400).json({
-          error: "This certificate has already been registered to an owner. If you are the new owner with the printed claim insert, you can request a transfer.",
+          error:
+            "This certificate has already been registered to an owner. If you are the new owner with the printed claim insert, you can request a transfer.",
           code: "ALREADY_CLAIMED",
           buyerInitPath: "/transfer/claim-by-code",
         });
       }
       if (cert.ownershipStatus === "transfer_pending") {
         return res.status(400).json({
-          error: "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
+          error:
+            "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
           code: "TRANSFER_IN_PROGRESS",
         });
       }
@@ -5462,10 +6323,17 @@ export async function registerRoutes(
       const codeValid = await storage.validateClaimCode(normalizedId, claimCode.trim());
       if (!codeValid) {
         console.warn(`[claim] Failed claim code attempt for cert ${normalizedId} from IP ${req.ip}`);
-        return res.status(400).json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
+        return res
+          .status(400)
+          .json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
 
-      const token = await storage.createClaimVerification(normalizedId, email.trim(), name?.trim() || undefined, declaredNew === true);
+      const token = await storage.createClaimVerification(
+        normalizedId,
+        email.trim(),
+        name?.trim() || undefined,
+        declaredNew === true
+      );
 
       const baseUrl = APP_BASE_URL;
       const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;
@@ -5484,7 +6352,11 @@ export async function registerRoutes(
         });
       }
 
-      return res.json({ success: true, message: "Verification email sent! Please check your inbox and click the link to complete your ownership registration." });
+      return res.json({
+        success: true,
+        message:
+          "Verification email sent! Please check your inbox and click the link to complete your ownership registration.",
+      });
     } catch (err: any) {
       console.error("[claim] Error processing claim request:", err);
       return res.status(500).json({ error: "An error occurred processing your request. Please try again." });
@@ -5557,26 +6429,43 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Certificate not found. Please check your certificate number." });
       }
       if (cert.ownershipStatus !== "claimed") {
-        return res.status(400).json({ error: "This certificate does not have a registered owner. Please use Register Ownership first." });
+        return res
+          .status(400)
+          .json({ error: "This certificate does not have a registered owner. Please use Register Ownership first." });
       }
 
       // Verify the fromEmail matches the current owner
       if (cert.currentOwnerUserId) {
         const owner = await storage.getUser(cert.currentOwnerUserId);
         if (!owner || (owner.email ?? "").toLowerCase() !== fromEmail.toLowerCase().trim()) {
-          return res.status(400).json({ error: "The email address you entered does not match the registered owner of this certificate." });
+          return res
+            .status(400)
+            .json({ error: "The email address you entered does not match the registered owner of this certificate." });
         }
       } else {
         return res.status(400).json({ error: "This certificate does not have a verified owner on record." });
       }
 
-      const ownerToken = await storage.createTransferVerification(normalizedId, fromEmail.trim(), toEmail.trim(), newOwnerName?.trim() || undefined);
+      const ownerToken = await storage.createTransferVerification(
+        normalizedId,
+        fromEmail.trim(),
+        toEmail.trim(),
+        newOwnerName?.trim() || undefined
+      );
       const baseUrl = APP_BASE_URL;
       const confirmUrl = `${baseUrl}/api/transfer/owner-confirm?token=${ownerToken}`;
 
-      await sendTransferOwnerConfirmation({ fromEmail: fromEmail.trim(), toEmail: toEmail.trim(), certId: normalizedId, confirmUrl });
+      await sendTransferOwnerConfirmation({
+        fromEmail: fromEmail.trim(),
+        toEmail: toEmail.trim(),
+        certId: normalizedId,
+        confirmUrl,
+      });
 
-      return res.json({ success: true, message: "Transfer initiated. Please check your inbox and click the confirmation link to proceed." });
+      return res.json({
+        success: true,
+        message: "Transfer initiated. Please check your inbox and click the confirmation link to proceed.",
+      });
     } catch (err: any) {
       console.error("[transfer] Error initiating transfer:", err);
       return res.status(500).json({ error: "An error occurred. Please try again." });
@@ -5680,7 +6569,9 @@ export async function registerRoutes(
     try {
       const { certId, fromEmail, toEmail, newOwnerName } = req.body;
       if (!certId || !fromEmail || !toEmail) {
-        return res.status(400).json({ error: "Certificate number, your email, and new keeper email are all required." });
+        return res
+          .status(400)
+          .json({ error: "Certificate number, your email, and new keeper email are all required." });
       }
 
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -5699,14 +6590,17 @@ export async function registerRoutes(
       }
       if ((cert as any).stolenStatus === "reported_stolen") {
         return res.status(403).json({
-          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+          error:
+            "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
         });
       }
       if (cert.ownershipStatus === "transfer_pending") {
         return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
       }
       if (cert.ownershipStatus !== "claimed") {
-        return res.status(400).json({ error: "This certificate does not have a registered keeper. Please use Register Ownership first." });
+        return res
+          .status(400)
+          .json({ error: "This certificate does not have a registered keeper. Please use Register Ownership first." });
       }
 
       // Verify fromEmail matches the current owner
@@ -5721,7 +6615,9 @@ export async function registerRoutes(
       // Check reference number exists (required for v2)
       const certRefNumber = (cert as any).referenceNumber as string | null;
       if (!certRefNumber) {
-        return res.status(400).json({ error: "This certificate does not have a Document Reference Number yet. Please contact support." });
+        return res
+          .status(400)
+          .json({ error: "This certificate does not have a Document Reference Number yet. Please contact support." });
       }
 
       // Check for existing active v2 transfer
@@ -5750,7 +6646,8 @@ export async function registerRoutes(
       });
 
       await storage.writeAuditLog("transfer", normalizedId, "transfer_v2.initiated", null, {
-        fromEmail: fromEmail.trim().toLowerCase(), toEmail: toEmail.trim().toLowerCase(),
+        fromEmail: fromEmail.trim().toLowerCase(),
+        toEmail: toEmail.trim().toLowerCase(),
       });
 
       return res.json({ success: true, message: "Transfer initiated. Check your inbox for the confirmation link." });
@@ -5789,7 +6686,8 @@ export async function registerRoutes(
 
       // v435 — audit log the outgoing-keeper confirmation step transition.
       await storage.writeAuditLog("transfer", result.certId || "", "transfer_v2.outgoing_confirmed", null, {
-        fromEmail: result.fromEmail, toEmail: result.toEmail,
+        fromEmail: result.fromEmail,
+        toEmail: result.toEmail,
       });
 
       return res.redirect(`/transfer?step=outgoing_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
@@ -5800,63 +6698,72 @@ export async function registerRoutes(
   });
 
   // Step 3: incoming keeper submits ref number + token → enters dispute window
-  app.post("/api/v2/transfers/incoming-confirm", requireTransferFlowLive, transferV2RateLimit, refNumberRateLimit, async (req, res) => {
-    try {
-      const { token, referenceNumber } = req.body;
-      if (!token || !referenceNumber) {
-        return res.status(400).json({ error: "Token and Document Reference Number are required." });
-      }
-
-      if (typeof referenceNumber !== "string" || referenceNumber.replace(/-/g, "").length < 8) {
-        return res.status(400).json({ error: "Please enter a valid Document Reference Number (format: XXXX-XXXX-XXXX)." });
-      }
-
-      const result = await storage.confirmIncomingKeeperV2(token, referenceNumber);
-      if (!result.success) {
-        if (result.stolen) {
-          return res.status(403).json({ error: result.error });
-        }
-        return res.status(400).json({ error: result.error });
-      }
-
-      // Send dispute-window emails to both parties
+  app.post(
+    "/api/v2/transfers/incoming-confirm",
+    requireTransferFlowLive,
+    transferV2RateLimit,
+    refNumberRateLimit,
+    async (req, res) => {
       try {
-        // Look up the transfer to get details
-        const cert = await storage.getCertificateByCertId(result.certId!);
-        if (cert) {
-          const ownerUser = cert.currentOwnerUserId ? await storage.getUser(cert.currentOwnerUserId) : null;
-          const transfer = await storage.getTransferV2ByCertId(result.certId!);
-          const disputeDeadline = transfer?.disputeDeadline || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+        const { token, referenceNumber } = req.body;
+        if (!token || !referenceNumber) {
+          return res.status(400).json({ error: "Token and Document Reference Number are required." });
+        }
 
-          if (ownerUser?.email) {
+        if (typeof referenceNumber !== "string" || referenceNumber.replace(/-/g, "").length < 8) {
+          return res
+            .status(400)
+            .json({ error: "Please enter a valid Document Reference Number (format: XXXX-XXXX-XXXX)." });
+        }
+
+        const result = await storage.confirmIncomingKeeperV2(token, referenceNumber);
+        if (!result.success) {
+          if (result.stolen) {
+            return res.status(403).json({ error: result.error });
+          }
+          return res.status(400).json({ error: result.error });
+        }
+
+        // Send dispute-window emails to both parties
+        try {
+          // Look up the transfer to get details
+          const cert = await storage.getCertificateByCertId(result.certId!);
+          if (cert) {
+            const ownerUser = cert.currentOwnerUserId ? await storage.getUser(cert.currentOwnerUserId) : null;
+            const transfer = await storage.getTransferV2ByCertId(result.certId!);
+            const disputeDeadline = transfer?.disputeDeadline || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+            if (ownerUser?.email) {
+              await sendTransferV2DisputeWindowStarted({
+                email: ownerUser.email,
+                certId: result.certId!,
+                role: "outgoing",
+                disputeDeadline,
+              });
+            }
             await sendTransferV2DisputeWindowStarted({
-              email: ownerUser.email,
+              email: result.toEmail!,
               certId: result.certId!,
-              role: "outgoing",
+              role: "incoming",
               disputeDeadline,
             });
           }
-          await sendTransferV2DisputeWindowStarted({
-            email: result.toEmail!,
-            certId: result.certId!,
-            role: "incoming",
-            disputeDeadline,
-          });
+        } catch (emailErr: any) {
+          console.error("[transfer-v2] Dispute window emails failed (non-fatal):", emailErr.message);
         }
-      } catch (emailErr: any) {
-        console.error("[transfer-v2] Dispute window emails failed (non-fatal):", emailErr.message);
+
+        await storage.writeAuditLog("transfer", result.certId!, "transfer_v2.incoming_confirmed", null, {
+          toEmail: result.toEmail,
+          referenceNumberPresent: true,
+        });
+
+        return res.json({ success: true, message: "Transfer verified. A 14-day dispute window is now active." });
+      } catch (err: any) {
+        console.error("[transfer-v2] Error incoming confirm:", err);
+        return res.status(500).json({ error: "An error occurred. Please try again." });
       }
-
-      await storage.writeAuditLog("transfer", result.certId!, "transfer_v2.incoming_confirmed", null, {
-        toEmail: result.toEmail, referenceNumberPresent: true,
-      });
-
-      return res.json({ success: true, message: "Transfer verified. A 14-day dispute window is now active." });
-    } catch (err: any) {
-      console.error("[transfer-v2] Error incoming confirm:", err);
-      return res.status(500).json({ error: "An error occurred. Please try again." });
     }
-  });
+  );
 
   // Status check for a v2 transfer
   app.get("/api/v2/transfers/status/:certId", requireTransferFlowLive, async (req, res) => {
@@ -5917,7 +6824,9 @@ export async function registerRoutes(
 
       // Audit
       await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.disputed", null, {
-        certId: normalizedId, disputedBy: role, reason: reason.trim().slice(0, 200),
+        certId: normalizedId,
+        disputedBy: role,
+        reason: reason.trim().slice(0, 200),
       });
 
       // Notify the other party
@@ -5926,7 +6835,10 @@ export async function registerRoutes(
         await sendTransferV2Disputed({ email: otherEmail, certId: normalizedId, disputedBy: role });
       } catch {}
 
-      return res.json({ success: true, message: "Dispute raised. The transfer has been paused and MintVault will review." });
+      return res.json({
+        success: true,
+        message: "Dispute raised. The transfer has been paused and MintVault will review.",
+      });
     } catch (err: any) {
       console.error("[transfer-v2] Error disputing:", err);
       return res.status(500).json({ error: "An error occurred." });
@@ -5958,13 +6870,22 @@ export async function registerRoutes(
       }
 
       await storage.writeAuditLog("transfer", String(transfer.id), "transfer_v2.cancelled", null, {
-        certId: normalizedId, cancelledBy: "outgoing",
+        certId: normalizedId,
+        cancelledBy: "outgoing",
       });
 
       // Notify both parties
       try {
-        await sendTransferV2Cancelled({ email: transfer.fromEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
-        await sendTransferV2Cancelled({ email: transfer.toEmail, certId: normalizedId, reason: "Cancelled by current keeper" });
+        await sendTransferV2Cancelled({
+          email: transfer.fromEmail,
+          certId: normalizedId,
+          reason: "Cancelled by current keeper",
+        });
+        await sendTransferV2Cancelled({
+          email: transfer.toEmail,
+          certId: normalizedId,
+          reason: "Cancelled by current keeper",
+        });
       } catch {}
 
       return res.json({ success: true, message: "Transfer cancelled. Your keepership record is unchanged." });
@@ -5994,117 +6915,132 @@ export async function registerRoutes(
   // Silence is treated as REJECTION (sweep auto-expires) — explicit
   // confirmation is required for ownership to change.
 
-  app.post("/api/v2/transfers/claim-by-code", requireTransferFlowLive, transferV2RateLimit, claimRateLimit, async (req, res) => {
-    try {
-      const { certId, claimCode, claimantEmail, claimantName } = req.body as {
-        certId?: unknown; claimCode?: unknown; claimantEmail?: unknown; claimantName?: unknown;
-      };
-      if (typeof certId !== "string" || typeof claimCode !== "string" || typeof claimantEmail !== "string") {
-        return res.status(400).json({ error: "Certificate number, claim code, and your email are all required." });
-      }
+  app.post(
+    "/api/v2/transfers/claim-by-code",
+    requireTransferFlowLive,
+    transferV2RateLimit,
+    claimRateLimit,
+    async (req, res) => {
+      try {
+        const { certId, claimCode, claimantEmail, claimantName } = req.body as {
+          certId?: unknown;
+          claimCode?: unknown;
+          claimantEmail?: unknown;
+          claimantName?: unknown;
+        };
+        if (typeof certId !== "string" || typeof claimCode !== "string" || typeof claimantEmail !== "string") {
+          return res.status(400).json({ error: "Certificate number, claim code, and your email are all required." });
+        }
 
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(claimantEmail.trim())) {
-        return res.status(400).json({ error: "Please provide a valid email address." });
-      }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(claimantEmail.trim())) {
+          return res.status(400).json({ error: "Please provide a valid email address." });
+        }
 
-      const normalizedCertId = normalizeCertId(certId.trim());
-      const cert = await storage.getCertificateByCertId(normalizedCertId);
-      if (!cert) {
-        return res.status(404).json({ error: "Certificate not found." });
-      }
+        const normalizedCertId = normalizeCertId(certId.trim());
+        const cert = await storage.getCertificateByCertId(normalizedCertId);
+        if (!cert) {
+          return res.status(404).json({ error: "Certificate not found." });
+        }
 
-      if ((cert as any).stolenStatus === "reported_stolen") {
-        return res.status(403).json({
-          error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify."
+        if ((cert as any).stolenStatus === "reported_stolen") {
+          return res.status(403).json({
+            error:
+              "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+          });
+        }
+
+        // Path discrimination — buyer-init only handles already-claimed certs.
+        // Unclaimed → redirect to the existing first-claim flow.
+        if (cert.ownershipStatus === "unclaimed") {
+          return res.status(409).json({
+            error: "This certificate has not yet been claimed. Use the first-time claim flow.",
+            redirect: "/api/claim/request",
+          });
+        }
+        if (cert.ownershipStatus === "transfer_pending") {
+          // Race-condition guard: another transfer is already in progress.
+          await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
+            reason: "Another transfer in progress",
+            claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+          });
+          return res
+            .status(409)
+            .json({
+              error:
+                "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved.",
+            });
+        }
+        if (cert.ownershipStatus !== "claimed") {
+          return res.status(400).json({ error: "This certificate is not in a state that supports transfer." });
+        }
+
+        // Validate the claim code (constant-time hash compare at DB layer)
+        const validation = await storage.validateClaimCodeForTransfer(normalizedCertId, claimCode.trim());
+        if (!validation.valid || !validation.currentOwnerEmail || !validation.currentOwnerUserId) {
+          await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_bad_code", null, {
+            claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+          });
+          return res.status(401).json({ error: "Invalid certificate number or claim code." });
+        }
+
+        // Self-transfer guard
+        if (claimantEmail.toLowerCase().trim() === validation.currentOwnerEmail) {
+          return res.status(400).json({ error: "You're already the registered keeper of this certificate." });
+        }
+
+        // Final race check — if a transfer was inserted between our status read
+        // and now, getTransferV2ByCertId returns it and we reject.
+        const existing = await storage.getTransferV2ByCertId(normalizedCertId);
+        if (existing) {
+          await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
+            reason: "Active transfer detected on second check",
+            claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+            existingTransferId: existing.id,
+          });
+          return res.status(409).json({ error: "A transfer is already in progress for this certificate." });
+        }
+
+        const { ownerToken, transferId } = await storage.createTransferV2BuyerInit({
+          certId: normalizedCertId,
+          claimantEmail: claimantEmail.trim(),
+          claimantName: typeof claimantName === "string" ? claimantName.trim() : undefined,
+          currentOwnerEmail: validation.currentOwnerEmail,
+          currentOwnerUserId: validation.currentOwnerUserId,
         });
-      }
 
-      // Path discrimination — buyer-init only handles already-claimed certs.
-      // Unclaimed → redirect to the existing first-claim flow.
-      if (cert.ownershipStatus === "unclaimed") {
-        return res.status(409).json({
-          error: "This certificate has not yet been claimed. Use the first-time claim flow.",
-          redirect: "/api/claim/request",
+        const baseUrl = APP_BASE_URL;
+        const disputeUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-dispute?token=${ownerToken}`;
+        const confirmUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-confirm?token=${ownerToken}`;
+        const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+
+        await sendTransferV2OwnerInvitedByBuyer({
+          ownerEmail: validation.currentOwnerEmail,
+          certId: normalizedCertId,
+          maskedClaimantEmail: maskEmailForAudit(claimantEmail.trim()),
+          ownerExpiresAt,
+          disputeUrl,
+          confirmUrl,
         });
-      }
-      if (cert.ownershipStatus === "transfer_pending") {
-        // Race-condition guard: another transfer is already in progress.
-        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
-          reason: "Another transfer in progress",
+
+        await storage.writeAuditLog("transfer", String(transferId), "transfer_v2.buyer_init_initiated", null, {
+          certId: normalizedCertId,
           claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+          currentOwnerEmailMasked: maskEmailForAudit(validation.currentOwnerEmail),
+          ownerExpiresAt: ownerExpiresAt.toISOString(),
         });
-        return res.status(409).json({ error: "A transfer is already in progress for this certificate. Please wait for it to complete or be resolved." });
-      }
-      if (cert.ownershipStatus !== "claimed") {
-        return res.status(400).json({ error: "This certificate is not in a state that supports transfer." });
-      }
 
-      // Validate the claim code (constant-time hash compare at DB layer)
-      const validation = await storage.validateClaimCodeForTransfer(normalizedCertId, claimCode.trim());
-      if (!validation.valid || !validation.currentOwnerEmail || !validation.currentOwnerUserId) {
-        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_bad_code", null, {
-          claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
+        return res.json({
+          success: true,
+          message: "Transfer requested. The current keeper has been notified and has 14 days to confirm or dispute.",
+          transferId,
         });
-        return res.status(401).json({ error: "Invalid certificate number or claim code." });
+      } catch (err: any) {
+        console.error("[transfer-v2-buyer-init] Error:", err);
+        return res.status(500).json({ error: "An error occurred. Please try again." });
       }
-
-      // Self-transfer guard
-      if (claimantEmail.toLowerCase().trim() === validation.currentOwnerEmail) {
-        return res.status(400).json({ error: "You're already the registered keeper of this certificate." });
-      }
-
-      // Final race check — if a transfer was inserted between our status read
-      // and now, getTransferV2ByCertId returns it and we reject.
-      const existing = await storage.getTransferV2ByCertId(normalizedCertId);
-      if (existing) {
-        await storage.writeAuditLog("transfer", normalizedCertId, "transfer_v2.buyer_init_rejected_race", null, {
-          reason: "Active transfer detected on second check",
-          claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
-          existingTransferId: existing.id,
-        });
-        return res.status(409).json({ error: "A transfer is already in progress for this certificate." });
-      }
-
-      const { ownerToken, transferId } = await storage.createTransferV2BuyerInit({
-        certId: normalizedCertId,
-        claimantEmail: claimantEmail.trim(),
-        claimantName: typeof claimantName === "string" ? claimantName.trim() : undefined,
-        currentOwnerEmail: validation.currentOwnerEmail,
-        currentOwnerUserId: validation.currentOwnerUserId,
-      });
-
-      const baseUrl = APP_BASE_URL;
-      const disputeUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-dispute?token=${ownerToken}`;
-      const confirmUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-confirm?token=${ownerToken}`;
-      const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-
-      await sendTransferV2OwnerInvitedByBuyer({
-        ownerEmail: validation.currentOwnerEmail,
-        certId: normalizedCertId,
-        maskedClaimantEmail: maskEmailForAudit(claimantEmail.trim()),
-        ownerExpiresAt,
-        disputeUrl,
-        confirmUrl,
-      });
-
-      await storage.writeAuditLog("transfer", String(transferId), "transfer_v2.buyer_init_initiated", null, {
-        certId: normalizedCertId,
-        claimantEmailMasked: maskEmailForAudit(claimantEmail.trim()),
-        currentOwnerEmailMasked: maskEmailForAudit(validation.currentOwnerEmail),
-        ownerExpiresAt: ownerExpiresAt.toISOString(),
-      });
-
-      return res.json({
-        success: true,
-        message: "Transfer requested. The current keeper has been notified and has 14 days to confirm or dispute.",
-        transferId,
-      });
-    } catch (err: any) {
-      console.error("[transfer-v2-buyer-init] Error:", err);
-      return res.status(500).json({ error: "An error occurred. Please try again." });
     }
-  });
+  );
 
   // Owner clicks CONFIRM link in buyer-init notification email
   app.get("/api/v2/transfers/buyer-init/owner-confirm", requireTransferFlowLive, async (req, res) => {
@@ -6142,12 +7078,20 @@ export async function registerRoutes(
         console.error("[transfer-v2-buyer-init] confirm emails failed (non-fatal):", emailErr.message);
       }
 
-      await storage.writeAuditLog("transfer", String(result.transferId), "transfer_v2.buyer_init_owner_confirmed", null, {
-        certId: result.certId,
-        disputeDeadline: result.disputeDeadline?.toISOString(),
-      });
+      await storage.writeAuditLog(
+        "transfer",
+        String(result.transferId),
+        "transfer_v2.buyer_init_owner_confirmed",
+        null,
+        {
+          certId: result.certId,
+          disputeDeadline: result.disputeDeadline?.toISOString(),
+        }
+      );
 
-      return res.redirect(`/transfer?step=buyer_init_owner_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+      return res.redirect(
+        `/transfer?step=buyer_init_owner_confirmed&certId=${encodeURIComponent(result.certId || "")}&v=2`
+      );
     } catch (err: any) {
       console.error("[transfer-v2-buyer-init] owner-confirm error:", err);
       return res.redirect("/transfer?error=server_error&v=2&path=buyer-init");
@@ -6176,11 +7120,19 @@ export async function registerRoutes(
         console.error("[transfer-v2-buyer-init] reject email failed (non-fatal):", emailErr.message);
       }
 
-      await storage.writeAuditLog("transfer", String(result.transferId), "transfer_v2.buyer_init_owner_disputed", null, {
-        certId: result.certId,
-      });
+      await storage.writeAuditLog(
+        "transfer",
+        String(result.transferId),
+        "transfer_v2.buyer_init_owner_disputed",
+        null,
+        {
+          certId: result.certId,
+        }
+      );
 
-      return res.redirect(`/transfer?step=buyer_init_owner_disputed&certId=${encodeURIComponent(result.certId || "")}&v=2`);
+      return res.redirect(
+        `/transfer?step=buyer_init_owner_disputed&certId=${encodeURIComponent(result.certId || "")}&v=2`
+      );
     } catch (err: any) {
       console.error("[transfer-v2-buyer-init] owner-dispute error:", err);
       return res.redirect("/transfer?error=server_error&v=2&path=buyer-init");
@@ -6202,7 +7154,7 @@ export async function registerRoutes(
         LIMIT 200
       `);
 
-      const rows = (result.rows as any[]).map(r => ({
+      const rows = (result.rows as any[]).map((r) => ({
         id: r.id,
         certId: r.cert_id,
         fromEmail: r.from_email,
@@ -6246,7 +7198,9 @@ export async function registerRoutes(
         return res.status(400).json({ error: `Transfer is already ${transfer.status}.` });
       }
       if (!["pending_dispute", "disputed"].includes(transfer.status)) {
-        return res.status(400).json({ error: "Force-finalise is only allowed on pending_dispute or disputed transfers." });
+        return res
+          .status(400)
+          .json({ error: "Force-finalise is only allowed on pending_dispute or disputed transfers." });
       }
 
       const priorStatus = transfer.status;
@@ -6267,7 +7221,12 @@ export async function registerRoutes(
       // Notify both parties — same template as cron-driven finalise
       try {
         await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
-        await sendTransferV2Completed({ email: result.toEmail!, certId: result.certId!, role: "incoming", newKeeperName: result.ownerName });
+        await sendTransferV2Completed({
+          email: result.toEmail!,
+          certId: result.certId!,
+          role: "incoming",
+          newKeeperName: result.ownerName,
+        });
       } catch (emailErr: any) {
         console.error("[admin] force-finalise emails failed (non-fatal):", emailErr.message);
       }
@@ -6431,7 +7390,8 @@ export async function registerRoutes(
       // route layer where admin identity + reason are available.
       if (overrideStolen === true && (cert as any).stolenStatus === "reported_stolen") {
         await storage.writeAuditLog("certificate", certId, "admin_override_stolen_assign", adminUser, {
-          email, reason: typeof overrideReason === "string" ? overrideReason.trim().slice(0, 2000) : null,
+          email,
+          reason: typeof overrideReason === "string" ? overrideReason.trim().slice(0, 2000) : null,
         });
       }
 
@@ -6453,7 +7413,8 @@ export async function registerRoutes(
       const certId = String(req.params.certId);
       const cert = await storage.getCertificateByCertId(certId);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-      if (cert.status === "voided") return res.status(403).json({ error: "Cannot generate certificate for a voided certificate" });
+      if (cert.status === "voided")
+        return res.status(403).json({ error: "Cannot generate certificate for a voided certificate" });
 
       const pdfBuffer = await generateCertificateDocument(cert, cert.ownerName);
       const normalId = normalizeCertId(cert.certId);
@@ -6491,14 +7452,18 @@ export async function registerRoutes(
     try {
       const certId = req.params.certId;
       const { centering, corners, edges, surface, overall } = req.body as {
-        centering?: string; corners?: string; edges?: string; surface?: string; overall?: string;
+        centering?: string;
+        corners?: string;
+        edges?: string;
+        surface?: string;
+        overall?: string;
       };
       const report: Record<string, string> = {};
       if (centering?.trim()) report.centering = centering.trim().slice(0, 1000);
-      if (corners?.trim())   report.corners   = corners.trim().slice(0, 1000);
-      if (edges?.trim())     report.edges     = edges.trim().slice(0, 1000);
-      if (surface?.trim())   report.surface   = surface.trim().slice(0, 1000);
-      if (overall?.trim())   report.overall   = overall.trim().slice(0, 1000);
+      if (corners?.trim()) report.corners = corners.trim().slice(0, 1000);
+      if (edges?.trim()) report.edges = edges.trim().slice(0, 1000);
+      if (surface?.trim()) report.surface = surface.trim().slice(0, 1000);
+      if (overall?.trim()) report.overall = overall.trim().slice(0, 1000);
 
       await db.execute(
         sql`UPDATE certificates SET grading_report = ${JSON.stringify(report)}::jsonb WHERE certificate_number = ${certId}`
@@ -6566,12 +7531,15 @@ export async function registerRoutes(
 
       await storage.writeAuditLog("system", "batch", "CLAIM_INSERT_SHEET_GENERATED", "admin", {
         count: inserts.length,
-        certIds: inserts.map(i => i.certId),
+        certIds: inserts.map((i) => i.certId),
       });
 
       const pdf = await generateClaimInsertSheet(inserts);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `inline; filename="claim-inserts-${new Date().toISOString().split("T")[0]}.pdf"`);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="claim-inserts-${new Date().toISOString().split("T")[0]}.pdf"`
+      );
       return res.send(pdf);
     } catch (err: any) {
       console.error("[admin] Error generating claim insert sheet:", err);
@@ -6606,12 +7574,15 @@ export async function registerRoutes(
 
     staticPages.push({ loc: "/claim", priority: "0.4", changefreq: "monthly" });
 
-    const urls = staticPages.map(p =>
-      `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
+    const urls = staticPages.map(
+      (p) =>
+        `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`
     );
 
     for (const slug of GUIDE_SLUGS) {
-      urls.push(`  <url>\n    <loc>${baseUrl}/guides/${slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`);
+      urls.push(
+        `  <url>\n    <loc>${baseUrl}/guides/${slug}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.7</priority>\n  </url>`
+      );
     }
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`;
@@ -6773,7 +7744,13 @@ export async function registerRoutes(
       clearPendingSwitchCookie(res);
       return res.redirect("/dashboard");
     }
-    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const escape = (s: string) =>
+      s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const currentEsc = escape(currentEmail);
     const pendingEsc = escape(verified.email);
     const nonceEsc = escape(verified.nonce);
@@ -6820,7 +7797,15 @@ export async function registerRoutes(
   });
 
   app.post("/account/switch/confirm", accountSwitchRateLimit, async (req, res) => {
-    const { readSwitchCookie, verifyPendingSwitchCookie, consumePendingSwitch, clearPendingSwitchCookie, cleanupStaleNonces, maskEmail, ipHash } = await import("./account-switch");
+    const {
+      readSwitchCookie,
+      verifyPendingSwitchCookie,
+      consumePendingSwitch,
+      clearPendingSwitchCookie,
+      cleanupStaleNonces,
+      maskEmail,
+      ipHash,
+    } = await import("./account-switch");
     cleanupStaleNonces();
     const raw = readSwitchCookie(req);
     const verified = verifyPendingSwitchCookie(raw);
@@ -6828,7 +7813,7 @@ export async function registerRoutes(
       clearPendingSwitchCookie(res);
       return res.redirect("/dashboard?error=switch_failed");
     }
-    const formNonce = String((req.body?.nonce ?? "")).trim();
+    const formNonce = String(req.body?.nonce ?? "").trim();
     if (!formNonce || formNonce !== verified.nonce) {
       clearPendingSwitchCookie(res);
       return res.redirect("/dashboard?error=switch_failed");
@@ -6885,16 +7870,25 @@ export async function registerRoutes(
     if (!ua) return false;
     // Common in-app browser signatures. Conservative — false positives just
     // show one extra confirmation tap, false negatives mean a broken login.
-    return /\bwv\)|; wv;|FBAN\/|FBAV\/|Instagram |Twitter for|LinkedInApp|GoogleMail|Outlook(?:Mobile|-iOS|-Android)|YJApp|Snapchat\b|Line\/|MicroMessenger\b/i.test(ua);
+    return /\bwv\)|; wv;|FBAN\/|FBAV\/|Instagram |Twitter for|LinkedInApp|GoogleMail|Outlook(?:Mobile|-iOS|-Android)|YJApp|Snapchat\b|Line\/|MicroMessenger\b/i.test(
+      ua
+    );
   }
 
   function renderIntermediateHtml(realUrl: string, kind: "login" | "reset"): string {
-    const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    const escape = (s: string) =>
+      s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     const urlEsc = escape(realUrl);
     const heading = kind === "login" ? "Open in your browser" : "Open in your browser";
-    const subhead = kind === "login"
-      ? "For security, your sign-in link needs to open in your phone's real browser, not inside this email app."
-      : "For security, your PIN reset link needs to open in your phone's real browser, not inside this email app.";
+    const subhead =
+      kind === "login"
+        ? "For security, your sign-in link needs to open in your phone's real browser, not inside this email app."
+        : "For security, your PIN reset link needs to open in your phone's real browser, not inside this email app.";
     const ctaLabel = kind === "login" ? "Open Sign-In Link" : "Open Reset Link";
     return `<!DOCTYPE html>
 <html lang="en"><head>
@@ -7077,8 +8071,11 @@ export async function registerRoutes(
   // Admin login uses /api/admin/login (password) → /api/admin/pin (PIN) instead.
   app.post("/api/auth/pin/login", pinLoginRateLimit, async (req, res) => {
     try {
-      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp, PIN_LOCKOUT_DURATION_MS } = await import("./pin");
-      const rawEmail = String(req.body?.email || "").toLowerCase().trim();
+      const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp, PIN_LOCKOUT_DURATION_MS } =
+        await import("./pin");
+      const rawEmail = String(req.body?.email || "")
+        .toLowerCase()
+        .trim();
       const pin = String(req.body?.pin || "").trim();
       const ipH = hashIp(req.ip || "unknown");
 
@@ -7162,7 +8159,9 @@ export async function registerRoutes(
   app.post("/api/auth/pin/forgot", magicLinkRateLimit, async (req, res) => {
     try {
       const { logPinEvent, hashIp } = await import("./pin");
-      const rawEmail = String(req.body?.email || "").toLowerCase().trim();
+      const rawEmail = String(req.body?.email || "")
+        .toLowerCase()
+        .trim();
       const ipH = hashIp(req.ip || "unknown");
 
       if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
@@ -7311,10 +8310,12 @@ export async function registerRoutes(
       if (!Number.isFinite(subId)) return res.status(400).json({ error: "Invalid submission id." });
       const consent = req.body?.consent === true;
 
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT id, customer_email, marketing_feature_consent, deleted_at
         FROM submissions WHERE id = ${subId} LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       const sub = rows[0] as any;
       if (!sub) return res.status(404).json({ error: "Submission not found." });
       if (sub.deleted_at) return res.status(404).json({ error: "Submission not found." });
@@ -7359,18 +8360,20 @@ export async function registerRoutes(
     try {
       const email = req.session.customerEmail!;
       const actor = (req.session as any).userId ?? email;
-      const consented = (await db.execute(sql`
+      const consented = (
+        await db.execute(sql`
         SELECT id FROM submissions
         WHERE LOWER(customer_email) = ${email.toLowerCase()}
           AND marketing_feature_consent = true
           AND deleted_at IS NULL
-      `)).rows as Array<{ id: number }>;
+      `)
+      ).rows as Array<{ id: number }>;
 
       if (consented.length === 0) {
         return res.json({ ok: true, withdrew: 0 });
       }
 
-      const ids = consented.map(r => r.id);
+      const ids = consented.map((r) => r.id);
       await db.execute(sql`
         UPDATE submissions
         SET marketing_feature_consent = false,
@@ -7400,7 +8403,7 @@ export async function registerRoutes(
       const userId = req.session.userId!;
       // Look up user email for legacy email-matched submissions
       const userRows = await db.execute(sql`SELECT email FROM users WHERE id = ${userId} LIMIT 1`);
-      const email = userRows.rows.length > 0 ? (userRows.rows[0] as any).email as string : null;
+      const email = userRows.rows.length > 0 ? ((userRows.rows[0] as any).email as string) : null;
       let subs: any[] = [];
       if (email) {
         subs = await storage.getSubmissionsByEmail(email);
@@ -7463,7 +8466,7 @@ export async function registerRoutes(
         for (const file of files) {
           const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
           await uploadToR2(key, file.buffer, file.mimetype);
-          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 7);   // 7-day URL (AWS SigV4 hard cap)
+          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 7); // 7-day URL (AWS SigV4 hard cap)
           photoUrls.push(url);
         }
         // Also accept pre-uploaded URLs from body (for admin typing in URLs)
@@ -7474,7 +8477,13 @@ export async function registerRoutes(
           onReceiptPhotoUrls: JSON.stringify(allUrls),
         });
 
-        await storage.writeAuditLog("submission", sub.submissionId, "status_received", req.session.adminEmail || "admin", { photoCount: allUrls.length });
+        await storage.writeAuditLog(
+          "submission",
+          sub.submissionId,
+          "status_received",
+          req.session.adminEmail || "admin",
+          { photoCount: allUrls.length }
+        );
 
         const email = sub.email || sub.customerEmail || "";
         if (email) {
@@ -7504,31 +8513,33 @@ export async function registerRoutes(
       // 1-hour TTL on the signed URL matches the /cert/:id page (certToPublic).
       // R2 sign calls run in parallel via Promise.all — typical dashboard
       // returns 1-20 certs so the per-cert sign doesn't dominate latency.
-      const safe = await Promise.all(certs.map(async (c) => ({
-        id: c.id,
-        certId: c.certId,
-        cardName: c.cardName,
-        setName: c.setName,
-        year: c.year,
-        cardGame: c.cardGame,
-        language: c.language,
-        gradeOverall: c.gradeOverall,
-        gradeType: c.gradeType,
-        createdAt: c.createdAt,
-        status: c.status,
-        ownershipStatus: c.ownershipStatus,
-        ownerEmail: c.ownerEmail,
-        submissionItemId: c.submissionItemId,
-        cardNumber: c.cardNumber ?? null,
-        gradeCentering: c.gradeCentering ?? null,
-        gradeCorners: c.gradeCorners ?? null,
-        gradeEdges: c.gradeEdges ?? null,
-        gradeSurface: c.gradeSurface ?? null,
-        frontImageUrl: (c as any).frontImagePath
-          ? await getR2SignedUrl((c as any).frontImagePath, 3600).catch(() => null)
-          : null,
-        stolenStatus: (c as any).stolenStatus ?? null,
-      })));
+      const safe = await Promise.all(
+        certs.map(async (c) => ({
+          id: c.id,
+          certId: c.certId,
+          cardName: c.cardName,
+          setName: c.setName,
+          year: c.year,
+          cardGame: c.cardGame,
+          language: c.language,
+          gradeOverall: c.gradeOverall,
+          gradeType: c.gradeType,
+          createdAt: c.createdAt,
+          status: c.status,
+          ownershipStatus: c.ownershipStatus,
+          ownerEmail: c.ownerEmail,
+          submissionItemId: c.submissionItemId,
+          cardNumber: c.cardNumber ?? null,
+          gradeCentering: c.gradeCentering ?? null,
+          gradeCorners: c.gradeCorners ?? null,
+          gradeEdges: c.gradeEdges ?? null,
+          gradeSurface: c.gradeSurface ?? null,
+          frontImageUrl: (c as any).frontImagePath
+            ? await getR2SignedUrl((c as any).frontImagePath, 3600).catch(() => null)
+            : null,
+          stolenStatus: (c as any).stolenStatus ?? null,
+        }))
+      );
       res.json(safe);
     } catch (err) {
       console.error("[customer] certificates error:", err);
@@ -7560,7 +8571,16 @@ export async function registerRoutes(
     ]),
     async (req, res) => {
       try {
-        const { deskewCard, cropToYellowBorder, autoCrop, maskRoundedCorners, generateVariants, checkImageQuality, reCentreBitmap, padWithMat } = await import("./image-processing");
+        const {
+          deskewCard,
+          cropToYellowBorder,
+          autoCrop,
+          maskRoundedCorners,
+          generateVariants,
+          checkImageQuality,
+          reCentreBitmap,
+          padWithMat,
+        } = await import("./image-processing");
         const cropGeometryByAngle: Record<string, any> = {};
 
         const id = parseInt(String(req.params.id), 10);
@@ -7600,7 +8620,7 @@ export async function registerRoutes(
 
           // 3. Yellow border crop (precise), then fallback to autoCrop
           const yellowResult = await cropToYellowBorder(deskewedBuf);
-          const cropResult = yellowResult || await autoCrop(deskewedBuf);
+          const cropResult = yellowResult || (await autoCrop(deskewedBuf));
           const { buffer: rectCropped, cropped, matRgb } = cropResult;
 
           // 3a. Deterministic re-centre — measure actual card edges against
@@ -7608,7 +8628,11 @@ export async function registerRoutes(
           // matRgb is plumbed in from the cropper so reCentreBitmap doesn't
           // misdetect the cropped buffer's yellow card border as mat.
           const centreResult = await reCentreBitmap(rectCropped, { certId, matRgb });
-          cropGeometryByAngle[angle] = { pre_padding_px: centreResult.pre_padding_px, post_asymmetry_px: centreResult.post_asymmetry_px, extended: centreResult.extended };
+          cropGeometryByAngle[angle] = {
+            pre_padding_px: centreResult.pre_padding_px,
+            post_asymmetry_px: centreResult.post_asymmetry_px,
+            extended: centreResult.extended,
+          };
 
           // 4. Rounded corner mask + mat padding. Order matters: mask FIRST
           // so the rounded-corner alpha sits on the card's corners, then
@@ -7624,7 +8648,10 @@ export async function registerRoutes(
           // image vs the prior PNG output (2.1MB → ~550KB per side).
           const maskedBuf = await maskRoundedCorners(centreResult.buffer);
           const paddedBuf = await padWithMat(maskedBuf, matRgb);
-          const croppedBuf = await (await import("sharp")).default(paddedBuf)
+          const croppedBuf = await (
+            await import("sharp")
+          )
+            .default(paddedBuf)
             .flatten({ background: { r: 255, g: 255, b: 255 } })
             .jpeg({ quality: 85, progressive: true, mozjpeg: true })
             .toBuffer();
@@ -7690,8 +8717,9 @@ export async function registerRoutes(
 
         // Persist image paths and quality results
         updates["image_quality_checks"] = JSON.stringify(qualityResults);
-        const setClauses = Object.entries(updates)
-          .filter(([k]) => !k.includes("_image_path") || k === "front_image_path" || k === "back_image_path");
+        const setClauses = Object.entries(updates).filter(
+          ([k]) => !k.includes("_image_path") || k === "front_image_path" || k === "back_image_path"
+        );
 
         // Build dynamic update via raw SQL per-column
         const colMap: Record<string, string> = {
@@ -7712,37 +8740,84 @@ export async function registerRoutes(
           const col = colMap[key];
           if (!col) continue;
           if (col === "image_quality_checks") {
-            await db.execute(sql`UPDATE certificates SET image_quality_checks = ${val}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+            await db.execute(
+              sql`UPDATE certificates SET image_quality_checks = ${val}::jsonb, updated_at = NOW() WHERE id = ${id}`
+            );
           } else {
-            await db.execute(sql`UPDATE certificates SET front_image_path = CASE WHEN ${col} = 'front_image_path' THEN ${val} ELSE front_image_path END, back_image_path = CASE WHEN ${col} = 'back_image_path' THEN ${val} ELSE back_image_path END, updated_at = NOW() WHERE id = ${id}`);
+            await db.execute(
+              sql`UPDATE certificates SET front_image_path = CASE WHEN ${col} = 'front_image_path' THEN ${val} ELSE front_image_path END, back_image_path = CASE WHEN ${col} = 'back_image_path' THEN ${val} ELSE back_image_path END, updated_at = NOW() WHERE id = ${id}`
+            );
             // Use separate targeted updates to avoid conditional SQL complexity
           }
         }
 
         // Targeted column updates
-        if (updates.grading_front_original) await db.execute(sql`UPDATE certificates SET grading_front_original = ${updates.grading_front_original}, updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_front_cropped)   await db.execute(sql`UPDATE certificates SET grading_front_cropped  = ${updates.grading_front_cropped},  updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_back_original)   await db.execute(sql`UPDATE certificates SET grading_back_original  = ${updates.grading_back_original},  updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_back_cropped)    await db.execute(sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_angled_original) await db.execute(sql`UPDATE certificates SET grading_angled_original = ${updates.grading_angled_original}, updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_angled_cropped)  await db.execute(sql`UPDATE certificates SET grading_angled_cropped  = ${updates.grading_angled_cropped},  updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_closeup_original) await db.execute(sql`UPDATE certificates SET grading_closeup_original = ${updates.grading_closeup_original}, updated_at = NOW() WHERE id = ${id}`);
-        if (updates.grading_closeup_cropped) await db.execute(sql`UPDATE certificates SET grading_closeup_cropped  = ${updates.grading_closeup_cropped},  updated_at = NOW() WHERE id = ${id}`);
-        if (updates.image_quality_checks)    await db.execute(sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`);
-        if (updates.front_image_path)        await db.execute(sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`);
-        if (updates.back_image_path)         await db.execute(sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`);
+        if (updates.grading_front_original)
+          await db.execute(
+            sql`UPDATE certificates SET grading_front_original = ${updates.grading_front_original}, updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_front_cropped)
+          await db.execute(
+            sql`UPDATE certificates SET grading_front_cropped  = ${updates.grading_front_cropped},  updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_back_original)
+          await db.execute(
+            sql`UPDATE certificates SET grading_back_original  = ${updates.grading_back_original},  updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_back_cropped)
+          await db.execute(
+            sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_angled_original)
+          await db.execute(
+            sql`UPDATE certificates SET grading_angled_original = ${updates.grading_angled_original}, updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_angled_cropped)
+          await db.execute(
+            sql`UPDATE certificates SET grading_angled_cropped  = ${updates.grading_angled_cropped},  updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_closeup_original)
+          await db.execute(
+            sql`UPDATE certificates SET grading_closeup_original = ${updates.grading_closeup_original}, updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_closeup_cropped)
+          await db.execute(
+            sql`UPDATE certificates SET grading_closeup_cropped  = ${updates.grading_closeup_cropped},  updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.image_quality_checks)
+          await db.execute(
+            sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.front_image_path)
+          await db.execute(
+            sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.back_image_path)
+          await db.execute(
+            sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`
+          );
 
         // Crop forensics — records reCentre asymmetry + whether padding was extended. Read-only signal.
         if (Object.keys(cropGeometryByAngle).length > 0) {
-          const cropGeometry = { ...cropGeometryByAngle, pipeline_version: "converged_v1", recorded_at: new Date().toISOString() };
-          await db.execute(sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`);
+          const cropGeometry = {
+            ...cropGeometryByAngle,
+            pipeline_version: "converged_v1",
+            recorded_at: new Date().toISOString(),
+          };
+          await db.execute(
+            sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`
+          );
         }
 
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};
         for (const [key, val] of Object.entries(updates)) {
           if (key === "image_quality_checks") continue;
-          try { responseUrls[key] = await getR2SignedUrl(val, 3600); } catch { responseUrls[key] = null; }
+          try {
+            responseUrls[key] = await getR2SignedUrl(val, 3600);
+          } catch {
+            responseUrls[key] = null;
+          }
         }
 
         // Fire async AI pipeline on first full upload (both front+back just became available and no prior analysis)
@@ -7756,11 +8831,19 @@ export async function registerRoutes(
             const aiPromise = runAiOnCertIfIdle(id, frontCroppedBuf, backCroppedBuf);
             if (aiPromise) {
               aiPromise
-                .then(r => console.log(`[upload-images] AI done for cert ${id}: grade=${r.grade} strength=${r.strengthScore}`))
-                .catch(e => console.error(`[upload-images] AI failed for cert ${id}: ${e?.message || e}\n${e?.stack || "(no stack)"}`));
+                .then((r) =>
+                  console.log(`[upload-images] AI done for cert ${id}: grade=${r.grade} strength=${r.strengthScore}`)
+                )
+                .catch((e) =>
+                  console.error(
+                    `[upload-images] AI failed for cert ${id}: ${e?.message || e}\n${e?.stack || "(no stack)"}`
+                  )
+                );
             }
           } else {
-            console.log(`[upload-images] cert=${id} skipping AI trigger (aiEmpty=${aiEmpty} aiGradeEmpty=${aiGradeEmpty} frontBuf=${!!frontCroppedBuf} backBuf=${!!backCroppedBuf})`);
+            console.log(
+              `[upload-images] cert=${id} skipping AI trigger (aiEmpty=${aiEmpty} aiGradeEmpty=${aiGradeEmpty} frontBuf=${!!frontCroppedBuf} backBuf=${!!backCroppedBuf})`
+            );
           }
         } catch (aiErr: any) {
           console.error(`[upload-images] AI trigger setup failed for cert ${id}: ${aiErr.message}`);
@@ -7790,7 +8873,10 @@ export async function registerRoutes(
   app.put(
     "/api/admin/certificates/:id/attach-images",
     requireAdmin,
-    attachImagesUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
+    attachImagesUpload.fields([
+      { name: "front", maxCount: 1 },
+      { name: "back", maxCount: 1 },
+    ]),
     async (req, res) => {
       const id = parseInt(String(req.params.id), 10);
       if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid certificate id" });
@@ -7800,36 +8886,33 @@ export async function registerRoutes(
 
       const files = req.files as Record<string, Express.Multer.File[]> | undefined;
       const frontFile = files?.front?.[0];
-      const backFile  = files?.back?.[0];
+      const backFile = files?.back?.[0];
       if (!frontFile) return res.status(400).json({ error: "Front image is required" });
 
       try {
         const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
-        const { frontVariants, backVariants } =
-          await uploadImagesToCert(id, frontFile.buffer, backFile?.buffer ?? null);
+        const { frontVariants, backVariants } = await uploadImagesToCert(
+          id,
+          frontFile.buffer,
+          backFile?.buffer ?? null
+        );
 
         const adminUser = req.session.adminEmail || "admin";
-        await storage.writeAuditLog(
-          "certificate",
-          String(cert.certId),
-          "cert_images_attached",
-          adminUser,
-          {
-            cert_id: id,
-            had_front_before: !!cert.frontImagePath,
-            had_back_before:  !!cert.backImagePath,
-            attached: {
-              front: { filename: frontFile.originalname, size: frontFile.size },
-              back:  backFile ? { filename: backFile.originalname, size: backFile.size } : null,
-            },
+        await storage.writeAuditLog("certificate", String(cert.certId), "cert_images_attached", adminUser, {
+          cert_id: id,
+          had_front_before: !!cert.frontImagePath,
+          had_back_before: !!cert.backImagePath,
+          attached: {
+            front: { filename: frontFile.originalname, size: frontFile.size },
+            back: backFile ? { filename: backFile.originalname, size: backFile.size } : null,
           },
-        );
+        });
 
         const aiPromise = runAiOnCertIfIdle(id, frontVariants.cropped, backVariants?.cropped || null);
         if (aiPromise) {
           aiPromise
-            .then(r => console.log(`[attach-images] AI done for cert ${id}: grade=${r?.grade}`))
-            .catch(e => console.warn(`[attach-images] AI failed for cert ${id}:`, e?.message || e));
+            .then((r) => console.log(`[attach-images] AI done for cert ${id}: grade=${r?.grade}`))
+            .catch((e) => console.warn(`[attach-images] AI failed for cert ${id}:`, e?.message || e));
         }
 
         res.json({ ok: true, certId: cert.certId, aiTriggered: !!aiPromise });
@@ -7837,13 +8920,18 @@ export async function registerRoutes(
         console.error(`[attach-images] cert=${id} failed:`, err?.message || err, err?.stack || "");
         res.status(500).json({ error: err?.message || "Attach failed" });
       }
-    },
+    }
   );
 
   // ── Reprocess images: re-run deskew + crop + variants on existing originals
   app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
     try {
-      const { deskewCard: dsk, cropToYellowBorder: cyb, autoCrop: ac, generateVariants: gv } = await import("./image-processing");
+      const {
+        deskewCard: dsk,
+        cropToYellowBorder: cyb,
+        autoCrop: ac,
+        generateVariants: gv,
+      } = await import("./image-processing");
 
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
@@ -7855,9 +8943,8 @@ export async function registerRoutes(
 
       for (const side of ["front", "back"] as const) {
         // ALWAYS fetch from the ORIGINAL (pre-processed) image, never the cropped version
-        const origKey = side === "front"
-          ? (c.gradingFrontOriginal || c.frontImagePath)
-          : (c.gradingBackOriginal || c.backImagePath);
+        const origKey =
+          side === "front" ? c.gradingFrontOriginal || c.frontImagePath : c.gradingBackOriginal || c.backImagePath;
         if (!origKey) {
           console.log(`[reprocess] ${certIdStr} ${side}: no original image path found, skipping`);
           continue;
@@ -7873,12 +8960,14 @@ export async function registerRoutes(
           continue;
         }
 
-        console.log(`[reprocess] ${certIdStr} ${side}: fetched original ${(origBuf.length / 1024).toFixed(0)}KB from ${origKey}`);
+        console.log(
+          `[reprocess] ${certIdStr} ${side}: fetched original ${(origBuf.length / 1024).toFixed(0)}KB from ${origKey}`
+        );
 
         // Run pipeline: deskew → yellow crop → fallback autoCrop → save
         const { buffer: deskewed, angle } = await dsk(origBuf);
         const yellowResult = await cyb(deskewed);
-        const { buffer: cropped } = yellowResult || await ac(deskewed);
+        const { buffer: cropped } = yellowResult || (await ac(deskewed));
 
         const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
         await uploadToR2(cropKey, cropped, "image/jpeg");
@@ -7887,11 +8976,15 @@ export async function registerRoutes(
         if (side === "front") {
           const displayKey = r2KeyForImage(certIdStr, "front", "jpg");
           await uploadToR2(displayKey, cropped, "image/jpeg");
-          await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+          await db.execute(
+            sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+          );
         } else {
           const displayKey = r2KeyForImage(certIdStr, "back", "jpg");
           await uploadToR2(displayKey, cropped, "image/jpeg");
-          await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+          await db.execute(
+            sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+          );
         }
 
         // Regenerate variants sequentially
@@ -7902,10 +8995,18 @@ export async function registerRoutes(
           const col = `grading_${side}_${vName}`;
           await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${id}`);
           // Update the specific variant column
-          if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
-          if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
-          if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
-          if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+          if (vName === "greyscale")
+            await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+          if (vName === "highcontrast")
+            await db.execute(
+              sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`)
+            );
+          if (vName === "edgeenhanced")
+            await db.execute(
+              sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`)
+            );
+          if (vName === "inverted")
+            await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
         }
 
         results[side] = { angle, processed: true };
@@ -7930,16 +9031,16 @@ export async function registerRoutes(
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
       const { side, left_pct, top_pct, width_pct, height_pct, rotation_deg = 0 } = req.body;
-      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (!side || !["front", "back"].includes(side))
+        return res.status(400).json({ error: "side must be front or back" });
       if ([left_pct, top_pct, width_pct, height_pct].some((v: any) => typeof v !== "number" || v < 0 || v > 100)) {
         return res.status(400).json({ error: "Invalid crop coordinates" });
       }
 
       const c = cert as any;
       const certIdStr = normalizeCertId(cert.certId);
-      const origKey = side === "front"
-        ? (c.gradingFrontOriginal || c.frontImagePath)
-        : (c.gradingBackOriginal || c.backImagePath);
+      const origKey =
+        side === "front" ? c.gradingFrontOriginal || c.frontImagePath : c.gradingBackOriginal || c.backImagePath;
       if (!origKey) return res.status(400).json({ error: `No original ${side} image found` });
 
       let origBuf: Buffer;
@@ -7967,10 +9068,10 @@ export async function registerRoutes(
       const meta = await sharpFn(workBuf).metadata();
       if (!meta.width || !meta.height) return res.status(500).json({ error: "Cannot read image dimensions" });
 
-      const left = Math.max(0, Math.round(meta.width * left_pct / 100));
-      const top = Math.max(0, Math.round(meta.height * top_pct / 100));
-      const w = Math.min(meta.width - left, Math.round(meta.width * width_pct / 100));
-      const h = Math.min(meta.height - top, Math.round(meta.height * height_pct / 100));
+      const left = Math.max(0, Math.round((meta.width * left_pct) / 100));
+      const top = Math.max(0, Math.round((meta.height * top_pct) / 100));
+      const w = Math.min(meta.width - left, Math.round((meta.width * width_pct) / 100));
+      const h = Math.min(meta.height - top, Math.round((meta.height * height_pct) / 100));
       if (w < 50 || h < 50) return res.status(400).json({ error: "Crop box too small" });
 
       console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
@@ -7990,19 +9091,31 @@ export async function registerRoutes(
       await uploadToR2(displayKey, cropped, "image/jpeg");
 
       if (side === "front") {
-        await db.execute(sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        await db.execute(
+          sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+        );
       } else {
-        await db.execute(sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`);
+        await db.execute(
+          sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+        );
       }
 
       const variants = await gv(cropped);
       for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
         const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
         await uploadToR2(vKey, vBuf, "image/jpeg");
-        if (vName === "greyscale") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
-        if (vName === "highcontrast") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`));
-        if (vName === "edgeenhanced") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`));
-        if (vName === "inverted") await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
+        if (vName === "greyscale")
+          await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
+        if (vName === "highcontrast")
+          await db.execute(
+            sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`)
+          );
+        if (vName === "edgeenhanced")
+          await db.execute(
+            sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`)
+          );
+        if (vName === "inverted")
+          await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
       }
 
       console.log(`[recrop] ${certIdStr} ${side}: manual crop applied, ${w}x${h}px, variants regenerated`);
@@ -8034,15 +9147,15 @@ export async function registerRoutes(
       // Validate all four subgrades present. Empty/0 means "not set" — the
       // calculator never produces 0 for a real grade (1 is the floor).
       const centeringScore = c.centeringScore ?? c.gradeCentering ?? null;
-      const cornersScore   = c.cornersScore   ?? c.gradeCorners   ?? null;
-      const edgesScore     = c.edgesScore     ?? c.gradeEdges     ?? null;
-      const surfaceScore   = c.surfaceScore   ?? c.gradeSurface   ?? null;
-      const overallGrade   = c.gradeOverall   ?? null;
+      const cornersScore = c.cornersScore ?? c.gradeCorners ?? null;
+      const edgesScore = c.edgesScore ?? c.gradeEdges ?? null;
+      const surfaceScore = c.surfaceScore ?? c.gradeSurface ?? null;
+      const overallGrade = c.gradeOverall ?? null;
       const missing: string[] = [];
       if (centeringScore == null) missing.push("centering");
-      if (cornersScore   == null) missing.push("corners");
-      if (edgesScore     == null) missing.push("edges");
-      if (surfaceScore   == null) missing.push("surface");
+      if (cornersScore == null) missing.push("corners");
+      if (edgesScore == null) missing.push("edges");
+      if (surfaceScore == null) missing.push("surface");
       if (missing.length > 0) {
         return res.status(422).json({
           error: `Set all four subgrades before generating description. Missing: ${missing.join(", ")}`,
@@ -8054,27 +9167,31 @@ export async function registerRoutes(
 
       // Confirmed defects (admin-curated). Skip ai_defect_candidates — those
       // are unconfirmed suggestions.
-      const defects = Array.isArray(c.defects) ? c.defects as Array<Record<string, unknown>> : [];
-      const defectLines = defects.length === 0
-        ? "none"
-        : defects.map((d) => {
-            const loc = d.location || d.image_side || "front";
-            const type = d.type || "defect";
-            const sev = d.severity || "minor";
-            return `${loc} ${type} (${sev})`;
-          }).join("; ");
+      const defects = Array.isArray(c.defects) ? (c.defects as Array<Record<string, unknown>>) : [];
+      const defectLines =
+        defects.length === 0
+          ? "none"
+          : defects
+              .map((d) => {
+                const loc = d.location || d.image_side || "front";
+                const type = d.type || "defect";
+                const sev = d.severity || "minor";
+                return `${loc} ${type} (${sev})`;
+              })
+              .join("; ");
 
-      const overallLabel = typeof overallGrade === "number" || (typeof overallGrade === "string" && /^\d/.test(overallGrade))
-        ? gradeLabel(typeof overallGrade === "number" ? overallGrade : parseFloat(String(overallGrade)))
-        : (overallGrade || "—");
+      const overallLabel =
+        typeof overallGrade === "number" || (typeof overallGrade === "string" && /^\d/.test(overallGrade))
+          ? gradeLabel(typeof overallGrade === "number" ? overallGrade : parseFloat(String(overallGrade)))
+          : overallGrade || "—";
 
       const certIdStr = normalizeCertId(cert.certId);
-      const cardName  = c.cardName  || "Unknown card";
-      const setName   = c.setName   || "Unknown set";
+      const cardName = c.cardName || "Unknown card";
+      const setName = c.setName || "Unknown set";
       const cardNumber = c.cardNumber || "";
-      const year      = c.year      || "";
-      const variant   = c.variant   || "";
-      const language  = c.language  || "English";
+      const year = c.year || "";
+      const variant = c.variant || "";
+      const language = c.language || "English";
 
       const prompt = `Write a professional grading description for this trading card. Output 3–5 sentences in this structure: (1) one-line card identification, (2) per-zone observations for centering / corners / edges / surface using the supplied subgrades and defects, (3) a closing summary sentence. Use precise, neutral grading language. Do NOT invent defects not in the input. Do NOT include the certificate number. Output plain text only — no markdown, no headings, no bullets.
 
@@ -8099,9 +9216,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const errText = await anthRes.text();
         return res.status(502).json({ error: `Claude API error ${anthRes.status}: ${errText.slice(0, 200)}` });
       }
-      const data = await anthRes.json() as Record<string, unknown>;
+      const data = (await anthRes.json()) as Record<string, unknown>;
       const content = data.content as Array<{ type: string; text?: string }> | undefined;
-      const textBlock = content?.find(b => b.type === "text");
+      const textBlock = content?.find((b) => b.type === "text");
       const description = (textBlock?.text || "").trim();
       if (!description) {
         return res.status(502).json({ error: "Claude returned empty description" });
@@ -8127,7 +9244,7 @@ Defects (admin-confirmed): ${defectLines}`;
           'certificate',
           ${String(id)},
           'generate_description',
-          ${(req as any).adminUser?.email || 'admin'},
+          ${(req as any).adminUser?.email || "admin"},
           ${JSON.stringify({
             model: "claude-haiku-4-5-20251001",
             cost_estimate_gbp: Number(costGbp.toFixed(4)),
@@ -8159,12 +9276,12 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
       const { side } = req.body;
-      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (!side || !["front", "back"].includes(side))
+        return res.status(400).json({ error: "side must be front or back" });
 
       const c = cert as any;
-      const origKey = side === "front"
-        ? (c.gradingFrontOriginal || c.frontImagePath)
-        : (c.gradingBackOriginal || c.backImagePath);
+      const origKey =
+        side === "front" ? c.gradingFrontOriginal || c.frontImagePath : c.gradingBackOriginal || c.backImagePath;
       if (!origKey) return res.json({ ok: false, message: "No original image" });
 
       let origBuf: Buffer;
@@ -8226,24 +9343,60 @@ Defects (admin-confirmed): ${defectLines}`;
       const colsToClear: string[] = [];
 
       if (side === "front") {
-        for (const col of ["frontImagePath", "gradingFrontOriginal", "gradingFrontCropped", "gradingFrontGreyscale", "gradingFrontHighcontrast", "gradingFrontEdgeenhanced", "gradingFrontInverted"]) {
+        for (const col of [
+          "frontImagePath",
+          "gradingFrontOriginal",
+          "gradingFrontCropped",
+          "gradingFrontGreyscale",
+          "gradingFrontHighcontrast",
+          "gradingFrontEdgeenhanced",
+          "gradingFrontInverted",
+        ]) {
           if (c[col]) keysToDelete.push(c[col]);
         }
-        colsToClear.push("front_image_path", "grading_front_original", "grading_front_cropped", "grading_front_greyscale", "grading_front_highcontrast", "grading_front_edgeenhanced", "grading_front_inverted");
+        colsToClear.push(
+          "front_image_path",
+          "grading_front_original",
+          "grading_front_cropped",
+          "grading_front_greyscale",
+          "grading_front_highcontrast",
+          "grading_front_edgeenhanced",
+          "grading_front_inverted"
+        );
       } else {
-        for (const col of ["backImagePath", "gradingBackOriginal", "gradingBackCropped", "gradingBackGreyscale", "gradingBackHighcontrast", "gradingBackEdgeenhanced", "gradingBackInverted"]) {
+        for (const col of [
+          "backImagePath",
+          "gradingBackOriginal",
+          "gradingBackCropped",
+          "gradingBackGreyscale",
+          "gradingBackHighcontrast",
+          "gradingBackEdgeenhanced",
+          "gradingBackInverted",
+        ]) {
           if (c[col]) keysToDelete.push(c[col]);
         }
-        colsToClear.push("back_image_path", "grading_back_original", "grading_back_cropped", "grading_back_greyscale", "grading_back_highcontrast", "grading_back_edgeenhanced", "grading_back_inverted");
+        colsToClear.push(
+          "back_image_path",
+          "grading_back_original",
+          "grading_back_cropped",
+          "grading_back_greyscale",
+          "grading_back_highcontrast",
+          "grading_back_edgeenhanced",
+          "grading_back_inverted"
+        );
       }
 
       // Delete from R2
       for (const key of keysToDelete) {
-        try { await deleteFromR2(key); } catch { /* ignore missing keys */ }
+        try {
+          await deleteFromR2(key);
+        } catch {
+          /* ignore missing keys */
+        }
       }
 
       // Clear DB columns
-      const setClauses = colsToClear.map(col => `${col} = NULL`).join(", ");
+      const setClauses = colsToClear.map((col) => `${col} = NULL`).join(", ");
       await db.execute(sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`));
 
       console.log(`[image-delete] cert ${certIdStr} removed ${side} (${keysToDelete.length} R2 keys)`);
@@ -8265,31 +9418,38 @@ Defects (admin-confirmed): ${defectLines}`;
       const c = cert as any;
       const imageKeys: Record<string, string | null> = {
         // Grading-specific images (from capture wizard / upload-images endpoint)
-        front_original:      c.gradingFrontOriginal   || c.frontImagePath || null,
-        front_cropped:       c.gradingFrontCropped    || null,
-        front_greyscale:     c.gradingFrontGreyscale  || null,
-        front_highcontrast:  c.gradingFrontHighcontrast || null,
-        front_edgeenhanced:  c.gradingFrontEdgeenhanced || null,
-        front_inverted:      c.gradingFrontInverted   || null,
-        back_original:       c.gradingBackOriginal    || c.backImagePath || null,
-        back_cropped:        c.gradingBackCropped     || null,
-        back_greyscale:      c.gradingBackGreyscale   || null,
-        back_highcontrast:   c.gradingBackHighcontrast || null,
-        back_edgeenhanced:   c.gradingBackEdgeenhanced || null,
-        back_inverted:       c.gradingBackInverted    || null,
-        angled_original:     c.gradingAngledOriginal  || null,
-        angled_cropped:      c.gradingAngledCropped   || null,
-        closeup_original:    c.gradingCloseupOriginal || null,
-        closeup_cropped:     c.gradingCloseupCropped  || null,
-        front_display:       c.frontImagePath         || null,
-        back_display:        c.backImagePath          || null,
+        front_original: c.gradingFrontOriginal || c.frontImagePath || null,
+        front_cropped: c.gradingFrontCropped || null,
+        front_greyscale: c.gradingFrontGreyscale || null,
+        front_highcontrast: c.gradingFrontHighcontrast || null,
+        front_edgeenhanced: c.gradingFrontEdgeenhanced || null,
+        front_inverted: c.gradingFrontInverted || null,
+        back_original: c.gradingBackOriginal || c.backImagePath || null,
+        back_cropped: c.gradingBackCropped || null,
+        back_greyscale: c.gradingBackGreyscale || null,
+        back_highcontrast: c.gradingBackHighcontrast || null,
+        back_edgeenhanced: c.gradingBackEdgeenhanced || null,
+        back_inverted: c.gradingBackInverted || null,
+        angled_original: c.gradingAngledOriginal || null,
+        angled_cropped: c.gradingAngledCropped || null,
+        closeup_original: c.gradingCloseupOriginal || null,
+        closeup_cropped: c.gradingCloseupCropped || null,
+        front_display: c.frontImagePath || null,
+        back_display: c.backImagePath || null,
       };
 
       const urls: Record<string, string | null> = {};
       await Promise.all(
         Object.entries(imageKeys).map(async ([k, key]) => {
-          if (!key) { urls[k] = null; return; }
-          try { urls[k] = await getR2SignedUrl(key, 3600); } catch { urls[k] = null; }
+          if (!key) {
+            urls[k] = null;
+            return;
+          }
+          try {
+            urls[k] = await getR2SignedUrl(key, 3600);
+          } catch {
+            urls[k] = null;
+          }
         })
       );
 
@@ -8310,34 +9470,34 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       const c = cert as any;
       res.json({
-        centeringFrontLr:    c.centeringFrontLr    || null,
-        centeringFrontTb:    c.centeringFrontTb    || null,
-        centeringBackLr:     c.centeringBackLr     || null,
-        centeringBackTb:     c.centeringBackTb     || null,
+        centeringFrontLr: c.centeringFrontLr || null,
+        centeringFrontTb: c.centeringFrontTb || null,
+        centeringBackLr: c.centeringBackLr || null,
+        centeringBackTb: c.centeringBackTb || null,
         centeringOuterFront: c.centeringOuterFront || null,
         centeringInnerFront: c.centeringInnerFront || null,
-        centeringOuterBack:  c.centeringOuterBack  || null,
-        centeringInnerBack:  c.centeringInnerBack  || null,
-        centeringMethod:     c.centeringMethod     || null,
+        centeringOuterBack: c.centeringOuterBack || null,
+        centeringInnerBack: c.centeringInnerBack || null,
+        centeringMethod: c.centeringMethod || null,
         // Per-zone JSONB columns (now exposed via schema — was returning null
         // pre-v408 because Drizzle didn't know about these columns).
-        corners: c.cornerValues  || null,
-        edges:   c.edgeValues    || null,
+        corners: c.cornerValues || null,
+        edges: c.edgeValues || null,
         surface: c.surfaceValues || null,
-        defects: c.defects       || [],
-        authStatus:       c.authStatus       || "genuine",
-        authNotes:        c.authNotes        || "",
+        defects: c.defects || [],
+        authStatus: c.authStatus || "genuine",
+        authNotes: c.authNotes || "",
         gradeExplanation: c.gradeExplanation || "",
-        privateNotes:     c.privateNotes     || "",
-        gradeApprovedBy:  c.gradeApprovedBy  || null,
-        gradeApprovedAt:  c.gradeApprovedAt  || null,
+        privateNotes: c.privateNotes || "",
+        gradeApprovedBy: c.gradeApprovedBy || null,
+        gradeApprovedAt: c.gradeApprovedAt || null,
         gradeStrengthScore: c.gradeStrengthScore ?? null,
         // MVGS admin inputs — hydrated into grading-panel local state on load.
         // Legacy darkBorder is preserved for old clients; new clients read
         // darkBorderFront / darkBorderBack and fall back to darkBorder.
-        darkBorder:        !!c.darkBorder,
-        darkBorderFront:   (c as any).darkBorderFront ?? !!c.darkBorder,
-        darkBorderBack:    (c as any).darkBorderBack  ?? !!c.darkBorder,
+        darkBorder: !!c.darkBorder,
+        darkBorderFront: (c as any).darkBorderFront ?? !!c.darkBorder,
+        darkBorderBack: (c as any).darkBorderBack ?? !!c.darkBorder,
         eyeAppealModifier: Number(c.eyeAppealModifier ?? 0) || 0,
         // Saved aggregate subgrades for hydration on reload. Field names below
         // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
@@ -8347,15 +9507,15 @@ Defects (admin-confirmed): ${defectLines}`;
         // Drizzle returns camelCase JS keys, not snake_case), so scores never
         // round-tripped on reload.
         centeringScore: c.gradeCentering ?? null,
-        cornersScore:   c.gradeCorners   ?? null,
-        edgesScore:     c.gradeEdges     ?? null,
-        surfaceScore:   c.gradeSurface   ?? null,
-        grade:          c.gradeOverall   ?? null,
-        aiDraftGrade:   c.aiDraftGrade   ?? null,
+        cornersScore: c.gradeCorners ?? null,
+        edgesScore: c.gradeEdges ?? null,
+        surfaceScore: c.gradeSurface ?? null,
+        grade: c.gradeOverall ?? null,
+        aiDraftGrade: c.aiDraftGrade ?? null,
         // Full AI analysis JSONB — under Option B this only contains the
         // identification payload (no `grading` key on new scans). Legacy
         // certs may still have `grading` here; the client ignores it.
-        aiAnalysis:     c.aiAnalysis     ?? (c as any).ai_analysis     ?? null,
+        aiAnalysis: c.aiAnalysis ?? (c as any).ai_analysis ?? null,
         // Option B: Haiku-suggested defects from scan-ingest, awaiting admin
         // confirm/reject. Distinct from the persisted `defects` array.
         aiDefectCandidates: c.aiDefectCandidates ?? (c as any).ai_defect_candidates ?? [],
@@ -8376,7 +9536,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
       const parsedOverall = parseFloat(overallGrade);
-      const gradeNum = isNonNum ? null : (isNaN(parsedOverall) ? null : parsedOverall);
+      const gradeNum = isNonNum ? null : isNaN(parsedOverall) ? null : parsedOverall;
 
       // P0 preservation helpers — return null when payload field is missing/empty/invalid,
       // so the SQL COALESCE below falls through to the existing column value.
@@ -8386,16 +9546,14 @@ Defects (admin-confirmed): ${defectLines}`;
         const n = typeof v === "number" ? v : parseFloat(String(v));
         return isNaN(n) ? null : n;
       };
-      const txt = (v: unknown): string | null => (v == null || v === "") ? null : String(v);
-      const jsn = (v: unknown): string | null => v != null ? JSON.stringify(v) : null;
+      const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
+      const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
 
       // Strength score is calibrated to the AI's overall grade. If the admin
       // changes the grade manually here, the AI-derived score is stale and
       // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
-      const fmt = (n: number | null) => n == null ? "" : n.toFixed(1);
-      const oldGradeNum = (cert as any).gradeOverall != null
-        ? parseFloat(String((cert as any).gradeOverall))
-        : null;
+      const fmt = (n: number | null) => (n == null ? "" : n.toFixed(1));
+      const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
       const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
 
       // Track approval state pre-write for the audit trail. Edits to an
@@ -8435,9 +9593,7 @@ Defects (admin-confirmed): ${defectLines}`;
           dark_border_front   = ${
             typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
           },
-          dark_border_back    = ${
-            typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`
-          },
+          dark_border_back    = ${typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`},
           dark_border         = ${
             // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
             // against the OLD row, so we can't reference the new sibling
@@ -8447,7 +9603,7 @@ Defects (admin-confirmed): ${defectLines}`;
               const fSet = typeof b.dark_border_front === "boolean";
               const bSet = typeof b.dark_border_back === "boolean";
               const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
-              const backExpr  = bSet ? sql`${b.dark_border_back}::boolean`  : sql`dark_border_back`;
+              const backExpr = bSet ? sql`${b.dark_border_back}::boolean` : sql`dark_border_back`;
               if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
               // Neither new flag in payload — keep legacy semantics so old
               // clients still toggle the column unchanged.
@@ -8482,31 +9638,31 @@ Defects (admin-confirmed): ${defectLines}`;
         const fieldsChanged = Object.keys(b || {});
         // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
         const fieldMap: Array<[string, string]> = [
-          ["overall_grade",       "gradeOverall"],
-          ["grade_centering",     "gradeCentering"],
-          ["grade_corners",       "gradeCorners"],
-          ["grade_edges",         "gradeEdges"],
-          ["grade_surface",       "gradeSurface"],
-          ["centering_front_lr",  "centeringFrontLr"],
-          ["centering_front_tb",  "centeringFrontTb"],
-          ["centering_back_lr",   "centeringBackLr"],
-          ["centering_back_tb",   "centeringBackTb"],
-          ["auth_status",         "authStatus"],
-          ["auth_notes",          "authNotes"],
-          ["grade_explanation",   "gradeExplanation"],
-          ["private_notes",       "privateNotes"],
-          ["corners",             "cornerValues"],
-          ["edges",               "edgeValues"],
-          ["surface",             "surfaceValues"],
-          ["defects",             "defects"],
+          ["overall_grade", "gradeOverall"],
+          ["grade_centering", "gradeCentering"],
+          ["grade_corners", "gradeCorners"],
+          ["grade_edges", "gradeEdges"],
+          ["grade_surface", "gradeSurface"],
+          ["centering_front_lr", "centeringFrontLr"],
+          ["centering_front_tb", "centeringFrontTb"],
+          ["centering_back_lr", "centeringBackLr"],
+          ["centering_back_tb", "centeringBackTb"],
+          ["auth_status", "authStatus"],
+          ["auth_notes", "authNotes"],
+          ["grade_explanation", "gradeExplanation"],
+          ["private_notes", "privateNotes"],
+          ["corners", "cornerValues"],
+          ["edges", "edgeValues"],
+          ["surface", "surfaceValues"],
+          ["defects", "defects"],
           ["ai_defect_candidates", "aiDefectCandidates"],
         ];
-        const norm = (v: unknown) => v == null ? null : (typeof v === "object" ? JSON.stringify(v) : String(v));
+        const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
         const changed: Record<string, { from: unknown; to: unknown }> = {};
         for (const [pKey, cKey] of fieldMap) {
           if (!(pKey in (b || {}))) continue;
           const before = norm((cert as any)[cKey]);
-          const after  = norm((b as any)[pKey]);
+          const after = norm((b as any)[pKey]);
           if (before !== after) {
             changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
           }
@@ -8551,43 +9707,44 @@ Defects (admin-confirmed): ${defectLines}`;
         const n = typeof v === "number" ? v : parseFloat(String(v));
         return isNaN(n) ? null : n;
       };
-      const txt = (v: unknown): string | null => (v == null || v === "") ? null : String(v);
-      const jsn = (v: unknown): string | null => v != null ? JSON.stringify(v) : null;
+      const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
+      const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
 
-      const gradeNum       = isNonNum ? null : num(overallGrade);
-      const sentCentering  = isNonNum ? null : num(b.grade_centering);
-      const sentCorners    = isNonNum ? null : num(b.grade_corners);
-      const sentEdges      = isNonNum ? null : num(b.grade_edges);
-      const sentSurface    = isNonNum ? null : num(b.grade_surface);
+      const gradeNum = isNonNum ? null : num(overallGrade);
+      const sentCentering = isNonNum ? null : num(b.grade_centering);
+      const sentCorners = isNonNum ? null : num(b.grade_corners);
+      const sentEdges = isNonNum ? null : num(b.grade_edges);
+      const sentSurface = isNonNum ? null : num(b.grade_surface);
 
       // Grading time (admin opens the grading workstation → clicks Approve).
       // Capped at 1800s (30 min) to keep the dashboard average representative —
       // anything longer is almost certainly a coffee break / tab left open.
       const rawTime = Number(b.grading_time_seconds);
-      const clampedTime = Number.isFinite(rawTime) && rawTime > 0
-        ? Math.min(1800, Math.round(rawTime))
-        : null;
+      const clampedTime = Number.isFinite(rawTime) && rawTime > 0 ? Math.min(1800, Math.round(rawTime)) : null;
 
       // Final state for label_type computation: payload value if present, else existing.
       // SQL COALESCE will produce the same final state in DB; we mirror it here so
       // label_type reflects what's actually saved when a partial payload comes in.
       const finalCentering = sentCentering ?? num(cert.gradeCentering);
-      const finalCorners   = sentCorners   ?? num(cert.gradeCorners);
-      const finalEdges     = sentEdges     ?? num(cert.gradeEdges);
-      const finalSurface   = sentSurface   ?? num(cert.gradeSurface);
+      const finalCorners = sentCorners ?? num(cert.gradeCorners);
+      const finalEdges = sentEdges ?? num(cert.gradeEdges);
+      const finalSurface = sentSurface ?? num(cert.gradeSurface);
 
       // Strength score is calibrated to the AI's overall grade. If the admin
       // changes the grade manually here, the AI-derived score is stale and
       // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
-      const fmt = (n: number | null) => n == null ? "" : n.toFixed(1);
-      const oldGradeNum = (cert as any).gradeOverall != null
-        ? parseFloat(String((cert as any).gradeOverall))
-        : null;
+      const fmt = (n: number | null) => (n == null ? "" : n.toFixed(1));
+      const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
       const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
 
       // Compute Black Label: all subgrades must be exactly 10.0
-      const allTen = !isNonNum && gradeNum === 10 &&
-        finalCentering === 10 && finalCorners === 10 && finalEdges === 10 && finalSurface === 10;
+      const allTen =
+        !isNonNum &&
+        gradeNum === 10 &&
+        finalCentering === 10 &&
+        finalCorners === 10 &&
+        finalEdges === 10 &&
+        finalSurface === 10;
       const labelType = allTen ? "black" : "Standard";
       const gradeType = isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric";
 
@@ -8646,11 +9803,17 @@ Defects (admin-confirmed): ${defectLines}`;
       // populated by Option-A scan-ingest before the admin clicked approve).
       // Useful post-launch metric: "what % of certs ship untouched-from-AI?"
       const wasAiDrafted = (cert as any).aiDraftGrade != null;
-      await storage.writeAuditLog("certificate", cert.certId, "approve_and_publish", req.session.adminEmail || "admin", {
-        overall: overallGrade,
-        labelType,
-        was_ai_drafted: wasAiDrafted,
-      });
+      await storage.writeAuditLog(
+        "certificate",
+        cert.certId,
+        "approve_and_publish",
+        req.session.adminEmail || "admin",
+        {
+          overall: overallGrade,
+          labelType,
+          was_ai_drafted: wasAiDrafted,
+        }
+      );
 
       // Log AI vs human comparison if an AI draft grade exists for this certificate
       if (cert.aiDraftGrade != null && gradeNum != null) {
@@ -8666,14 +9829,14 @@ Defects (admin-confirmed): ${defectLines}`;
               ${cert.certId},
               ${Math.round(parseFloat(String(cert.aiDraftGrade)))},
               ${aiAnalysis.centering?.subgrade != null ? String(aiAnalysis.centering.subgrade) : null},
-              ${aiAnalysis.corners?.subgrade   != null ? String(aiAnalysis.corners.subgrade)   : null},
-              ${aiAnalysis.edges?.subgrade     != null ? String(aiAnalysis.edges.subgrade)     : null},
-              ${aiAnalysis.surface?.subgrade   != null ? String(aiAnalysis.surface.subgrade)   : null},
+              ${aiAnalysis.corners?.subgrade != null ? String(aiAnalysis.corners.subgrade) : null},
+              ${aiAnalysis.edges?.subgrade != null ? String(aiAnalysis.edges.subgrade) : null},
+              ${aiAnalysis.surface?.subgrade != null ? String(aiAnalysis.surface.subgrade) : null},
               ${gradeNum},
               ${finalCentering != null ? Math.round(finalCentering) : null},
-              ${finalCorners   != null ? Math.round(finalCorners)   : null},
-              ${finalEdges     != null ? Math.round(finalEdges)     : null},
-              ${finalSurface   != null ? Math.round(finalSurface)   : null},
+              ${finalCorners != null ? Math.round(finalCorners) : null},
+              ${finalEdges != null ? Math.round(finalEdges) : null},
+              ${finalSurface != null ? Math.round(finalSurface) : null},
               ${req.session.adminEmail || "admin"}
             )
           `);
@@ -8766,9 +9929,9 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/card-lookup", requireAdmin, async (req, res) => {
     try {
       const { lookupCard } = await import("./card-database");
-      const game  = typeof req.query.game  === "string" ? req.query.game.trim()  : "";
+      const game = typeof req.query.game === "string" ? req.query.game.trim() : "";
       const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
-      const mode  = req.query.mode === "wildcard" ? "wildcard" as const : "exact" as const;
+      const mode = req.query.mode === "wildcard" ? ("wildcard" as const) : ("exact" as const);
       console.log(`[card-lookup] game=${game} query=${query} mode=${mode}`);
       if (!query) return res.status(400).json({ error: "query is required" });
       const results = await lookupCard(game, query, mode);
@@ -8794,14 +9957,14 @@ Defects (admin-confirmed): ${defectLines}`;
         LIMIT 100
       `);
       const queue = (rows.rows || []).map((r: any) => ({
-        id:         r.id,
-        certId:     normalizeCertId(r.cert_id),
-        cardName:   r.card_name,
-        cardSet:    r.set_name,
-        cardGame:   r.card_game,
-        createdAt:  r.created_at,
-        hasImages:  !!r.has_images,
-        grade:      null,
+        id: r.id,
+        certId: normalizeCertId(r.cert_id),
+        cardName: r.card_name,
+        cardSet: r.set_name,
+        cardGame: r.card_game,
+        createdAt: r.created_at,
+        hasImages: !!r.has_images,
+        grade: null,
       }));
       res.json(queue);
     } catch (err: any) {
@@ -8852,9 +10015,12 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Public phone upload endpoint ─────────────────────────────────
 
-  const phoneUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 },
+  const phoneUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 30 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-      if (/\.(jpg|jpeg|png|webp|heic)$/i.test(path.extname(file.originalname)) || file.mimetype.startsWith("image/")) cb(null, true);
+      if (/\.(jpg|jpeg|png|webp|heic)$/i.test(path.extname(file.originalname)) || file.mimetype.startsWith("image/"))
+        cb(null, true);
       else cb(new Error("Images only"));
     },
   });
@@ -8867,7 +10033,10 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const entry = _uploadTokens.get(token);
       if (!entry) return res.status(401).json({ error: "Invalid or expired token" });
-      if (Date.now() > entry.expiresAt) { _uploadTokens.delete(token); return res.status(401).json({ error: "Token expired" }); }
+      if (Date.now() > entry.expiresAt) {
+        _uploadTokens.delete(token);
+        return res.status(401).json({ error: "Token expired" });
+      }
 
       const certId = String(req.params.certId);
       const imageType = String(req.params.imageType);
@@ -8878,12 +10047,15 @@ Defects (admin-confirmed): ${defectLines}`;
 
       if (!req.file) return res.status(400).json({ error: "No image provided" });
 
+      const phoneUploadErr = await rejectInvalidUploads([req.file]);
+      if (phoneUploadErr) return res.status(400).json({ error: phoneUploadErr });
+
       const { buffer: croppedBuf } = await autoCrop(req.file.buffer);
       const key = `grading/${normalizeCertId(dbCert.certId)}/${imageType}_original.jpg`;
       await uploadToR2(key, croppedBuf, "image/jpeg");
 
       const colMap: Record<string, string> = {
-        angled:  "grading_angled_original",
+        angled: "grading_angled_original",
         closeup: "grading_closeup_original",
       };
       const col = colMap[imageType];
@@ -8920,14 +10092,16 @@ Defects (admin-confirmed): ${defectLines}`;
       const side = (req.body.side || "front") as "front" | "back";
 
       // Determine target cert: explicit or current queue item
-      let certId = req.body.certId || _currentGradingCertId;
+      const certId = req.body.certId || _currentGradingCertId;
       let dbCert: any = null;
       if (certId) {
         dbCert = await findCertByIdFlex(String(certId));
       }
       if (!dbCert) {
         // Fall back to first ungraded
-        const rows = await db.execute(sql`SELECT * FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`);
+        const rows = await db.execute(
+          sql`SELECT * FROM certificates WHERE status = 'active' AND deleted_at IS NULL AND grade_approved_at IS NULL ORDER BY created_at ASC LIMIT 1`
+        );
         dbCert = rows.rows?.[0];
       }
       if (!dbCert) return res.status(404).json({ error: "No active certificate found for upload" });
@@ -8945,9 +10119,13 @@ Defects (admin-confirmed): ${defectLines}`;
       const col = side === "front" ? "front_image_path" : "back_image_path";
       await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
       if (side === "front") {
-        await db.execute(sql`UPDATE certificates SET front_image_path = ${origKey}, grading_front_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`);
+        await db.execute(
+          sql`UPDATE certificates SET front_image_path = ${origKey}, grading_front_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`
+        );
       } else {
-        await db.execute(sql`UPDATE certificates SET back_image_path = ${origKey}, grading_back_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`);
+        await db.execute(
+          sql`UPDATE certificates SET back_image_path = ${origKey}, grading_back_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`
+        );
       }
 
       const signedUrl = await getR2SignedUrl(origKey, 3600);
@@ -8962,14 +10140,14 @@ Defects (admin-confirmed): ${defectLines}`;
 
   function getCertImageKeys(c: any): ImageKeys {
     return {
-      frontOriginal:     c.gradingFrontOriginal     || null,
-      backOriginal:      c.gradingBackOriginal       || null,
-      frontGreyscale:    c.gradingFrontGreyscale     || null,
-      frontHighcontrast: c.gradingFrontHighcontrast  || null,
-      backGreyscale:     c.gradingBackGreyscale      || null,
-      backHighcontrast:  c.gradingBackHighcontrast   || null,
-      angledOriginal:    c.gradingAngledOriginal     || null,
-      closeupOriginal:   c.gradingCloseupOriginal    || null,
+      frontOriginal: c.gradingFrontOriginal || null,
+      backOriginal: c.gradingBackOriginal || null,
+      frontGreyscale: c.gradingFrontGreyscale || null,
+      frontHighcontrast: c.gradingFrontHighcontrast || null,
+      backGreyscale: c.gradingBackGreyscale || null,
+      backHighcontrast: c.gradingBackHighcontrast || null,
+      angledOriginal: c.gradingAngledOriginal || null,
+      closeupOriginal: c.gradingCloseupOriginal || null,
     };
   }
 
@@ -9016,7 +10194,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const url = await getR2SignedUrl(frontKey, 300);
         const resp = await fetch(url);
         frontBuf = Buffer.from(await resp.arrayBuffer());
-      } catch { return res.status(400).json({ error: "Could not fetch front image" }); }
+      } catch {
+        return res.status(400).json({ error: "Could not fetch front image" });
+      }
 
       // Identify with Claude Haiku
       const rawId = await identifyCardFromBuffer(frontBuf, "image/jpeg");
@@ -9027,15 +10207,24 @@ Defects (admin-confirmed): ${defectLines}`;
       const tcgVerified = game === "pokemon";
       let tcgResult: any = { verified: false };
       if (game === "pokemon") {
-        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
+        tcgResult = await verifyPokemonCardWithTcgApi(
+          rawId.detected_name,
+          rawId.detected_number,
+          rawId.detected_rarity,
+          rawId.set_code,
+          rawId.copyright_year
+        );
         if (tcgResult.verified) {
           // Only override enrichedId if it wasn't already verified with a different card name
           const enrichedAlreadyVerified = enrichedId.verified === true;
-          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+          const namesAgree =
+            !tcgResult.officialCardName ||
+            !enrichedId.officialName ||
             normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
           if (!enrichedAlreadyVerified || namesAgree) {
             enrichedId = {
-              ...enrichedId, verified: true,
+              ...enrichedId,
+              verified: true,
               officialName: tcgResult.officialCardName || enrichedId.officialName,
               officialSet: tcgResult.officialSetName || enrichedId.officialSet,
               officialNumber: rawId.detected_number,
@@ -9046,7 +10235,9 @@ Defects (admin-confirmed): ${defectLines}`;
               detected_year: tcgResult.officialYear || enrichedId.detected_year,
             };
           } else {
-            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+            console.log(
+              `[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`
+            );
           }
         }
       }
@@ -9060,7 +10251,7 @@ Defects (admin-confirmed): ${defectLines}`;
       if (shouldWrite) {
         const cardName = enrichedId.officialName || enrichedId.detected_name;
         // When trusting AI without TCG verification, leave set_name null for manual entry
-        const setName = verified ? (enrichedId.officialSet || enrichedId.detected_set) : null;
+        const setName = verified ? enrichedId.officialSet || enrichedId.detected_set : null;
         const cardNumber = enrichedId.detected_number;
         const cardGame = enrichedId.detected_game || "pokemon";
         const rarity = enrichedId.detected_rarity;
@@ -9098,7 +10289,9 @@ Defects (admin-confirmed): ${defectLines}`;
             WHERE id = ${id}
           `);
         }
-        console.log(`[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText} overwrite=${overwrite}`);
+        console.log(
+          `[identify-only] wrote to cert ${id}: name=${cardName} set=${setName} number=${cardNumber} year=${yearText} overwrite=${overwrite}`
+        );
       } else {
         console.log(`[identify-only] cert ${id}: confidence=${aiConfidence} tcg=${verified} — NOT writing details`);
       }
@@ -9109,7 +10302,7 @@ Defects (admin-confirmed): ${defectLines}`;
         confidence: aiConfidence,
         tcgVerified: verified,
         detailsWritten: shouldWrite,
-        rejectReason: !shouldWrite ? (tcgResult.rejectReason || "Low confidence — manual entry needed") : undefined,
+        rejectReason: !shouldWrite ? tcgResult.rejectReason || "Low confidence — manual entry needed" : undefined,
         cert: updatedCert ? { ...updatedCert, certId: normalizeCertId(updatedCert.certId) } : null,
       });
     } catch (err: any) {
@@ -9138,7 +10331,13 @@ Defects (admin-confirmed): ${defectLines}`;
       // Fetch images
       const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
         if (!key) return null;
-        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const r = await fetch(url);
+          return Buffer.from(await r.arrayBuffer());
+        } catch {
+          return null;
+        }
       };
       const frontBuf = await fetchBuf(frontKey);
       if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
@@ -9151,7 +10350,10 @@ Defects (admin-confirmed): ${defectLines}`;
       ];
       if (backBuf) {
         const { buffer: backResized } = await resizeForClaude(backBuf);
-        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") },
+        });
       }
       content.push({ type: "text", text: CENTERING_ONLY_PROMPT });
 
@@ -9161,7 +10363,7 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         response = await anthropicFetch(
           { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
-          { apiKey, timeoutMs: 30_000 },
+          { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
         if (err?.name === "AbortError") {
@@ -9170,7 +10372,7 @@ Defects (admin-confirmed): ${defectLines}`;
         throw err;
       }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
-      const aiData = await response.json() as { content: { text: string }[] };
+      const aiData = (await response.json()) as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
       console.log(`[measure-centering] raw response (200 chars): ${text.slice(0, 200)}`);
       const centering = extractJson(text, "measure-centering");
@@ -9183,7 +10385,9 @@ Defects (admin-confirmed): ${defectLines}`;
         WHERE id = ${id}
       `);
 
-      console.log(`[measure-centering] cert=${id} front=${centering.front_left_right} back=${centering.back_left_right}`);
+      console.log(
+        `[measure-centering] cert=${id} front=${centering.front_left_right} back=${centering.back_left_right}`
+      );
       res.json({ centering });
     } catch (err: any) {
       console.error("[measure-centering] error:", err.message);
@@ -9196,7 +10400,8 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const id = parseInt(String(req.params.id), 10);
       const { side, outer, inner } = req.body;
-      if (!side || !["front", "back"].includes(side)) return res.status(400).json({ error: "side must be front or back" });
+      if (!side || !["front", "back"].includes(side))
+        return res.status(400).json({ error: "side must be front or back" });
       if (!outer || !inner) return res.status(400).json({ error: "outer and inner rects required" });
 
       // Calculate centering from the two rectangles
@@ -9212,11 +10417,24 @@ Defects (admin-confirmed): ${defectLines}`;
       const tFloat = totalV > 0 ? (topB / totalV) * 100 : 50;
       const lRound = Math.round(lFloat);
       const tRound = Math.round(tFloat);
-      const lr = lRound >= (100 - lRound) ? `${lRound}/${100 - lRound}` : `${100 - lRound}/${lRound}`;
-      const tb = tRound >= (100 - tRound) ? `${tRound}/${100 - tRound}` : `${100 - tRound}/${tRound}`;
+      const lr = lRound >= 100 - lRound ? `${lRound}/${100 - lRound}` : `${100 - lRound}/${lRound}`;
+      const tb = tRound >= 100 - tRound ? `${tRound}/${100 - tRound}` : `${100 - tRound}/${tRound}`;
 
       const worstDev = Math.max(Math.abs(lFloat - 50), Math.abs(tFloat - 50));
-      const subgrade = worstDev <= 2 ? 10 : worstDev <= 5 ? 9 : worstDev <= 10 ? 8 : worstDev <= 15 ? 7 : worstDev <= 20 ? 6 : worstDev <= 35 ? 5 : 4;
+      const subgrade =
+        worstDev <= 2
+          ? 10
+          : worstDev <= 5
+            ? 9
+            : worstDev <= 10
+              ? 8
+              : worstDev <= 15
+                ? 7
+                : worstDev <= 20
+                  ? 6
+                  : worstDev <= 35
+                    ? 5
+                    : 4;
 
       const outerCol = side === "front" ? "centering_outer_front" : "centering_outer_back";
       const innerCol = side === "front" ? "centering_inner_front" : "centering_inner_back";
@@ -9224,12 +10442,21 @@ Defects (admin-confirmed): ${defectLines}`;
       const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
 
       // Add new columns if they don't exist yet
-      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`); } catch {}
-      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`); } catch {}
-      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`); } catch {}
-      try { await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`); } catch {}
+      try {
+        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`);
+      } catch {}
+      try {
+        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`);
+      } catch {}
+      try {
+        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`);
+      } catch {}
+      try {
+        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`);
+      } catch {}
 
-      await db.execute(sql.raw(`
+      await db.execute(
+        sql.raw(`
         UPDATE certificates SET
           ${outerCol} = '${JSON.stringify(outer)}'::jsonb,
           ${innerCol} = '${JSON.stringify(inner)}'::jsonb,
@@ -9238,7 +10465,8 @@ Defects (admin-confirmed): ${defectLines}`;
           centering_method = 'manual',
           updated_at = NOW()
         WHERE id = ${id}
-      `));
+      `)
+      );
 
       console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
       res.json({ lr, tb, subgrade, outer, inner });
@@ -9267,7 +10495,13 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
         if (!key) return null;
-        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const r = await fetch(url);
+          return Buffer.from(await r.arrayBuffer());
+        } catch {
+          return null;
+        }
       };
       const frontBuf = await fetchBuf(frontKey);
       if (!frontBuf) return res.status(400).json({ error: "Could not fetch front image" });
@@ -9280,7 +10514,10 @@ Defects (admin-confirmed): ${defectLines}`;
       ];
       if (backBuf) {
         const { buffer: backResized } = await resizeForClaude(backBuf);
-        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") } });
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: backResized.toString("base64") },
+        });
       }
       content.push({ type: "text", text: DEFECTS_ONLY_PROMPT });
 
@@ -9290,7 +10527,7 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         response = await anthropicFetch(
           { model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] },
-          { apiKey, timeoutMs: 30_000 },
+          { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
         if (err?.name === "AbortError") {
@@ -9299,7 +10536,7 @@ Defects (admin-confirmed): ${defectLines}`;
         throw err;
       }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
-      const aiData = await response.json() as { content: { text: string }[] };
+      const aiData = (await response.json()) as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
       console.log(`[detect-defects] raw length: ${text.length}`);
       console.log(`[detect-defects] first 500: ${text.slice(0, 500)}`);
@@ -9321,7 +10558,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const x = d.position_x_percent ?? d.x_percent ?? 50;
         const y = d.position_y_percent ?? d.y_percent ?? 50;
         if (x < 3 || x > 97 || y < 3 || y > 97) {
-          console.log(`[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`);
+          console.log(
+            `[defect-filter] rejected defect "${d.type}" at (${x.toFixed(1)}, ${y.toFixed(1)}) — outside card boundary`
+          );
           return false;
         }
         return true;
@@ -9334,7 +10573,9 @@ Defects (admin-confirmed): ${defectLines}`;
         WHERE id = ${id}
       `);
 
-      console.log(`[detect-defects] cert=${id} defects=${filtered.length} (${rawCount - filtered.length} filtered out)`);
+      console.log(
+        `[detect-defects] cert=${id} defects=${filtered.length} (${rawCount - filtered.length} filtered out)`
+      );
       res.json({ defects: filtered });
     } catch (err: any) {
       console.error("[detect-defects] error:", err.message);
@@ -9366,8 +10607,7 @@ Defects (admin-confirmed): ${defectLines}`;
         ? `${aiData.defects_detected.defects.length} defects: ${aiData.defects_detected.defects.map((d: any) => `${d.type} (${d.severity})`).join(", ")}`
         : "Not detected yet";
 
-      const prompt = GRADE_ONLY_PROMPT
-        .replace("{CARD_CONTEXT}", cardContext)
+      const prompt = GRADE_ONLY_PROMPT.replace("{CARD_CONTEXT}", cardContext)
         .replace("{CENTERING_CONTEXT}", centeringContext)
         .replace("{DEFECTS_CONTEXT}", defectsContext);
 
@@ -9375,7 +10615,13 @@ Defects (admin-confirmed): ${defectLines}`;
       const frontKey = c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath;
       const fetchBuf = async (key: string | null): Promise<Buffer | null> => {
         if (!key) return null;
-        try { const url = await getR2SignedUrl(key, 300); const r = await fetch(url); return Buffer.from(await r.arrayBuffer()); } catch { return null; }
+        try {
+          const url = await getR2SignedUrl(key, 300);
+          const r = await fetch(url);
+          return Buffer.from(await r.arrayBuffer());
+        } catch {
+          return null;
+        }
       };
       const frontBuf = await fetchBuf(frontKey);
 
@@ -9383,7 +10629,10 @@ Defects (admin-confirmed): ${defectLines}`;
       if (frontBuf) {
         const { resizeForClaude } = await import("./ai-grading-service");
         const { buffer: resized } = await resizeForClaude(frontBuf);
-        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") } });
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: resized.toString("base64") },
+        });
       }
       content.push({ type: "text", text: prompt });
 
@@ -9393,7 +10642,7 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         response = await anthropicFetch(
           { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
-          { apiKey, timeoutMs: 30_000 },
+          { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
         if (err?.name === "AbortError") {
@@ -9402,19 +10651,25 @@ Defects (admin-confirmed): ${defectLines}`;
         throw err;
       }
       if (!response.ok) throw new Error(`Claude API error ${response.status}`);
-      const aiResp = await response.json() as { content: { text: string }[] };
+      const aiResp = (await response.json()) as { content: { text: string }[] };
       const text = aiResp.content?.[0]?.text || "";
       console.log(`[grade-card] raw response (200 chars): ${text.slice(0, 200)}`);
       const gradeResult = extractJson(text, "grade-card");
 
       // Clamp grades to whole numbers
-      const clamp = (v: any) => { const n = typeof v === "number" ? v : parseFloat(v); return isNaN(n) ? 1 : Math.max(1, Math.min(10, Math.floor(n))); };
+      const clamp = (v: any) => {
+        const n = typeof v === "number" ? v : parseFloat(v);
+        return isNaN(n) ? 1 : Math.max(1, Math.min(10, Math.floor(n)));
+      };
       if (typeof gradeResult.overall_grade === "number") gradeResult.overall_grade = clamp(gradeResult.overall_grade);
       if (gradeResult.centering_subgrade) gradeResult.centering_subgrade = clamp(gradeResult.centering_subgrade);
       if (gradeResult.corners_subgrade) gradeResult.corners_subgrade = clamp(gradeResult.corners_subgrade);
       if (gradeResult.edges_subgrade) gradeResult.edges_subgrade = clamp(gradeResult.edges_subgrade);
       if (gradeResult.surface_subgrade) gradeResult.surface_subgrade = clamp(gradeResult.surface_subgrade);
-      const strength = typeof gradeResult.grade_strength_score === "number" ? Math.max(0, Math.min(100, Math.round(gradeResult.grade_strength_score))) : null;
+      const strength =
+        typeof gradeResult.grade_strength_score === "number"
+          ? Math.max(0, Math.min(100, Math.round(gradeResult.grade_strength_score)))
+          : null;
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -9446,7 +10701,7 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(400).json({ error: "No images available for AI analysis" });
       }
       if (!keys.frontOriginal) keys.frontOriginal = c.frontImagePath;
-      if (!keys.backOriginal)  keys.backOriginal  = c.backImagePath;
+      if (!keys.backOriginal) keys.backOriginal = c.backImagePath;
 
       const cardGame = req.body?.card_game || c.gameType || undefined;
       const analysis = await analyzeCard(keys, cardGame);
@@ -9489,7 +10744,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const url = await getR2SignedUrl(frontKey, 300);
         const resp = await fetch(url);
         frontBuf = Buffer.from(await resp.arrayBuffer());
-      } catch { return res.status(400).json({ error: "Could not fetch front image" }); }
+      } catch {
+        return res.status(400).json({ error: "Could not fetch front image" });
+      }
 
       // Haiku identify + GPT consensus
       const rawId = await identifyCardFromBuffer(frontBuf, "image/jpeg", id);
@@ -9501,22 +10758,31 @@ Defects (admin-confirmed): ${defectLines}`;
       const game = rawId.detected_game?.toLowerCase();
       let tcgResult: any = { verified: false };
       if (game === "pokemon") {
-        tcgResult = await verifyPokemonCardWithTcgApi(rawId.detected_name, rawId.detected_number, rawId.detected_rarity, rawId.set_code, rawId.copyright_year);
+        tcgResult = await verifyPokemonCardWithTcgApi(
+          rawId.detected_name,
+          rawId.detected_number,
+          rawId.detected_rarity,
+          rawId.set_code,
+          rawId.copyright_year
+        );
         if (tcgResult.verified) {
           const enrichedAlreadyVerified = enrichedId.verified === true;
-          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+          const namesAgree =
+            !tcgResult.officialCardName ||
+            !enrichedId.officialName ||
             normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
           if (!enrichedAlreadyVerified || namesAgree) {
             enrichedId = {
-              ...enrichedId, verified: true,
-              officialName:   tcgResult.officialCardName || enrichedId.officialName,
-              officialSet:    tcgResult.officialSetName  || enrichedId.officialSet,
+              ...enrichedId,
+              verified: true,
+              officialName: tcgResult.officialCardName || enrichedId.officialName,
+              officialSet: tcgResult.officialSetName || enrichedId.officialSet,
               officialNumber: rawId.detected_number,
               referenceImageUrl: tcgResult.referenceImageUrl || enrichedId.referenceImageUrl,
-              dbSource:       "pokemon-tcg-api",
-              detected_set:   tcgResult.officialSetName || enrichedId.detected_set,
+              dbSource: "pokemon-tcg-api",
+              detected_set: tcgResult.officialSetName || enrichedId.detected_set,
               detected_rarity: tcgResult.officialRarity || enrichedId.detected_rarity,
-              detected_year:  tcgResult.officialYear   || enrichedId.detected_year,
+              detected_year: tcgResult.officialYear || enrichedId.detected_year,
             };
           }
         }
@@ -9527,16 +10793,16 @@ Defects (admin-confirmed): ${defectLines}`;
       const trustAi = tcgResult.trustAi === true;
       const shouldWrite = verified || aiConfidence === "high" || trustAi;
 
-      const cardName   = shouldWrite ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
-      const setName    = verified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
-      const cardNumber = shouldWrite ? (enrichedId.detected_number || null) : null;
-      const cardGame   = shouldWrite ? (enrichedId.detected_game || null) : null;
-      const rarity     = shouldWrite ? (enrichedId.detected_rarity || null) : null;
-      const rawYear    = rawId.copyright_year || enrichedId.detected_year || null;
-      const yearMatch  = rawYear ? String(rawYear).match(/\d{4}/) : null;
-      const yearText   = yearMatch ? yearMatch[0] : null;
-      const language   = (enrichedId as any).detected_language || null;
-      const overwrite  = verified || aiConfidence === "high";
+      const cardName = shouldWrite ? enrichedId.officialName || enrichedId.detected_name || null : null;
+      const setName = verified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
+      const cardNumber = shouldWrite ? enrichedId.detected_number || null : null;
+      const cardGame = shouldWrite ? enrichedId.detected_game || null : null;
+      const rarity = shouldWrite ? enrichedId.detected_rarity || null : null;
+      const rawYear = rawId.copyright_year || enrichedId.detected_year || null;
+      const yearMatch = rawYear ? String(rawYear).match(/\d{4}/) : null;
+      const yearText = yearMatch ? yearMatch[0] : null;
+      const language = (enrichedId as any).detected_language || null;
+      const overwrite = verified || aiConfidence === "high";
 
       let updatedFields: string[] = [];
       if (shouldWrite) {
@@ -9567,8 +10833,24 @@ Defects (admin-confirmed): ${defectLines}`;
             WHERE id = ${id}
           `);
         }
-        updatedFields = ["card_name","set_name","card_number_display","year_text","card_game","rarity","language"].filter(f => {
-          const v: Record<string,unknown> = { card_name: cardName, set_name: setName, card_number_display: cardNumber, year_text: yearText, card_game: cardGame, rarity, language };
+        updatedFields = [
+          "card_name",
+          "set_name",
+          "card_number_display",
+          "year_text",
+          "card_game",
+          "rarity",
+          "language",
+        ].filter((f) => {
+          const v: Record<string, unknown> = {
+            card_name: cardName,
+            set_name: setName,
+            card_number_display: cardNumber,
+            year_text: yearText,
+            card_game: cardGame,
+            rarity,
+            language,
+          };
           return v[f] != null && v[f] !== "";
         });
       }
@@ -9580,18 +10862,22 @@ Defects (admin-confirmed): ${defectLines}`;
           VALUES ('certificate', ${String(id)}, 'ai_identify',
             ${JSON.stringify({ fields_updated: updatedFields, source: "manual_button", confidence: aiConfidence, tcgVerified: verified })}::jsonb)
         `);
-      } catch (e: any) { console.warn("[ai/identify] audit failed:", e.message); }
+      } catch (e: any) {
+        console.warn("[ai/identify] audit failed:", e.message);
+      }
 
-      console.log(`[ai/identify] cert=${id} confidence=${aiConfidence} tcgVerified=${verified} fields=${updatedFields.join(",")}`);
+      console.log(
+        `[ai/identify] cert=${id} confidence=${aiConfidence} tcgVerified=${verified} fields=${updatedFields.join(",")}`
+      );
       res.json({
-        card_name:   cardName,
-        set_name:    setName,
+        card_name: cardName,
+        set_name: setName,
         card_number: cardNumber,
-        year:        yearText,
+        year: yearText,
         rarity,
-        set_id:      (enrichedId as any).set_code || rawId.set_code || null,
+        set_id: (enrichedId as any).set_code || rawId.set_code || null,
         language,
-        confidence:  aiConfidence,
+        confidence: aiConfidence,
         verified,
         detailsWritten: shouldWrite,
       });
@@ -9623,7 +10909,7 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const c = cert as any;
       const frontKey = c.gradingFrontOriginal || c.frontImagePath;
-      const backKey  = c.gradingBackOriginal  || c.backImagePath;
+      const backKey = c.gradingBackOriginal || c.backImagePath;
       if (!frontKey) return res.status(400).json({ error: "No front image — upload images first" });
 
       const fetchR2 = async (key: string | null): Promise<Buffer | null> => {
@@ -9632,7 +10918,9 @@ Defects (admin-confirmed): ${defectLines}`;
           const url = await getR2SignedUrl(key, 300);
           const resp = await fetch(url);
           return Buffer.from(await resp.arrayBuffer());
-        } catch { return null; }
+        } catch {
+          return null;
+        }
       };
       const frontRaw = await fetchR2(frontKey);
       if (!frontRaw) return res.status(400).json({ error: "Could not fetch front image from storage" });
@@ -9646,21 +10934,17 @@ Defects (admin-confirmed): ${defectLines}`;
       const backVariants = backRaw ? await generateImageVariants(backRaw, id) : null;
 
       const cardGame = (c.cardGame || "").toLowerCase() || undefined;
-      const analysis = await analyzeCardFromBuffers(
-        frontVariants.cropped,
-        backVariants?.cropped || null,
-        cardGame,
-        id,
-      );
+      const analysis = await analyzeCardFromBuffers(frontVariants.cropped, backVariants?.cropped || null, cardGame, id);
 
-      const cents   = typeof analysis.centering?.subgrade === "number" ? analysis.centering.subgrade : null;
-      const corners = typeof analysis.corners?.subgrade   === "number" ? analysis.corners.subgrade   : null;
-      const edges   = typeof analysis.edges?.subgrade     === "number" ? analysis.edges.subgrade     : null;
-      const surface = typeof analysis.surface?.subgrade   === "number" ? analysis.surface.subgrade   : null;
-      const overall = typeof analysis.overall_grade       === "number" ? analysis.overall_grade     : null;
-      const strength = typeof (analysis as any).grade_strength_score === "number"
-        ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
-        : null;
+      const cents = typeof analysis.centering?.subgrade === "number" ? analysis.centering.subgrade : null;
+      const corners = typeof analysis.corners?.subgrade === "number" ? analysis.corners.subgrade : null;
+      const edges = typeof analysis.edges?.subgrade === "number" ? analysis.edges.subgrade : null;
+      const surface = typeof analysis.surface?.subgrade === "number" ? analysis.surface.subgrade : null;
+      const overall = typeof analysis.overall_grade === "number" ? analysis.overall_grade : null;
+      const strength =
+        typeof (analysis as any).grade_strength_score === "number"
+          ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
+          : null;
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -9682,9 +10966,13 @@ Defects (admin-confirmed): ${defectLines}`;
           VALUES ('certificate', ${String(id)}, 'ai_grade',
             ${JSON.stringify({ subgrades: { centering: cents, corners, edges, surface }, overall, model_used: "claude-opus-4-7", source: "manual_button" })}::jsonb)
         `);
-      } catch (e: any) { console.warn("[ai/grade] audit failed:", e.message); }
+      } catch (e: any) {
+        console.warn("[ai/grade] audit failed:", e.message);
+      }
 
-      console.log(`[ai/grade] cert=${id} centering=${cents} corners=${corners} edges=${edges} surface=${surface} overall=${overall} strength=${strength}`);
+      console.log(
+        `[ai/grade] cert=${id} centering=${cents} corners=${corners} edges=${edges} surface=${surface} overall=${overall} strength=${strength}`
+      );
       res.json({
         centering: cents,
         corners,
@@ -9727,7 +11015,9 @@ Defects (admin-confirmed): ${defectLines}`;
           const url = await getR2SignedUrl(key, 300);
           const resp = await fetch(url);
           return Buffer.from(await resp.arrayBuffer());
-        } catch { return null; }
+        } catch {
+          return null;
+        }
       };
 
       const frontRaw = await fetchR2(frontKey);
@@ -9803,10 +11093,14 @@ Defects (admin-confirmed): ${defectLines}`;
         if (tcgResult.verified) {
           // Only override enrichedId if it wasn't already verified with a different card name
           const enrichedAlreadyVerified = enrichedId.verified === true;
-          const namesAgree = !tcgResult.officialCardName || !enrichedId.officialName ||
+          const namesAgree =
+            !tcgResult.officialCardName ||
+            !enrichedId.officialName ||
             normaliseCardName(tcgResult.officialCardName) === normaliseCardName(enrichedId.officialName);
           if (!enrichedAlreadyVerified || namesAgree) {
-            console.log(`[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`);
+            console.log(
+              `[ai/identify-and-analyze] TCG API override: "${identification.detected_set}" → "${tcgResult.officialSetName}" (${tcgResult.apiCardId})`
+            );
             enrichedId = {
               ...enrichedId,
               verified: true,
@@ -9820,23 +11114,22 @@ Defects (admin-confirmed): ${defectLines}`;
               detected_year: tcgResult.officialYear || enrichedId.detected_year,
             };
           } else {
-            console.log(`[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`);
+            console.log(
+              `[override-guard] blocked: enriched="${enrichedId.officialName}" tcg="${tcgResult.officialCardName}" — keeping enriched match`
+            );
           }
         }
         if (tcgResult.trustAi) tcgTrustAiFlag = true;
       }
 
       // Step 7: Full grading analysis (uses cropped front + back + greyscale + hicontrast)
-      const analysis = await analyzeCardFromBuffers(
-        frontVariants.cropped,
-        backVariants?.cropped || null,
-        game
-      );
+      const analysis = await analyzeCardFromBuffers(frontVariants.cropped, backVariants?.cropped || null, game);
 
       // Step 8: Extract and log grade strength score
-      const strengthScore = typeof (analysis as any).grade_strength_score === "number"
-        ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
-        : null;
+      const strengthScore =
+        typeof (analysis as any).grade_strength_score === "number"
+          ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
+          : null;
       if (strengthScore !== null) {
         console.log(`[grade-strength] cert=${id} grade=${analysis.overall_grade} strength=${strengthScore}`);
         await db.execute(sql`
@@ -9849,12 +11142,12 @@ Defects (admin-confirmed): ${defectLines}`;
       const tcgVerified = enrichedId.verified === true;
       const shouldWriteDetails = tcgVerified || aiConfidence === "high" || tcgTrustAiFlag;
 
-      const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
+      const cardName = shouldWriteDetails ? enrichedId.officialName || enrichedId.detected_name || null : null;
       // When trusting AI without TCG verification, leave set_name null for manual entry
-      const setName = tcgVerified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
-      const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
-      const cardGame = shouldWriteDetails ? (enrichedId.detected_game || null) : null;
-      const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
+      const setName = tcgVerified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
+      const cardNumber = shouldWriteDetails ? enrichedId.detected_number || null : null;
+      const cardGame = shouldWriteDetails ? enrichedId.detected_game || null : null;
+      const rarity = shouldWriteDetails ? enrichedId.detected_rarity || null : null;
 
       // Year normalisation: prefer copyright_year from Claude
       const currentYear = new Date().getFullYear();
@@ -9877,7 +11170,9 @@ Defects (admin-confirmed): ${defectLines}`;
       // otherwise only fill empty fields (protects manual entries from uncertain guesses)
       const overwrite = tcgVerified || aiConfidence === "high";
 
-      console.log(`[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} overwrite=${overwrite} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`);
+      console.log(
+        `[ai-identify] cert=${id} confidence=${aiConfidence} tcgVerified=${tcgVerified} shouldWrite=${shouldWriteDetails} overwrite=${overwrite} name=${cardName}, set=${setName}, number=${cardNumber}, year=${yearText}`
+      );
 
       const aiAnalysisJson = JSON.stringify({ identification: enrichedId, grading: analysis });
       const aiDraftGrade = typeof analysis.overall_grade === "number" ? analysis.overall_grade : null;
@@ -9912,7 +11207,9 @@ Defects (admin-confirmed): ${defectLines}`;
         `);
       }
 
-      console.log(`[ai/identify-and-analyze] complete: cert=${id} card="${cardName}" set="${setName}" grade=${analysis.overall_grade} strength=${strengthScore}`);
+      console.log(
+        `[ai/identify-and-analyze] complete: cert=${id} card="${cardName}" set="${setName}" grade=${analysis.overall_grade} strength=${strengthScore}`
+      );
 
       // Return the updated cert so the frontend can refresh form fields
       const updatedCert = await storage.getCertificate(id);
@@ -10069,8 +11366,10 @@ Defects (admin-confirmed): ${defectLines}`;
   // ── Build 6: Public tools ──────────────────────────────────────────────────
 
   const toolsRateLimit = rateLimit({
-    windowMs: 60 * 1000, max: 10,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many requests — please wait a minute." },
   });
   // Admin bypass uses the `x-mv-admin-email` request header — body isn't parsed
@@ -10078,11 +11377,13 @@ Defects (admin-confirmed): ${defectLines}`;
   // without the header will share the 5/hour bucket; power use should curl with
   // the header set.
   const estimateRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000, max: 5,
-    standardHeaders: true, legacyHeaders: false,
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Too many estimate requests — you can request up to 5 estimates per hour." },
     skip: (req) => {
-      const headerEmail = (req.headers["x-mv-admin-email"] as string || "").trim().toLowerCase();
+      const headerEmail = ((req.headers["x-mv-admin-email"] as string) || "").trim().toLowerCase();
       return headerEmail === ADMIN_FREE_EMAIL;
     },
   });
@@ -10091,7 +11392,7 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // GET /api/tools/estimate/credits?email=
   app.get("/api/tools/estimate/credits", async (req, res) => {
-    const email = (req.query.email as string || "").trim().toLowerCase();
+    const email = ((req.query.email as string) || "").trim().toLowerCase();
     if (!email) return res.status(400).json({ error: "Email required" });
     try {
       const rows = await db.execute(sql`
@@ -10122,17 +11423,19 @@ Defects (admin-confirmed): ${defectLines}`;
         payment_method_types: ["card"],
         mode: "payment",
         customer_email: email,
-        line_items: [{
-          price_data: {
-            currency: "gbp",
-            product_data: {
-              name: `MintVault Pre-Grade Estimates — ${pkgInfo.label}`,
-              description: `${pkgInfo.credits} AI pre-grading estimates for your trading cards`,
+        line_items: [
+          {
+            price_data: {
+              currency: "gbp",
+              product_data: {
+                name: `MintVault Pre-Grade Estimates — ${pkgInfo.label}`,
+                description: `${pkgInfo.credits} AI pre-grading estimates for your trading cards`,
+              },
+              unit_amount: pkgInfo.pricePence,
             },
-            unit_amount: pkgInfo.pricePence,
+            quantity: 1,
           },
-          quantity: 1,
-        }],
+        ],
         metadata: {
           type: "estimate_credits",
           email,
@@ -10164,7 +11467,9 @@ Defects (admin-confirmed): ${defectLines}`;
       const apiKey = process.env.ANTHROPIC_API_KEY;
       console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
       if (!apiKey) {
-        console.error("[tools/estimate] CRITICAL: ANTHROPIC_API_KEY secret missing. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app-name>");
+        console.error(
+          "[tools/estimate] CRITICAL: ANTHROPIC_API_KEY secret missing. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app-name>"
+        );
         return res.status(503).json({ error: "AI service is temporarily unavailable. Please try again shortly." });
       }
 
@@ -10178,10 +11483,10 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!isAdminFree) {
         if (sessionUserId) {
           // Try user-level AI credit balance first
-          const deduction = await deductAiCredits(sessionUserId, 1, 'ai_grading_estimate');
+          const deduction = await deductAiCredits(sessionUserId, 1, "ai_grading_estimate");
           if (deduction.ok) {
             usedUserBalance = true;
-          } else if (deduction.reason === 'no_user') {
+          } else if (deduction.reason === "no_user") {
             return res.status(401).json({ error: "User account not found." });
           } else if (email) {
             // Fall back to email-based credits (e.g. pre-account purchases)
@@ -10189,10 +11494,16 @@ Defects (admin-confirmed): ${defectLines}`;
               SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
             `);
             if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
-              await db.insert(auditLog).values({
-                entityType: "estimate", entityId: sessionUserId, action: "402_insufficient",
-                adminUser: null, details: { path: "user_then_email_empty", email },
-              }).catch(() => {});
+              await db
+                .insert(auditLog)
+                .values({
+                  entityType: "estimate",
+                  entityId: sessionUserId,
+                  action: "402_insufficient",
+                  adminUser: null,
+                  details: { path: "user_then_email_empty", email },
+                })
+                .catch(() => {});
               return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
             }
             await db.execute(sql`
@@ -10203,11 +11514,19 @@ Defects (admin-confirmed): ${defectLines}`;
               WHERE email = ${email} AND credits_remaining > 0
             `);
           } else {
-            await db.insert(auditLog).values({
-              entityType: "estimate", entityId: sessionUserId, action: "402_insufficient",
-              adminUser: null, details: { path: "user_no_balance_no_email" },
-            }).catch(() => {});
-            return res.status(402).json({ error: "No AI credits remaining. Buy a pack or join Vault Club Silver when it reopens." });
+            await db
+              .insert(auditLog)
+              .values({
+                entityType: "estimate",
+                entityId: sessionUserId,
+                action: "402_insufficient",
+                adminUser: null,
+                details: { path: "user_no_balance_no_email" },
+              })
+              .catch(() => {});
+            return res
+              .status(402)
+              .json({ error: "No AI credits remaining. Buy a pack or join Vault Club Silver when it reopens." });
           }
         } else if (email) {
           // Anonymous with email — use email credits only
@@ -10215,10 +11534,16 @@ Defects (admin-confirmed): ${defectLines}`;
             SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
           `);
           if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
-            await db.insert(auditLog).values({
-              entityType: "estimate", entityId: email, action: "402_insufficient",
-              adminUser: null, details: { path: "anon_email_empty" },
-            }).catch(() => {});
+            await db
+              .insert(auditLog)
+              .values({
+                entityType: "estimate",
+                entityId: email,
+                action: "402_insufficient",
+                adminUser: null,
+                details: { path: "anon_email_empty" },
+              })
+              .catch(() => {});
             return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
           }
           await db.execute(sql`
@@ -10231,8 +11556,8 @@ Defects (admin-confirmed): ${defectLines}`;
         } else {
           // Anonymous + no email — server-side free tier: 1 estimate per IP per UTC day.
           // IP hashed SHA-256 before storage (never raw, per privacy rules).
-          const ipRaw = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
-                        || req.socket.remoteAddress || "unknown";
+          const ipRaw =
+            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
           const ipHash = crypto.createHash("sha256").update(ipRaw).digest("hex");
           const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
           const upsert = await db.execute(sql`
@@ -10249,10 +11574,16 @@ Defects (admin-confirmed): ${defectLines}`;
           `);
           const countToday = Number((upsert.rows[0] as any).count_today);
           if (countToday > 1) {
-            await db.insert(auditLog).values({
-              entityType: "estimate", entityId: ipHash, action: "402_insufficient",
-              adminUser: null, details: { path: "anon_ip_day_limit", countToday },
-            }).catch(() => {});
+            await db
+              .insert(auditLog)
+              .values({
+                entityType: "estimate",
+                entityId: ipHash,
+                action: "402_insufficient",
+                adminUser: null,
+                details: { path: "anon_ip_day_limit", countToday },
+              })
+              .catch(() => {});
             return res.status(402).json({
               error: "Free estimate used for today. Add an email to buy a credit pack from £2 for 5 estimates.",
               freeLimit: 1,
@@ -10281,12 +11612,17 @@ Defects (admin-confirmed): ${defectLines}`;
           {
             model: "claude-haiku-4-5-20251001",
             max_tokens: 2048,
-            messages: [{ role: "user", content: [
-              { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
-              { type: "text", text: PRE_GRADE_PROMPT },
-            ]}],
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
+                  { type: "text", text: PRE_GRADE_PROMPT },
+                ],
+              },
+            ],
           },
-          { apiKey, timeoutMs: 30_000 },
+          { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
         if (err?.name === "AbortError") {
@@ -10300,7 +11636,7 @@ Defects (admin-confirmed): ${defectLines}`;
         console.error("[tools/estimate] Anthropic API error", response.status, errBody.slice(0, 300));
         throw new Error(`AI API error ${response.status}: ${errBody.slice(0, 200)}`);
       }
-      const aiData = await response.json() as { content: { text: string }[] };
+      const aiData = (await response.json()) as { content: { text: string }[] };
       const text = aiData.content?.[0]?.text || "";
       const cleaned = text.replace(/```json|```/g, "").trim();
       const estimate = JSON.parse(cleaned);
@@ -10318,7 +11654,7 @@ Defects (admin-confirmed): ${defectLines}`;
         edges_notes: sub.edges?.note ?? estimate.edges_notes ?? "",
         surface_notes: sub.surface?.note ?? estimate.surface_notes ?? "",
         potential_issues: Array.isArray(estimate.potential_issues)
-          ? estimate.potential_issues.map((p: any) => typeof p === "string" ? p : p.description || "")
+          ? estimate.potential_issues.map((p: any) => (typeof p === "string" ? p : p.description || ""))
           : [],
         recommendation: estimate.recommendation ?? "",
         confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
@@ -10348,7 +11684,10 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/scan-ingest",
     requireScannerOrAdmin,
-    scanUpload.fields([{ name: "front", maxCount: 1 }, { name: "back", maxCount: 1 }]),
+    scanUpload.fields([
+      { name: "front", maxCount: 1 },
+      { name: "back", maxCount: 1 },
+    ]),
     async (req, res) => {
       const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
       let certInfo: { id: number; certId: string } | null = null;
@@ -10362,7 +11701,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const notes = (req.body?.notes || "").trim();
         const clientSource = (req.body?.client_source || "admin_ui").trim();
 
-        console.log(`[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`);
+        console.log(
+          `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`
+        );
 
         // Step 1: Create cert
         certInfo = await createCertForScan();
@@ -10394,7 +11735,9 @@ Defects (admin-confirmed): ${defectLines}`;
               message: `Certificate ${certInfo.certId} graded.`,
             });
           } catch (aiErr: any) {
-            console.error(`[scan-ingest] AI failed for ${certInfo.certId} (sync): ${aiErr?.message || aiErr}\n${aiErr?.stack || "(no stack)"}`);
+            console.error(
+              `[scan-ingest] AI failed for ${certInfo.certId} (sync): ${aiErr?.message || aiErr}\n${aiErr?.stack || "(no stack)"}`
+            );
             res.json({
               certId: certInfo.certId,
               dbId: certInfo.id,
@@ -10407,8 +11750,12 @@ Defects (admin-confirmed): ${defectLines}`;
         } else {
           // Watcher script / admin UI — respond immediately, AI runs in background
           const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
-            .then(r => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
-            .catch(e => console.error(`[scan-ingest] AI failed for ${certInfo!.certId} (async): ${e?.message || e}\n${e?.stack || "(no stack)"}`));
+            .then((r) => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
+            .catch((e) =>
+              console.error(
+                `[scan-ingest] AI failed for ${certInfo!.certId} (async): ${e?.message || e}\n${e?.stack || "(no stack)"}`
+              )
+            );
 
           res.json({
             certId: certInfo.certId,
@@ -10455,7 +11802,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
 
       res.json({
-        scans: (rows.rows as any[]).map(r => ({
+        scans: (rows.rows as any[]).map((r) => ({
           id: r.id,
           certId: r.certificate_number?.replace(/^MV-?0+/, "MV") || "",
           cardName: r.card_name || null,
@@ -10588,21 +11935,24 @@ Defects (admin-confirmed): ${defectLines}`;
       // Use Drizzle's inArray() — pg's wire protocol won't accept a raw JS
       // array bound to ANY(...) without a column-type cast, and inArray
       // emits standard `IN (?, ?, ...)` which always works.
-      const meta = await db.select({
-        name: featureOverrides.name,
-        updatedAt: featureOverrides.updatedAt,
-        updatedBy: featureOverrides.updatedBy,
-        reason: featureOverrides.reason,
-      }).from(featureOverrides).where(inArray(featureOverrides.name, AI_FLAG_NAMES as unknown as string[]));
+      const meta = await db
+        .select({
+          name: featureOverrides.name,
+          updatedAt: featureOverrides.updatedAt,
+          updatedBy: featureOverrides.updatedBy,
+          reason: featureOverrides.reason,
+        })
+        .from(featureOverrides)
+        .where(inArray(featureOverrides.name, AI_FLAG_NAMES as unknown as string[]));
       const metaByName = new Map<string, any>();
       for (const r of meta) metaByName.set(r.name, r);
 
       res.json({
-        flags: flags.map(f => ({
+        flags: flags.map((f) => ({
           ...f,
           updatedAt: metaByName.get(f.name)?.updatedAt || null,
           updatedBy: metaByName.get(f.name)?.updatedBy || null,
-          reason:    metaByName.get(f.name)?.reason    || null,
+          reason: metaByName.get(f.name)?.reason || null,
         })),
       });
     } catch (err: any) {
@@ -10632,7 +11982,10 @@ Defects (admin-confirmed): ${defectLines}`;
           reason = EXCLUDED.reason
       `);
       invalidateFeatureFlagCache();
-      await storage.writeAuditLog("feature_flag", name, "override_set", adminEmail, { enabled, reason: reason || null });
+      await storage.writeAuditLog("feature_flag", name, "override_set", adminEmail, {
+        enabled,
+        reason: reason || null,
+      });
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[ai-feature-flags] POST failed:", err);
@@ -10732,31 +12085,32 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       const accRow = (accuracy.rows[0] as any) || {};
       const approvedCount = Number(accRow.approved_count || 0);
-      const aiAccuracy = approvedCount >= 30
-        ? {
-            prediction_count:      Number(accRow.prediction_count || 0),
-            approved_count:        approvedCount,
-            exact_agreement_pct:   accRow.exact_agreement_pct != null ? Number(accRow.exact_agreement_pct) : null,
-            within_half_point_pct: accRow.within_half_point_pct != null ? Number(accRow.within_half_point_pct) : null,
-            mean_absolute_error:   accRow.mean_absolute_error != null ? Number(accRow.mean_absolute_error) : null,
-          }
-        : {
-            prediction_count:      Number(accRow.prediction_count || 0),
-            approved_count:        approvedCount,
-            exact_agreement_pct:   null,
-            within_half_point_pct: null,
-            mean_absolute_error:   null,
-          };
+      const aiAccuracy =
+        approvedCount >= 30
+          ? {
+              prediction_count: Number(accRow.prediction_count || 0),
+              approved_count: approvedCount,
+              exact_agreement_pct: accRow.exact_agreement_pct != null ? Number(accRow.exact_agreement_pct) : null,
+              within_half_point_pct: accRow.within_half_point_pct != null ? Number(accRow.within_half_point_pct) : null,
+              mean_absolute_error: accRow.mean_absolute_error != null ? Number(accRow.mean_absolute_error) : null,
+            }
+          : {
+              prediction_count: Number(accRow.prediction_count || 0),
+              approved_count: approvedCount,
+              exact_agreement_pct: null,
+              within_half_point_pct: null,
+              mean_absolute_error: null,
+            };
 
       res.json({
-        total_graded:       Number(topRow.total_graded || 0),
-        this_month:         Number(topRow.this_month || 0),
-        average_grade:      topRow.average_grade != null ? Number(topRow.average_grade) : null,
-        avg_time_seconds:   topRow.avg_time_seconds != null ? Number(topRow.avg_time_seconds) : null,
+        total_graded: Number(topRow.total_graded || 0),
+        this_month: Number(topRow.this_month || 0),
+        average_grade: topRow.average_grade != null ? Number(topRow.average_grade) : null,
+        avg_time_seconds: topRow.avg_time_seconds != null ? Number(topRow.avg_time_seconds) : null,
         grade_distribution: dist.rows,
         pristine_10p_count: Number(topRow.pristine_10p_count || 0),
-        ai_accuracy:        aiAccuracy,
-        last_30_days:       activity.rows,
+        ai_accuracy: aiAccuracy,
+        last_30_days: activity.rows,
       });
     } catch (err: any) {
       console.error("[ai-dashboard-stats] failed:", err);
@@ -10824,13 +12178,13 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json({
         orphans: r.rows.map((row: any) => ({
-          certId:        row.cert_id,
-          cardName:      row.card_name ?? null,
-          set:           row.set_name ?? null,
-          missingFront:  !!row.missing_front,
-          missingBack:   !!row.missing_back,
-          createdAt:     row.issued_at,
-          deleted:       !!row.deleted_at,
+          certId: row.cert_id,
+          cardName: row.card_name ?? null,
+          set: row.set_name ?? null,
+          missingFront: !!row.missing_front,
+          missingBack: !!row.missing_back,
+          createdAt: row.issued_at,
+          deleted: !!row.deleted_at,
         })),
       });
     } catch (err: any) {
@@ -10861,15 +12215,15 @@ Defects (admin-confirmed): ${defectLines}`;
       const row = r.rows[0] as any;
       if (!row) return res.status(404).json({ error: "cert not found", certId });
       res.json({
-        cert_id:           row.certificate_number,
-        internal_id:       row.id,
-        card_name:         row.card_name ?? null,
-        has_front:         !!row.has_front,
-        has_back:          !!row.has_back,
-        grade_overall:     row.grade_overall ?? null,
+        cert_id: row.certificate_number,
+        internal_id: row.id,
+        card_name: row.card_name ?? null,
+        has_front: !!row.has_front,
+        has_back: !!row.has_back,
+        grade_overall: row.grade_overall ?? null,
         grade_approved_at: row.grade_approved_at ?? null,
-        deleted:           !!row.deleted_at,
-        status:            row.status,
+        deleted: !!row.deleted_at,
+        status: row.status,
       });
     } catch (err: any) {
       console.error("[cert-preview] failed:", err);
@@ -10888,12 +12242,14 @@ Defects (admin-confirmed): ${defectLines}`;
       const certIdRaw = String(req.params.certId);
       const certId = normalizeCertId(certIdRaw);
 
-      const curRows = (await db.execute(sql`
+      const curRows = (
+        await db.execute(sql`
         SELECT card_name, set_name, card_number_display, grade_type, grade::text AS grade_text
         FROM certificates
         WHERE certificate_number = ${certId}
         LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       if (curRows.length === 0) return res.status(404).json({ error: "cert not found", certId });
       const cur = curRows[0] as any;
 
@@ -10926,7 +12282,8 @@ Defects (admin-confirmed): ${defectLines}`;
       // Aggregate. Numeric grades collapse trailing zeros so "9.0" → "9"
       // and "10.0" → "10". Non-numeric grade_type values (NO/AA) flow
       // straight through as their own labels.
-      const distRows = (await db.execute(sql`
+      const distRows = (
+        await db.execute(sql`
         SELECT
           CASE
             WHEN grade_type = 'numeric' AND grade IS NOT NULL
@@ -10946,10 +12303,11 @@ Defects (admin-confirmed): ${defectLines}`;
           AND card_number_display = ${cardNumber}
         GROUP BY label, sort_class, sort_num
         ORDER BY sort_class ASC, sort_num DESC NULLS LAST, label ASC
-      `)).rows as Array<{ label: string; count: number }>;
+      `)
+      ).rows as Array<{ label: string; count: number }>;
 
       const total = distRows.reduce((s, r) => s + r.count, 0);
-      const distribution = distRows.map(r => ({
+      const distribution = distRows.map((r) => ({
         grade: r.label,
         count: r.count,
         percent: total > 0 ? (r.count / total) * 100 : 0,
@@ -10987,12 +12345,14 @@ Defects (admin-confirmed): ${defectLines}`;
       const certIdRaw = String(req.params.certId);
       const certId = normalizeCertId(certIdRaw);
 
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT id, grading_front_original, grading_back_original
         FROM certificates
         WHERE certificate_number = ${certId}
         LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       if (rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
       const cur = rows[0] as any;
       const dbId = Number(cur.id);
@@ -11015,7 +12375,9 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const frontBuf = await fetchR2Buf(frontKey);
       const backBuf = backKey ? await fetchR2Buf(backKey) : null;
-      console.log(`[reprocess-images] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`);
+      console.log(
+        `[reprocess-images] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`
+      );
 
       const { uploadImagesToCert } = await import("./scan-ingest-service");
       await uploadImagesToCert(dbId, frontBuf, backBuf);
@@ -11023,16 +12385,22 @@ Defects (admin-confirmed): ${defectLines}`;
       // Read back the post-reprocess display image paths and sign them
       // for the response so the frontend can swap the viewer image src
       // without going through /api/logbook again.
-      const afterRows = (await db.execute(sql`
+      const afterRows = (
+        await db.execute(sql`
         SELECT front_image_path, back_image_path
         FROM certificates
         WHERE id = ${dbId}
         LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       const after = (afterRows[0] ?? {}) as any;
       const signIfPresent = async (key: string | null): Promise<string | null> => {
         if (!key) return null;
-        try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+        try {
+          return await getR2SignedUrl(key, 3600);
+        } catch {
+          return null;
+        }
       };
       const front_url = await signIfPresent(after.front_image_path ?? null);
       const back_url = await signIfPresent(after.back_image_path ?? null);
@@ -11080,25 +12448,29 @@ Defects (admin-confirmed): ${defectLines}`;
       // voided cert or one without an R2 original.
       let worklist: Array<{ id: number; certNumber: string }>;
       if (all) {
-        const rows = (await db.execute(sql`
+        const rows = (
+          await db.execute(sql`
           SELECT id, certificate_number
           FROM certificates
           WHERE deleted_at IS NULL
             AND grading_front_original IS NOT NULL
           ORDER BY id
-        `)).rows as Array<{ id: number; certificate_number: string }>;
-        worklist = rows.map(r => ({ id: r.id, certNumber: r.certificate_number }));
+        `)
+        ).rows as Array<{ id: number; certificate_number: string }>;
+        worklist = rows.map((r) => ({ id: r.id, certNumber: r.certificate_number }));
       } else {
-        const normalized = inputCertIds.map(c => normalizeCertId(c));
-        const rows = (await db.execute(sql`
+        const normalized = inputCertIds.map((c) => normalizeCertId(c));
+        const rows = (
+          await db.execute(sql`
           SELECT id, certificate_number
           FROM certificates
           WHERE certificate_number = ANY(${normalized}::text[])
             AND deleted_at IS NULL
             AND grading_front_original IS NOT NULL
           ORDER BY id
-        `)).rows as Array<{ id: number; certificate_number: string }>;
-        worklist = rows.map(r => ({ id: r.id, certNumber: r.certificate_number }));
+        `)
+        ).rows as Array<{ id: number; certificate_number: string }>;
+        worklist = rows.map((r) => ({ id: r.id, certNumber: r.certificate_number }));
       }
 
       console.log(`[bulk-reprocess] starting: ${worklist.length} certs (all=${all})`);
@@ -11120,12 +12492,14 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const processOne = async (item: { id: number; certNumber: string }) => {
         try {
-          const r = (await db.execute(sql`
+          const r = (
+            await db.execute(sql`
             SELECT grading_front_original, grading_back_original
             FROM certificates
             WHERE id = ${item.id}
             LIMIT 1
-          `)).rows[0] as any;
+          `)
+          ).rows[0] as any;
           const frontKey: string | null = r?.grading_front_original ?? null;
           const backKey: string | null = r?.grading_back_original ?? null;
           if (!frontKey) throw new Error("no grading_front_original");
@@ -11170,7 +12544,9 @@ Defects (admin-confirmed): ${defectLines}`;
       for (let i = 0; i < worklist.length; i += BATCH) {
         const batch = worklist.slice(i, i + BATCH);
         await Promise.all(batch.map(processOne));
-        console.log(`[bulk-reprocess] batch complete: ${processed + failed}/${worklist.length} (ok=${processed} fail=${failed})`);
+        console.log(
+          `[bulk-reprocess] batch complete: ${processed + failed}/${worklist.length} (ok=${processed} fail=${failed})`
+        );
       }
 
       console.log(`[bulk-reprocess] DONE total=${worklist.length} processed=${processed} failed=${failed}`);
@@ -11190,163 +12566,166 @@ Defects (admin-confirmed): ${defectLines}`;
   // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
   // R2 key follows the existing scan-ingest convention so /reprocess-images
   // and the dashboard image fetcher both find it without changes.
-  app.post(
-    "/api/admin/certs/:certId/image",
-    requireScannerOrAdmin,
-    certImgUpload.single("image"),
-    async (req, res) => {
-      try {
-        const certIdRaw = String(req.params.certId);
-        const certId    = normalizeCertId(certIdRaw);
-        const side      = String(req.body?.side || "").toLowerCase();
-        const replaceExisting = String(req.body?.replace_existing || "false") === "true";
+  app.post("/api/admin/certs/:certId/image", requireScannerOrAdmin, certImgUpload.single("image"), async (req, res) => {
+    try {
+      const certIdRaw = String(req.params.certId);
+      const certId = normalizeCertId(certIdRaw);
+      const side = String(req.body?.side || "").toLowerCase();
+      const replaceExisting = String(req.body?.replace_existing || "false") === "true";
 
-        if (side !== "front" && side !== "back") {
-          return res.status(400).json({ error: "side must be 'front' or 'back'" });
-        }
-        const file = req.file;
-        if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
+      if (side !== "front" && side !== "back") {
+        return res.status(400).json({ error: "side must be 'front' or 'back'" });
+      }
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
 
-        const certRow = await db.execute(sql`
+      const certRow = await db.execute(sql`
           SELECT id, certificate_number, grading_front_original, grading_back_original, deleted_at
           FROM certificates
           WHERE certificate_number = ${certId}
           LIMIT 1
         `);
-        const cert = certRow.rows[0] as any;
-        if (!cert) return res.status(404).json({ error: "cert not found", certId });
-        if (cert.deleted_at) return res.status(410).json({ error: "cert is soft-deleted; restore before attaching images" });
+      const cert = certRow.rows[0] as any;
+      if (!cert) return res.status(404).json({ error: "cert not found", certId });
+      if (cert.deleted_at)
+        return res.status(410).json({ error: "cert is soft-deleted; restore before attaching images" });
 
-        const sideCol = side === "front" ? "grading_front_original" : "grading_back_original";
-        const previousKey: string | null = cert[sideCol] || null;
+      const sideCol = side === "front" ? "grading_front_original" : "grading_back_original";
+      const previousKey: string | null = cert[sideCol] || null;
 
-        if (previousKey && !replaceExisting) {
-          let currentSignedUrl: string | null = null;
-          try { currentSignedUrl = await getR2SignedUrl(previousKey, 600); } catch {}
-          return res.status(409).json({
-            error: `${side} already attached to ${certId}`,
-            current_key: previousKey,
-            current_signed_url: currentSignedUrl,
-          });
-        }
-
-        // sharp → JPEG. .rotate() applies EXIF orientation; resize cap mirrors
-        // scan-ingest-service.uploadImagesToCert (3000×3000 fit:inside).
-        const sharp = (await import("sharp")).default;
-        let jpegBuf: Buffer;
+      if (previousKey && !replaceExisting) {
+        let currentSignedUrl: string | null = null;
         try {
-          jpegBuf = await sharp(file.buffer)
-            .rotate()
-            .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
-            .jpeg({ quality: 85, progressive: true, mozjpeg: true })
-            .toBuffer();
-        } catch (err: any) {
-          return res.status(400).json({ error: `image decode failed: ${err.message}` });
-        }
-
-        const newKey = `images/grading/${cert.id}/${side}_original.jpg`;
-        await uploadToR2(newKey, jpegBuf, "image/jpeg");
-
-        if (side === "front") {
-          await db.execute(sql`UPDATE certificates SET grading_front_original = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`);
-        } else {
-          await db.execute(sql`UPDATE certificates SET grading_back_original  = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`);
-        }
-
-        const adminUser = (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
-        await storage.writeAuditLog("certificate", certId, "image_attached_manual", adminUser, {
-          side,
-          replace_existing:  replaceExisting,
-          previous_key:      previousKey,
-          new_key:           newKey,
-          original_filename: file.originalname || null,
-          mime_received:     file.mimetype || null,
-          size_in_bytes:     file.size,
+          currentSignedUrl = await getR2SignedUrl(previousKey, 600);
+        } catch {}
+        return res.status(409).json({
+          error: `${side} already attached to ${certId}`,
+          current_key: previousKey,
+          current_signed_url: currentSignedUrl,
         });
-
-        // ── Post-save: run the same crop + AI pipeline scan-ingest uses ──
-        // Without this, the cert has the raw original in R2 but no display
-        // PNG, no AI variants, and AI grading is never queued — so the
-        // workstation viewer is blank and the grade stays at "—". Mirrors
-        // PUT /attach-images, which calls uploadImagesToCert + AI for new
-        // certs that get image attachments from the admin UI.
-        //
-        // uploadImagesToCert requires the FRONT original (back-only certs
-        // can't go through the pipeline). When the operator uploads back
-        // first, we skip with pipeline_status='skipped-no-front' — the
-        // operator's subsequent front upload will trigger the full pipeline
-        // for both sides.
-        let pipelineStatus: "ok" | "skipped-no-front" | "failed" = "skipped-no-front";
-        let pipelineError: string | null = null;
-        let aiTriggered = false;
-
-        const frontKeyAfter = side === "front" ? newKey : (cert.grading_front_original as string | null);
-        const backKeyAfter  = side === "back"  ? newKey : (cert.grading_back_original  as string | null);
-
-        if (frontKeyAfter) {
-          try {
-            // Fetch buffers — the just-uploaded side is already in memory
-            // as jpegBuf; the other side comes from R2.
-            const fetchR2Buf = async (key: string): Promise<Buffer> => {
-              const url = await getR2SignedUrl(key, 300);
-              const resp = await fetch(url);
-              if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
-              return Buffer.from(await resp.arrayBuffer());
-            };
-            const frontBuf: Buffer = side === "front" ? jpegBuf : await fetchR2Buf(frontKeyAfter);
-            const backBuf: Buffer | null = !backKeyAfter
-              ? null
-              : side === "back"
-                ? jpegBuf
-                : await fetchR2Buf(backKeyAfter);
-
-            const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
-            const { frontVariants, backVariants } = await uploadImagesToCert(cert.id, frontBuf, backBuf);
-            pipelineStatus = "ok";
-            console.log(`[cert-image-attach] pipeline ok for cert ${cert.id} (${certId}) side=${side}`);
-
-            const aiPromise = runAiOnCertIfIdle(cert.id, frontVariants.cropped, backVariants?.cropped || null);
-            if (aiPromise) {
-              aiTriggered = true;
-              aiPromise
-                .then(r => console.log(`[cert-image-attach] AI done for cert ${cert.id}: grade=${r?.grade}`))
-                .catch(e => console.warn(`[cert-image-attach] AI failed for cert ${cert.id}:`, e?.message || e));
-            }
-          } catch (err: any) {
-            // Original is saved on R2 + the column is updated — pipeline
-            // failure doesn't undo that. Return 200 with the failure flagged
-            // so the caller can decide (e.g. re-run /reprocess-images).
-            pipelineStatus = "failed";
-            pipelineError  = err?.message || String(err);
-            console.error(`[cert-image-attach] pipeline failed for cert ${cert.id}:`, pipelineError);
-          }
-        }
-
-        res.json({
-          ok:       true,
-          cert_id:  certId,
-          side,
-          new_key:  newKey,
-          previous_key: previousKey,
-          replaced: !!previousKey,
-          pipeline_status: pipelineStatus,
-          pipeline_error:  pipelineError,
-          ai_triggered:    aiTriggered,
-        });
-      } catch (err: any) {
-        console.error("[cert-image-attach] failed:", err);
-        res.status(500).json({ error: err.message });
       }
-    },
-  );
+
+      // sharp → JPEG. .rotate() applies EXIF orientation; resize cap mirrors
+      // scan-ingest-service.uploadImagesToCert (3000×3000 fit:inside).
+      const sharp = (await import("sharp")).default;
+      let jpegBuf: Buffer;
+      try {
+        jpegBuf = await sharp(file.buffer)
+          .rotate()
+          .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+          .toBuffer();
+      } catch (err: any) {
+        return res.status(400).json({ error: `image decode failed: ${err.message}` });
+      }
+
+      const newKey = `images/grading/${cert.id}/${side}_original.jpg`;
+      await uploadToR2(newKey, jpegBuf, "image/jpeg");
+
+      if (side === "front") {
+        await db.execute(
+          sql`UPDATE certificates SET grading_front_original = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`
+        );
+      } else {
+        await db.execute(
+          sql`UPDATE certificates SET grading_back_original  = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`
+        );
+      }
+
+      const adminUser =
+        (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
+      await storage.writeAuditLog("certificate", certId, "image_attached_manual", adminUser, {
+        side,
+        replace_existing: replaceExisting,
+        previous_key: previousKey,
+        new_key: newKey,
+        original_filename: file.originalname || null,
+        mime_received: file.mimetype || null,
+        size_in_bytes: file.size,
+      });
+
+      // ── Post-save: run the same crop + AI pipeline scan-ingest uses ──
+      // Without this, the cert has the raw original in R2 but no display
+      // PNG, no AI variants, and AI grading is never queued — so the
+      // workstation viewer is blank and the grade stays at "—". Mirrors
+      // PUT /attach-images, which calls uploadImagesToCert + AI for new
+      // certs that get image attachments from the admin UI.
+      //
+      // uploadImagesToCert requires the FRONT original (back-only certs
+      // can't go through the pipeline). When the operator uploads back
+      // first, we skip with pipeline_status='skipped-no-front' — the
+      // operator's subsequent front upload will trigger the full pipeline
+      // for both sides.
+      let pipelineStatus: "ok" | "skipped-no-front" | "failed" = "skipped-no-front";
+      let pipelineError: string | null = null;
+      let aiTriggered = false;
+
+      const frontKeyAfter = side === "front" ? newKey : (cert.grading_front_original as string | null);
+      const backKeyAfter = side === "back" ? newKey : (cert.grading_back_original as string | null);
+
+      if (frontKeyAfter) {
+        try {
+          // Fetch buffers — the just-uploaded side is already in memory
+          // as jpegBuf; the other side comes from R2.
+          const fetchR2Buf = async (key: string): Promise<Buffer> => {
+            const url = await getR2SignedUrl(key, 300);
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
+            return Buffer.from(await resp.arrayBuffer());
+          };
+          const frontBuf: Buffer = side === "front" ? jpegBuf : await fetchR2Buf(frontKeyAfter);
+          const backBuf: Buffer | null = !backKeyAfter
+            ? null
+            : side === "back"
+              ? jpegBuf
+              : await fetchR2Buf(backKeyAfter);
+
+          const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
+          const { frontVariants, backVariants } = await uploadImagesToCert(cert.id, frontBuf, backBuf);
+          pipelineStatus = "ok";
+          console.log(`[cert-image-attach] pipeline ok for cert ${cert.id} (${certId}) side=${side}`);
+
+          const aiPromise = runAiOnCertIfIdle(cert.id, frontVariants.cropped, backVariants?.cropped || null);
+          if (aiPromise) {
+            aiTriggered = true;
+            aiPromise
+              .then((r) => console.log(`[cert-image-attach] AI done for cert ${cert.id}: grade=${r?.grade}`))
+              .catch((e) => console.warn(`[cert-image-attach] AI failed for cert ${cert.id}:`, e?.message || e));
+          }
+        } catch (err: any) {
+          // Original is saved on R2 + the column is updated — pipeline
+          // failure doesn't undo that. Return 200 with the failure flagged
+          // so the caller can decide (e.g. re-run /reprocess-images).
+          pipelineStatus = "failed";
+          pipelineError = err?.message || String(err);
+          console.error(`[cert-image-attach] pipeline failed for cert ${cert.id}:`, pipelineError);
+        }
+      }
+
+      res.json({
+        ok: true,
+        cert_id: certId,
+        side,
+        new_key: newKey,
+        previous_key: previousKey,
+        replaced: !!previousKey,
+        pipeline_status: pipelineStatus,
+        pipeline_error: pipelineError,
+        ai_triggered: aiTriggered,
+      });
+    } catch (err: any) {
+      console.error("[cert-image-attach] failed:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // DELETE — soft-delete only (sets deleted_at). Hard-delete is intentionally
   // not exposed; project rule "no hard deletes on business tables" applies.
   app.delete("/api/admin/certs/:certId", requireScannerOrAdmin, async (req, res) => {
     try {
       const certIdRaw = String(req.params.certId);
-      const certId    = normalizeCertId(certIdRaw);
-      const reason    = String(req.body?.reason || "").trim();
+      const certId = normalizeCertId(certIdRaw);
+      const reason = String(req.body?.reason || "").trim();
       if (reason.length < 10) {
         return res.status(400).json({ error: "reason must be at least 10 characters" });
       }
@@ -11358,12 +12737,15 @@ Defects (admin-confirmed): ${defectLines}`;
         RETURNING id
       `);
       if (r.rows.length === 0) {
-        const exists = await db.execute(sql`SELECT id, deleted_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`);
+        const exists = await db.execute(
+          sql`SELECT id, deleted_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`
+        );
         if (exists.rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
         return res.status(410).json({ error: "cert already soft-deleted", certId });
       }
 
-      const adminUser = (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
+      const adminUser =
+        (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
       await storage.writeAuditLog("certificate", certId, "soft_delete", adminUser, { reason });
 
       res.json({ ok: true, cert_id: certId });
@@ -11388,17 +12770,19 @@ Defects (admin-confirmed): ${defectLines}`;
   // human-friendly as "Haiku quick-grade".
   app.get("/api/admin/ai-divergence", requireAdmin, async (req, res) => {
     try {
-      const sinceDays = req.query.sinceDays == null || req.query.sinceDays === ""
-        ? 30
-        : Math.max(1, parseInt(String(req.query.sinceDays), 10) || 30);
+      const sinceDays =
+        req.query.sinceDays == null || req.query.sinceDays === ""
+          ? 30
+          : Math.max(1, parseInt(String(req.query.sinceDays), 10) || 30);
 
       // callType filter — accept both the canonical 'quick_grade' and the
       // brief's 'haiku_quick_grade' alias for callers using the spec name.
       const callTypeRaw = req.query.callType ? String(req.query.callType) : null;
       const callType = callTypeRaw === "haiku_quick_grade" ? "quick_grade" : callTypeRaw;
-      const callTypeClause = (callType === "full_grade" || callType === "quick_grade")
-        ? sql` AND p.call_type = ${callType}`
-        : sql` AND p.call_type IN ('full_grade', 'quick_grade')`;
+      const callTypeClause =
+        callType === "full_grade" || callType === "quick_grade"
+          ? sql` AND p.call_type = ${callType}`
+          : sql` AND p.call_type IN ('full_grade', 'quick_grade')`;
 
       // ── Q: latest prediction per cert + paired human grade ──────────────
       // DISTINCT ON (cert_id) + ORDER BY cert_id, created_at DESC picks the
@@ -11447,7 +12831,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
 
       const ZONES = ["overall", "centering", "corners", "edges", "surface"] as const;
-      type Zone = typeof ZONES[number];
+      type Zone = (typeof ZONES)[number];
 
       type CertRow = {
         cert_id: string;
@@ -11461,57 +12845,66 @@ Defects (admin-confirmed): ${defectLines}`;
         any_field_missing: boolean;
       };
 
-      const certs: CertRow[] = (rowsRes.rows as any[]).map(r => {
+      const certs: CertRow[] = (rowsRes.rows as any[]).map((r) => {
         const grades: CertRow["grades"] = {} as any;
         let maxAbs = 0;
         let anyMissing = false;
         for (const z of ZONES) {
-          const ai    = r["ai_" + z]    != null ? Number(r["ai_" + z])    : null;
+          const ai = r["ai_" + z] != null ? Number(r["ai_" + z]) : null;
           const human = r["human_" + z] != null ? Number(r["human_" + z]) : null;
-          const div   = (ai != null && human != null) ? Math.round((ai - human) * 100) / 100 : null;
+          const div = ai != null && human != null ? Math.round((ai - human) * 100) / 100 : null;
           if (div != null && Math.abs(div) > maxAbs) maxAbs = Math.abs(div);
           if (ai == null) anyMissing = true;
           grades[z] = { ai, human, divergence: div };
         }
         return {
-          cert_id:        String(r.cert_id),
-          card_name:      r.card_name ?? null,
-          approved_at:    r.grade_approved_at ? new Date(r.grade_approved_at).toISOString() : null,
-          model:          String(r.model || ""),
-          call_type:      String(r.call_type || ""),
-          prediction_at:  r.prediction_at ? new Date(r.prediction_at).toISOString() : null,
+          cert_id: String(r.cert_id),
+          card_name: r.card_name ?? null,
+          approved_at: r.grade_approved_at ? new Date(r.grade_approved_at).toISOString() : null,
+          model: String(r.model || ""),
+          call_type: String(r.call_type || ""),
+          prediction_at: r.prediction_at ? new Date(r.prediction_at).toISOString() : null,
           grades,
           max_zone_divergence: maxAbs,
-          any_field_missing:   anyMissing,
+          any_field_missing: anyMissing,
         };
       });
 
       // ── Aggregations ────────────────────────────────────────────────────
       function zoneStats(divs: number[]) {
-        if (divs.length === 0) return { n: 0, mean_divergence: null, median_divergence: null, stddev: null, ai_too_generous_pct: null, ai_too_harsh_pct: null, exact_match_pct: null };
+        if (divs.length === 0)
+          return {
+            n: 0,
+            mean_divergence: null,
+            median_divergence: null,
+            stddev: null,
+            ai_too_generous_pct: null,
+            ai_too_harsh_pct: null,
+            exact_match_pct: null,
+          };
         const sorted = [...divs].sort((a, b) => a - b);
         const n = divs.length;
         const mean = divs.reduce((a, b) => a + b, 0) / n;
         const median = n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
         const variance = divs.reduce((s, x) => s + (x - mean) ** 2, 0) / n;
         const stddev = Math.sqrt(variance);
-        const generous = divs.filter(d => d > 0).length;
-        const harsh    = divs.filter(d => d < 0).length;
-        const exact    = divs.filter(d => d === 0).length;
+        const generous = divs.filter((d) => d > 0).length;
+        const harsh = divs.filter((d) => d < 0).length;
+        const exact = divs.filter((d) => d === 0).length;
         return {
           n,
-          mean_divergence:     Math.round(mean * 100) / 100,
-          median_divergence:   Math.round(median * 100) / 100,
-          stddev:              Math.round(stddev * 100) / 100,
+          mean_divergence: Math.round(mean * 100) / 100,
+          median_divergence: Math.round(median * 100) / 100,
+          stddev: Math.round(stddev * 100) / 100,
           ai_too_generous_pct: Math.round((generous / n) * 100),
-          ai_too_harsh_pct:    Math.round((harsh    / n) * 100),
-          exact_match_pct:     Math.round((exact    / n) * 100),
+          ai_too_harsh_pct: Math.round((harsh / n) * 100),
+          exact_match_pct: Math.round((exact / n) * 100),
         };
       }
 
       const by_zone: Record<Zone, ReturnType<typeof zoneStats>> = {} as any;
       for (const z of ZONES) {
-        by_zone[z] = zoneStats(certs.map(c => c.grades[z].divergence).filter((d): d is number => d != null));
+        by_zone[z] = zoneStats(certs.map((c) => c.grades[z].divergence).filter((d): d is number => d != null));
       }
 
       // Grade bands — bucket by HUMAN overall grade.
@@ -11519,9 +12912,9 @@ Defects (admin-confirmed): ${defectLines}`;
         if (g == null) return null;
         if (g === 10) return "10";
         if (g >= 9.5) return "9.5-9.9";
-        if (g === 9)  return "9";
-        if (g === 8)  return "8";
-        if (g <  8)   return "below 8";
+        if (g === 9) return "9";
+        if (g === 8) return "8";
+        if (g < 8) return "below 8";
         return null;
       };
       const bands: Record<string, number[]> = { "10": [], "9.5-9.9": [], "9": [], "8": [], "below 8": [] };
@@ -11532,9 +12925,13 @@ Defects (admin-confirmed): ${defectLines}`;
       }
       const by_grade_band: Record<string, { n: number; mean_overall_divergence: number | null }> = {};
       for (const [k, divs] of Object.entries(bands)) {
-        by_grade_band[k] = divs.length === 0
-          ? { n: 0, mean_overall_divergence: null }
-          : { n: divs.length, mean_overall_divergence: Math.round((divs.reduce((a, b) => a + b, 0) / divs.length) * 100) / 100 };
+        by_grade_band[k] =
+          divs.length === 0
+            ? { n: 0, mean_overall_divergence: null }
+            : {
+                n: divs.length,
+                mean_overall_divergence: Math.round((divs.reduce((a, b) => a + b, 0) / divs.length) * 100) / 100,
+              };
       }
 
       // Per-model — aggregated by model string from ai_predictions.
@@ -11559,8 +12956,8 @@ Defects (admin-confirmed): ${defectLines}`;
 
       res.json({
         generated_at: new Date().toISOString(),
-        sample_size:  certs.length,
-        summary:      { by_zone, by_grade_band, by_model },
+        sample_size: certs.length,
+        summary: { by_zone, by_grade_band, by_model },
         certs,
       });
     } catch (err: any) {
@@ -11582,9 +12979,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "25"), 10) || 25));
       const onlyFailing = String(req.query.onlyFailing ?? "false") === "true";
       const sinceDaysRaw = req.query.sinceDays;
-      const sinceDays = sinceDaysRaw == null || sinceDaysRaw === ""
-        ? null
-        : Math.max(1, parseInt(String(sinceDaysRaw), 10) || 0);
+      const sinceDays =
+        sinceDaysRaw == null || sinceDaysRaw === "" ? null : Math.max(1, parseInt(String(sinceDaysRaw), 10) || 0);
 
       const sinceClause = sinceDays
         ? sql` AND grade_approved_at >= NOW() - (${sinceDays} || ' days')::interval`
@@ -11620,13 +13016,16 @@ Defects (admin-confirmed): ${defectLines}`;
         });
       }
 
-      const certIds = certs.map(c => String(c.cert_id));
+      const certIds = certs.map((c) => String(c.cert_id));
 
       // ── Q2: ai_predictions count by cert_id ───────────────────────────────
       const predRows = await db.execute(sql`
         SELECT cert_id, COUNT(*)::int AS cnt
         FROM ai_predictions
-        WHERE cert_id IN (${sql.join(certIds.map(id => sql`${id}`), sql`, `)})
+        WHERE cert_id IN (${sql.join(
+          certIds.map((id) => sql`${id}`),
+          sql`, `
+        )})
         GROUP BY cert_id
       `);
       const predCounts = new Map<string, number>();
@@ -11637,7 +13036,10 @@ Defects (admin-confirmed): ${defectLines}`;
         SELECT entity_id, ARRAY_AGG(DISTINCT action) AS actions
         FROM audit_log
         WHERE entity_type = 'certificate'
-          AND entity_id IN (${sql.join(certIds.map(id => sql`${id}`), sql`, `)})
+          AND entity_id IN (${sql.join(
+            certIds.map((id) => sql`${id}`),
+            sql`, `
+          )})
           AND action IN ('grade_approved','approved','metadata_backfill','CERT_ID_ALLOCATED','OWNER_ASSIGNED','approve_grade','approve_and_publish')
         GROUP BY entity_id
       `);
@@ -11646,16 +13048,26 @@ Defects (admin-confirmed): ${defectLines}`;
 
       // ── Per-cert checks ───────────────────────────────────────────────────
       type CheckStatus = "green" | "amber" | "red";
-      const FIELD_KEYS = ["card_metadata", "grade_fields", "defects", "images", "grading_time", "embedding", "ai_predictions", "audit_log"] as const;
-      type FieldKey = typeof FIELD_KEYS[number];
+      const FIELD_KEYS = [
+        "card_metadata",
+        "grade_fields",
+        "defects",
+        "images",
+        "grading_time",
+        "embedding",
+        "ai_predictions",
+        "audit_log",
+      ] as const;
+      type FieldKey = (typeof FIELD_KEYS)[number];
 
-      const byField: Record<FieldKey, { green: number; amber: number; red: number }> =
-        Object.fromEntries(FIELD_KEYS.map(k => [k, { green: 0, amber: 0, red: 0 }])) as any;
+      const byField: Record<FieldKey, { green: number; amber: number; red: number }> = Object.fromEntries(
+        FIELD_KEYS.map((k) => [k, { green: 0, amber: 0, red: 0 }])
+      ) as any;
 
       const isEmpty = (v: unknown): boolean => v == null || (typeof v === "string" && v.trim() === "");
       const now = Date.now();
 
-      const out = certs.map(cert => {
+      const out = certs.map((cert) => {
         const certId = String(cert.cert_id);
 
         // 1) card_metadata — 5 fields all non-null/non-empty
@@ -11663,16 +13075,22 @@ Defects (admin-confirmed): ${defectLines}`;
         for (const f of ["card_name", "set_name", "card_number_display", "rarity", "year_text"]) {
           if (isEmpty(cert[f])) metaMissing.push(f);
         }
-        const cardMetadata = { status: (metaMissing.length === 0 ? "green" : "red") as CheckStatus, missing: metaMissing.length ? metaMissing : null };
+        const cardMetadata = {
+          status: (metaMissing.length === 0 ? "green" : "red") as CheckStatus,
+          missing: metaMissing.length ? metaMissing : null,
+        };
 
         // 2) grade_fields — overall + 4 subgrades all non-null
         const gradeMissing: string[] = [];
-        if (cert.grade_overall == null)    gradeMissing.push("grade_overall");
-        if (cert.centering_score == null)  gradeMissing.push("grade_centering");
-        if (cert.corners_score   == null)  gradeMissing.push("grade_corners");
-        if (cert.edges_score     == null)  gradeMissing.push("grade_edges");
-        if (cert.surface_score   == null)  gradeMissing.push("grade_surface");
-        const gradeFields = { status: (gradeMissing.length === 0 ? "green" : "red") as CheckStatus, missing: gradeMissing.length ? gradeMissing : null };
+        if (cert.grade_overall == null) gradeMissing.push("grade_overall");
+        if (cert.centering_score == null) gradeMissing.push("grade_centering");
+        if (cert.corners_score == null) gradeMissing.push("grade_corners");
+        if (cert.edges_score == null) gradeMissing.push("grade_edges");
+        if (cert.surface_score == null) gradeMissing.push("grade_surface");
+        const gradeFields = {
+          status: (gradeMissing.length === 0 ? "green" : "red") as CheckStatus,
+          missing: gradeMissing.length ? gradeMissing : null,
+        };
 
         // 3) defects — non-empty array OR (grade=10 / label=black) → intentional zero
         const defectsArr = Array.isArray(cert.defects) ? cert.defects : [];
@@ -11681,7 +13099,10 @@ Defects (admin-confirmed): ${defectLines}`;
         if (defectsArr.length > 0) {
           defects = { status: "green", note: null };
         } else if (isPerfect) {
-          defects = { status: "green", note: `intentional zero (grade=${cert.grade_overall ?? "10"}${cert.label_type === "black" ? "/black" : ""})` };
+          defects = {
+            status: "green",
+            note: `intentional zero (grade=${cert.grade_overall ?? "10"}${cert.label_type === "black" ? "/black" : ""})`,
+          };
         } else {
           defects = { status: "red", note: null };
         }
@@ -11689,17 +13110,26 @@ Defects (admin-confirmed): ${defectLines}`;
         // 4) images — both keys present + front prefix sanity
         const imgMissing: string[] = [];
         if (isEmpty(cert.grading_front_original)) imgMissing.push("grading_front_original");
-        else if (typeof cert.grading_front_original === "string" && !cert.grading_front_original.startsWith("images/")) {
-          imgMissing.push(`grading_front_original looks like a URL not an R2 key (${String(cert.grading_front_original).slice(0, 32)}…)`);
+        else if (
+          typeof cert.grading_front_original === "string" &&
+          !cert.grading_front_original.startsWith("images/")
+        ) {
+          imgMissing.push(
+            `grading_front_original looks like a URL not an R2 key (${String(cert.grading_front_original).slice(0, 32)}…)`
+          );
         }
         if (isEmpty(cert.grading_back_original)) imgMissing.push("grading_back_original");
-        const images = { status: (imgMissing.length === 0 ? "green" : "red") as CheckStatus, missing: imgMissing.length ? imgMissing : null };
+        const images = {
+          status: (imgMissing.length === 0 ? "green" : "red") as CheckStatus,
+          missing: imgMissing.length ? imgMissing : null,
+        };
 
         // 5) grading_time
         const gt = Number(cert.grading_time_seconds);
-        const grading_time = Number.isFinite(gt) && gt > 0
-          ? { status: "green" as CheckStatus, value_seconds: gt }
-          : { status: "red"   as CheckStatus, value_seconds: null };
+        const grading_time =
+          Number.isFinite(gt) && gt > 0
+            ? { status: "green" as CheckStatus, value_seconds: gt }
+            : { status: "red" as CheckStatus, value_seconds: null };
 
         // 6) embedding — green if both set; amber if < 2hr post-approval; else red
         const minsSinceApproved = cert.grade_approved_at
@@ -11707,7 +13137,11 @@ Defects (admin-confirmed): ${defectLines}`;
           : null;
         let embedding: { status: CheckStatus; embedded_at: string | null; minutes_since_approved: number | null };
         if (cert.embedded_at && cert.has_embedding) {
-          embedding = { status: "green", embedded_at: new Date(cert.embedded_at).toISOString(), minutes_since_approved: minsSinceApproved };
+          embedding = {
+            status: "green",
+            embedded_at: new Date(cert.embedded_at).toISOString(),
+            minutes_since_approved: minsSinceApproved,
+          };
         } else if (minsSinceApproved != null && minsSinceApproved < 120) {
           embedding = { status: "amber", embedded_at: null, minutes_since_approved: minsSinceApproved };
         } else {
@@ -11716,19 +13150,21 @@ Defects (admin-confirmed): ${defectLines}`;
 
         // 7) ai_predictions — at least one row
         const predCount = predCounts.get(certId) || 0;
-        const ai_predictions = predCount > 0
-          ? { status: "green" as CheckStatus, count: predCount }
-          : { status: "red"   as CheckStatus, count: 0 };
+        const ai_predictions =
+          predCount > 0
+            ? { status: "green" as CheckStatus, count: predCount }
+            : { status: "red" as CheckStatus, count: 0 };
 
         // 8) audit_log — at least one of the canonical actions seen
         const actions = auditActions.get(certId) || [];
-        const audit_log = actions.length > 0
-          ? { status: "green" as CheckStatus, actions_seen: actions }
-          : { status: "red"   as CheckStatus, actions_seen: [] };
+        const audit_log =
+          actions.length > 0
+            ? { status: "green" as CheckStatus, actions_seen: actions }
+            : { status: "red" as CheckStatus, actions_seen: [] };
 
         const checks = {
-          card_metadata:  cardMetadata,
-          grade_fields:   gradeFields,
+          card_metadata: cardMetadata,
+          grade_fields: gradeFields,
           defects,
           images,
           grading_time,
@@ -11737,11 +13173,12 @@ Defects (admin-confirmed): ${defectLines}`;
           audit_log,
         };
 
-        let any_red = false, any_amber = false;
+        let any_red = false,
+          any_amber = false;
         for (const k of FIELD_KEYS) {
           const s = (checks as any)[k].status as CheckStatus;
           byField[k][s]++;
-          if (s === "red")   any_red = true;
+          if (s === "red") any_red = true;
           if (s === "amber") any_amber = true;
         }
 
@@ -11756,14 +13193,14 @@ Defects (admin-confirmed): ${defectLines}`;
         };
       });
 
-      const filtered = onlyFailing ? out.filter(c => c.any_red) : out;
+      const filtered = onlyFailing ? out.filter((c) => c.any_red) : out;
 
       const summary = {
         total_checked: out.length,
-        fully_green:   out.filter(c => !c.any_red && !c.any_amber).length,
-        any_red:       out.filter(c => c.any_red).length,
-        any_amber:     out.filter(c => c.any_amber).length,
-        by_field:      byField,
+        fully_green: out.filter((c) => !c.any_red && !c.any_amber).length,
+        any_red: out.filter((c) => c.any_red).length,
+        any_amber: out.filter((c) => c.any_amber).length,
+        by_field: byField,
       };
 
       res.json({ generated_at: new Date().toISOString(), summary, certs: filtered });
@@ -11824,19 +13261,31 @@ Defects (admin-confirmed): ${defectLines}`;
 
       for (const raw of certIds) {
         const certIdStr = String(raw);
-        const before: Record<string, string | null> = { card_name: null, set_name: null, card_number_display: null, rarity: null, year_text: null };
+        const before: Record<string, string | null> = {
+          card_name: null,
+          set_name: null,
+          card_number_display: null,
+          rarity: null,
+          year_text: null,
+        };
 
-        const cert = await storage.getCertificateByCertId(certIdStr) as any;
-        if (!cert) { results.push({ certId: certIdStr, status: "failed", reason: "cert not found", before }); continue; }
+        const cert = (await storage.getCertificateByCertId(certIdStr)) as any;
+        if (!cert) {
+          results.push({ certId: certIdStr, status: "failed", reason: "cert not found", before });
+          continue;
+        }
 
-        before.card_name           = cert.cardName   ?? null;
-        before.set_name            = cert.setName    ?? null;
+        before.card_name = cert.cardName ?? null;
+        before.set_name = cert.setName ?? null;
         before.card_number_display = cert.cardNumber ?? null;
-        before.rarity              = cert.rarity     ?? null;
-        before.year_text           = cert.year       ?? null;
+        before.rarity = cert.rarity ?? null;
+        before.year_text = cert.year ?? null;
 
         const imageKey = cert.gradingFrontOriginal || cert.frontImagePath;
-        if (!imageKey) { results.push({ certId: certIdStr, status: "failed", reason: "no front image key on cert", before }); continue; }
+        if (!imageKey) {
+          results.push({ certId: certIdStr, status: "failed", reason: "no front image key on cert", before });
+          continue;
+        }
 
         // Fetch front image from R2.
         let buffer: Buffer;
@@ -11847,7 +13296,13 @@ Defects (admin-confirmed): ${defectLines}`;
           for await (const chunk of r2.Body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
           buffer = Buffer.concat(chunks);
         } catch (err: any) {
-          results.push({ certId: certIdStr, status: "failed", reason: `R2 fetch failed (${imageKey}): ${err.message}`, before }); continue;
+          results.push({
+            certId: certIdStr,
+            status: "failed",
+            reason: `R2 fetch failed (${imageKey}): ${err.message}`,
+            before,
+          });
+          continue;
         }
 
         // Run Haiku identify (+ optional GPT reconciliation inside the helper).
@@ -11855,20 +13310,21 @@ Defects (admin-confirmed): ${defectLines}`;
         try {
           identified = await identifyCardFromBuffer(buffer, "image/jpeg", certIdStr);
         } catch (err: any) {
-          results.push({ certId: certIdStr, status: "failed", reason: `identify failed: ${err.message}`, before }); continue;
+          results.push({ certId: certIdStr, status: "failed", reason: `identify failed: ${err.message}`, before });
+          continue;
         }
 
         // Brief asks for ">0.6" confidence; underlying enum is high|medium|low.
         // Accept high+medium, skip low. Never write a guess.
         const idPayload = (verifiedFlag: boolean, dbSrc: string | null) => ({
-          confidence:      identified.confidence,
-          detected_name:   identified.detected_name,
-          detected_set:    identified.detected_set,
+          confidence: identified.confidence,
+          detected_name: identified.detected_name,
+          detected_set: identified.detected_set,
           detected_number: identified.detected_number,
-          detected_year:   identified.copyright_year || identified.detected_year,
+          detected_year: identified.copyright_year || identified.detected_year,
           detected_rarity: identified.detected_rarity,
-          verified:        verifiedFlag,
-          dbSource:        dbSrc,
+          verified: verifiedFlag,
+          dbSource: dbSrc,
         });
 
         if (identified.confidence === "low") {
@@ -11888,25 +13344,44 @@ Defects (admin-confirmed): ${defectLines}`;
         try {
           enriched = await verifyAndEnrichCardData(identified);
         } catch {
-          enriched = { ...identified, verified: false, officialName: identified.detected_name, officialSet: identified.detected_set, officialNumber: identified.detected_number, dbSource: null };
+          enriched = {
+            ...identified,
+            verified: false,
+            officialName: identified.detected_name,
+            officialSet: identified.detected_set,
+            officialNumber: identified.detected_number,
+            dbSource: null,
+          };
         }
 
         const proposed: Record<string, string | null> = {
-          card_name:           pickValue(cert.cardName,    enriched.officialName),
-          set_name:            pickValue(cert.setName,     enriched.officialSet),
-          card_number_display: pickValue(cert.cardNumber,  enriched.officialNumber),
-          rarity:              pickValue(cert.rarity,      identified.detected_rarity),
-          year_text:           pickValue(cert.year,        identified.copyright_year || identified.detected_year),
+          card_name: pickValue(cert.cardName, enriched.officialName),
+          set_name: pickValue(cert.setName, enriched.officialSet),
+          card_number_display: pickValue(cert.cardNumber, enriched.officialNumber),
+          rarity: pickValue(cert.rarity, identified.detected_rarity),
+          year_text: pickValue(cert.year, identified.copyright_year || identified.detected_year),
         };
 
-        const changed = FIELDS.filter(f => proposed[f] !== before[f]);
+        const changed = FIELDS.filter((f) => proposed[f] !== before[f]);
         if (changed.length === 0) {
-          results.push({ certId: certIdStr, status: "skipped", reason: "no field needs filling", before, identification: idPayload(enriched.verified, enriched.dbSource) });
+          results.push({
+            certId: certIdStr,
+            status: "skipped",
+            reason: "no field needs filling",
+            before,
+            identification: idPayload(enriched.verified, enriched.dbSource),
+          });
           continue;
         }
 
         if (dryRun) {
-          results.push({ certId: certIdStr, status: "would-update", before, after: proposed, identification: idPayload(enriched.verified, enriched.dbSource) });
+          results.push({
+            certId: certIdStr,
+            status: "would-update",
+            before,
+            after: proposed,
+            identification: idPayload(enriched.verified, enriched.dbSource),
+          });
           continue;
         }
 
@@ -11929,11 +13404,20 @@ Defects (admin-confirmed): ${defectLines}`;
             await tx.execute(sql`
               INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
               VALUES ('certificate', ${certIdStr}, 'metadata_backfill', ${adminEmail}, ${JSON.stringify({
-                before, after: proposed, identification: { ...idPayload(enriched.verified, enriched.dbSource), reasoning: identified.reasoning }, fields_changed: changed,
+                before,
+                after: proposed,
+                identification: { ...idPayload(enriched.verified, enriched.dbSource), reasoning: identified.reasoning },
+                fields_changed: changed,
               })}::jsonb)
             `);
           });
-          results.push({ certId: certIdStr, status: "updated", before, after: proposed, identification: idPayload(enriched.verified, enriched.dbSource) });
+          results.push({
+            certId: certIdStr,
+            status: "updated",
+            before,
+            after: proposed,
+            identification: idPayload(enriched.verified, enriched.dbSource),
+          });
         } catch (err: any) {
           results.push({ certId: certIdStr, status: "failed", reason: `DB write failed: ${err.message}`, before });
         }
@@ -12010,7 +13494,7 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/embed-corpus/last-run", requireAdmin, (_req, res) => {
     res.json({
       lastRunAtMs: lastForceRunAtMs > 0 ? lastForceRunAtMs : null,
-      windowMs:    FORCE_RUN_DEBOUNCE_MS,
+      windowMs: FORCE_RUN_DEBOUNCE_MS,
     });
   });
 
@@ -12033,20 +13517,20 @@ Defects (admin-confirmed): ${defectLines}`;
       const stats = await runEmbedCorpusJob();
       await storage.writeAuditLog("rag_corpus", "embed_corpus", "force_run", adminEmail, {
         skipped: false,
-        picked:   stats.picked,
+        picked: stats.picked,
         embedded: stats.embedded,
         skippedCount: stats.skipped,
-        failed:   stats.failed,
-        reason:   stats.reason || null,
+        failed: stats.failed,
+        reason: stats.reason || null,
       });
       return res.json({
         ok: true,
         skipped: false,
-        picked:       stats.picked,
-        embedded:     stats.embedded,
+        picked: stats.picked,
+        embedded: stats.embedded,
         skippedCount: stats.skipped,
-        failed:       stats.failed,
-        reason:       stats.reason || null,
+        failed: stats.failed,
+        reason: stats.reason || null,
       });
     } catch (err: any) {
       console.error("[embed-corpus/run] failed:", err);
@@ -12083,7 +13567,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const dryRun = body.dryRun === true;
       const batchSizeRaw = Number(body.batchSize);
       const ageDaysRaw = Number(body.ageDays);
-      const batchSize = Number.isFinite(batchSizeRaw) && batchSizeRaw > 0 ? Math.min(500, Math.floor(batchSizeRaw)) : 50;
+      const batchSize =
+        Number.isFinite(batchSizeRaw) && batchSizeRaw > 0 ? Math.min(500, Math.floor(batchSizeRaw)) : 50;
       const ageDays = Number.isFinite(ageDaysRaw) && ageDaysRaw >= 0 ? Math.floor(ageDaysRaw) : 90;
       const { archiveStaleImages } = await import("./workers/r2-to-b2-archival");
       const summary = await archiveStaleImages({ dryRun, batchSize, ageDays });
@@ -12143,7 +13628,16 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const id = parseInt(String(req.params.id), 10);
       const { status, tracking_number } = req.body;
-      const validStatuses = ["submitted", "received", "in_queue", "grading", "quality_check", "slab_production", "shipping", "delivered"];
+      const validStatuses = [
+        "submitted",
+        "received",
+        "in_queue",
+        "grading",
+        "quality_check",
+        "slab_production",
+        "shipping",
+        "delivered",
+      ];
       if (!validStatuses.includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
@@ -12208,11 +13702,11 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/population", async (req, res) => {
     try {
       const game = typeof req.query.game === "string" ? req.query.game.trim() : undefined;
-      const set  = typeof req.query.set  === "string" ? req.query.set.trim()  : undefined;
+      const set = typeof req.query.set === "string" ? req.query.set.trim() : undefined;
       const card = typeof req.query.card === "string" ? req.query.card.trim() : undefined;
       const rows = await storage.getGlobalPopulation({
         game: game || undefined,
-        set:  set  || undefined,
+        set: set || undefined,
         card: card || undefined,
       });
 
@@ -12236,23 +13730,27 @@ Defects (admin-confirmed): ${defectLines}`;
         ORDER BY grade_approved_at DESC
         LIMIT 12
       `);
-      const recent = await Promise.all((recentResult.rows as any[]).map(async (r) => {
-        let imageUrl: string | null = null;
-        const imgKey = r.front_image_path;
-        if (imgKey) {
-          try { imageUrl = await getR2SignedUrl(imgKey, 3600); } catch {}
-        }
-        const certNum = String(r.certificate_number).replace(/^MV-?0+/, "MV");
-        return {
-          certificate_number: certNum,
-          card_name: r.card_name || null,
-          card_set: r.set_name || null,
-          grade: r.grade ? parseFloat(r.grade) : null,
-          label_type: r.label_type || "Standard",
-          card_image_front_url: imageUrl,
-          approved_at: r.grade_approved_at,
-        };
-      }));
+      const recent = await Promise.all(
+        (recentResult.rows as any[]).map(async (r) => {
+          let imageUrl: string | null = null;
+          const imgKey = r.front_image_path;
+          if (imgKey) {
+            try {
+              imageUrl = await getR2SignedUrl(imgKey, 3600);
+            } catch {}
+          }
+          const certNum = String(r.certificate_number).replace(/^MV-?0+/, "MV");
+          return {
+            certificate_number: certNum,
+            card_name: r.card_name || null,
+            card_set: r.set_name || null,
+            grade: r.grade ? parseFloat(r.grade) : null,
+            label_type: r.label_type || "Standard",
+            card_image_front_url: imageUrl,
+            approved_at: r.grade_approved_at,
+          };
+        })
+      );
 
       res.json({
         counters: {
@@ -12275,32 +13773,36 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/population/certs", async (req, res) => {
     try {
       const card = typeof req.query.card === "string" ? req.query.card.trim() : "";
-      const set  = typeof req.query.set  === "string" ? req.query.set.trim()  : "";
+      const set = typeof req.query.set === "string" ? req.query.set.trim() : "";
       if (!card && !set) return res.status(400).json({ error: "card or set required" });
 
       const cardEsc = card.replace(/'/g, "''").replace(/%/g, "\\%");
-      const setEsc  = set.replace(/'/g, "''").replace(/%/g, "\\%");
+      const setEsc = set.replace(/'/g, "''").replace(/%/g, "\\%");
 
       const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
       if (card) conditions.push(`LOWER(card_name) LIKE LOWER('%${cardEsc}%')`);
-      if (set)  conditions.push(`LOWER(set_name) LIKE LOWER('%${setEsc}%')`);
+      if (set) conditions.push(`LOWER(set_name) LIKE LOWER('%${setEsc}%')`);
 
-      const result = await db.execute(sql.raw(`
+      const result = await db.execute(
+        sql.raw(`
         SELECT cert_id, card_name, set_name, card_game, grade_overall, created_at
         FROM certificates
         WHERE ${conditions.join(" AND ")}
         ORDER BY grade_overall DESC NULLS LAST, created_at DESC
         LIMIT 500
-      `));
+      `)
+      );
 
-      res.json((result.rows as any[]).map(r => ({
-        certId:      r.cert_id,
-        cardName:    r.card_name,
-        setName:     r.set_name,
-        cardGame:    r.card_game,
-        grade:       r.grade_overall,
-        gradedAt:    r.created_at,
-      })));
+      res.json(
+        (result.rows as any[]).map((r) => ({
+          certId: r.cert_id,
+          cardName: r.card_name,
+          setName: r.set_name,
+          cardGame: r.card_game,
+          grade: r.grade_overall,
+          gradedAt: r.created_at,
+        }))
+      );
     } catch (err) {
       console.error("[population/certs] error:", err);
       res.status(500).json({ error: "Failed to load certificates." });
@@ -12329,7 +13831,8 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
 
       const existing = await findUserByEmail(email);
-      if (existing && !existing.deleted_at) return res.status(409).json({ error: "An account with that email already exists" });
+      if (existing && !existing.deleted_at)
+        return res.status(409).json({ error: "An account with that email already exists" });
 
       const hash = await hashPassword(password);
       const result = await db.execute(sql`
@@ -12345,7 +13848,9 @@ Defects (admin-confirmed): ${defectLines}`;
 
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
-      return res.status(201).json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: false });
+      return res
+        .status(201)
+        .json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: false });
     } catch (err: any) {
       console.error("[auth] signup error:", err.message);
       return res.status(500).json({ error: "Signup failed. Please try again." });
@@ -12384,7 +13889,9 @@ Defects (admin-confirmed): ${defectLines}`;
       const valid = await verifyPassword(password as string, user.password_hash as string);
       if (!valid) {
         await logLoginAttempt(email, ip, false, ua);
-        await db.execute(sql`UPDATE users SET failed_login_count = failed_login_count + 1 WHERE id = ${user.id as string}`);
+        await db.execute(
+          sql`UPDATE users SET failed_login_count = failed_login_count + 1 WHERE id = ${user.id as string}`
+        );
         await writeAuthAudit("auth.login.failure", user.id as string, ip, { email });
         return res.status(401).json({ error: "invalid_credentials" });
       }
@@ -12407,7 +13914,12 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       await logLoginAttempt(email, ip, true, ua);
       await writeAuthAudit("auth.login.success", user.id as string, ip, { email });
-      return res.json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: user.email_verified });
+      return res.json({
+        id: user.id,
+        email: user.email,
+        display_name: user.display_name,
+        email_verified: user.email_verified,
+      });
     } catch (err: any) {
       console.error("[auth] login error:", err.message);
       return res.status(500).json({ error: "Login failed. Please try again." });
@@ -12465,7 +13977,9 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
-      await db.execute(sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`);
+      await db.execute(
+        sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`
+      );
       await writeAuthAudit("auth.magic_link.used", user.id as string, getClientIpForAuth(req), {});
       return res.redirect("/dashboard");
     } catch (err: any) {
@@ -12534,7 +14048,9 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!rows.rows.length) return res.redirect("/dashboard?verified=error");
       const rec = rows.rows[0] as any;
       if (rec.consumed_at || new Date(rec.expires_at) < new Date()) return res.redirect("/verify-email?error=expired");
-      await db.execute(sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${rec.user_id}`);
+      await db.execute(
+        sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${rec.user_id}`
+      );
       await db.execute(sql`UPDATE email_verification_tokens SET consumed_at = NOW() WHERE token = ${token}`);
       await writeAuthAudit("auth.email.verified", rec.user_id, getClientIpForAuth(req), {});
       return res.redirect("/dashboard?verified=true");
@@ -12595,7 +14111,8 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const userId = (req.session as any).userId as string;
       const { current_password, new_password } = req.body;
-      if (!current_password || !new_password) return res.status(400).json({ error: "Both current and new password are required" });
+      if (!current_password || !new_password)
+        return res.status(400).json({ error: "Both current and new password are required" });
       const pwCheck = validatePassword(new_password);
       if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
       const user = await findUserById(userId);
@@ -12619,7 +14136,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const userId = (req.session as any).userId as string;
       const { new_email, password } = req.body;
       if (!new_email || !password) return res.status(400).json({ error: "New email and password are required" });
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(new_email)) return res.status(400).json({ error: "Invalid email address" });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(new_email))
+        return res.status(400).json({ error: "Invalid email address" });
       const user = await findUserById(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       if (user.password_hash) {
@@ -12629,7 +14147,9 @@ Defects (admin-confirmed): ${defectLines}`;
       const existing = await findUserByEmail(new_email);
       if (existing && existing.id !== userId) return res.status(409).json({ error: "That email is already in use" });
       const oldEmail = user.email as string;
-      await db.execute(sql`UPDATE users SET email = ${new_email.toLowerCase().trim()}, email_verified = false, email_verified_at = NULL, updated_at = NOW() WHERE id = ${userId}`);
+      await db.execute(
+        sql`UPDATE users SET email = ${new_email.toLowerCase().trim()}, email_verified = false, email_verified_at = NULL, updated_at = NOW() WHERE id = ${userId}`
+      );
       (req.session as any).userEmail = new_email.toLowerCase().trim();
       const token = await createEmailVerificationToken(userId);
       const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
@@ -12678,7 +14198,9 @@ Defects (admin-confirmed): ${defectLines}`;
           WHERE id = ${userId}
         `);
       } else if (touchDisplayName) {
-        await db.execute(sql`UPDATE users SET display_name = ${display_name?.trim() || null}, updated_at = NOW() WHERE id = ${userId}`);
+        await db.execute(
+          sql`UPDATE users SET display_name = ${display_name?.trim() || null}, updated_at = NOW() WHERE id = ${userId}`
+        );
       } else if (public_name !== undefined) {
         await db.execute(sql`UPDATE users SET public_name = ${public_name}, updated_at = NOW() WHERE id = ${userId}`);
       }
@@ -12706,7 +14228,8 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const userId = (req.session as any).userId as string;
       const { password, confirmation } = req.body;
-      if (confirmation !== "DELETE") return res.status(400).json({ error: 'Please type "DELETE" to confirm account deletion' });
+      if (confirmation !== "DELETE")
+        return res.status(400).json({ error: 'Please type "DELETE" to confirm account deletion' });
       const user = await findUserById(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       if (user.password_hash) {
@@ -12778,7 +14301,9 @@ Defects (admin-confirmed): ${defectLines}`;
         WHERE tier_id = ${tierId}
       `);
 
-      console.log(`[capacity] tier ${tierId} → ${status || "updated"} by ${(req.session as any)?.adminEmail || "admin"}`);
+      console.log(
+        `[capacity] tier ${tierId} → ${status || "updated"} by ${(req.session as any)?.adminEmail || "admin"}`
+      );
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -12846,8 +14371,13 @@ Defects (admin-confirmed): ${defectLines}`;
         if (r.ok) {
           const data = await r.json();
           cachedTcgSets = (data.data || []).map((s: any) => ({
-            id: s.id, name: s.name, series: s.series, ptcgoCode: s.ptcgoCode || null,
-            releaseDate: s.releaseDate, total: s.total, source: "tcg",
+            id: s.id,
+            name: s.name,
+            series: s.series,
+            ptcgoCode: s.ptcgoCode || null,
+            releaseDate: s.releaseDate,
+            total: s.total,
+            source: "tcg",
           }));
           tcgCacheTime = Date.now();
         }
@@ -12855,16 +14385,20 @@ Defects (admin-confirmed): ${defectLines}`;
 
       // Fetch custom sets from DB
       const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
-      const customSets = (customRows.rows as any[]).map(s => ({
-        id: s.set_id, name: s.set_name, series: s.series || "Custom", ptcgoCode: s.ptcgo_code || null,
+      const customSets = (customRows.rows as any[]).map((s) => ({
+        id: s.set_id,
+        name: s.set_name,
+        series: s.series || "Custom",
+        ptcgoCode: s.ptcgo_code || null,
         releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
-        total: s.total_cards || 0, source: "custom",
+        total: s.total_cards || 0,
+        source: "custom",
       }));
 
       // Merge: custom sets first, then TCG API sets (dedup by id)
       const tcg = cachedTcgSets || [];
-      const customIds = new Set(customSets.map(s => s.id));
-      const merged = [...customSets, ...tcg.filter(s => !customIds.has(s.id))];
+      const customIds = new Set(customSets.map((s) => s.id));
+      const merged = [...customSets, ...tcg.filter((s) => !customIds.has(s.id))];
 
       res.json(merged);
     } catch (err: any) {
@@ -12931,15 +14465,17 @@ Defects (admin-confirmed): ${defectLines}`;
           try {
             const { getR2SignedUrl } = await import("./r2");
             nextPost.certThumbnailUrl = await getR2SignedUrl(path, 3600);
-          } catch { /* keep certThumbnailUrl = null */ }
+          } catch {
+            /* keep certThumbnailUrl = null */
+          }
         }
       } else if (nextPost) {
         nextPost = { ...nextPost, certIdString: null, certThumbnailUrl: null };
       }
 
       res.json({
-        postEnabled:  settings[0]?.postEnabled ?? false,
-        envGate:      process.env.IG_POST_ENABLED === "true",
+        postEnabled: settings[0]?.postEnabled ?? false,
+        envGate: process.env.IG_POST_ENABLED === "true",
         dryRunEnvVar: process.env.IG_DRY_RUN === "true",
         nextPost,
       });
@@ -12959,11 +14495,14 @@ Defects (admin-confirmed): ${defectLines}`;
       if (existing.length === 0) {
         await db.insert(igSettings).values({ id: 1, postEnabled: enabled, updatedBy: adminEmail });
       } else {
-        await db.update(igSettings)
+        await db
+          .update(igSettings)
           .set({ postEnabled: enabled, updatedAt: new Date(), updatedBy: adminEmail })
           .where(eq(igSettings.id, existing[0].id));
       }
-      try { await storage.writeAuditLog("ig_settings", "1", enabled ? "enable" : "disable", adminEmail, {}); } catch {}
+      try {
+        await storage.writeAuditLog("ig_settings", "1", enabled ? "enable" : "disable", adminEmail, {});
+      } catch {}
       res.json({ ok: true, postEnabled: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -12974,7 +14513,7 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const { igPostQueue, certificates } = await import("@shared/schema");
       const { desc, isNull, inArray, sql: drizzleSql } = await import("drizzle-orm");
-      const page  = Math.max(1, parseInt(String(req.query.page  ?? "1"), 10) || 1);
+      const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
       const limit = Math.max(1, Math.min(100, parseInt(String(req.query.limit ?? "20"), 10) || 20));
       const offset = (page - 1) * limit;
       // includeDeleted=true is a debugging hook — not surfaced in UI yet.
@@ -12982,15 +14521,15 @@ Defects (admin-confirmed): ${defectLines}`;
       const includeDeleted = String(req.query.includeDeleted ?? "").toLowerCase() === "true";
 
       const baseQuery = db.select().from(igPostQueue);
-      const rows = await (includeDeleted
-        ? baseQuery
-        : baseQuery.where(isNull(igPostQueue.deletedAt)))
+      const rows = await (includeDeleted ? baseQuery : baseQuery.where(isNull(igPostQueue.deletedAt)))
         .orderBy(desc(igPostQueue.scheduledFor))
         .limit(limit)
         .offset(offset);
 
       const countWhere = includeDeleted ? drizzleSql`1=1` : drizzleSql`deleted_at IS NULL`;
-      const countRes = await db.execute<{ n: number }>(drizzleSql`SELECT COUNT(*)::int AS n FROM ig_post_queue WHERE ${countWhere}`);
+      const countRes = await db.execute<{ n: number }>(
+        drizzleSql`SELECT COUNT(*)::int AS n FROM ig_post_queue WHERE ${countWhere}`
+      );
       const total = (countRes as any).rows?.[0]?.n ?? 0;
 
       // Batch-fetch cert thumbnails for all rows with cert_id in this page.
@@ -12999,7 +14538,11 @@ Defects (admin-confirmed): ${defectLines}`;
       const certMap = new Map<number, { certIdString: string | null; frontImagePath: string | null }>();
       if (certPks.length > 0) {
         const certRows = await db
-          .select({ id: certificates.id, certIdString: certificates.certId, frontImagePath: certificates.frontImagePath })
+          .select({
+            id: certificates.id,
+            certIdString: certificates.certId,
+            frontImagePath: certificates.frontImagePath,
+          })
           .from(certificates)
           .where(inArray(certificates.id, certPks));
         for (const c of certRows) {
@@ -13008,18 +14551,24 @@ Defects (admin-confirmed): ${defectLines}`;
       }
 
       const { getR2SignedUrl } = await import("./r2");
-      const enriched = await Promise.all(rows.map(async (r) => {
-        let certThumbnailUrl: string | null = null;
-        let certIdString: string | null = null;
-        if (r.certId != null) {
-          const meta = certMap.get(r.certId);
-          certIdString = meta?.certIdString ?? null;
-          if (meta?.frontImagePath) {
-            try { certThumbnailUrl = await getR2SignedUrl(meta.frontImagePath, 3600); } catch { certThumbnailUrl = null; }
+      const enriched = await Promise.all(
+        rows.map(async (r) => {
+          let certThumbnailUrl: string | null = null;
+          let certIdString: string | null = null;
+          if (r.certId != null) {
+            const meta = certMap.get(r.certId);
+            certIdString = meta?.certIdString ?? null;
+            if (meta?.frontImagePath) {
+              try {
+                certThumbnailUrl = await getR2SignedUrl(meta.frontImagePath, 3600);
+              } catch {
+                certThumbnailUrl = null;
+              }
+            }
           }
-        }
-        return { ...r, certIdString, certThumbnailUrl };
-      }));
+          return { ...r, certIdString, certThumbnailUrl };
+        })
+      );
 
       res.json({ rows: enriched, page, limit, total });
     } catch (err: any) {
@@ -13035,9 +14584,10 @@ Defects (admin-confirmed): ${defectLines}`;
       // so a malformed body can't reach the cron entry point.
       const { IG_POST_TYPES } = await import("@shared/schema");
       const rawOverride = typeof req.body?.post_type === "string" ? req.body.post_type : null;
-      const postTypeOverride = rawOverride && (IG_POST_TYPES as readonly string[]).includes(rawOverride)
-        ? (rawOverride as typeof IG_POST_TYPES[number])
-        : undefined;
+      const postTypeOverride =
+        rawOverride && (IG_POST_TYPES as readonly string[]).includes(rawOverride)
+          ? (rawOverride as (typeof IG_POST_TYPES)[number])
+          : undefined;
 
       const { runIgDailyPost } = await import("./jobs/ig-daily-post");
       const result = await runIgDailyPost({ force: true, postTypeOverride });
@@ -13093,48 +14643,55 @@ Defects (admin-confirmed): ${defectLines}`;
   // separate task.
   app.get("/api/admin/weekly-reel/status", requireAdmin, async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT id, entity_id, created_at, details
         FROM audit_log
         WHERE entity_type = 'weekly_reel'
           AND action = 'generated'
         ORDER BY created_at DESC
         LIMIT 10
-      `)).rows as Array<{ id: number; entity_id: string; created_at: Date; details: any }>;
+      `)
+      ).rows as Array<{ id: number; entity_id: string; created_at: Date; details: any }>;
 
-      const history = await Promise.all(rows.map(async (row) => {
-        const date = row.entity_id;
-        const manifestKey = `videos/weekly-reels/draft-${date}.json`;
-        let manifest: any = null;
-        try {
-          const url = await getR2SignedUrl(manifestKey, 60);
-          const resp = await fetch(url);
-          if (resp.ok) manifest = await resp.json();
-        } catch {
-          // best-effort — missing manifest doesn't fail the whole list
-        }
-        const cardCount = manifest?.cardCount ?? row.details?.cardCount ?? 0;
-        const successCount = manifest?.successCount ?? row.details?.successCount ?? 0;
-        const failCount = manifest?.failCount ?? row.details?.failCount ?? 0;
-        const status: "ok" | "partial" | "failed" | "unknown" =
-          manifest === null && cardCount === 0 ? "unknown" :
-          successCount > 0 && failCount === 0 ? "ok" :
-          successCount > 0 && failCount > 0 ? "partial" :
-          "failed";
-        return {
-          date,
-          createdAt: row.created_at,
-          status,
-          cardCount,
-          successCount,
-          failCount,
-          manifestKey,
-          manifestPresent: manifest !== null,
-          cards: Array.isArray(manifest?.cards) ? manifest.cards : [],
-          model: manifest?.model ?? row.details?.model ?? null,
-          clipLengthSeconds: manifest?.clipLengthSeconds ?? row.details?.clipLengthSeconds ?? null,
-        };
-      }));
+      const history = await Promise.all(
+        rows.map(async (row) => {
+          const date = row.entity_id;
+          const manifestKey = `videos/weekly-reels/draft-${date}.json`;
+          let manifest: any = null;
+          try {
+            const url = await getR2SignedUrl(manifestKey, 60);
+            const resp = await fetch(url);
+            if (resp.ok) manifest = await resp.json();
+          } catch {
+            // best-effort — missing manifest doesn't fail the whole list
+          }
+          const cardCount = manifest?.cardCount ?? row.details?.cardCount ?? 0;
+          const successCount = manifest?.successCount ?? row.details?.successCount ?? 0;
+          const failCount = manifest?.failCount ?? row.details?.failCount ?? 0;
+          const status: "ok" | "partial" | "failed" | "unknown" =
+            manifest === null && cardCount === 0
+              ? "unknown"
+              : successCount > 0 && failCount === 0
+                ? "ok"
+                : successCount > 0 && failCount > 0
+                  ? "partial"
+                  : "failed";
+          return {
+            date,
+            createdAt: row.created_at,
+            status,
+            cardCount,
+            successCount,
+            failCount,
+            manifestKey,
+            manifestPresent: manifest !== null,
+            cards: Array.isArray(manifest?.cards) ? manifest.cards : [],
+            model: manifest?.model ?? row.details?.model ?? null,
+            clipLengthSeconds: manifest?.clipLengthSeconds ?? row.details?.clipLengthSeconds ?? null,
+          };
+        })
+      );
 
       res.json({ history });
     } catch (err: any) {
@@ -13149,7 +14706,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // reel-worthy cards surface first.
   app.get("/api/admin/weekly-reel/consenting-cards", requireAdmin, async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT
           c.certificate_number       AS cert_number,
           c.grade::text              AS grade,
@@ -13165,7 +14723,8 @@ Defects (admin-confirmed): ${defectLines}`;
           AND c.deleted_at IS NULL
           AND c.grade_approved_at IS NOT NULL
         ORDER BY c.grade DESC NULLS LAST, c.grade_approved_at DESC
-      `)).rows as Array<any>;
+      `)
+      ).rows as Array<any>;
       const cards = rows.map((r) => ({
         certNumber: String(r.cert_number),
         grade: r.grade != null ? Number(r.grade) : null,
@@ -13188,7 +14747,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // that endpoint is now unused but left for backwards-compat.
   app.get("/api/admin/weekly-reel/all-graded-cards", requireAdmin, async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT
           c.certificate_number       AS cert_number,
           c.grade::text              AS grade,
@@ -13204,7 +14764,8 @@ Defects (admin-confirmed): ${defectLines}`;
           AND s.deleted_at IS NULL
           AND c.grade_approved_at IS NOT NULL
         ORDER BY c.grade DESC NULLS LAST, c.grade_approved_at DESC
-      `)).rows as Array<any>;
+      `)
+      ).rows as Array<any>;
       const cards = rows.map((r) => ({
         certNumber: String(r.cert_number),
         grade: r.grade != null ? Number(r.grade) : null,
@@ -13232,7 +14793,8 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
       const consent = req.body?.consent === true;
 
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT s.id AS submission_id, s.marketing_feature_consent
         FROM certificates c
         JOIN submission_items si ON si.id = c.submission_item_id
@@ -13241,7 +14803,8 @@ Defects (admin-confirmed): ${defectLines}`;
           AND c.deleted_at IS NULL
           AND s.deleted_at IS NULL
         LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       const cur = rows[0] as any;
       if (!cur) {
         return res.status(404).json({ error: "cert not found OR not linked to a submission" });
@@ -13283,7 +14846,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // independent of submissions.marketing_feature_consent.
   app.get("/api/admin/weekly-reel/featured-cards", requireAdmin, async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT
           c.certificate_number     AS cert_number,
           c.grade::text            AS grade,
@@ -13301,7 +14865,8 @@ Defects (admin-confirmed): ${defectLines}`;
                  c.marketing_featured DESC,
                  c.grade DESC NULLS LAST,
                  c.grade_approved_at DESC
-      `)).rows as Array<any>;
+      `)
+      ).rows as Array<any>;
       const cards = rows.map((r) => ({
         certNumber: String(r.cert_number),
         grade: r.grade != null ? Number(r.grade) : null,
@@ -13330,13 +14895,15 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
       const featured = req.body?.featured === true;
 
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT id, marketing_featured
         FROM certificates
         WHERE certificate_number = ${certNumberRaw}
           AND deleted_at IS NULL
         LIMIT 1
-      `)).rows;
+      `)
+      ).rows;
       const cur = rows[0] as any;
       if (!cur) {
         return res.status(404).json({ error: "cert not found" });
@@ -13418,8 +14985,7 @@ Defects (admin-confirmed): ${defectLines}`;
           value = Number(raw) === 720 ? 720 : 1080;
           break;
         case "sort_order":
-          value = ["grade_desc", "value_desc", "newest_first"].includes(String(raw))
-            ? String(raw) : "grade_desc";
+          value = ["grade_desc", "value_desc", "newest_first"].includes(String(raw)) ? String(raw) : "grade_desc";
           break;
         case "pipeline_paused":
         case "include_back":
@@ -13443,11 +15009,11 @@ Defects (admin-confirmed): ${defectLines}`;
           break;
         case "tiktok_privacy":
           value = ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "SELF_ONLY"].includes(String(raw))
-            ? String(raw) : "PUBLIC_TO_EVERYONE";
+            ? String(raw)
+            : "PUBLIC_TO_EVERYONE";
           break;
         case "transition_style":
-          value = ["cut", "dissolve", "zoom"].includes(String(raw))
-            ? String(raw) : "cut";
+          value = ["cut", "dissolve", "zoom"].includes(String(raw)) ? String(raw) : "cut";
           break;
         case "video_prompt":
         case "video_model":
@@ -13484,24 +15050,21 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // PATCH /pinned and /blacklisted — same shape as /featured.
-  function makeBoolColPatch(opts: {
-    bodyField: string;
-    sqlCol: string;
-    auditAction: string;
-    logTag: string;
-  }) {
+  function makeBoolColPatch(opts: { bodyField: string; sqlCol: string; auditAction: string; logTag: string }) {
     return async (req: any, res: any) => {
       try {
         const certNumberRaw = String(req.params.certNumber).trim();
         if (!certNumberRaw) return res.status(400).json({ error: "certNumber required" });
         const nextVal = req.body?.[opts.bodyField] === true;
-        const rows = (await db.execute(sql`
+        const rows = (
+          await db.execute(sql`
           SELECT id, ${sql.raw(opts.sqlCol)} AS cur
           FROM certificates
           WHERE certificate_number = ${certNumberRaw}
             AND deleted_at IS NULL
           LIMIT 1
-        `)).rows;
+        `)
+        ).rows;
         const cur = rows[0] as any;
         if (!cur) return res.status(404).json({ error: "cert not found" });
         const certId = Number(cur.id);
@@ -13538,7 +15101,7 @@ Defects (admin-confirmed): ${defectLines}`;
       sqlCol: "marketing_pinned",
       auditAction: "marketing_pinned_changed",
       logTag: "weekly-reel:pin",
-    }),
+    })
   );
 
   app.patch(
@@ -13549,7 +15112,7 @@ Defects (admin-confirmed): ${defectLines}`;
       sqlCol: "marketing_blacklisted",
       auditAction: "marketing_blacklisted_changed",
       logTag: "weekly-reel:blacklist",
-    }),
+    })
   );
 
   // POST /test-webhook — fires a synthetic payload to the configured webhook
@@ -13592,7 +15155,8 @@ Defects (admin-confirmed): ${defectLines}`;
   // GET /api/admin/weekly-reel/analytics — last 12 weeks + running total cost.
   app.get("/api/admin/weekly-reel/analytics", requireAdmin, async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT reel_date, card_count, success_count, fail_count,
                estimated_cost_usd::text AS estimated_cost_usd,
                model, clip_length_seconds, created_at,
@@ -13602,11 +15166,14 @@ Defects (admin-confirmed): ${defectLines}`;
         FROM reel_analytics
         ORDER BY created_at DESC
         LIMIT 12
-      `)).rows as Array<any>;
-      const totalRow = (await db.execute(sql`
+      `)
+      ).rows as Array<any>;
+      const totalRow = (
+        await db.execute(sql`
         SELECT COALESCE(SUM(estimated_cost_usd), 0)::text AS total
         FROM reel_analytics
-      `)).rows[0] as any;
+      `)
+      ).rows[0] as any;
       res.json({
         rows: rows.map((r) => ({
           reelDate: r.reel_date,
@@ -13644,16 +15211,20 @@ Defects (admin-confirmed): ${defectLines}`;
       const r = await fetch(url);
       if (!r.ok) return null;
       return await r.json();
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   async function ensureAllCardsApproved(date: string): Promise<{ ok: boolean; pending: string[] }> {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT cert_number, approved FROM reel_card_approvals WHERE reel_date = ${date}
-      `)).rows as Array<{ cert_number: string; approved: boolean }>;
+      `)
+      ).rows as Array<{ cert_number: string; approved: boolean }>;
       if (rows.length === 0) return { ok: true, pending: [] };
-      const pending = rows.filter(r => r.approved !== true).map(r => r.cert_number);
+      const pending = rows.filter((r) => r.approved !== true).map((r) => r.cert_number);
       return { ok: pending.length === 0, pending };
     } catch {
       return { ok: true, pending: [] };
@@ -13682,10 +15253,11 @@ Defects (admin-confirmed): ${defectLines}`;
   // read manifest → require approvals (when configured) → pick top video →
   // call publisher → store post id in reel_analytics.
   async function publishHandler(
-    req: any, res: any,
+    req: any,
+    res: any,
     publisher: (videoUrl: string, caption: string) => Promise<{ postId: string }>,
     column: "instagram_post_id" | "facebook_post_id" | "tiktok_post_id",
-    label: string,
+    label: string
   ) {
     try {
       const date = String(req.body?.date ?? "").trim();
@@ -13712,8 +15284,11 @@ Defects (admin-confirmed): ${defectLines}`;
       const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
       try {
         await db.insert(auditLog).values({
-          entityType: "weekly_reel", entityId: date, action: `${label}_published`,
-          adminUser: actor, details: { postId },
+          entityType: "weekly_reel",
+          entityId: date,
+          action: `${label}_published`,
+          adminUser: actor,
+          details: { postId },
         });
       } catch {}
       res.json({ ok: true, postId });
@@ -13740,13 +15315,16 @@ Defects (admin-confirmed): ${defectLines}`;
     const { getAllSettings } = await import("./lib/pipeline-settings");
     const settings = await getAllSettings();
     return publishHandler(
-      req, res,
-      (videoUrl, caption) => publishToTikTok(videoUrl, caption, {
-        privacy: settings.tiktok_privacy,
-        disableDuet: settings.tiktok_disable_duet,
-        disableStitch: settings.tiktok_disable_stitch,
-      }),
-      "tiktok_post_id", "tiktok",
+      req,
+      res,
+      (videoUrl, caption) =>
+        publishToTikTok(videoUrl, caption, {
+          privacy: settings.tiktok_privacy,
+          disableDuet: settings.tiktok_disable_duet,
+          disableStitch: settings.tiktok_disable_stitch,
+        }),
+      "tiktok_post_id",
+      "tiktok"
     );
   });
 
@@ -13756,9 +15334,11 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const date = String(req.body?.date ?? "").trim();
       if (!date) return res.status(400).json({ error: "date required" });
-      const row = (await db.execute(sql`
+      const row = (
+        await db.execute(sql`
         SELECT instagram_post_id FROM reel_analytics WHERE reel_date = ${date} LIMIT 1
-      `)).rows[0] as { instagram_post_id?: string } | undefined;
+      `)
+      ).rows[0] as { instagram_post_id?: string } | undefined;
       if (!row?.instagram_post_id) return res.status(404).json({ error: "no instagram_post_id for date" });
       const { getInstagramInsights } = await import("./lib/meta-publisher");
       const insights = await getInstagramInsights(row.instagram_post_id);
@@ -13784,15 +15364,17 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/weekly-reel/approvals/:date", requireAdmin, async (req, res) => {
     try {
       const date = String(req.params.date).trim();
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT cert_number, approved, reviewed_at, reviewed_by
         FROM reel_card_approvals
         WHERE reel_date = ${date}
         ORDER BY cert_number
-      `)).rows as Array<any>;
+      `)
+      ).rows as Array<any>;
       res.json({
         date,
-        cards: rows.map(r => ({
+        cards: rows.map((r) => ({
           certNumber: r.cert_number,
           approved: r.approved === true,
           reviewedAt: r.reviewed_at ?? null,
@@ -13879,7 +15461,7 @@ Defects (admin-confirmed): ${defectLines}`;
       };
       // Recount success/fail
       const cards = manifest.cards as Array<any>;
-      manifest.successCount = cards.filter(c => c.videoUrl).length;
+      manifest.successCount = cards.filter((c) => c.videoUrl).length;
       manifest.failCount = cards.length - manifest.successCount;
 
       try {
@@ -13898,7 +15480,7 @@ Defects (admin-confirmed): ${defectLines}`;
 
   const reelAssetUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 },   // 50 MB cap
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap
   });
 
   function makeAssetUploadHandler(opts: {
@@ -13923,27 +15505,39 @@ Defects (admin-confirmed): ${defectLines}`;
     };
   }
 
-  app.post("/api/admin/weekly-reel/upload-intro", requireAdmin, reelAssetUpload.single("file"),
+  app.post(
+    "/api/admin/weekly-reel/upload-intro",
+    requireAdmin,
+    reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/intro.mp4",
       settingKey: "intro_video_r2_key",
       contentType: "video/mp4",
       logTag: "reel-asset:intro",
-    }));
-  app.post("/api/admin/weekly-reel/upload-outro", requireAdmin, reelAssetUpload.single("file"),
+    })
+  );
+  app.post(
+    "/api/admin/weekly-reel/upload-outro",
+    requireAdmin,
+    reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/outro.mp4",
       settingKey: "outro_video_r2_key",
       contentType: "video/mp4",
       logTag: "reel-asset:outro",
-    }));
-  app.post("/api/admin/weekly-reel/upload-music", requireAdmin, reelAssetUpload.single("file"),
+    })
+  );
+  app.post(
+    "/api/admin/weekly-reel/upload-music",
+    requireAdmin,
+    reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/music.mp3",
       settingKey: "background_music_r2_key",
       contentType: "audio/mpeg",
       logTag: "reel-asset:music",
-    }));
+    })
+  );
 
   // ── Thumbnail presigned URL ────────────────────────────────────────────
 
@@ -13966,13 +15560,15 @@ Defects (admin-confirmed): ${defectLines}`;
   // owner emails, no submission internals.
   app.get("/api/reels", async (_req, res) => {
     try {
-      const rows = (await db.execute(sql`
+      const rows = (
+        await db.execute(sql`
         SELECT entity_id, created_at
         FROM audit_log
         WHERE entity_type = 'weekly_reel' AND action = 'generated'
         ORDER BY created_at DESC
         LIMIT 24
-      `)).rows as Array<{ entity_id: string; created_at: Date }>;
+      `)
+      ).rows as Array<{ entity_id: string; created_at: Date }>;
       const reels = [];
       for (const row of rows) {
         const manifest = await readReelManifest(row.entity_id);
@@ -14033,10 +15629,10 @@ Defects (admin-confirmed): ${defectLines}`;
       const { igPostQueue } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
       const adminEmail = (req.session as any)?.adminEmail ?? null;
-      await db.update(igPostQueue)
-        .set({ status: "skipped", deletedAt: new Date() })
-        .where(eq(igPostQueue.id, id));
-      try { await storage.writeAuditLog("ig_post", String(id), "skipped", adminEmail, {}); } catch {}
+      await db.update(igPostQueue).set({ status: "skipped", deletedAt: new Date() }).where(eq(igPostQueue.id, id));
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "skipped", adminEmail, {});
+      } catch {}
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -14050,10 +15646,10 @@ Defects (admin-confirmed): ${defectLines}`;
       const { igPostQueue } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
       const adminEmail = (req.session as any)?.adminEmail ?? null;
-      await db.update(igPostQueue)
-        .set({ status: "pending", errorDetail: null })
-        .where(eq(igPostQueue.id, id));
-      try { await storage.writeAuditLog("ig_post", String(id), "retry", adminEmail, {}); } catch {}
+      await db.update(igPostQueue).set({ status: "pending", errorDetail: null }).where(eq(igPostQueue.id, id));
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "retry", adminEmail, {});
+      } catch {}
       res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -14105,7 +15701,10 @@ Defects (admin-confirmed): ${defectLines}`;
 
       // Hashtags — trim each token, dedupe, max 30 tags.
       if (typeof body.hashtags === "string") {
-        const tags = body.hashtags.split(/\s+/).map((t: string) => t.trim()).filter(Boolean);
+        const tags = body.hashtags
+          .split(/\s+/)
+          .map((t: string) => t.trim())
+          .filter(Boolean);
         if (tags.length > 30) {
           return res.status(400).json({ error: `Too many hashtags — ${tags.length} (max 30)` });
         }
@@ -14131,7 +15730,11 @@ Defects (admin-confirmed): ${defectLines}`;
       }
 
       await db.update(igPostQueue).set(updates).where(eq(igPostQueue.id, id));
-      try { await storage.writeAuditLog("ig_post", String(id), "manual_edit", adminEmail, { fields_changed: fieldsChanged }); } catch {}
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "manual_edit", adminEmail, {
+          fields_changed: fieldsChanged,
+        });
+      } catch {}
       res.json({ ok: true, fieldsChanged });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -14147,85 +15750,78 @@ Defects (admin-confirmed): ${defectLines}`;
   // content-type regardless of what the admin uploaded.
   const ACCEPTED_UPLOAD_MIMES = new Set([
     "image/jpeg",
-    "image/jpg",     // less standard but seen from some clients
+    "image/jpg", // less standard but seen from some clients
     "image/png",
     "image/tiff",
-    "image/x-tiff",  // alternate TIFF mime
+    "image/x-tiff", // alternate TIFF mime
     "image/webp",
   ]);
   const igImageUpload = multer({
     storage: multer.memoryStorage(),
-    limits:  { fileSize: 50 * 1024 * 1024 },
+    limits: { fileSize: 50 * 1024 * 1024 },
     fileFilter(_req, file, cb) {
       if (ACCEPTED_UPLOAD_MIMES.has(file.mimetype)) return cb(null, true);
       cb(new Error(`Unsupported format ${file.mimetype} — accepted: JPEG, PNG, TIFF, WebP`));
     },
   });
-  app.post(
-    "/api/admin/ig/queue/:id/replace-image",
-    requireAdmin,
-    igImageUpload.single("image"),
-    async (req, res) => {
+  app.post("/api/admin/ig/queue/:id/replace-image", requireAdmin, igImageUpload.single("image"), async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+      if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
+      const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+      const { igPostQueue } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+      const row = rows[0];
+      if (!row) return res.status(404).json({ error: "Queue row not found" });
+
+      const sharp = (await import("sharp")).default;
+      // Read metadata from the original buffer (sharp understands all 4
+      // input formats). Reused for the squareWarning + the converted JPEG.
+      let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
       try {
-        const id = parseInt(String(req.params.id), 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-        if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
-        const adminEmail = (req.session as any)?.adminEmail ?? null;
-
-        const { igPostQueue } = await import("@shared/schema");
-        const { eq } = await import("drizzle-orm");
-        const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
-        const row = rows[0];
-        if (!row) return res.status(404).json({ error: "Queue row not found" });
-
-        const sharp = (await import("sharp")).default;
-        // Read metadata from the original buffer (sharp understands all 4
-        // input formats). Reused for the squareWarning + the converted JPEG.
-        let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
-        try {
-          const meta = await sharp(req.file.buffer).metadata();
-          dimensions = {
-            width: meta.width,
-            height: meta.height,
-            squareWarning: meta.width !== meta.height,
-          };
-        } catch { /* metadata extraction is best-effort */ }
-
-        // Always convert to JPEG @ q=92. Meta Graph API only accepts JPEG
-        // for IG posts, so doing it here means the publish path stays format-
-        // agnostic. JPEG @ 92 is a sensible quality/size trade-off — file
-        // bytes drop ~70% vs PNG/TIFF for the same visual fidelity.
-        const jpegBuffer = await sharp(req.file.buffer)
-          .jpeg({ quality: 92 })
-          .toBuffer();
-
-        const newKey = `ig/manual-upload/${id}-${Date.now()}.jpg`;
-        const { uploadToR2 } = await import("./r2");
-        await uploadToR2(newKey, jpegBuffer, "image/jpeg");
-
-        await db.update(igPostQueue)
-          .set({ imageR2Key: newKey })
-          .where(eq(igPostQueue.id, id));
-
-        try {
-          await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
-            old_key:        row.imageR2Key,
-            new_key:        newKey,
-            uploaded_mime:  req.file.mimetype,
-            uploaded_size:  req.file.size,
-            stored_mime:    "image/jpeg",
-            stored_size:    jpegBuffer.length,
-            converted:      req.file.mimetype !== "image/jpeg",
-            ...dimensions,
-          });
-        } catch {}
-        res.json({ ok: true, r2Key: newKey, ...dimensions, converted: req.file.mimetype !== "image/jpeg" });
-      } catch (err: any) {
-        // Multer errors land here (file too big, unsupported format)
-        res.status(400).json({ error: err.message });
+        const meta = await sharp(req.file.buffer).metadata();
+        dimensions = {
+          width: meta.width,
+          height: meta.height,
+          squareWarning: meta.width !== meta.height,
+        };
+      } catch {
+        /* metadata extraction is best-effort */
       }
-    },
-  );
+
+      // Always convert to JPEG @ q=92. Meta Graph API only accepts JPEG
+      // for IG posts, so doing it here means the publish path stays format-
+      // agnostic. JPEG @ 92 is a sensible quality/size trade-off — file
+      // bytes drop ~70% vs PNG/TIFF for the same visual fidelity.
+      const jpegBuffer = await sharp(req.file.buffer).jpeg({ quality: 92 }).toBuffer();
+
+      const newKey = `ig/manual-upload/${id}-${Date.now()}.jpg`;
+      const { uploadToR2 } = await import("./r2");
+      await uploadToR2(newKey, jpegBuffer, "image/jpeg");
+
+      await db.update(igPostQueue).set({ imageR2Key: newKey }).where(eq(igPostQueue.id, id));
+
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
+          old_key: row.imageR2Key,
+          new_key: newKey,
+          uploaded_mime: req.file.mimetype,
+          uploaded_size: req.file.size,
+          stored_mime: "image/jpeg",
+          stored_size: jpegBuffer.length,
+          converted: req.file.mimetype !== "image/jpeg",
+          ...dimensions,
+        });
+      } catch {}
+      res.json({ ok: true, r2Key: newKey, ...dimensions, converted: req.file.mimetype !== "image/jpeg" });
+    } catch (err: any) {
+      // Multer errors land here (file too big, unsupported format)
+      res.status(400).json({ error: err.message });
+    }
+  });
 
   // ── Regenerate caption — re-run the Anthropic call (or fallback) with the
   // same data the queue row was originally built from. For card_reveal /
@@ -14243,7 +15839,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const row = rows[0];
       if (!row) return res.status(404).json({ error: "Queue row not found" });
 
-      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } = await import("./ig/data-fetcher");
+      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } =
+        await import("./ig/data-fetcher");
       let data;
       if (row.certId != null && row.postType === "card_reveal") {
         data = await fetchCardRevealDataForCertPk(row.certId);
@@ -14252,15 +15849,18 @@ Defects (admin-confirmed): ${defectLines}`;
       } else {
         data = await fetchPostData(row.postType as any);
       }
-      if (!data) return res.status(409).json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
+      if (!data)
+        return res
+          .status(409)
+          .json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
 
       const { generateCaption } = await import("./ig/caption-generator");
       const { caption, hashtags, fromFallback } = await generateCaption(data);
 
-      await db.update(igPostQueue)
-        .set({ caption, hashtags })
-        .where(eq(igPostQueue.id, id));
-      try { await storage.writeAuditLog("ig_post", String(id), "regenerate_caption", adminEmail, { fromFallback }); } catch {}
+      await db.update(igPostQueue).set({ caption, hashtags }).where(eq(igPostQueue.id, id));
+      try {
+        await storage.writeAuditLog("ig_post", String(id), "regenerate_caption", adminEmail, { fromFallback });
+      } catch {}
       res.json({ ok: true, caption, hashtags, fromFallback });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -14283,7 +15883,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const row = rows[0];
       if (!row) return res.status(404).json({ error: "Queue row not found" });
 
-      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } = await import("./ig/data-fetcher");
+      const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk, fetchPostData } =
+        await import("./ig/data-fetcher");
       let data;
       if (row.certId != null && row.postType === "card_reveal") {
         data = await fetchCardRevealDataForCertPk(row.certId);
@@ -14292,7 +15893,10 @@ Defects (admin-confirmed): ${defectLines}`;
       } else {
         data = await fetchPostData(row.postType as any);
       }
-      if (!data) return res.status(409).json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
+      if (!data)
+        return res
+          .status(409)
+          .json({ error: "Could not rebuild post data (cert may be deleted or post type unavailable)" });
 
       const { generateIgImage } = await import("./ig/image-generator");
       const imageBuffer = await generateIgImage(data);
@@ -14301,9 +15905,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const { uploadToR2 } = await import("./r2");
       await uploadToR2(newKey, imageBuffer, "image/png");
 
-      await db.update(igPostQueue)
-        .set({ imageR2Key: newKey })
-        .where(eq(igPostQueue.id, id));
+      await db.update(igPostQueue).set({ imageR2Key: newKey }).where(eq(igPostQueue.id, id));
 
       try {
         await storage.writeAuditLog("ig_post", String(id), "image_regenerate", adminEmail, {
@@ -14343,10 +15945,11 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const { igPostQueue } = await import("@shared/schema");
       const { and, eq, isNull } = await import("drizzle-orm");
-      const rows = await db.select().from(igPostQueue).where(and(
-        eq(igPostQueue.id, id),
-        isNull(igPostQueue.deletedAt),
-      )).limit(1);
+      const rows = await db
+        .select()
+        .from(igPostQueue)
+        .where(and(eq(igPostQueue.id, id), isNull(igPostQueue.deletedAt)))
+        .limit(1);
       const row = rows[0];
       if (!row) return res.status(404).json({ error: "Queue row not found or already deleted" });
 
@@ -14354,17 +15957,15 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(409).json({ error: "Cannot delete a published post (preserves Meta post-ID audit trail)" });
       }
 
-      await db.update(igPostQueue)
-        .set({ deletedAt: new Date() })
-        .where(eq(igPostQueue.id, id));
+      await db.update(igPostQueue).set({ deletedAt: new Date() }).where(eq(igPostQueue.id, id));
 
       const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 500) : null;
       try {
         await storage.writeAuditLog("ig_post_queue", String(id), "admin_delete", adminEmail, {
-          prior_status:        row.status,
+          prior_status: row.status,
           prior_scheduled_for: row.scheduledFor,
-          post_type:           row.postType,
-          cert_id:             row.certId,
+          post_type: row.postType,
+          cert_id: row.certId,
           reason,
         });
       } catch {}
@@ -14393,10 +15994,11 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const { certificates, igPostQueue } = await import("@shared/schema");
       const { and, eq, isNull } = await import("drizzle-orm");
-      const certRows = await db.select().from(certificates).where(and(
-        eq(certificates.id, certId),
-        isNull(certificates.deletedAt),
-      )).limit(1);
+      const certRows = await db
+        .select()
+        .from(certificates)
+        .where(and(eq(certificates.id, certId), isNull(certificates.deletedAt)))
+        .limit(1);
       const cert = certRows[0];
       if (!cert) return res.status(404).json({ error: "Cert not found or deleted" });
 
@@ -14416,9 +16018,10 @@ Defects (admin-confirmed): ${defectLines}`;
       }
 
       const { fetchCardRevealDataForCertPk, fetchGradeBreakdownDataForCertPk } = await import("./ig/data-fetcher");
-      const data = postType === "card_reveal"
-        ? await fetchCardRevealDataForCertPk(certId)
-        : await fetchGradeBreakdownDataForCertPk(certId);
+      const data =
+        postType === "card_reveal"
+          ? await fetchCardRevealDataForCertPk(certId)
+          : await fetchGradeBreakdownDataForCertPk(certId);
       if (!data) return res.status(422).json({ error: "Could not build post data for this cert" });
 
       const { generateIgImage } = await import("./ig/image-generator");
@@ -14431,22 +16034,25 @@ Defects (admin-confirmed): ${defectLines}`;
       const { generateCaption } = await import("./ig/caption-generator");
       const { caption, hashtags, fromFallback } = await generateCaption(data);
 
-      const [inserted] = await db.insert(igPostQueue).values({
-        scheduledFor: new Date(),
-        postType,
-        certId,
-        imageR2Key:   r2Key,
-        caption,
-        hashtags,
-        status:       "ready",
-      }).returning();
+      const [inserted] = await db
+        .insert(igPostQueue)
+        .values({
+          scheduledFor: new Date(),
+          postType,
+          certId,
+          imageR2Key: r2Key,
+          caption,
+          hashtags,
+          status: "ready",
+        })
+        .returning();
 
       try {
         await storage.writeAuditLog("ig_post_queue", String(inserted.id), "admin_queue_from_cert", adminEmail, {
-          cert_id:         certId,
-          post_type:       postType,
-          requested_type:  requestedType,
-          source:          "admin_dashboard",
+          cert_id: certId,
+          post_type: postType,
+          requested_type: requestedType,
+          source: "admin_dashboard",
           caption_fallback: fromFallback,
         });
       } catch {}

@@ -18,7 +18,13 @@ import ManualCentering, { type CenteringResult } from "./manual-centering";
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
-import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel, getCenteringGrade, psaCenteringSubgrade } from "./grade-logic";
+import {
+  calculateOverallGrade,
+  getGradeLabel,
+  isBlackLabel as checkBlackLabel,
+  getCenteringGrade,
+  psaCenteringSubgrade,
+} from "./grade-logic";
 import { computeMvgsScore, gradeFromMvgsScore } from "@shared/mvgs-scoring";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
@@ -29,11 +35,17 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
       type="button"
       disabled={status === "loading"}
       onClick={async () => {
-        if (status === "loading") { toast({ title: "Already reprocessing, please wait" }); return; }
+        if (status === "loading") {
+          toast({ title: "Already reprocessing, please wait" });
+          return;
+        }
         setStatus("loading");
         toast({ title: "Reprocessing images…" });
         try {
-          const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, { method: "POST", credentials: "include" });
+          const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, {
+            method: "POST",
+            credentials: "include",
+          });
           const d = await r.json();
           if (!r.ok) throw new Error(d.error);
           setStatus("done");
@@ -46,14 +58,24 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
         }
       }}
       className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
-        status === "done" ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50" :
-        status === "loading" ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5" :
-        "border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+        status === "done"
+          ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50"
+          : status === "loading"
+            ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5"
+            : "border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
       }`}
     >
-      {status === "loading" ? <><Loader2 size={11} className="animate-spin" /> Reprocessing…</> :
-       status === "done" ? <><CheckCircle2 size={11} /> Reprocessed ✓</> :
-       "Reprocess"}
+      {status === "loading" ? (
+        <>
+          <Loader2 size={11} className="animate-spin" /> Reprocessing…
+        </>
+      ) : status === "done" ? (
+        <>
+          <CheckCircle2 size={11} /> Reprocessed ✓
+        </>
+      ) : (
+        "Reprocess"
+      )}
     </button>
   );
 }
@@ -77,10 +99,10 @@ function mvgsRemainingToGrade(remaining: number): number {
   if (remaining >= 17) return 8;
   if (remaining >= 14) return 7;
   if (remaining >= 11) return 6;
-  if (remaining >= 8)  return 5;
-  if (remaining >= 5)  return 4;
-  if (remaining >= 3)  return 3;
-  if (remaining >= 1)  return 2;
+  if (remaining >= 8) return 5;
+  if (remaining >= 5) return 4;
+  if (remaining >= 3) return 3;
+  if (remaining >= 1) return 2;
   return 1;
 }
 
@@ -101,11 +123,53 @@ interface Props {
 }
 
 // Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
-const DEFAULT_CORNERS: CornerValues = { frontTL: 0, frontTR: 0, frontBL: 0, frontBR: 0, backTL: 0, backTR: 0, backBL: 0, backBR: 0 };
-const DEFAULT_EDGES: EdgeValues = { frontTop: 0, frontBottom: 0, frontLeft: 0, frontRight: 0, backTop: 0, backBottom: 0, backLeft: 0, backRight: 0 };
-const DEFAULT_SURFACE: SurfaceValues = { front: 0, back: 0, hasPrintLines: false, hasHoloScratches: false, hasSurfaceScratches: false, hasStaining: false, hasIndentation: false, hasRollerMarks: false, hasColorRegistration: false, hasCrease: false, hasTear: false };
+const DEFAULT_CORNERS: CornerValues = {
+  frontTL: 0,
+  frontTR: 0,
+  frontBL: 0,
+  frontBR: 0,
+  backTL: 0,
+  backTR: 0,
+  backBL: 0,
+  backBR: 0,
+};
+const DEFAULT_EDGES: EdgeValues = {
+  frontTop: 0,
+  frontBottom: 0,
+  frontLeft: 0,
+  frontRight: 0,
+  backTop: 0,
+  backBottom: 0,
+  backLeft: 0,
+  backRight: 0,
+};
+const DEFAULT_SURFACE: SurfaceValues = {
+  front: 0,
+  back: 0,
+  hasPrintLines: false,
+  hasHoloScratches: false,
+  hasSurfaceScratches: false,
+  hasStaining: false,
+  hasIndentation: false,
+  hasRollerMarks: false,
+  hasColorRegistration: false,
+  hasCrease: false,
+  hasTear: false,
+};
 
-export default function GradingPanel({ certId, certIdStr, cardName, cardSet, existingGrade, onGradeApproved, onCertUpdated, pendingAnalysis, onPendingAnalysisConsumed, onManualIdentification, cardGame }: Props) {
+export default function GradingPanel({
+  certId,
+  certIdStr,
+  cardName,
+  cardSet,
+  existingGrade,
+  onGradeApproved,
+  onCertUpdated,
+  pendingAnalysis,
+  onPendingAnalysisConsumed,
+  onManualIdentification,
+  cardGame,
+}: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -143,13 +207,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // time, the PR #15 client guard omits them and the server preserves.
   const [frontLR, setFrontLR] = useState("");
   const [frontTB, setFrontTB] = useState("");
-  const [backLR, setBackLR]   = useState("");
-  const [backTB, setBackTB]   = useState("");
+  const [backLR, setBackLR] = useState("");
+  const [backTB, setBackTB] = useState("");
   const [corners, setCorners] = useState<CornerValues>(DEFAULT_CORNERS);
   const [viewerSide, setViewerSide] = useState("front");
   const [viewerZoom, setViewerZoom] = useState(1);
   const [viewerMode, setViewerMode] = useState({ fullscreen: false, markMode: false });
-  const [edges, setEdges]     = useState<EdgeValues>(DEFAULT_EDGES);
+  const [edges, setEdges] = useState<EdgeValues>(DEFAULT_EDGES);
   const [surface, setSurface] = useState<SurfaceValues>(DEFAULT_SURFACE);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [defectCandidates, setDefectCandidates] = useState<DefectCandidate[]>([]);
@@ -158,25 +222,25 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // ×1.25 edge multiplier on their own side. eye_appeal_modifier is a ±2
   // finishing tweak applied last in scoring.
   const [darkBorderFront, setDarkBorderFront] = useState(false);
-  const [darkBorderBack, setDarkBorderBack]   = useState(false);
+  const [darkBorderBack, setDarkBorderBack] = useState(false);
   const [eyeAppealModifier, setEyeAppealModifier] = useState(0);
   // Pre-grade checklist — session-only state, deliberately NOT persisted to
   // the cert. It's an operational reminder that the grader deionized the
   // card before scanning, not a data field on the certificate.
   const [deionizationComplete, setDeionizationComplete] = useState(false);
-  const [authStatus, setAuthStatus]   = useState<AuthStatus>("genuine");
-  const [authNotes, setAuthNotes]     = useState("");
-  const [privateNotes, setPrivateNotes]         = useState("");
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("genuine");
+  const [authNotes, setAuthNotes] = useState("");
+  const [privateNotes, setPrivateNotes] = useState("");
   const [gradeExplanation, setGradeExplanation] = useState("");
-  const [highlightDefect, setHighlightDefect]   = useState<number | null>(null);
+  const [highlightDefect, setHighlightDefect] = useState<number | null>(null);
 
   const [centeringOverride, setCenteringOverride] = useState<number | null>(null);
-  const [cornersOverride, setCornersOverride]     = useState<number | null>(null);
-  const [edgesOverride, setEdgesOverride]         = useState<number | null>(null);
-  const [surfaceOverride, setSurfaceOverride]     = useState<number | null>(null);
-  const [overallOverride, setOverallOverride]     = useState<number | null>(null);
+  const [cornersOverride, setCornersOverride] = useState<number | null>(null);
+  const [edgesOverride, setEdgesOverride] = useState<number | null>(null);
+  const [surfaceOverride, setSurfaceOverride] = useState<number | null>(null);
+  const [overallOverride, setOverallOverride] = useState<number | null>(null);
 
-  const [saving, setSaving]   = useState(false);
+  const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
 
   // Wall-clock timestamp when this certificate's grading panel mounted.
@@ -195,22 +259,32 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [gradeApprovedAt, setGradeApprovedAt] = useState<string | null>(null);
   const [gradeApprovedBy, setGradeApprovedBy] = useState<string | null>(null);
-  const [approved, setApproved]   = useState(false);
+  const [approved, setApproved] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
   // Post-approval edit-mode gate. Pre-approval is unchanged (auto-save still
   // runs as a draft mechanism). Post-approval, edits to the live record
   // require explicit Save — see saveEditedGrade() and cancelEdit() below.
-  const [editMode, setEditMode]       = useState(false);
-  const [editSaving, setEditSaving]   = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
   type EditSnapshot = {
-    frontLR: string; frontTB: string; backLR: string; backTB: string;
-    corners: CornerValues; edges: EdgeValues; surface: SurfaceValues;
-    defects: Defect[]; defectCandidates: DefectCandidate[];
-    authStatus: AuthStatus; authNotes: string;
-    privateNotes: string; gradeExplanation: string;
-    centeringOverride: number | null; cornersOverride: number | null;
-    edgesOverride: number | null;     surfaceOverride: number | null;
+    frontLR: string;
+    frontTB: string;
+    backLR: string;
+    backTB: string;
+    corners: CornerValues;
+    edges: EdgeValues;
+    surface: SurfaceValues;
+    defects: Defect[];
+    defectCandidates: DefectCandidate[];
+    authStatus: AuthStatus;
+    authNotes: string;
+    privateNotes: string;
+    gradeExplanation: string;
+    centeringOverride: number | null;
+    cornersOverride: number | null;
+    edgesOverride: number | null;
+    surfaceOverride: number | null;
     overallOverride: number | null;
   };
   const editSnapshotRef = useRef<EditSnapshot | null>(null);
@@ -232,7 +306,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
 
   // Quick-grade mode
   const [quickGrade, setQuickGrade] = useState(() => {
-    try { return localStorage.getItem("mv_quick_grade") === "1"; } catch { return false; }
+    try {
+      return localStorage.getItem("mv_quick_grade") === "1";
+    } catch {
+      return false;
+    }
   });
   const [quickFocusField, setQuickFocusField] = useState<"centering" | "corners" | "edges" | "surface" | null>(null);
 
@@ -241,8 +319,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
-      if (e.ctrlKey && e.key === "s") { e.preventDefault(); saveDraft(); }
-      else if (e.ctrlKey && e.key === "Enter") {
+      if (e.ctrlKey && e.key === "s") {
+        e.preventDefault();
+        saveDraft();
+      } else if (e.ctrlKey && e.key === "Enter") {
         e.preventDefault();
         // Pre-grade checklist gate — Ctrl+Enter shortcut must respect the
         // deionization checkbox the same way the Approve button does.
@@ -251,14 +331,19 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           return;
         }
         setShowConfirm(true);
-      }
-      else if (e.key === "q" || e.key === "Q") {
-        setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; });
+      } else if (e.key === "q" || e.key === "Q") {
+        setQuickGrade((v) => {
+          const next = !v;
+          try {
+            localStorage.setItem("mv_quick_grade", next ? "1" : "0");
+          } catch {}
+          return next;
+        });
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, []);
 
   // Populate from saved grading data
@@ -266,10 +351,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (!gradingData) return;
     if (gradingData.centeringFrontLr) setFrontLR(gradingData.centeringFrontLr);
     if (gradingData.centeringFrontTb) setFrontTB(gradingData.centeringFrontTb);
-    if (gradingData.centeringBackLr)  setBackLR(gradingData.centeringBackLr);
-    if (gradingData.centeringBackTb)  setBackTB(gradingData.centeringBackTb);
+    if (gradingData.centeringBackLr) setBackLR(gradingData.centeringBackLr);
+    if (gradingData.centeringBackTb) setBackTB(gradingData.centeringBackTb);
     if (gradingData.corners) setCorners(gradingData.corners);
-    if (gradingData.edges)   setEdges(gradingData.edges);
+    if (gradingData.edges) setEdges(gradingData.edges);
     if (gradingData.surface) setSurface(gradingData.surface);
     if (gradingData.defects && Array.isArray(gradingData.defects)) setDefects(gradingData.defects);
     if ((gradingData as any).aiDefectCandidates && Array.isArray((gradingData as any).aiDefectCandidates)) {
@@ -285,10 +370,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       if (typeof g.darkBorderBack === "boolean") setDarkBorderBack(g.darkBorderBack);
       else if (typeof g.darkBorder === "boolean") setDarkBorderBack(legacy);
     }
-    if (typeof (gradingData as any).eyeAppealModifier === "number") setEyeAppealModifier((gradingData as any).eyeAppealModifier);
+    if (typeof (gradingData as any).eyeAppealModifier === "number")
+      setEyeAppealModifier((gradingData as any).eyeAppealModifier);
     if (gradingData.authStatus) setAuthStatus(gradingData.authStatus);
-    if (gradingData.authNotes)  setAuthNotes(gradingData.authNotes);
-    if (gradingData.privateNotes)   setPrivateNotes(gradingData.privateNotes);
+    if (gradingData.authNotes) setAuthNotes(gradingData.authNotes);
+    if (gradingData.privateNotes) setPrivateNotes(gradingData.privateNotes);
     if (gradingData.gradeExplanation) setGradeExplanation(gradingData.gradeExplanation);
     if (gradingData.gradeApprovedBy) {
       setApproved(true);
@@ -300,19 +386,23 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // Manual centering frame rects (persisted)
     if (gradingData.centeringOuterFront) setManualOuterFront(gradingData.centeringOuterFront);
     if (gradingData.centeringInnerFront) setManualInnerFront(gradingData.centeringInnerFront);
-    if (gradingData.centeringOuterBack)  setManualOuterBack(gradingData.centeringOuterBack);
-    if (gradingData.centeringInnerBack)  setManualInnerBack(gradingData.centeringInnerBack);
-    if (gradingData.centeringMethod)     setCenteringMethod(gradingData.centeringMethod);
+    if (gradingData.centeringOuterBack) setManualOuterBack(gradingData.centeringOuterBack);
+    if (gradingData.centeringInnerBack) setManualInnerBack(gradingData.centeringInnerBack);
+    if (gradingData.centeringMethod) setCenteringMethod(gradingData.centeringMethod);
     // Hydrate saved aggregate subgrades as overrides
-    if (gradingData.cornersScore != null)  setCornersOverride(Number(gradingData.cornersScore));
-    if (gradingData.edgesScore != null)    setEdgesOverride(Number(gradingData.edgesScore));
-    if (gradingData.surfaceScore != null)  setSurfaceOverride(Number(gradingData.surfaceScore));
-    if (gradingData.grade != null)         setOverallOverride(Number(gradingData.grade));
+    if (gradingData.cornersScore != null) setCornersOverride(Number(gradingData.cornersScore));
+    if (gradingData.edgesScore != null) setEdgesOverride(Number(gradingData.edgesScore));
+    if (gradingData.surfaceScore != null) setSurfaceOverride(Number(gradingData.surfaceScore));
+    if (gradingData.grade != null) setOverallOverride(Number(gradingData.grade));
     // Centering: prefer letting centeringCalc derive from L/R + T/B ratios.
     // Fallback: if ratios are missing but a centering_score was saved, use it
     // as an override so the Overall formula still has a value to weight.
-    const hasCenteringRatios = !!(gradingData.centeringFrontLr && gradingData.centeringFrontTb &&
-                                  gradingData.centeringBackLr  && gradingData.centeringBackTb);
+    const hasCenteringRatios = !!(
+      gradingData.centeringFrontLr &&
+      gradingData.centeringFrontTb &&
+      gradingData.centeringBackLr &&
+      gradingData.centeringBackTb
+    );
     if (!hasCenteringRatios && gradingData.centeringScore != null) {
       setCenteringOverride(Number(gradingData.centeringScore));
     }
@@ -331,7 +421,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisResult | null>(null);
   const [aiIdentification, setAiIdentification] = useState<AiIdentification | null>(null);
   // Track which subgrades were set by AI (key) vs manually changed
-  const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>({});
+  const [aiSources, setAiSources] = useState<Partial<Record<"centering" | "corners" | "edges" | "surface", number>>>(
+    {}
+  );
 
   // ── v413/v414 — hooks moved here from below the `if (!hasAnyImage)` early
   // return. Originally PR #51 placed these inline near the related logic; the
@@ -354,19 +446,25 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       }
     | undefined;
 
-  const aiSubgrades = useMemo(() => ({
-    centering: aiGradingBase?.centering?.subgrade ?? null,
-    corners:   aiGradingBase?.corners?.subgrade   ?? null,
-    edges:     aiGradingBase?.edges?.subgrade     ?? null,
-    surface:   aiGradingBase?.surface?.subgrade   ?? null,
-  }), [aiGradingBase]);
+  const aiSubgrades = useMemo(
+    () => ({
+      centering: aiGradingBase?.centering?.subgrade ?? null,
+      corners: aiGradingBase?.corners?.subgrade ?? null,
+      edges: aiGradingBase?.edges?.subgrade ?? null,
+      surface: aiGradingBase?.surface?.subgrade ?? null,
+    }),
+    [aiGradingBase]
+  );
 
-  const aiConfidenceMap = useMemo(() => ({
-    centering: (aiGradingBase?.confidence?.centering as "high" | "medium" | "low" | undefined) ?? null,
-    corners:   (aiGradingBase?.confidence?.corners   as "high" | "medium" | "low" | undefined) ?? null,
-    edges:     (aiGradingBase?.confidence?.edges     as "high" | "medium" | "low" | undefined) ?? null,
-    surface:   (aiGradingBase?.confidence?.surface   as "high" | "medium" | "low" | undefined) ?? null,
-  }), [aiGradingBase]);
+  const aiConfidenceMap = useMemo(
+    () => ({
+      centering: (aiGradingBase?.confidence?.centering as "high" | "medium" | "low" | undefined) ?? null,
+      corners: (aiGradingBase?.confidence?.corners as "high" | "medium" | "low" | undefined) ?? null,
+      edges: (aiGradingBase?.confidence?.edges as "high" | "medium" | "low" | undefined) ?? null,
+      surface: (aiGradingBase?.confidence?.surface as "high" | "medium" | "low" | undefined) ?? null,
+    }),
+    [aiGradingBase]
+  );
 
   // Auto-save refs + debounced effect. autoSaveNow is a plain function
   // declaration (hoisted within this scope) so it can call setters / refs
@@ -380,23 +478,41 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // ── Post-approval explicit-save flow ──────────────────────────────────
   function captureEditSnapshot(): EditSnapshot {
     return {
-      frontLR, frontTB, backLR, backTB,
-      corners, edges, surface,
-      defects: [...defects], defectCandidates: [...defectCandidates],
-      authStatus, authNotes,
-      privateNotes, gradeExplanation,
-      centeringOverride, cornersOverride, edgesOverride, surfaceOverride,
+      frontLR,
+      frontTB,
+      backLR,
+      backTB,
+      corners,
+      edges,
+      surface,
+      defects: [...defects],
+      defectCandidates: [...defectCandidates],
+      authStatus,
+      authNotes,
+      privateNotes,
+      gradeExplanation,
+      centeringOverride,
+      cornersOverride,
+      edgesOverride,
+      surfaceOverride,
       overallOverride,
     };
   }
 
   function restoreEditSnapshot(s: EditSnapshot) {
-    setFrontLR(s.frontLR); setFrontTB(s.frontTB);
-    setBackLR(s.backLR);   setBackTB(s.backTB);
-    setCorners(s.corners); setEdges(s.edges); setSurface(s.surface);
-    setDefects(s.defects); setDefectCandidates(s.defectCandidates);
-    setAuthStatus(s.authStatus); setAuthNotes(s.authNotes);
-    setPrivateNotes(s.privateNotes); setGradeExplanation(s.gradeExplanation);
+    setFrontLR(s.frontLR);
+    setFrontTB(s.frontTB);
+    setBackLR(s.backLR);
+    setBackTB(s.backTB);
+    setCorners(s.corners);
+    setEdges(s.edges);
+    setSurface(s.surface);
+    setDefects(s.defects);
+    setDefectCandidates(s.defectCandidates);
+    setAuthStatus(s.authStatus);
+    setAuthNotes(s.authNotes);
+    setPrivateNotes(s.privateNotes);
+    setGradeExplanation(s.gradeExplanation);
     setCenteringOverride(s.centeringOverride);
     setCornersOverride(s.cornersOverride);
     setEdgesOverride(s.edgesOverride);
@@ -424,7 +540,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload()),
       });
-      const data = await res.json().catch(() => ({} as any));
+      const data = await res.json().catch(() => ({}) as any);
       if (!res.ok) {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
@@ -490,7 +606,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
     if (!certId) return;
-    if (gradeApprovedAt) return;  // auto-save is pre-approval only
+    if (gradeApprovedAt) return; // auto-save is pre-approval only
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -502,26 +618,38 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [
     certId,
-    frontLR, frontTB, backLR, backTB,
-    corners, edges, surface,
-    defects, defectCandidates,
-    authStatus, authNotes,
-    privateNotes, gradeExplanation,
-    centeringOverride, cornersOverride, edgesOverride, surfaceOverride, overallOverride,
+    frontLR,
+    frontTB,
+    backLR,
+    backTB,
+    corners,
+    edges,
+    surface,
+    defects,
+    defectCandidates,
+    authStatus,
+    authNotes,
+    privateNotes,
+    gradeExplanation,
+    centeringOverride,
+    cornersOverride,
+    edgesOverride,
+    surfaceOverride,
+    overallOverride,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
-    setAiAnalysis(prev => analysis.overall_grade ? analysis : prev);
+    setAiAnalysis((prev) => (analysis.overall_grade ? analysis : prev));
     setAiIdentification(identification);
 
     // Populate subgrade overrides from AI (skip zero = "not measured")
     const c = analysis.centering.subgrade;
     const co = analysis.corners.subgrade;
-    const e  = analysis.edges.subgrade;
-    const s  = analysis.surface.subgrade;
+    const e = analysis.edges.subgrade;
+    const s = analysis.surface.subgrade;
 
     // Centering: clear override so centeringCalc (from all 4 ratios) is authoritative
     if (c > 0) setCenteringOverride(null);
@@ -531,7 +659,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // AI re-ran → any prior manual overall override is stale. Let formula redrive.
     setOverallOverride(null);
 
-    setAiSources(prev => ({
+    setAiSources((prev) => ({
       ...prev,
       ...(c > 0 ? { centering: c } : {}),
       ...(co > 0 ? { corners: co } : {}),
@@ -542,21 +670,21 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // Populate centering ratios
     if (analysis.centering.front_left_right) setFrontLR(analysis.centering.front_left_right);
     if (analysis.centering.front_top_bottom) setFrontTB(analysis.centering.front_top_bottom);
-    if (analysis.centering.back_left_right)  setBackLR(analysis.centering.back_left_right);
-    if (analysis.centering.back_top_bottom)  setBackTB(analysis.centering.back_top_bottom);
+    if (analysis.centering.back_left_right) setBackLR(analysis.centering.back_left_right);
+    if (analysis.centering.back_top_bottom) setBackTB(analysis.centering.back_top_bottom);
 
     // Populate corners (skip if subgrade is 0 = not measured)
     if (co > 0) {
       const co2 = analysis.corners;
       setCorners({
-        frontTL: co2.front_top_left?.grade     ?? 10,
-        frontTR: co2.front_top_right?.grade    ?? 10,
-        frontBL: co2.front_bottom_left?.grade  ?? 10,
+        frontTL: co2.front_top_left?.grade ?? 10,
+        frontTR: co2.front_top_right?.grade ?? 10,
+        frontBL: co2.front_bottom_left?.grade ?? 10,
         frontBR: co2.front_bottom_right?.grade ?? 10,
-        backTL:  co2.back_top_left?.grade      ?? 10,
-        backTR:  co2.back_top_right?.grade     ?? 10,
-        backBL:  co2.back_bottom_left?.grade   ?? 10,
-        backBR:  co2.back_bottom_right?.grade  ?? 10,
+        backTL: co2.back_top_left?.grade ?? 10,
+        backTR: co2.back_top_right?.grade ?? 10,
+        backBL: co2.back_bottom_left?.grade ?? 10,
+        backBR: co2.back_bottom_right?.grade ?? 10,
       });
     }
 
@@ -564,54 +692,60 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     if (e > 0) {
       const ed = analysis.edges;
       setEdges({
-        frontTop:    ed.front_top?.grade    ?? 10,
+        frontTop: ed.front_top?.grade ?? 10,
         frontBottom: ed.front_bottom?.grade ?? 10,
-        frontLeft:   ed.front_left?.grade   ?? 10,
-        frontRight:  ed.front_right?.grade  ?? 10,
-        backTop:     ed.back_top?.grade     ?? 10,
-        backBottom:  ed.back_bottom?.grade  ?? 10,
-        backLeft:    ed.back_left?.grade    ?? 10,
-        backRight:   ed.back_right?.grade   ?? 10,
+        frontLeft: ed.front_left?.grade ?? 10,
+        frontRight: ed.front_right?.grade ?? 10,
+        backTop: ed.back_top?.grade ?? 10,
+        backBottom: ed.back_bottom?.grade ?? 10,
+        backLeft: ed.back_left?.grade ?? 10,
+        backRight: ed.back_right?.grade ?? 10,
       });
     }
 
     // Populate surface (skip if subgrade is 0)
     if (s > 0) {
-      setSurface(prev => ({
+      setSurface((prev) => ({
         ...prev,
         front: analysis.surface.front_grade ?? 10,
-        back:  analysis.surface.back_grade  ?? 10,
+        back: analysis.surface.back_grade ?? 10,
       }));
     }
 
     // Populate surface defect flags from defects array (always update if defects present)
     if (analysis.defects?.length > 0) {
-      setSurface(prev => ({
+      setSurface((prev) => ({
         ...prev,
-        hasHoloScratches: analysis.defects?.some(d => d.type === "holo_scratch"),
-        hasSurfaceScratches: analysis.defects?.some(d => d.type === "scratch"),
-        hasPrintLines: analysis.defects?.some(d => d.type === "print_line"),
-        hasStaining: analysis.defects?.some(d => d.type === "stain"),
-        hasCrease: analysis.defects?.some(d => d.type === "crease"),
-        hasTear: analysis.defects?.some(d => d.type === "tear"),
+        hasHoloScratches: analysis.defects?.some((d) => d.type === "holo_scratch"),
+        hasSurfaceScratches: analysis.defects?.some((d) => d.type === "scratch"),
+        hasPrintLines: analysis.defects?.some((d) => d.type === "print_line"),
+        hasStaining: analysis.defects?.some((d) => d.type === "stain"),
+        hasCrease: analysis.defects?.some((d) => d.type === "crease"),
+        hasTear: analysis.defects?.some((d) => d.type === "tear"),
       }));
     }
 
     // Convert AI defects to Defect format and merge with any existing human defects
     if (analysis.defects?.length > 0) {
       const humanDefects = defects.filter((d: any) => !d._aiSource);
-      const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map(d => d.id)) : 0;
-      const aiDefects: Defect[] = analysis.defects.map((ad, i) => ({
-        id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
-        type: ad.type?.replace(/_/g, " ") || "Unknown",
-        severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as "minor" | "moderate" | "significant",
-        description: ad.description || "",
-        location: ad.location || (ad as any).detected_in || "front",
-        image_side: ad.location === "back" ? "back" : "front",
-        x_percent: ad.position_x_percent ?? 50,
-        y_percent: ad.position_y_percent ?? 50,
-        _aiSource: true, // flag so image-viewer can render as red ring
-      } as Defect & { _aiSource: boolean }));
+      const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map((d) => d.id)) : 0;
+      const aiDefects: Defect[] = analysis.defects.map(
+        (ad, i) =>
+          ({
+            id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
+            type: ad.type?.replace(/_/g, " ") || "Unknown",
+            severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
+              | "minor"
+              | "moderate"
+              | "significant",
+            description: ad.description || "",
+            location: ad.location || (ad as any).detected_in || "front",
+            image_side: ad.location === "back" ? "back" : "front",
+            x_percent: ad.position_x_percent ?? 50,
+            y_percent: ad.position_y_percent ?? 50,
+            _aiSource: true, // flag so image-viewer can render as red ring
+          }) as Defect & { _aiSource: boolean }
+      );
       setDefects([...humanDefects, ...aiDefects]);
     }
 
@@ -635,24 +769,28 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
    */
   function handleRevertToAi() {
     if (!aiAnalysis) {
-      toast({ title: "No AI draft in this session", description: "Run AI Identify & Grade first", variant: "destructive" });
+      toast({
+        title: "No AI draft in this session",
+        description: "Run AI Identify & Grade first",
+        variant: "destructive",
+      });
       return;
     }
-    const c  = aiAnalysis.centering?.subgrade ?? 0;
-    const co = aiAnalysis.corners?.subgrade   ?? 0;
-    const e  = aiAnalysis.edges?.subgrade     ?? 0;
-    const s  = aiAnalysis.surface?.subgrade   ?? 0;
+    const c = aiAnalysis.centering?.subgrade ?? 0;
+    const co = aiAnalysis.corners?.subgrade ?? 0;
+    const e = aiAnalysis.edges?.subgrade ?? 0;
+    const s = aiAnalysis.surface?.subgrade ?? 0;
 
-    if (c  > 0) setCenteringOverride(null);
+    if (c > 0) setCenteringOverride(null);
     if (co > 0) setCornersOverride(co);
-    if (e  > 0) setEdgesOverride(e);
-    if (s  > 0) setSurfaceOverride(s);
+    if (e > 0) setEdgesOverride(e);
+    if (s > 0) setSurfaceOverride(s);
     setOverallOverride(null);
 
     if (aiAnalysis.centering?.front_left_right) setFrontLR(aiAnalysis.centering.front_left_right);
     if (aiAnalysis.centering?.front_top_bottom) setFrontTB(aiAnalysis.centering.front_top_bottom);
-    if (aiAnalysis.centering?.back_left_right)  setBackLR(aiAnalysis.centering.back_left_right);
-    if (aiAnalysis.centering?.back_top_bottom)  setBackTB(aiAnalysis.centering.back_top_bottom);
+    if (aiAnalysis.centering?.back_left_right) setBackLR(aiAnalysis.centering.back_left_right);
+    if (aiAnalysis.centering?.back_top_bottom) setBackTB(aiAnalysis.centering.back_top_bottom);
 
     toast({ title: "Reverted to AI draft", description: "Review and approve to save" });
   }
@@ -670,21 +808,20 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   // when no images are present yet.
 
   // Calculated subgrades
-  const centeringCalc = (frontLR && frontTB && backLR && backTB)
-    ? getCenteringGrade(frontLR, frontTB, backLR, backTB)
-    : null;
+  const centeringCalc =
+    frontLR && frontTB && backLR && backTB ? getCenteringGrade(frontLR, frontTB, backLR, backTB) : null;
   const centering = centeringOverride ?? centeringCalc ?? 10;
   const cornersCalc = calcCornerSubgrade(corners);
-  const edgesCalc   = calcEdgeSubgrade(edges);
-  const cornersGrade  = cornersOverride  ?? cornersCalc.grade;
-  const edgesGrade    = edgesOverride    ?? edgesCalc.grade;
-  const surfaceGrade  = surfaceOverride  ?? calcSurfaceSubgrade(surface);
+  const edgesCalc = calcEdgeSubgrade(edges);
+  const cornersGrade = cornersOverride ?? cornersCalc.grade;
+  const edgesGrade = edgesOverride ?? edgesCalc.grade;
+  const surfaceGrade = surfaceOverride ?? calcSurfaceSubgrade(surface);
 
   // Zone-set counts for the partial-zones indicator + worstKey for the
   // "Limited by …" tooltip on the summary stepper. Surfaced post-PR-#45
   // when admins can no longer rely on AI pre-fill across all 8 zones.
-  const cornersZonesSet = Object.values(corners).filter(v => typeof v === "number" && v > 0).length;
-  const edgesZonesSet   = Object.values(edges).filter(v => typeof v === "number" && v > 0).length;
+  const cornersZonesSet = Object.values(corners).filter((v) => typeof v === "number" && v > 0).length;
+  const edgesZonesSet = Object.values(edges).filter((v) => typeof v === "number" && v > 0).length;
 
   // AI / manual subgrades — produced from the steppers + AI baseline +
   // per-zone arrays. Used as the displayed subs when NO MVGS pins are
@@ -698,28 +835,28 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
   const mvgsForOverall = computeMvgsScore({
     centeringFrontLr: frontLR || null,
     centeringFrontTb: frontTB || null,
-    centeringBackLr:  backLR  || null,
-    centeringBackTb:  backTB  || null,
+    centeringBackLr: backLR || null,
+    centeringBackTb: backTB || null,
     defects: (defects || [])
-      .filter(d => d.mvgsCode && d.tier && d.zone)
-      .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+      .filter((d) => d.mvgsCode && d.tier && d.zone)
+      .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
     darkBorderFront,
     darkBorderBack,
     eyeAppealModifier,
   });
-  const hasMvgsPins = (defects || []).some(d => d.mvgsCode);
+  const hasMvgsPins = (defects || []).some((d) => d.mvgsCode);
 
   // MVGS subgrades — each category has a 25-pt budget; remaining points
   // bucket to 1-10. Centering's budget spans the combined front+back
   // deductions (front max -20, back max -5, total max -25). The three
   // other categories cap at -25 inside the scoring engine, so remaining ≥ 0.
   const mvgsCenteringGrade = mvgsRemainingToGrade(
-    25
-    - Math.abs(mvgsForOverall.deductions.centering_front ?? 0)
-    - Math.abs(mvgsForOverall.deductions.centering_back  ?? 0)
+    25 -
+      Math.abs(mvgsForOverall.deductions.centering_front ?? 0) -
+      Math.abs(mvgsForOverall.deductions.centering_back ?? 0)
   );
   const mvgsCornersGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.corners ?? 0));
-  const mvgsEdgesGrade   = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges   ?? 0));
+  const mvgsEdgesGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges ?? 0));
   const mvgsSurfaceGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.surface ?? 0));
 
   // Displayed + saved subs: MVGS when any pin is MVGS-classified, AI/manual
@@ -730,15 +867,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     ? { centering: mvgsCenteringGrade, corners: mvgsCornersGrade, edges: mvgsEdgesGrade, surface: mvgsSurfaceGrade }
     : aiSub;
 
-  const mvgsGrade = (hasMvgsPins && mvgsForOverall.score != null)
-    ? gradeFromMvgsScore(mvgsForOverall.score)
-    : null;
+  const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
   const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
 
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
   const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
-  const label   = getGradeLabel(overall);
+  const label = getGradeLabel(overall);
   const isBlack = checkBlackLabel(sub, overall);
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
@@ -765,9 +900,9 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       if (val != null && !isNaN(val) && val > 0) out[key] = val;
     };
     sendNum("grade_centering", sub.centering);
-    sendNum("grade_corners",   sub.corners);
-    sendNum("grade_edges",     sub.edges);
-    sendNum("grade_surface",   sub.surface);
+    sendNum("grade_corners", sub.corners);
+    sendNum("grade_edges", sub.edges);
+    sendNum("grade_surface", sub.surface);
 
     // Centering ratios — omit if empty.
     const sendTxt = (key: string, val: string | null | undefined) => {
@@ -775,18 +910,19 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     };
     sendTxt("centering_front_lr", frontLR);
     sendTxt("centering_front_tb", frontTB);
-    sendTxt("centering_back_lr",  backLR);
-    sendTxt("centering_back_tb",  backTB);
+    sendTxt("centering_back_lr", backLR);
+    sendTxt("centering_back_tb", backTB);
 
     // Zone JSONBs — only send if user has touched the panel (any non-default value).
     const hasContent = (s: unknown): boolean => {
       if (!s || typeof s !== "object") return false;
-      const vals = Object.values(s as Record<string, unknown>)
-        .filter(v => v != null && v !== 0 && v !== "" && v !== false);
+      const vals = Object.values(s as Record<string, unknown>).filter(
+        (v) => v != null && v !== 0 && v !== "" && v !== false
+      );
       return vals.length > 0;
     };
     if (hasContent(corners)) out.corners = corners;
-    if (hasContent(edges))   out.edges   = edges;
+    if (hasContent(edges)) out.edges = edges;
     if (hasContent(surface)) out.surface = surface;
 
     // Defects — server doesn't preserve this column yet (semantic ambiguity),
@@ -802,7 +938,7 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
     // actually persists (no false-as-default conflation). Server mirrors the
     // legacy dark_border column from (front OR back) — no need to send it.
     out.dark_border_front = darkBorderFront;
-    out.dark_border_back  = darkBorderBack;
+    out.dark_border_back = darkBorderBack;
     out.eye_appeal_modifier = eyeAppealModifier;
 
     return out;
@@ -850,7 +986,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
    */
   async function generateDescription() {
     if (subgradesIncomplete) {
-      toast({ title: "Set all four subgrades first", description: "Centering, corners, edges, and surface must each have a value." });
+      toast({
+        title: "Set all four subgrades first",
+        description: "Centering, corners, edges, and surface must each have a value.",
+      });
       return;
     }
     setGeneratingDescription(true);
@@ -875,7 +1014,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       }
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setGradeExplanation(data.description);
-      toast({ title: "Description generated", description: `Cost ≈ £${(data.costEstimate || 0).toFixed(4)}. Edit before saving if needed.` });
+      toast({
+        title: "Description generated",
+        description: `Cost ≈ £${(data.costEstimate || 0).toFixed(4)}. Edit before saving if needed.`,
+      });
     } catch (e: any) {
       toast({ title: "Generate failed", description: e.message, variant: "destructive" });
     } finally {
@@ -932,7 +1074,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             type="button"
             onClick={handleRevertToAi}
             disabled={!aiAnalysis}
-            title={aiAnalysis ? "Clear all overrides and re-populate sub-grades from the last AI run this session" : "Run AI Identify & Grade first to enable this"}
+            title={
+              aiAnalysis
+                ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
+                : "Run AI Identify & Grade first to enable this"
+            }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
               aiAnalysis
                 ? "text-[#555555] border border-[#D4D0C8] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
@@ -943,7 +1089,15 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           </button>
           <button
             type="button"
-            onClick={() => setQuickGrade(v => { const next = !v; try { localStorage.setItem("mv_quick_grade", next ? "1" : "0"); } catch {} return next; })}
+            onClick={() =>
+              setQuickGrade((v) => {
+                const next = !v;
+                try {
+                  localStorage.setItem("mv_quick_grade", next ? "1" : "0");
+                } catch {}
+                return next;
+              })
+            }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
             title="Toggle quick-grade mode (Q)"
           >
@@ -966,31 +1120,25 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
       {!approved && (
         <label
           className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
-            deionizationComplete
-              ? "bg-emerald-50 border-emerald-200"
-              : "bg-amber-50 border-amber-300"
+            deionizationComplete ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-300"
           }`}
           data-testid="check-deionization-complete"
         >
           <input
             type="checkbox"
             checked={deionizationComplete}
-            onChange={() => setDeionizationComplete(v => !v)}
+            onChange={() => setDeionizationComplete((v) => !v)}
             className="accent-[#D4AF37] h-4 w-4"
           />
-          <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">
-            Deionization complete
-          </span>
-          <span className="text-[10px] text-[#555] ml-auto">
-            Required before approve
-          </span>
+          <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Deionization complete</span>
+          <span className="text-[10px] text-[#555] ml-auto">Required before approve</span>
         </label>
       )}
 
       {quickGrade && (
         <QuickGrade
           subgrades={{ centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade }}
-          onChange={s => {
+          onChange={(s) => {
             setCenteringOverride(s.centering);
             setCornersOverride(s.corners);
             setEdgesOverride(s.edges);
@@ -1001,7 +1149,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             // Mirror the main Approve button's deionization gate so the
             // QuickGrade panel can't bypass it.
             if (!deionizationComplete) {
-              toast({ title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." });
+              toast({
+                title: "Confirm deionization first",
+                description: "Tick 'Deionization complete' before approving.",
+              });
               return;
             }
             setShowConfirm(true);
@@ -1027,7 +1178,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             cardGame={cardGame}
           />
         </div>
-        <ReprocessButton certId={certId} onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })} />
+        <ReprocessButton
+          certId={certId}
+          onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+        />
       </div>
 
       {/* Two-panel layout */}
@@ -1042,9 +1196,11 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               `omitSideTabs` and to use `viewerSide` as controlled state. */}
           <div className="px-[60px] mb-2">
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {(["front", "back"] as const).map(s => {
-                const count = defects.filter(d => d.image_side === s).length;
-                const hasImage = !!(urls[`${s}_cropped` as keyof typeof urls] || urls[`${s}_original` as keyof typeof urls]);
+              {(["front", "back"] as const).map((s) => {
+                const count = defects.filter((d) => d.image_side === s).length;
+                const hasImage = !!(
+                  urls[`${s}_cropped` as keyof typeof urls] || urls[`${s}_original` as keyof typeof urls]
+                );
                 const isActive = viewerSide === s;
                 return (
                   <div key={s} className="flex items-center gap-0.5">
@@ -1060,7 +1216,10 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                             ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
                             : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
                       }`}
-                    >{s}{count > 0 ? ` (${count})` : ""}</button>
+                    >
+                      {s}
+                      {count > 0 ? ` (${count})` : ""}
+                    </button>
                     {hasImage && certId && (
                       <button
                         type="button"
@@ -1069,8 +1228,14 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
                           e.stopPropagation();
                           if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                           try {
-                            const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, { method: "DELETE", credentials: "include" });
-                            if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
+                            const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, {
+                              method: "DELETE",
+                              credentials: "include",
+                            });
+                            if (!r.ok) {
+                              const d = await r.json();
+                              throw new Error(d.error);
+                            }
                             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
                           } catch {}
                         }}
@@ -1090,144 +1255,187 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               <ImageViewer
                 urls={urls}
                 defects={defects}
-                onDefectAdded={d => setDefects(prev => [...prev, d])}
+                onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
                 onDefectsChange={setDefects}
                 readOnly={gradeApprovedAt != null && !editMode}
                 highlightId={highlightDefect}
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
-                centeringFront={frontLR ? {
-                  ratioLR: frontLR,
-                  ratioTB: frontTB,
-                  outerFrame: centeringMethod === "manual" && manualOuterFront
-                    ? manualOuterFront
-                    : (aiAnalysis?.centering?.front_outer_frame || null),
-                  innerFrame: centeringMethod === "manual" && manualInnerFront
-                    ? manualInnerFront
-                    : (aiAnalysis?.centering?.front_inner_frame || null),
-                } : null}
-                centeringBack={backLR ? {
-                  ratioLR: backLR,
-                  ratioTB: backTB,
-                  outerFrame: centeringMethod === "manual" && manualOuterBack
-                    ? manualOuterBack
-                    : (aiAnalysis?.centering?.back_outer_frame || null),
-                  innerFrame: centeringMethod === "manual" && manualInnerBack
-                    ? manualInnerBack
-                    : (aiAnalysis?.centering?.back_inner_frame || null),
-                } : null}
+                centeringFront={
+                  frontLR
+                    ? {
+                        ratioLR: frontLR,
+                        ratioTB: frontTB,
+                        outerFrame:
+                          centeringMethod === "manual" && manualOuterFront
+                            ? manualOuterFront
+                            : aiAnalysis?.centering?.front_outer_frame || null,
+                        innerFrame:
+                          centeringMethod === "manual" && manualInnerFront
+                            ? manualInnerFront
+                            : aiAnalysis?.centering?.front_inner_frame || null,
+                      }
+                    : null
+                }
+                centeringBack={
+                  backLR
+                    ? {
+                        ratioLR: backLR,
+                        ratioTB: backTB,
+                        outerFrame:
+                          centeringMethod === "manual" && manualOuterBack
+                            ? manualOuterBack
+                            : aiAnalysis?.centering?.back_outer_frame || null,
+                        innerFrame:
+                          centeringMethod === "manual" && manualInnerBack
+                            ? manualInnerBack
+                            : aiAnalysis?.centering?.back_inner_frame || null,
+                      }
+                    : null
+                }
                 certId={certId}
-                onImageDeleted={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+                onImageDeleted={() =>
+                  queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })
+                }
                 onSideChange={setViewerSide}
                 onZoomChange={setViewerZoom}
                 onModeChange={setViewerMode}
               />
               {/* Top + side overlays (absolute — these work fine) */}
-              {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
-                const cc = viewerSide === "back"
-                  ? { tl: corners.backTL, tr: corners.backTR }
-                  : { tl: corners.frontTL, tr: corners.frontTR };
-                const allCorners = viewerSide === "back"
-                  ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
-                  : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
-                const cLow = Math.min(...allCorners);
-                const isCLow = (v: number) => v === cLow && cLow < 10;
-                const setC = (pos: "tl" | "tr", v: number) => {
-                  const key = viewerSide === "back"
-                    ? ({ tl: "backTL", tr: "backTR" } as const)[pos]
-                    : ({ tl: "frontTL", tr: "frontTR" } as const)[pos];
-                  setCorners(prev => ({ ...prev, [key]: v }));
-                  clearOverallOverrideIfSet();
-                };
-                const ee = viewerSide === "back"
-                  ? { top: edges.backTop, left: edges.backLeft, right: edges.backRight }
-                  : { top: edges.frontTop, left: edges.frontLeft, right: edges.frontRight };
-                const allEdges = viewerSide === "back"
-                  ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
-                  : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
-                const eLow = Math.min(...allEdges);
-                const isELow = (v: number) => v === eLow && eLow < 10;
-                const setE = (pos: "top" | "left" | "right", v: number) => {
-                  const key = viewerSide === "back"
-                    ? ({ top: "backTop", left: "backLeft", right: "backRight" } as const)[pos]
-                    : ({ top: "frontTop", left: "frontLeft", right: "frontRight" } as const)[pos];
-                  setEdges(prev => ({ ...prev, [key]: v }));
-                  clearOverallOverrideIfSet();
-                };
-                return (
-                  <>
-                    {/* TL / T / TR all anchored above the card (top:-28) so the
+              {viewerZoom <= 1 &&
+                !viewerMode.fullscreen &&
+                !viewerMode.markMode &&
+                (() => {
+                  const cc =
+                    viewerSide === "back"
+                      ? { tl: corners.backTL, tr: corners.backTR }
+                      : { tl: corners.frontTL, tr: corners.frontTR };
+                  const allCorners =
+                    viewerSide === "back"
+                      ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
+                      : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
+                  const cLow = Math.min(...allCorners);
+                  const isCLow = (v: number) => v === cLow && cLow < 10;
+                  const setC = (pos: "tl" | "tr", v: number) => {
+                    const key =
+                      viewerSide === "back"
+                        ? ({ tl: "backTL", tr: "backTR" } as const)[pos]
+                        : ({ tl: "frontTL", tr: "frontTR" } as const)[pos];
+                    setCorners((prev) => ({ ...prev, [key]: v }));
+                    clearOverallOverrideIfSet();
+                  };
+                  const ee =
+                    viewerSide === "back"
+                      ? { top: edges.backTop, left: edges.backLeft, right: edges.backRight }
+                      : { top: edges.frontTop, left: edges.frontLeft, right: edges.frontRight };
+                  const allEdges =
+                    viewerSide === "back"
+                      ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
+                      : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
+                  const eLow = Math.min(...allEdges);
+                  const isELow = (v: number) => v === eLow && eLow < 10;
+                  const setE = (pos: "top" | "left" | "right", v: number) => {
+                    const key =
+                      viewerSide === "back"
+                        ? ({ top: "backTop", left: "backLeft", right: "backRight" } as const)[pos]
+                        : ({ top: "frontTop", left: "frontLeft", right: "frontRight" } as const)[pos];
+                    setEdges((prev) => ({ ...prev, [key]: v }));
+                    clearOverallOverrideIfSet();
+                  };
+                  return (
+                    <>
+                      {/* TL / T / TR all anchored above the card (top:-28) so the
                         labels are NOT on the card art. Horizontal anchors put TL
                         flush at the card-left edge, T centred, TR at the card-right
                         edge — clear separation, plenty of horizontal gap. The
                         outer wrapper carries 32px top margin to make room. */}
-                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: 0 }}>
-                      <span className="text-[8px] font-bold text-[#555555]">TL</span>
-                      <CornerSelect value={cc.tl} onChange={v => setC("tl", v)} isLowest={isCLow(cc.tl)} />
-                    </div>
-                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, right: 0 }}>
-                      <span className="text-[8px] font-bold text-[#555555]">TR</span>
-                      <CornerSelect value={cc.tr} onChange={v => setC("tr", v)} isLowest={isCLow(cc.tr)} />
-                    </div>
-                    <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: "50%", transform: "translateX(-50%)" }}>
-                      <span className="text-[8px] font-bold text-[#555555]">T</span>
-                      <EdgeSelect value={ee.top} onChange={v => setE("top", v)} isLowest={isELow(ee.top)} />
-                    </div>
-                    <div className="absolute z-20 flex items-center gap-1" style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}>
-                      <span className="text-[8px] font-bold text-[#555555]">L</span>
-                      <EdgeSelect value={ee.left} onChange={v => setE("left", v)} isLowest={isELow(ee.left)} />
-                    </div>
-                    <div className="absolute z-20 flex items-center gap-1" style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}>
-                      <EdgeSelect value={ee.right} onChange={v => setE("right", v)} isLowest={isELow(ee.right)} />
-                      <span className="text-[8px] font-bold text-[#555555]">R</span>
-                    </div>
-                  </>
-                );
-              })()}
+                      <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: 0 }}>
+                        <span className="text-[8px] font-bold text-[#555555]">TL</span>
+                        <CornerSelect value={cc.tl} onChange={(v) => setC("tl", v)} isLowest={isCLow(cc.tl)} />
+                      </div>
+                      <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, right: 0 }}>
+                        <span className="text-[8px] font-bold text-[#555555]">TR</span>
+                        <CornerSelect value={cc.tr} onChange={(v) => setC("tr", v)} isLowest={isCLow(cc.tr)} />
+                      </div>
+                      <div
+                        className="absolute z-20 flex flex-col items-center gap-1"
+                        style={{ top: -28, left: "50%", transform: "translateX(-50%)" }}
+                      >
+                        <span className="text-[8px] font-bold text-[#555555]">T</span>
+                        <EdgeSelect value={ee.top} onChange={(v) => setE("top", v)} isLowest={isELow(ee.top)} />
+                      </div>
+                      <div
+                        className="absolute z-20 flex items-center gap-1"
+                        style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}
+                      >
+                        <span className="text-[8px] font-bold text-[#555555]">L</span>
+                        <EdgeSelect value={ee.left} onChange={(v) => setE("left", v)} isLowest={isELow(ee.left)} />
+                      </div>
+                      <div
+                        className="absolute z-20 flex items-center gap-1"
+                        style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}
+                      >
+                        <EdgeSelect value={ee.right} onChange={(v) => setE("right", v)} isLowest={isELow(ee.right)} />
+                        <span className="text-[8px] font-bold text-[#555555]">R</span>
+                      </div>
+                    </>
+                  );
+                })()}
             </div>
             {/* Bottom row — normal flow, always below card + controls */}
-            {viewerZoom <= 1 && !viewerMode.fullscreen && !viewerMode.markMode && (() => {
-              const cc = viewerSide === "back"
-                ? { bl: corners.backBL, br: corners.backBR }
-                : { bl: corners.frontBL, br: corners.frontBR };
-              const allCorners = viewerSide === "back"
-                ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
-                : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
-              const cLow = Math.min(...allCorners);
-              const isCLow = (v: number) => v === cLow && cLow < 10;
-              const setCBot = (pos: "bl" | "br", v: number) => {
-                const key = viewerSide === "back"
-                  ? ({ bl: "backBL", br: "backBR" } as const)[pos]
-                  : ({ bl: "frontBL", br: "frontBR" } as const)[pos];
-                setCorners(prev => ({ ...prev, [key]: v }));
-              };
-              const eeBot = viewerSide === "back" ? edges.backBottom : edges.frontBottom;
-              const allEdges = viewerSide === "back"
-                ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
-                : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
-              const eLow = Math.min(...allEdges);
-              const isELow = eeBot === eLow && eLow < 10;
-              return (
-                <div className="flex items-start justify-between mt-3 px-1">
-                  <div className="flex flex-col items-center gap-1">
-                    <CornerSelect value={cc.bl} onChange={v => setCBot("bl", v)} isLowest={isCLow(cc.bl)} />
-                    <span className="text-[8px] font-bold text-[#555555]">BL</span>
+            {viewerZoom <= 1 &&
+              !viewerMode.fullscreen &&
+              !viewerMode.markMode &&
+              (() => {
+                const cc =
+                  viewerSide === "back"
+                    ? { bl: corners.backBL, br: corners.backBR }
+                    : { bl: corners.frontBL, br: corners.frontBR };
+                const allCorners =
+                  viewerSide === "back"
+                    ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
+                    : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
+                const cLow = Math.min(...allCorners);
+                const isCLow = (v: number) => v === cLow && cLow < 10;
+                const setCBot = (pos: "bl" | "br", v: number) => {
+                  const key =
+                    viewerSide === "back"
+                      ? ({ bl: "backBL", br: "backBR" } as const)[pos]
+                      : ({ bl: "frontBL", br: "frontBR" } as const)[pos];
+                  setCorners((prev) => ({ ...prev, [key]: v }));
+                };
+                const eeBot = viewerSide === "back" ? edges.backBottom : edges.frontBottom;
+                const allEdges =
+                  viewerSide === "back"
+                    ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
+                    : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
+                const eLow = Math.min(...allEdges);
+                const isELow = eeBot === eLow && eLow < 10;
+                return (
+                  <div className="flex items-start justify-between mt-3 px-1">
+                    <div className="flex flex-col items-center gap-1">
+                      <CornerSelect value={cc.bl} onChange={(v) => setCBot("bl", v)} isLowest={isCLow(cc.bl)} />
+                      <span className="text-[8px] font-bold text-[#555555]">BL</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                      <EdgeSelect
+                        value={eeBot}
+                        onChange={(v) => {
+                          const key = viewerSide === "back" ? "backBottom" : "frontBottom";
+                          setEdges((prev) => ({ ...prev, [key]: v }));
+                        }}
+                        isLowest={isELow}
+                      />
+                      <span className="text-[8px] font-bold text-[#555555]">B</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                      <CornerSelect value={cc.br} onChange={(v) => setCBot("br", v)} isLowest={isCLow(cc.br)} />
+                      <span className="text-[8px] font-bold text-[#555555]">BR</span>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-center gap-1">
-                    <EdgeSelect value={eeBot} onChange={v => {
-                      const key = viewerSide === "back" ? "backBottom" : "frontBottom";
-                      setEdges(prev => ({ ...prev, [key]: v }));
-                    }} isLowest={isELow} />
-                    <span className="text-[8px] font-bold text-[#555555]">B</span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1">
-                    <CornerSelect value={cc.br} onChange={v => setCBot("br", v)} isLowest={isCLow(cc.br)} />
-                    <span className="text-[8px] font-bold text-[#555555]">BR</span>
-                  </div>
-                </div>
-              );
-            })()}
+                );
+              })()}
           </div>
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
             <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
@@ -1316,357 +1524,421 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
             disabled={gradeApprovedAt != null && !editMode}
             className="min-w-0 border-none p-0 m-0 space-y-5 disabled:opacity-70"
           >
-          {/* AI source badges */}
-          {aiAnalysis && (
-            <div className="flex gap-1 flex-wrap">
-              {(["centering", "corners", "edges", "surface"] as const).map(key => {
-                const aiVal = aiSources[key];
-                const curVal = key === "centering" ? centering : key === "corners" ? cornersGrade : key === "edges" ? edgesGrade : surfaceGrade;
-                const isManual = aiVal !== undefined && curVal !== aiVal;
-                return (
-                  <div key={key} className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${
-                    isManual
-                      ? "bg-blue-950/30 text-blue-400 border-blue-800/40"
-                      : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border-[#D4AF37]/20"
-                  }`}>
-                    <span className="uppercase font-bold">{key.slice(0, 1).toUpperCase()}</span>
-                    <span>{isManual ? `Manual (AI: ${aiVal})` : `AI ${aiVal}`}</span>
-                    <span className="text-[#D4AF37]/50">·</span>
-                    <span className={`font-bold ${
-                      aiAnalysis.confidence[key] === "high" ? "text-emerald-600" :
-                      aiAnalysis.confidence[key] === "medium" ? "text-amber-600" : "text-red-600"
-                    }`}>{aiAnalysis.confidence[key]}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            {/* AI source badges */}
+            {aiAnalysis && (
+              <div className="flex gap-1 flex-wrap">
+                {(["centering", "corners", "edges", "surface"] as const).map((key) => {
+                  const aiVal = aiSources[key];
+                  const curVal =
+                    key === "centering"
+                      ? centering
+                      : key === "corners"
+                        ? cornersGrade
+                        : key === "edges"
+                          ? edgesGrade
+                          : surfaceGrade;
+                  const isManual = aiVal !== undefined && curVal !== aiVal;
+                  return (
+                    <div
+                      key={key}
+                      className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                        isManual
+                          ? "bg-blue-950/30 text-blue-400 border-blue-800/40"
+                          : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border-[#D4AF37]/20"
+                      }`}
+                    >
+                      <span className="uppercase font-bold">{key.slice(0, 1).toUpperCase()}</span>
+                      <span>{isManual ? `Manual (AI: ${aiVal})` : `AI ${aiVal}`}</span>
+                      <span className="text-[#D4AF37]/50">·</span>
+                      <span
+                        className={`font-bold ${
+                          aiAnalysis.confidence[key] === "high"
+                            ? "text-emerald-600"
+                            : aiAnalysis.confidence[key] === "medium"
+                              ? "text-amber-600"
+                              : "text-red-600"
+                        }`}
+                      >
+                        {aiAnalysis.confidence[key]}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
-          {/* MVGS controls + live score — visible whenever the panel is in
+            {/* MVGS controls + live score — visible whenever the panel is in
               numeric-grade mode. The score updates as defects, centering,
               dark_border_front/back, and eye_appeal_modifier change locally
               — same pure function (shared/mvgs-scoring.ts) the server runs
               on approve. */}
-          {!isNonNumeric && (() => {
-            const mvgs = computeMvgsScore({
-              centeringFrontLr: frontLR || null,
-              centeringFrontTb: frontTB || null,
-              centeringBackLr:  backLR  || null,
-              centeringBackTb:  backTB  || null,
-              defects: (defects || [])
-                .filter(d => d.mvgsCode && d.tier && d.zone)
-                .map(d => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-              darkBorderFront,
-              darkBorderBack,
-              eyeAppealModifier,
-            });
-            return (
-              <div className="bg-[#FAF5E0] border border-[#D4AF37]/40 rounded-lg p-3 space-y-3" data-testid="mvgs-controls">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">MVGS</span>
-                  <span className="text-[#1A1400] text-sm font-bold" data-testid="text-mvgs-score">
-                    {mvgs.score}/100 · {mvgs.grade}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] uppercase tracking-wider text-[#555]">Dark border</span>
-                    <div className="flex gap-3">
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={darkBorderFront}
-                          onChange={() => setDarkBorderFront(v => !v)}
-                          className="accent-[#D4AF37] h-4 w-4"
-                          data-testid="check-dark-border-front"
-                        />
-                        <span className="text-[10px] text-[#555]">Front</span>
-                      </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={darkBorderBack}
-                          onChange={() => setDarkBorderBack(v => !v)}
-                          className="accent-[#D4AF37] h-4 w-4"
-                          data-testid="check-dark-border-back"
-                        />
-                        <span className="text-[10px] text-[#555]">Back</span>
-                      </label>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase tracking-wider text-[#555] block mb-1">Eye appeal</span>
-                    <div className="flex gap-1">
-                      {[-2, -1, 0, 1, 2].map(n => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => setEyeAppealModifier(n)}
-                          className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${
-                            eyeAppealModifier === n
-                              ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                              : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
-                          }`}
-                          data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
-                        >
-                          {n > 0 ? `+${n}` : n}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                {Object.keys(mvgs.deductions).length > 0 && (
-                  <div className="text-[10px] text-[#555] font-mono">
-                    {Object.entries(mvgs.deductions).map(([k, v]) => (
-                      <span key={k} className="inline-block mr-2 whitespace-nowrap">
-                        {k}: <span className={v > 0 ? "text-emerald-700" : "text-red-700"}>{v > 0 ? `+${v}` : v}</span>
+            {!isNonNumeric &&
+              (() => {
+                const mvgs = computeMvgsScore({
+                  centeringFrontLr: frontLR || null,
+                  centeringFrontTb: frontTB || null,
+                  centeringBackLr: backLR || null,
+                  centeringBackTb: backTB || null,
+                  defects: (defects || [])
+                    .filter((d) => d.mvgsCode && d.tier && d.zone)
+                    .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+                  darkBorderFront,
+                  darkBorderBack,
+                  eyeAppealModifier,
+                });
+                return (
+                  <div
+                    className="bg-[#FAF5E0] border border-[#D4AF37]/40 rounded-lg p-3 space-y-3"
+                    data-testid="mvgs-controls"
+                  >
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">MVGS</span>
+                      <span className="text-[#1A1400] text-sm font-bold" data-testid="text-mvgs-score">
+                        {mvgs.score}/100 · {mvgs.grade}
                       </span>
-                    ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[10px] uppercase tracking-wider text-[#555]">Dark border</span>
+                        <div className="flex gap-3">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={darkBorderFront}
+                              onChange={() => setDarkBorderFront((v) => !v)}
+                              className="accent-[#D4AF37] h-4 w-4"
+                              data-testid="check-dark-border-front"
+                            />
+                            <span className="text-[10px] text-[#555]">Front</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={darkBorderBack}
+                              onChange={() => setDarkBorderBack((v) => !v)}
+                              className="accent-[#D4AF37] h-4 w-4"
+                              data-testid="check-dark-border-back"
+                            />
+                            <span className="text-[10px] text-[#555]">Back</span>
+                          </label>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase tracking-wider text-[#555] block mb-1">Eye appeal</span>
+                        <div className="flex gap-1">
+                          {[-2, -1, 0, 1, 2].map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setEyeAppealModifier(n)}
+                              className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${
+                                eyeAppealModifier === n
+                                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
+                                  : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                              }`}
+                              data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
+                            >
+                              {n > 0 ? `+${n}` : n}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {Object.keys(mvgs.deductions).length > 0 && (
+                      <div className="text-[10px] text-[#555] font-mono">
+                        {Object.entries(mvgs.deductions).map(([k, v]) => (
+                          <span key={k} className="inline-block mr-2 whitespace-nowrap">
+                            {k}:{" "}
+                            <span className={v > 0 ? "text-emerald-700" : "text-red-700"}>{v > 0 ? `+${v}` : v}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                );
+              })()}
 
-          {/* Grade summary — always visible at top */}
-          {!isNonNumeric && (
-            <GradeDisplay
-              overall={overall}
-              sub={sub}
-              hasCrease={surface.hasCrease}
-              hasTear={surface.hasTear}
-              manualOverride={hasMvgsPins ? null : overallOverride}
-              onOverride={hasMvgsPins ? () => {} : setOverallOverride}
-              lockedByMvgs={hasMvgsPins}
-              gradeLabel={label}
-              isBlack={isBlack}
-              strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
-              cornersZonesSet={cornersZonesSet}
-              edgesZonesSet={edgesZonesSet}
-              cornersWorstKey={cornersOverride == null ? cornersCalc.worstKey : ""}
-              edgesWorstKey={edgesOverride == null ? edgesCalc.worstKey : ""}
-              aiSubgrades={aiSubgrades}
-              aiConfidence={aiConfidenceMap}
-              onSubgradeChange={(key, val) => {
-                if (key === "centering") setCenteringOverride(val);
-                else if (key === "corners") setCornersOverride(val);
-                else if (key === "edges") setEdgesOverride(val);
-                else if (key === "surface") setSurfaceOverride(val);
-                clearOverallOverrideIfSet();
-              }}
-            />
-          )}
-
-          {/* Cross-grade estimate */}
-          {!isNonNumeric && overall > 0 && (
-            <CrossGradeDisplay
-              mvGrade={overall}
-              subgrades={sub}
-              strengthScore={(aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null}
-            />
-          )}
-
-          {isNonNumeric && (
-            <div className="rounded-xl p-4 bg-amber-50 border border-amber-200 text-center">
-              <p className="text-amber-600 text-2xl font-black">{authStatus === "authentic_altered" ? "AA" : "NO"}</p>
-              <p className="text-amber-600 text-xs mt-1">{authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL"}</p>
-            </div>
-          )}
-
-          {/* Centering — manual measurement buttons */}
-          <div className="flex gap-2 mb-2">
-            <button type="button" onClick={() => setManualCenteringSide("front")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
-              Manual Centering (Front)
-            </button>
-            <button type="button" onClick={() => setManualCenteringSide("back")}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all">
-              Manual Centering (Back)
-            </button>
-            {centeringMethod && (
-              <span className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}>
-                {centeringMethod}
-              </span>
+            {/* Grade summary — always visible at top */}
+            {!isNonNumeric && (
+              <GradeDisplay
+                overall={overall}
+                sub={sub}
+                hasCrease={surface.hasCrease}
+                hasTear={surface.hasTear}
+                manualOverride={hasMvgsPins ? null : overallOverride}
+                onOverride={hasMvgsPins ? () => {} : setOverallOverride}
+                lockedByMvgs={hasMvgsPins}
+                gradeLabel={label}
+                isBlack={isBlack}
+                strengthScore={
+                  (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
+                }
+                cornersZonesSet={cornersZonesSet}
+                edgesZonesSet={edgesZonesSet}
+                cornersWorstKey={cornersOverride == null ? cornersCalc.worstKey : ""}
+                edgesWorstKey={edgesOverride == null ? edgesCalc.worstKey : ""}
+                aiSubgrades={aiSubgrades}
+                aiConfidence={aiConfidenceMap}
+                onSubgradeChange={(key, val) => {
+                  if (key === "centering") setCenteringOverride(val);
+                  else if (key === "corners") setCornersOverride(val);
+                  else if (key === "edges") setEdgesOverride(val);
+                  else if (key === "surface") setSurfaceOverride(val);
+                  clearOverallOverrideIfSet();
+                }}
+              />
             )}
-          </div>
 
-          <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-2">
-            <CenteringInput
-              frontLR={frontLR} frontTB={frontTB} backLR={backLR} backTB={backTB}
-              subgrade={centeringCalc}
-              onChange={(field, val) => {
-                if (field === "frontLR") setFrontLR(val);
-                else if (field === "frontTB") setFrontTB(val);
-                else if (field === "backLR") setBackLR(val);
-                else setBackTB(val);
-                clearOverallOverrideIfSet();
-              }}
-              overrideGrade={centeringOverride}
-              onOverride={v => { setCenteringOverride(v); }}
-            />
-            {/* PSA-standard centering calculator — separate from MintVault's
+            {/* Cross-grade estimate */}
+            {!isNonNumeric && overall > 0 && (
+              <CrossGradeDisplay
+                mvGrade={overall}
+                subgrades={sub}
+                strengthScore={
+                  (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
+                }
+              />
+            )}
+
+            {isNonNumeric && (
+              <div className="rounded-xl p-4 bg-amber-50 border border-amber-200 text-center">
+                <p className="text-amber-600 text-2xl font-black">{authStatus === "authentic_altered" ? "AA" : "NO"}</p>
+                <p className="text-amber-600 text-xs mt-1">
+                  {authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL"}
+                </p>
+              </div>
+            )}
+
+            {/* Centering — manual measurement buttons */}
+            <div className="flex gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setManualCenteringSide("front")}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+              >
+                Manual Centering (Front)
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualCenteringSide("back")}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+              >
+                Manual Centering (Back)
+              </button>
+              {centeringMethod && (
+                <span
+                  className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}
+                >
+                  {centeringMethod}
+                </span>
+              )}
+            </div>
+
+            <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-2">
+              <CenteringInput
+                frontLR={frontLR}
+                frontTB={frontTB}
+                backLR={backLR}
+                backTB={backTB}
+                subgrade={centeringCalc}
+                onChange={(field, val) => {
+                  if (field === "frontLR") setFrontLR(val);
+                  else if (field === "frontTB") setFrontTB(val);
+                  else if (field === "backLR") setBackLR(val);
+                  else setBackTB(val);
+                  clearOverallOverrideIfSet();
+                }}
+                overrideGrade={centeringOverride}
+                onOverride={(v) => {
+                  setCenteringOverride(v);
+                }}
+              />
+              {/* PSA-standard centering calculator — separate from MintVault's
                 lenient mapping (getCenteringGrade) shown alongside the inputs
                 above. Calls psaCenteringSubgrade and writes the result into
                 centeringOverride (same state path as the manual subgrade
                 stepper), which buildPayload() then ships via grade_centering. */}
-            {(() => {
-              const allFilled = !!(frontLR.trim() && frontTB.trim() && backLR.trim() && backTB.trim());
-              const ratioRe   = /^\s*\d+\s*\/\s*\d+\s*$/;
-              const allValid  = allFilled
-                && ratioRe.test(frontLR) && ratioRe.test(frontTB)
-                && ratioRe.test(backLR)  && ratioRe.test(backTB);
-              const isDisabled = !allValid;
-              return (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const result = psaCenteringSubgrade(frontLR, frontTB, backLR, backTB);
-                    if (!result) {
+              {(() => {
+                const allFilled = !!(frontLR.trim() && frontTB.trim() && backLR.trim() && backTB.trim());
+                const ratioRe = /^\s*\d+\s*\/\s*\d+\s*$/;
+                const allValid =
+                  allFilled &&
+                  ratioRe.test(frontLR) &&
+                  ratioRe.test(frontTB) &&
+                  ratioRe.test(backLR) &&
+                  ratioRe.test(backTB);
+                const isDisabled = !allValid;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const result = psaCenteringSubgrade(frontLR, frontTB, backLR, backTB);
+                      if (!result) {
+                        toast({
+                          title: "PSA calc unavailable",
+                          description: "PSA calc needs all 4 ratios in X/Y format (e.g. 53/47)",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      setCenteringOverride(result.subgrade);
                       toast({
-                        title: "PSA calc unavailable",
-                        description: "PSA calc needs all 4 ratios in X/Y format (e.g. 53/47)",
-                        variant: "destructive",
+                        title: `Centering set to ${result.subgrade}/10`,
+                        description: `PSA chart — worst axis: ${result.worstAxisName} ${result.worstAxisRatio} → ${result.worstAxisValue}/10`,
                       });
-                      return;
+                    }}
+                    disabled={isDisabled}
+                    title={
+                      isDisabled
+                        ? "Fill all 4 ratios in X/Y format to enable"
+                        : "Compute centering subgrade from the four ratios using the PSA chart"
                     }
-                    setCenteringOverride(result.subgrade);
-                    toast({
-                      title: `Centering set to ${result.subgrade}/10`,
-                      description: `PSA chart — worst axis: ${result.worstAxisName} ${result.worstAxisRatio} → ${result.worstAxisValue}/10`,
-                    });
-                  }}
-                  disabled={isDisabled}
-                  title={isDisabled
-                    ? "Fill all 4 ratios in X/Y format to enable"
-                    : "Compute centering subgrade from the four ratios using the PSA chart"}
-                  data-testid="btn-psa-calc"
-                  className="text-[10px] font-bold uppercase tracking-widest border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                >
-                  PSA Calc
-                </button>
-              );
-            })()}
-          </div>
+                    data-testid="btn-psa-calc"
+                    className="text-[10px] font-bold uppercase tracking-widest border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  >
+                    PSA Calc
+                  </button>
+                );
+              })()}
+            </div>
 
-          {/* Corners */}
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
-            <CornerGrading
-              values={corners}
-              subgrade={cornersGrade}
-              onChange={(v) => { setCorners(v); clearOverallOverrideIfSet(); }}
-              overrideGrade={cornersOverride}
-              onOverride={setCornersOverride}
-            />
-          </div>
+            {/* Corners */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3">
+              <CornerGrading
+                values={corners}
+                subgrade={cornersGrade}
+                onChange={(v) => {
+                  setCorners(v);
+                  clearOverallOverrideIfSet();
+                }}
+                overrideGrade={cornersOverride}
+                onOverride={setCornersOverride}
+              />
+            </div>
 
-          {/* Edges */}
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
-            <EdgeGrading
-              values={edges}
-              onChange={(v) => { setEdges(v); clearOverallOverrideIfSet(); }}
-              overrideGrade={edgesOverride}
-              onOverride={setEdgesOverride}
-            />
-          </div>
+            {/* Edges */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3">
+              <EdgeGrading
+                values={edges}
+                onChange={(v) => {
+                  setEdges(v);
+                  clearOverallOverrideIfSet();
+                }}
+                overrideGrade={edgesOverride}
+                onOverride={setEdgesOverride}
+              />
+            </div>
 
-          {/* Surface */}
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
-            <SurfaceGrading
-              values={surface}
-              onChange={(v) => { setSurface(v); clearOverallOverrideIfSet(); }}
-              overrideGrade={surfaceOverride}
-              onOverride={setSurfaceOverride}
-            />
-          </div>
+            {/* Surface */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3">
+              <SurfaceGrading
+                values={surface}
+                onChange={(v) => {
+                  setSurface(v);
+                  clearOverallOverrideIfSet();
+                }}
+                overrideGrade={surfaceOverride}
+                onOverride={setSurfaceOverride}
+              />
+            </div>
 
-          {/* Authentication */}
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
-            <Authentication
-              status={authStatus}
-              notes={authNotes}
-              onChange={(s, n) => { setAuthStatus(s); setAuthNotes(n); }}
-            />
-          </div>
+            {/* Authentication */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3">
+              <Authentication
+                status={authStatus}
+                notes={authNotes}
+                onChange={(s, n) => {
+                  setAuthStatus(s);
+                  setAuthNotes(n);
+                }}
+              />
+            </div>
 
-          {/* Generate Description (Option B — Haiku writes grade rationale
+            {/* Generate Description (Option B — Haiku writes grade rationale
               from the admin's manual subgrades + confirmed defects). */}
-          <div>
-            <button
-              type="button"
-              onClick={generateDescription}
-              disabled={generatingDescription || subgradesIncomplete}
-              title={subgradesIncomplete ? "Set all four subgrades first" : "Write a grade rationale paragraph using the current subgrades + confirmed defects"}
-              className="w-full flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37] hover:border-[#D4AF37]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              data-testid="btn-generate-description"
-            >
-              {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-              {generatingDescription ? "Writing description…" : "Generate Description"}
-            </button>
-          </div>
+            <div>
+              <button
+                type="button"
+                onClick={generateDescription}
+                disabled={generatingDescription || subgradesIncomplete}
+                title={
+                  subgradesIncomplete
+                    ? "Set all four subgrades first"
+                    : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
+                }
+                className="w-full flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37] hover:border-[#D4AF37]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                data-testid="btn-generate-description"
+              >
+                {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                {generatingDescription ? "Writing description…" : "Generate Description"}
+              </button>
+            </div>
 
-          {/* Notes */}
-          <div className="bg-[#F7F7F5] rounded-lg p-3">
-            <GradingNotes
-              privateNotes={privateNotes}
-              gradeExplanation={gradeExplanation}
-              onChange={(field, val) => {
-                if (field === "privateNotes") setPrivateNotes(val);
-                else setGradeExplanation(val);
-              }}
-            />
-          </div>
+            {/* Notes */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3">
+              <GradingNotes
+                privateNotes={privateNotes}
+                gradeExplanation={gradeExplanation}
+                onChange={(field, val) => {
+                  if (field === "privateNotes") setPrivateNotes(val);
+                  else setGradeExplanation(val);
+                }}
+              />
+            </div>
 
-          {/* v413 — single-button approval. "Save Draft" is gone; auto-save
+            {/* v413 — single-button approval. "Save Draft" is gone; auto-save
               fires silently on every blur. The button gates on subgrades
               present + overall > 0 + (post-approve, always enabled because
               the cert is live and we want edits to flow through). The auto-
               save status pip sits to the left of the button. */}
-          <div className="sticky bottom-0 pb-2 pt-1 bg-white space-y-2">
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
-              <span className="text-[#888888]">
-                {autoSaveStatus === "saving" && (
-                  <span className="flex items-center gap-1.5"><Loader2 size={10} className="animate-spin" /> Saving…</span>
-                )}
-                {autoSaveStatus === "saved"  && (
-                  <span className="flex items-center gap-1.5 text-[#16A34A]"><CheckCircle2 size={10} /> Saved</span>
-                )}
-                {autoSaveStatus === "error"  && (
-                  <span className="text-red-600">Save failed — retrying on next change</span>
-                )}
-              </span>
-              {gradeApprovedAt && (
-                <span className="text-[#16A34A]">✓ Live</span>
+            <div className="sticky bottom-0 pb-2 pt-1 bg-white space-y-2">
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
+                <span className="text-[#888888]">
+                  {autoSaveStatus === "saving" && (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 size={10} className="animate-spin" /> Saving…
+                    </span>
+                  )}
+                  {autoSaveStatus === "saved" && (
+                    <span className="flex items-center gap-1.5 text-[#16A34A]">
+                      <CheckCircle2 size={10} /> Saved
+                    </span>
+                  )}
+                  {autoSaveStatus === "error" && (
+                    <span className="text-red-600">Save failed — retrying on next change</span>
+                  )}
+                </span>
+                {gradeApprovedAt && <span className="text-[#16A34A]">✓ Live</span>}
+              </div>
+              {!approved ? (
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(true)}
+                  disabled={approving || overall <= 0 || subgradesIncomplete || !deionizationComplete}
+                  title={
+                    overall <= 0 || subgradesIncomplete
+                      ? "Set all four subgrades first"
+                      : !deionizationComplete
+                        ? "Tick 'Deionization complete' before approving"
+                        : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                  }
+                  data-testid="btn-approve-publish"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                >
+                  {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  {subgradesIncomplete
+                    ? "Set subgrades first"
+                    : !deionizationComplete
+                      ? "Confirm deionization first"
+                      : "Approve & Publish"}
+                </button>
+              ) : (
+                <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">
+                  <CheckCircle2 size={13} />
+                  Approved & Live · {certIdStr || ""}
+                </div>
               )}
             </div>
-            {!approved ? (
-              <button
-                type="button"
-                onClick={() => setShowConfirm(true)}
-                disabled={approving || overall <= 0 || subgradesIncomplete || !deionizationComplete}
-                title={
-                  overall <= 0 || subgradesIncomplete
-                    ? "Set all four subgrades first"
-                    : !deionizationComplete
-                      ? "Tick 'Deionization complete' before approving"
-                      : "Approve and publish — cert goes live and PDF becomes available at the public URL"
-                }
-                data-testid="btn-approve-publish"
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
-              >
-                {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                {subgradesIncomplete
-                  ? "Set subgrades first"
-                  : !deionizationComplete
-                    ? "Confirm deionization first"
-                    : "Approve & Publish"}
-              </button>
-            ) : (
-              <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">
-                <CheckCircle2 size={13} />
-                Approved & Live · {certIdStr || ""}
-              </div>
-            )}
-          </div>
           </fieldset>
         </div>
       </div>
@@ -1678,23 +1950,26 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           side={manualCenteringSide}
           imageUrl={
             manualCenteringSide === "front"
-              ? (urls.front_cropped || urls.front_original || "")
-              : (urls.back_cropped || urls.back_original || "")
+              ? urls.front_cropped || urls.front_original || ""
+              : urls.back_cropped || urls.back_original || ""
           }
           existingOuter={
             manualCenteringSide === "front"
-              ? (manualOuterFront || (gradingData as any)?.centeringOuterFront || null)
-              : (manualOuterBack  || (gradingData as any)?.centeringOuterBack  || null)
+              ? manualOuterFront || (gradingData as any)?.centeringOuterFront || null
+              : manualOuterBack || (gradingData as any)?.centeringOuterBack || null
           }
           existingInner={
             manualCenteringSide === "front"
-              ? (manualInnerFront || (gradingData as any)?.centeringInnerFront || null)
-              : (manualInnerBack  || (gradingData as any)?.centeringInnerBack  || null)
+              ? manualInnerFront || (gradingData as any)?.centeringInnerFront || null
+              : manualInnerBack || (gradingData as any)?.centeringInnerBack || null
           }
           aiRatios={
             manualCenteringSide === "front"
-              ? { lr: (gradingData as any)?.centeringFrontLr ?? null, tb: (gradingData as any)?.centeringFrontTb ?? null }
-              : { lr: (gradingData as any)?.centeringBackLr  ?? null, tb: (gradingData as any)?.centeringBackTb  ?? null }
+              ? {
+                  lr: (gradingData as any)?.centeringFrontLr ?? null,
+                  tb: (gradingData as any)?.centeringFrontTb ?? null,
+                }
+              : { lr: (gradingData as any)?.centeringBackLr ?? null, tb: (gradingData as any)?.centeringBackTb ?? null }
           }
           onSave={(result) => {
             if (result.side === "front") {
@@ -1724,9 +1999,17 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
           <div className="bg-[#111111] border border-[#333333] rounded-xl p-6 max-w-sm w-full space-y-4">
             <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Approve &amp; Publish</p>
             <p className="text-[#CCCCCC] text-sm">
-              Publish grade of <strong className="text-white">{finalGradeOverall} — {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}</strong> for <strong className="text-white">{cardName}</strong> ({cardSet})?
+              Publish grade of{" "}
+              <strong className="text-white">
+                {finalGradeOverall} —{" "}
+                {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}
+              </strong>{" "}
+              for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
-            <p className="text-[#555555] text-xs">The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to subgrades or notes will be live immediately (recorded in the audit log).</p>
+            <p className="text-[#555555] text-xs">
+              The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to
+              subgrades or notes will be live immediately (recorded in the audit log).
+            </p>
             {isBlack && (
               <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
                 <span className="text-lg">★</span>
@@ -1734,7 +2017,13 @@ export default function GradingPanel({ certId, certIdStr, cardName, cardSet, exi
               </div>
             )}
             <div className="flex gap-2">
-              <button type="button" onClick={() => setShowConfirm(false)} className="border border-[#333333] text-[#555555] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]">Cancel</button>
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="border border-[#333333] text-[#555555] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]"
+              >
+                Cancel
+              </button>
               <button
                 type="button"
                 onClick={() => approveGrade()}

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import DOMPurify from "dompurify";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -26,22 +27,25 @@ function sanitizeBody(html: string): string {
     .replace(/href="\/guides\/([^"]+)"/gi, 'href="/journal/$1"')
     .replace(/<h2([^>]*)>(.*?)<\/h2>/gi, (_match, attrs, content) => {
       const text = String(content).replace(/<[^>]*>/g, "");
-      const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const id = text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
       return `<h2${attrs} id="${id}">${content}</h2>`;
     });
 }
 
 // Published-date-adjacent: closest N by |publishedDate delta|, excluding self.
 function getDateAdjacent(slug: string, count = 3): Guide[] {
-  const current = guides.find(g => g.slug === slug);
+  const current = guides.find((g) => g.slug === slug);
   if (!current) return [];
   const currentMs = new Date(current.publishedDate).getTime();
   return guides
-    .filter(g => g.slug !== slug)
-    .map(g => ({ g, delta: Math.abs(new Date(g.publishedDate).getTime() - currentMs) }))
+    .filter((g) => g.slug !== slug)
+    .map((g) => ({ g, delta: Math.abs(new Date(g.publishedDate).getTime() - currentMs) }))
     .sort((a, b) => a.delta - b.delta)
     .slice(0, count)
-    .map(x => x.g);
+    .map((x) => x.g);
 }
 
 const PROSE_CSS = `
@@ -115,10 +119,7 @@ export default function JournalDetailV2() {
   const slug = params.slug || "";
   const guide = getGuideBySlug(slug);
 
-  const sanitizedBody = useMemo(
-    () => (guide ? sanitizeBody(guide.body) : ""),
-    [guide]
-  );
+  const sanitizedBody = useMemo(() => (guide ? DOMPurify.sanitize(sanitizeBody(guide.body)) : ""), [guide]);
   const related = useMemo(() => (guide ? getDateAdjacent(guide.slug) : []), [guide]);
 
   // ── 404 fallback ──
@@ -208,10 +209,7 @@ export default function JournalDetailV2() {
       {/* ── SECTION C: BODY ────────────────────────────────────────── */}
       <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
-          <article
-            className="mv-prose"
-            dangerouslySetInnerHTML={{ __html: sanitizedBody }}
-          />
+          <article className="mv-prose" dangerouslySetInnerHTML={{ __html: sanitizedBody }} />
         </div>
       </section>
 

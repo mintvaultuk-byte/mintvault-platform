@@ -55,7 +55,13 @@ app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
   const host = (req.headers.host || "").toLowerCase();
   // Skip redirect on staging — APP_URL identifies which fly app is canonical for itself.
-  const appUrlHost = (() => { try { return new URL(process.env.APP_URL || "").host.toLowerCase(); } catch { return ""; } })();
+  const appUrlHost = (() => {
+    try {
+      return new URL(process.env.APP_URL || "").host.toLowerCase();
+    } catch {
+      return "";
+    }
+  })();
   if (appUrlHost && host === appUrlHost) return next();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
     console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
@@ -80,7 +86,9 @@ app.get("/api/db-check", async (_req, res) => {
   try {
     const parsed = new URL(dbUrl);
     const testPool = new pg.Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-    const result = await testPool.query("SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name");
+    const result = await testPool.query(
+      "SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name"
+    );
     await testPool.end();
     res.json({
       env: process.env.NODE_ENV || "development",
@@ -100,7 +108,10 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
+        scriptSrc:
+          process.env.NODE_ENV === "production"
+            ? ["'self'", "https://js.stripe.com"]
+            : ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:", "https://*.r2.cloudflarestorage.com", "https://i.ebayimg.com"],
         connectSrc: ["'self'", "https://api.stripe.com", "wss:"],
@@ -164,31 +175,27 @@ if (!process.env.STRIPE_PUBLISHABLE_KEY) {
   console.warn("[stripe] STRIPE_PUBLISHABLE_KEY not set — payments disabled");
 }
 
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    const signature = req.headers["stripe-signature"];
-    if (!signature) {
-      return res.status(400).json({ error: "Missing stripe-signature" });
-    }
-
-    try {
-      const sig = Array.isArray(signature) ? signature[0] : signature;
-
-      if (!Buffer.isBuffer(req.body)) {
-        console.error("STRIPE WEBHOOK ERROR: req.body is not a Buffer");
-        return res.status(500).json({ error: "Webhook processing error" });
-      }
-
-      await WebhookHandlers.processWebhook(req.body as Buffer, sig);
-      res.status(200).json({ received: true });
-    } catch (error: any) {
-      console.error("Webhook error:", error.message);
-      res.status(400).json({ error: "Webhook processing error" });
-    }
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  const signature = req.headers["stripe-signature"];
+  if (!signature) {
+    return res.status(400).json({ error: "Missing stripe-signature" });
   }
-);
+
+  try {
+    const sig = Array.isArray(signature) ? signature[0] : signature;
+
+    if (!Buffer.isBuffer(req.body)) {
+      console.error("STRIPE WEBHOOK ERROR: req.body is not a Buffer");
+      return res.status(500).json({ error: "Webhook processing error" });
+    }
+
+    await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+    res.status(200).json({ received: true });
+  } catch (error: any) {
+    console.error("Webhook error:", error.message);
+    res.status(400).json({ error: "Webhook processing error" });
+  }
+});
 
 app.use(
   express.json({
@@ -212,7 +219,13 @@ app.use(
       pool: sessionPool,
       createTableIfMissing: false,
     }),
-    secret: process.env.SESSION_SECRET || "mintvault-session-secret-fallback",
+    secret: (() => {
+      const s = process.env.SESSION_SECRET;
+      if (!s && process.env.NODE_ENV === "production") {
+        throw new Error("SESSION_SECRET is required in production");
+      }
+      return s || "mintvault-dev-only-secret";
+    })(),
     name: "mv.sid",
     resave: false,
     saveUninitialized: false,
@@ -343,15 +356,22 @@ async function runTransferV2Sweep() {
       const { sendTransferV2Expired } = await import("./email");
       const { storage: storageForAudit } = await import("./storage");
       for (const row of expired) {
-        try { await sendTransferV2Expired({ email: row.fromEmail, certId: row.certId, reason: row.reason }); } catch (e: any) {
+        try {
+          await sendTransferV2Expired({ email: row.fromEmail, certId: row.certId, reason: row.reason });
+        } catch (e: any) {
           log(`[transfer-v2] Expired email to fromEmail failed: ${e.message}`, "transfer-v2");
         }
-        try { await sendTransferV2Expired({ email: row.toEmail, certId: row.certId, reason: row.reason }); } catch (e: any) {
+        try {
+          await sendTransferV2Expired({ email: row.toEmail, certId: row.certId, reason: row.reason });
+        } catch (e: any) {
           log(`[transfer-v2] Expired email to toEmail failed: ${e.message}`, "transfer-v2");
         }
         try {
           await storageForAudit.writeAuditLog("transfer", String(row.transferId), "transfer_v2.expired", null, {
-            certId: row.certId, reason: row.reason, fromEmail: row.fromEmail, toEmail: row.toEmail,
+            certId: row.certId,
+            reason: row.reason,
+            fromEmail: row.fromEmail,
+            toEmail: row.toEmail,
           });
         } catch {}
       }
@@ -371,7 +391,12 @@ async function runTransferV2Sweep() {
           // Email both parties
           try {
             await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
-            await sendTransferV2Completed({ email: result.toEmail!, certId: result.certId!, role: "incoming", newKeeperName: result.ownerName });
+            await sendTransferV2Completed({
+              email: result.toEmail!,
+              certId: result.certId!,
+              role: "incoming",
+              newKeeperName: result.ownerName,
+            });
           } catch (emailErr: any) {
             log(`[transfer-v2] Completion emails failed (non-fatal): ${emailErr.message}`, "transfer-v2");
           }
@@ -408,7 +433,12 @@ async function runTransferV2Sweep() {
     try {
       const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
       await runEmbedCorpusJob();
-      setInterval(() => { runEmbedCorpusJob().catch(e => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus")); }, 60 * 60 * 1000);
+      setInterval(
+        () => {
+          runEmbedCorpusJob().catch((e) => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus"));
+        },
+        60 * 60 * 1000
+      );
     } catch (err: any) {
       log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
     }
@@ -455,9 +485,9 @@ async function runTransferV2Sweep() {
       const summary = await archiveStaleImages({ dryRun: false, batchSize: 50, ageDays: 90 });
       log(
         `summary: certs=${summary.certsProcessed} copied=${summary.objectsCopied} ` +
-        `skipped=${summary.objectsSkipped} bytes=${(summary.bytesCopied / 1024 / 1024).toFixed(2)}MB ` +
-        `errors=${summary.errors}`,
-        "archival-b2",
+          `skipped=${summary.objectsSkipped} bytes=${(summary.bytesCopied / 1024 / 1024).toFixed(2)}MB ` +
+          `errors=${summary.errors}`,
+        "archival-b2"
       );
     } catch (err: any) {
       log(`sweep error: ${err?.message || err}`, "archival-b2");
@@ -497,18 +527,21 @@ async function runTransferV2Sweep() {
       // Resolved AI feature-flag state at boot — surfaces in Fly logs so we can
       // confirm which AI features are live without exec'ing into the machine.
       const { FEATURE_FLAGS: FF } = require("./config/feature-flags");
-      console.log("[ai-flags]", JSON.stringify({
-        identify:           FF.AI_IDENTIFY_ENABLED,
-        defect_suggest:     FF.AI_DEFECT_SUGGEST_ENABLED,
-        haiku_quick_grade:  FF.AI_HAIKU_QUICK_GRADE_ENABLED,
-        full_grade:         FF.AI_FULL_GRADE_ENABLED,
-        centering:          FF.AI_CENTERING_ENABLED,
-        standalone_detect:  FF.AI_STANDALONE_DETECT_ENABLED,
-        standalone_grade:   FF.AI_STANDALONE_GRADE_ENABLED,
-        description_gen:    FF.AI_DESCRIPTION_GEN_ENABLED,
-        gpt_second_opinion: FF.AI_GPT_SECOND_OPINION_ENABLED,
-        public_estimate:    FF.AI_PUBLIC_ESTIMATE_ENABLED,
-      }));
+      console.log(
+        "[ai-flags]",
+        JSON.stringify({
+          identify: FF.AI_IDENTIFY_ENABLED,
+          defect_suggest: FF.AI_DEFECT_SUGGEST_ENABLED,
+          haiku_quick_grade: FF.AI_HAIKU_QUICK_GRADE_ENABLED,
+          full_grade: FF.AI_FULL_GRADE_ENABLED,
+          centering: FF.AI_CENTERING_ENABLED,
+          standalone_detect: FF.AI_STANDALONE_DETECT_ENABLED,
+          standalone_grade: FF.AI_STANDALONE_GRADE_ENABLED,
+          description_gen: FF.AI_DESCRIPTION_GEN_ENABLED,
+          gpt_second_opinion: FF.AI_GPT_SECOND_OPINION_ENABLED,
+          public_estimate: FF.AI_PUBLIC_ESTIMATE_ENABLED,
+        })
+      );
     }
   );
 })();

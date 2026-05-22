@@ -1,6 +1,19 @@
 import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Eye, EyeOff, X, Maximize2, ZoomIn, ZoomOut, RotateCcw, Trash2, Upload, Loader2, Crop } from "lucide-react";
+import {
+  Pencil,
+  Eye,
+  EyeOff,
+  X,
+  Maximize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Trash2,
+  Upload,
+  Loader2,
+  Crop,
+} from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
 import { DEFECT_TYPES, MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
@@ -28,7 +41,12 @@ interface ImageUrls {
   closeup_cropped?: string | null;
 }
 
-interface FrameRect { left_pct: number; right_pct: number; top_pct: number; bottom_pct: number; }
+interface FrameRect {
+  left_pct: number;
+  right_pct: number;
+  top_pct: number;
+  bottom_pct: number;
+}
 
 export interface CenteringOverlayData {
   ratioLR: string;
@@ -74,17 +92,17 @@ const SEVERITY_VALUES: Defect["severity"][] = ["minor", "moderate", "significant
 
 const SIDES: Side[] = ["front", "back"];
 const VARIANTS: { key: Variant; label: string }[] = [
-  { key: "original",     label: "Original" },
-  { key: "greyscale",    label: "Greyscale" },
+  { key: "original", label: "Original" },
+  { key: "greyscale", label: "Greyscale" },
   { key: "highcontrast", label: "Hi-Contrast" },
   { key: "edgeenhanced", label: "Edge" },
-  { key: "inverted",     label: "Inverted" },
+  { key: "inverted", label: "Inverted" },
 ];
 
 function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
   if (variant === "original") return urls[`${side}_cropped`] || urls[`${side}_original`] || null;
   const key = `${side}_${variant}` as keyof ImageUrls;
-  return urls[key] as string | null || urls[`${side}_cropped`] || urls[`${side}_original`] || null;
+  return (urls[key] as string | null) || urls[`${side}_cropped`] || urls[`${side}_original`] || null;
 }
 
 function hasAny(urls: ImageUrls, side: Side): boolean {
@@ -94,12 +112,16 @@ function hasAny(urls: ImageUrls, side: Side): boolean {
 const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6];
 
 function nextZoomStep(current: number): number {
-  for (const s of ZOOM_STEPS) { if (s > current + 0.01) return s; }
+  for (const s of ZOOM_STEPS) {
+    if (s > current + 0.01) return s;
+  }
   return ZOOM_STEPS[ZOOM_STEPS.length - 1];
 }
 
 function prevZoomStep(current: number): number {
-  for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) { if (ZOOM_STEPS[i] < current - 0.01) return ZOOM_STEPS[i]; }
+  for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) {
+    if (ZOOM_STEPS[i] < current - 0.01) return ZOOM_STEPS[i];
+  }
   return 1;
 }
 
@@ -111,7 +133,24 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
-export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsChange, highlightId, referenceImageUrl, centeringFront, centeringBack, certId, onImageDeleted, onSideChange, onZoomChange, onModeChange, readOnly, side: controlledSide, omitSideTabs }: Props) {
+export default function ImageViewer({
+  urls,
+  defects,
+  onDefectAdded,
+  onDefectsChange,
+  highlightId,
+  referenceImageUrl,
+  centeringFront,
+  centeringBack,
+  certId,
+  onImageDeleted,
+  onSideChange,
+  onZoomChange,
+  onModeChange,
+  readOnly,
+  side: controlledSide,
+  omitSideTabs,
+}: Props) {
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
   // values from the live `defects` array (avoids stale closures during edit).
@@ -126,7 +165,10 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   useEffect(() => {
     if (editingDefectId == null) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setEditingDefectId(null); setEditingDefectAnchor(null); }
+      if (e.key === "Escape") {
+        setEditingDefectId(null);
+        setEditingDefectAnchor(null);
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -136,11 +178,11 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   // because `clickable` falls through to false).
   function updateDefectField<K extends keyof Defect>(id: number, key: K, value: Defect[K]) {
     if (!onDefectsChange) return;
-    onDefectsChange(defects.map(d => d.id === id ? { ...d, [key]: value } : d));
+    onDefectsChange(defects.map((d) => (d.id === id ? { ...d, [key]: value } : d)));
   }
   function deleteDefect(id: number) {
     if (!onDefectsChange) return;
-    onDefectsChange(defects.filter(d => d.id !== id));
+    onDefectsChange(defects.filter((d) => d.id !== id));
     setEditingDefectId(null);
     setEditingDefectAnchor(null);
   }
@@ -182,12 +224,24 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     }
   }, [side, onZoomChange]);
   function setZoom(z: number | ((prev: number) => number)) {
-    setZoomRaw(prev => { const next = typeof z === "function" ? z(prev) : z; onZoomChange?.(next); return next; });
+    setZoomRaw((prev) => {
+      const next = typeof z === "function" ? z(prev) : z;
+      onZoomChange?.(next);
+      return next;
+    });
   }
-  function setMarkMode(v: boolean) { setMarkModeRaw(v); onModeChange?.({ fullscreen: fullscreen, markMode: v }); }
-  function setFullscreen(v: boolean) { setFullscreenRaw(v); onModeChange?.({ fullscreen: v, markMode: markMode }); }
+  function setMarkMode(v: boolean) {
+    setMarkModeRaw(v);
+    onModeChange?.({ fullscreen: fullscreen, markMode: v });
+  }
+  function setFullscreen(v: boolean) {
+    setFullscreenRaw(v);
+    onModeChange?.({ fullscreen: v, markMode: markMode });
+  }
 
-  useEffect(() => { onSideChange?.("front"); }, []);
+  useEffect(() => {
+    onSideChange?.("front");
+  }, []);
   const [manualCropSide, setManualCropSide] = useState<"front" | "back" | null>(null);
   // Batch defect placement: admin drops multiple pins (each click adds one),
   // then assigns a defect type once for the whole batch via the picker.
@@ -196,10 +250,20 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   // because the image container has a scale() transform which would break
   // position:fixed otherwise). localId is the 1..N display number; real
   // defect ids are assigned in commitBatch.
-  type PendingPin = { x: number; y: number; pxX: number; pxY: number; location: string; image_side: string; localId: number };
+  type PendingPin = {
+    x: number;
+    y: number;
+    pxX: number;
+    pxY: number;
+    location: string;
+    image_side: string;
+    localId: number;
+  };
   const [pendingBatch, setPendingBatch] = useState<PendingPin[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerAnchor, setPickerAnchor] = useState<{ pxX: number; pxY: number; xPct: number; yPct: number } | null>(null);
+  const [pickerAnchor, setPickerAnchor] = useState<{ pxX: number; pxY: number; xPct: number; yPct: number } | null>(
+    null
+  );
   // MVGS tier selection inside the picker — defaults to D2 (most common
   // mid-tier) so a single click + type pick can commit the batch.
   const [pickerTier, setPickerTier] = useState<"D1" | "D2" | "D3">("D2");
@@ -208,9 +272,9 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   const imgElRef = useRef<HTMLImageElement>(null);
 
   const currentUrl = getUrl(urls, side, variant);
-  const sideDefects = defects.filter(d => d.image_side === side);
-  const frontDefectCount = defects.filter(d => d.image_side === "front").length;
-  const backDefectCount = defects.filter(d => d.image_side === "back").length;
+  const sideDefects = defects.filter((d) => d.image_side === side);
+  const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
+  const backDefectCount = defects.filter((d) => d.image_side === "back").length;
 
   // Keyboard shortcuts for fullscreen mode. Esc unwinds in order:
   // picker → pending batch → exit. Enter on a non-empty batch opens
@@ -221,20 +285,26 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
       const t = e.target as HTMLElement | null;
       const inField = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || (t as any).isContentEditable);
       if (e.key === "Escape") {
-        if (pickerOpen) { setPickerOpen(false); setPickerAnchor(null); return; }
-        if (pendingBatch.length > 0) { setPendingBatch([]); return; }
-        setFullscreen(false); setMarkMode(false);
-      }
-      else if (e.key === "Enter" && !inField && pendingBatch.length > 0 && !pickerOpen) {
+        if (pickerOpen) {
+          setPickerOpen(false);
+          setPickerAnchor(null);
+          return;
+        }
+        if (pendingBatch.length > 0) {
+          setPendingBatch([]);
+          return;
+        }
+        setFullscreen(false);
+        setMarkMode(false);
+      } else if (e.key === "Enter" && !inField && pendingBatch.length > 0 && !pickerOpen) {
         e.preventDefault();
         openTypePicker();
-      }
-      else if (!inField && (e.key === "f" || e.key === "F")) setSide("front");
+      } else if (!inField && (e.key === "f" || e.key === "F")) setSide("front");
       else if (!inField && (e.key === "b" || e.key === "B")) setSide("back");
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [fullscreen, pendingBatch, pickerOpen]);
 
   function enterMarkMode() {
@@ -266,7 +336,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
       const cx = Math.max(0, Math.min(100, xPct));
       const cy = Math.max(0, Math.min(100, yPct));
       const locDesc = locationFromPercent(cx, cy, side);
-      setPendingBatch(prev => [
+      setPendingBatch((prev) => [
         ...prev,
         { x: cx, y: cy, pxX: e.clientX, pxY: e.clientY, location: locDesc, image_side: side, localId: prev.length + 1 },
       ]);
@@ -285,9 +355,16 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     e.preventDefault(); // prevent page scroll but don't zoom — use buttons instead
   }
 
-  function zoomIn() { setZoom(z => nextZoomStep(z)); }
-  function zoomOut() { setZoom(z => prevZoomStep(z)); }
-  function zoomReset() { setZoom(1); setPan({ x: 50, y: 50 }); }
+  function zoomIn() {
+    setZoom((z) => nextZoomStep(z));
+  }
+  function zoomOut() {
+    setZoom((z) => prevZoomStep(z));
+  }
+  function zoomReset() {
+    setZoom(1);
+    setPan({ x: 50, y: 50 });
+  }
 
   function handleMouseDown(e: React.MouseEvent) {
     if (zoom <= 1 && !markMode) return;
@@ -301,7 +378,9 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
   }
 
-  function handleMouseUp() { setDragging(false); }
+  function handleMouseUp() {
+    setDragging(false);
+  }
 
   function openTypePicker() {
     const last = pendingBatch[pendingBatch.length - 1];
@@ -311,7 +390,7 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   }
 
   function commitBatch(opts: { mvgsCode: MvgsCode; label: string; tier: "D1" | "D2" | "D3" }) {
-    let nextId = defects.length > 0 ? Math.max(...defects.map(d => d.id)) + 1 : 1;
+    let nextId = defects.length > 0 ? Math.max(...defects.map((d) => d.id)) + 1 : 1;
     for (const pin of pendingBatch) {
       // Auto-derive zone from coords + side per the MVGS spec. Admin can
       // hand-edit later via the defect-annotation list if needed.
@@ -346,9 +425,8 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     setPickerAnchor(null);
   }
 
-  const transformStyle = zoom > 1
-    ? `scale(${zoom}) translate(${(50 - pan.x) / zoom}%, ${(50 - pan.y) / zoom}%)`
-    : "none";
+  const transformStyle =
+    zoom > 1 ? `scale(${zoom}) translate(${(50 - pan.x) / zoom}%, ${(50 - pan.y) / zoom}%)` : "none";
   const transitionStyle = dragging ? "none" : "transform 0.15s";
 
   // ── Shared tab bar ──────────────────────────────────────────────────────
@@ -362,58 +440,85 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
     return (
       <div className="space-y-1">
         {showSideTabs && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {SIDES.map(s => {
-            const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
-            const hasImage = hasAny(urls, s);
-            return (
-              <div key={s} className="flex items-center gap-0.5">
-                <button type="button"
-                  onClick={() => { setSide(s); setShowReference(false); zoomReset(); }}
-                  disabled={!hasImage}
-                  className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
-                    side === s && !showReference
-                      ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
-                      : hasImage ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40" : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
-                  }`}
-                >{s}{count > 0 ? ` (${count})` : ""}</button>
-                {hasImage && certId && !fullscreen && (
-                  <button type="button" title={`Delete ${s} image`}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
-                      try {
-                        const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, { method: "DELETE", credentials: "include" });
-                        if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
-                        onImageDeleted?.();
-                      } catch {}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {SIDES.map((s) => {
+              const count = s === "front" ? frontDefectCount : s === "back" ? backDefectCount : 0;
+              const hasImage = hasAny(urls, s);
+              return (
+                <div key={s} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSide(s);
+                      setShowReference(false);
+                      zoomReset();
                     }}
-                    className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                    disabled={!hasImage}
+                    className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                      side === s && !showReference
+                        ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                        : hasImage
+                          ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
+                          : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
+                    }`}
                   >
-                    <Trash2 size={10} />
+                    {s}
+                    {count > 0 ? ` (${count})` : ""}
                   </button>
-                )}
-              </div>
-            );
-          })}
-          {!fullscreen && referenceImageUrl && (
-            <button type="button" onClick={() => setShowReference(v => !v)}
-              className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"}`}
-            >Reference</button>
-          )}
-        </div>
+                  {hasImage && certId && !fullscreen && (
+                    <button
+                      type="button"
+                      title={`Delete ${s} image`}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
+                        try {
+                          const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, {
+                            method: "DELETE",
+                            credentials: "include",
+                          });
+                          if (!r.ok) {
+                            const d = await r.json();
+                            throw new Error(d.error);
+                          }
+                          onImageDeleted?.();
+                        } catch {}
+                      }}
+                      className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {!fullscreen && referenceImageUrl && (
+              <button
+                type="button"
+                onClick={() => setShowReference((v) => !v)}
+                className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"}`}
+              >
+                Reference
+              </button>
+            )}
+          </div>
         )}
         <div className="flex gap-1 overflow-x-auto">
-          {VARIANTS.filter(v => {
+          {VARIANTS.filter((v) => {
             // Original is always available (falls back to cropped or original)
             if (v.key === "original") return true;
             // Other variants only show if their URL exists for this side
             const key = `${side}_${v.key}` as keyof ImageUrls;
             return urls[key] != null;
-          }).map(v => (
-            <button key={v.key} type="button" onClick={() => setVariant(v.key)}
+          }).map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              onClick={() => setVariant(v.key)}
               className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#333333]"}`}
-            >{v.label}</button>
+            >
+              {v.label}
+            </button>
           ))}
         </div>
       </div>
@@ -424,201 +529,380 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
   function renderImageArea(maxH: string | number) {
     return (
       <>
-      <div
-        ref={containerRef}
-        className={`relative overflow-hidden rounded-[5%] select-none ${
-          markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
-        }`}
-        style={{ aspectRatio: "5/7", maxHeight: maxH }}
-        onClick={handleContainerClick}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        {currentUrl ? (
-          <div className={`relative w-full h-full ${markMode ? '' : 'overflow-hidden'}`} style={{ transform: transformStyle, transition: transitionStyle }}>
-            <img ref={imgElRef} src={currentUrl} alt={`${side} ${variant}`} className="w-full h-full object-contain" draggable={false} />
+        <div
+          ref={containerRef}
+          className={`relative overflow-hidden rounded-[5%] select-none ${
+            markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
+          }`}
+          style={{ aspectRatio: "5/7", maxHeight: maxH }}
+          onClick={handleContainerClick}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {currentUrl ? (
+            <div
+              className={`relative w-full h-full ${markMode ? "" : "overflow-hidden"}`}
+              style={{ transform: transformStyle, transition: transitionStyle }}
+            >
+              <img
+                ref={imgElRef}
+                src={currentUrl}
+                alt={`${side} ${variant}`}
+                className="w-full h-full object-contain"
+                draggable={false}
+              />
 
-            {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
-            {showCentering && (() => {
-              const cd = side === "front" ? centeringFront : centeringBack;
-              if (!cd) return null;
-              const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
-              const inner = cd.innerFrame;
-              // Compute geometric centering from outer + inner frame coordinates
-              let lPct = 50, rPct = 50, tPct = 50, bPct = 50;
-              if (inner) {
-                const leftM = inner.left_pct - outer.left_pct;
-                const rightM = outer.right_pct - inner.right_pct;
-                const topM = inner.top_pct - outer.top_pct;
-                const botM = outer.bottom_pct - inner.bottom_pct;
-                const lrTotal = leftM + rightM;
-                const tbTotal = topM + botM;
-                if (lrTotal > 0) { lPct = Math.round(leftM / lrTotal * 100); rPct = 100 - lPct; }
-                if (tbTotal > 0) { tPct = Math.round(topM / tbTotal * 100); bPct = 100 - tPct; }
-              }
-              // Sanity checks
-              let warning = "";
-              if (inner) {
-                const innerW = inner.right_pct - inner.left_pct;
-                const innerH = inner.bottom_pct - inner.top_pct;
-                const outerW = outer.right_pct - outer.left_pct;
-                const outerH = outer.bottom_pct - outer.top_pct;
-                const areaRatio = (innerW * innerH) / (outerW * outerH);
-                if (areaRatio < 0.4) warning = "⚠ Inner frame too small — may be measuring art window, not card border";
-                if (Math.abs(lPct - tPct) > 20) warning = "⚠ L/R and T/B differ significantly — verify inner frame";
-              }
+              {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
+              {showCentering &&
+                (() => {
+                  const cd = side === "front" ? centeringFront : centeringBack;
+                  if (!cd) return null;
+                  const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
+                  const inner = cd.innerFrame;
+                  // Compute geometric centering from outer + inner frame coordinates
+                  let lPct = 50,
+                    rPct = 50,
+                    tPct = 50,
+                    bPct = 50;
+                  if (inner) {
+                    const leftM = inner.left_pct - outer.left_pct;
+                    const rightM = outer.right_pct - inner.right_pct;
+                    const topM = inner.top_pct - outer.top_pct;
+                    const botM = outer.bottom_pct - inner.bottom_pct;
+                    const lrTotal = leftM + rightM;
+                    const tbTotal = topM + botM;
+                    if (lrTotal > 0) {
+                      lPct = Math.round((leftM / lrTotal) * 100);
+                      rPct = 100 - lPct;
+                    }
+                    if (tbTotal > 0) {
+                      tPct = Math.round((topM / tbTotal) * 100);
+                      bPct = 100 - tPct;
+                    }
+                  }
+                  // Sanity checks
+                  let warning = "";
+                  if (inner) {
+                    const innerW = inner.right_pct - inner.left_pct;
+                    const innerH = inner.bottom_pct - inner.top_pct;
+                    const outerW = outer.right_pct - outer.left_pct;
+                    const outerH = outer.bottom_pct - outer.top_pct;
+                    const areaRatio = (innerW * innerH) / (outerW * outerH);
+                    if (areaRatio < 0.4)
+                      warning = "⚠ Inner frame too small — may be measuring art window, not card border";
+                    if (Math.abs(lPct - tPct) > 20) warning = "⚠ L/R and T/B differ significantly — verify inner frame";
+                  }
 
-              // Fallback to AI ratios if no frame coords
-              const lr = inner ? [lPct, rPct] : (cd.ratioLR?.split("/").map(Number) || [50, 50]);
-              const tb = inner ? [tPct, bPct] : (cd.ratioTB?.split("/").map(Number) || [50, 50]);
-              const midY = inner ? (inner.top_pct + inner.bottom_pct) / 2 : 50;
-              const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
-              return (
-                <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  {/* Sanity warning */}
-                  {warning && <text x="50" y="3" textAnchor="middle" fill="#FF6600" fontSize="2.5" fontWeight="bold">{warning}</text>}
-                  {/* Outer frame — solid gold, traces card physical edge */}
-                  <rect x={outer.left_pct} y={outer.top_pct}
-                    width={outer.right_pct - outer.left_pct} height={outer.bottom_pct - outer.top_pct}
-                    fill="none" stroke="#D4AF37" strokeWidth="0.6" opacity="0.7" />
-                  {/* Inner frame — dashed gold, traces artwork boundary */}
-                  {inner && <rect x={inner.left_pct} y={inner.top_pct}
-                    width={inner.right_pct - inner.left_pct} height={inner.bottom_pct - inner.top_pct}
-                    fill="none" stroke="#D4AF37" strokeWidth="0.4" strokeDasharray="1.5,1" opacity="0.8" />}
-                  {/* Measurement lines + computed percentages */}
-                  {inner && <>
-                    <line x1={outer.left_pct} y1={midY} x2={inner.left_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={(outer.left_pct + inner.left_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[0]}%</text>
-                    <line x1={inner.right_pct} y1={midY} x2={outer.right_pct} y2={midY} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={(inner.right_pct + outer.right_pct) / 2} y={midY - 1.5} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{lr[1]}%</text>
-                    <line x1={midX} y1={outer.top_pct} x2={midX} y2={inner.top_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={midX} y={(outer.top_pct + inner.top_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[0]}%</text>
-                    <line x1={midX} y1={inner.bottom_pct} x2={midX} y2={outer.bottom_pct} stroke="#D4AF37" strokeWidth="0.3" opacity="0.6" />
-                    <text x={midX} y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1} textAnchor="middle" fill="#D4AF37" fontSize="3" fontWeight="bold" opacity="0.9">{tb[1]}%</text>
-                  </>}
-                </svg>
-              );
-            })()}
+                  // Fallback to AI ratios if no frame coords
+                  const lr = inner ? [lPct, rPct] : cd.ratioLR?.split("/").map(Number) || [50, 50];
+                  const tb = inner ? [tPct, bPct] : cd.ratioTB?.split("/").map(Number) || [50, 50];
+                  const midY = inner ? (inner.top_pct + inner.bottom_pct) / 2 : 50;
+                  const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
+                  return (
+                    <svg
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                    >
+                      {/* Sanity warning */}
+                      {warning && (
+                        <text x="50" y="3" textAnchor="middle" fill="#FF6600" fontSize="2.5" fontWeight="bold">
+                          {warning}
+                        </text>
+                      )}
+                      {/* Outer frame — solid gold, traces card physical edge */}
+                      <rect
+                        x={outer.left_pct}
+                        y={outer.top_pct}
+                        width={outer.right_pct - outer.left_pct}
+                        height={outer.bottom_pct - outer.top_pct}
+                        fill="none"
+                        stroke="#D4AF37"
+                        strokeWidth="0.6"
+                        opacity="0.7"
+                      />
+                      {/* Inner frame — dashed gold, traces artwork boundary */}
+                      {inner && (
+                        <rect
+                          x={inner.left_pct}
+                          y={inner.top_pct}
+                          width={inner.right_pct - inner.left_pct}
+                          height={inner.bottom_pct - inner.top_pct}
+                          fill="none"
+                          stroke="#D4AF37"
+                          strokeWidth="0.4"
+                          strokeDasharray="1.5,1"
+                          opacity="0.8"
+                        />
+                      )}
+                      {/* Measurement lines + computed percentages */}
+                      {inner && (
+                        <>
+                          <line
+                            x1={outer.left_pct}
+                            y1={midY}
+                            x2={inner.left_pct}
+                            y2={midY}
+                            stroke="#D4AF37"
+                            strokeWidth="0.3"
+                            opacity="0.6"
+                          />
+                          <text
+                            x={(outer.left_pct + inner.left_pct) / 2}
+                            y={midY - 1.5}
+                            textAnchor="middle"
+                            fill="#D4AF37"
+                            fontSize="3"
+                            fontWeight="bold"
+                            opacity="0.9"
+                          >
+                            {lr[0]}%
+                          </text>
+                          <line
+                            x1={inner.right_pct}
+                            y1={midY}
+                            x2={outer.right_pct}
+                            y2={midY}
+                            stroke="#D4AF37"
+                            strokeWidth="0.3"
+                            opacity="0.6"
+                          />
+                          <text
+                            x={(inner.right_pct + outer.right_pct) / 2}
+                            y={midY - 1.5}
+                            textAnchor="middle"
+                            fill="#D4AF37"
+                            fontSize="3"
+                            fontWeight="bold"
+                            opacity="0.9"
+                          >
+                            {lr[1]}%
+                          </text>
+                          <line
+                            x1={midX}
+                            y1={outer.top_pct}
+                            x2={midX}
+                            y2={inner.top_pct}
+                            stroke="#D4AF37"
+                            strokeWidth="0.3"
+                            opacity="0.6"
+                          />
+                          <text
+                            x={midX}
+                            y={(outer.top_pct + inner.top_pct) / 2 + 1}
+                            textAnchor="middle"
+                            fill="#D4AF37"
+                            fontSize="3"
+                            fontWeight="bold"
+                            opacity="0.9"
+                          >
+                            {tb[0]}%
+                          </text>
+                          <line
+                            x1={midX}
+                            y1={inner.bottom_pct}
+                            x2={midX}
+                            y2={outer.bottom_pct}
+                            stroke="#D4AF37"
+                            strokeWidth="0.3"
+                            opacity="0.6"
+                          />
+                          <text
+                            x={midX}
+                            y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1}
+                            textAnchor="middle"
+                            fill="#D4AF37"
+                            fontSize="3"
+                            fontWeight="bold"
+                            opacity="0.9"
+                          >
+                            {tb[1]}%
+                          </text>
+                        </>
+                      )}
+                    </svg>
+                  );
+                })()}
 
-            {/* Defect ring markers — clickable when not readOnly and an
+              {/* Defect ring markers — clickable when not readOnly and an
                 onDefectsChange handler exists. Click opens an inline popover
                 anchored to the marker for edit / delete. AI markers are also
                 editable (they share the defects[] array with admin-placed). */}
-            {showDefects && (() => {
-              let humanIdx = 0;
-              const clickable = !readOnly && !!onDefectsChange;
-              return sideDefects.map(d => {
-                const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
-                if (!isAi) humanIdx++;
-                const isHL = highlightId === d.id;
-                const col = isAi ? "#DC2626" : "#D4AF37";
-                const badge = isAi ? "AI" : String(humanIdx);
-                const isEditing = editingDefectId === d.id;
-                // Popover above marker when marker is in lower half; below
-                // when in upper half — keeps marker visible.
-                const popoverAbove = d.y_percent > 50;
-                return (
-                  <div key={d.id} className={`absolute ${clickable ? "" : "pointer-events-none"} ${isHL ? "defect-ring-pulse" : ""}`}
-                    style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                    {/* Marker ring — a button when clickable so keyboard nav
+              {showDefects &&
+                (() => {
+                  let humanIdx = 0;
+                  const clickable = !readOnly && !!onDefectsChange;
+                  return sideDefects.map((d) => {
+                    const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
+                    if (!isAi) humanIdx++;
+                    const isHL = highlightId === d.id;
+                    const col = isAi ? "#DC2626" : "#D4AF37";
+                    const badge = isAi ? "AI" : String(humanIdx);
+                    const isEditing = editingDefectId === d.id;
+                    // Popover above marker when marker is in lower half; below
+                    // when in upper half — keeps marker visible.
+                    const popoverAbove = d.y_percent > 50;
+                    return (
+                      <div
+                        key={d.id}
+                        className={`absolute ${clickable ? "" : "pointer-events-none"} ${isHL ? "defect-ring-pulse" : ""}`}
+                        style={{
+                          left: `${d.x_percent}%`,
+                          top: `${d.y_percent}%`,
+                          transform: "translate(-50%, -50%)",
+                          width: 32,
+                          height: 32,
+                        }}
+                      >
+                        {/* Marker ring — a button when clickable so keyboard nav
                         + role + aria-label come for free. Falls back to a
                         decorative div when read-only / handler missing. */}
-                    {clickable ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isEditing) {
-                            setEditingDefectId(null);
-                            setEditingDefectAnchor(null);
-                          } else {
-                            // Capture the marker's viewport rect so the
-                            // portal'd popover can position itself in fixed
-                            // coordinates. currentTarget is the marker button;
-                            // its bounding rect matches the visible marker.
-                            setEditingDefectAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
-                            setEditingDefectId(d.id);
-                          }
-                        }}
-                        title={`Defect ${badge}: ${d.type}, ${d.severity}`}
-                        aria-label={`Defect ${badge}: ${d.type}, ${d.severity}. Click to edit or delete.`}
-                        className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
-                        style={{ border: `${isHL || isEditing ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none" }}
-                      />
-                    ) : (
-                      <div
-                        className="w-full h-full rounded-full transition-all"
-                        title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
-                        style={{ border: `${isHL ? 3 : 2}px solid ${col}`, background: "transparent", boxShadow: isHL ? `0 0 8px ${col}80` : "none" }}
-                      />
-                    )}
-                    <span className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
-                      style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}>{badge}</span>
+                        {clickable ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isEditing) {
+                                setEditingDefectId(null);
+                                setEditingDefectAnchor(null);
+                              } else {
+                                // Capture the marker's viewport rect so the
+                                // portal'd popover can position itself in fixed
+                                // coordinates. currentTarget is the marker button;
+                                // its bounding rect matches the visible marker.
+                                setEditingDefectAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
+                                setEditingDefectId(d.id);
+                              }
+                            }}
+                            title={`Defect ${badge}: ${d.type}, ${d.severity}`}
+                            aria-label={`Defect ${badge}: ${d.type}, ${d.severity}. Click to edit or delete.`}
+                            className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
+                            style={{
+                              border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
+                              background: "transparent",
+                              boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="w-full h-full rounded-full transition-all"
+                            title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
+                            style={{
+                              border: `${isHL ? 3 : 2}px solid ${col}`,
+                              background: "transparent",
+                              boxShadow: isHL ? `0 0 8px ${col}80` : "none",
+                            }}
+                          />
+                        )}
+                        <span
+                          className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
+                          style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}
+                        >
+                          {badge}
+                        </span>
 
-                    {/* Inline edit/delete popover */}
-                    {isEditing && editingDefectAnchor && (
-                      <DefectEditPopover
-                        defect={d}
-                        badge={badge}
-                        anchorAbove={popoverAbove}
-                        anchorRect={editingDefectAnchor}
-                        onChangeField={(k, v) => updateDefectField(d.id, k, v)}
-                        onDelete={() => deleteDefect(d.id)}
-                        onClose={() => { setEditingDefectId(null); setEditingDefectAnchor(null); }}
-                      />
-                    )}
-                  </div>
-                );
-              });
-            })()}
+                        {/* Inline edit/delete popover */}
+                        {isEditing && editingDefectAnchor && (
+                          <DefectEditPopover
+                            defect={d}
+                            badge={badge}
+                            anchorAbove={popoverAbove}
+                            anchorRect={editingDefectAnchor}
+                            onChangeField={(k, v) => updateDefectField(d.id, k, v)}
+                            onDelete={() => deleteDefect(d.id)}
+                            onClose={() => {
+                              setEditingDefectId(null);
+                              setEditingDefectAnchor(null);
+                            }}
+                          />
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
 
-            {/* Pending batch pins — grey numbered markers for the current
+              {/* Pending batch pins — grey numbered markers for the current
                 click-batch. Each click in markMode adds a pin here; the Done
                 button (or Enter / dbl-click) opens the picker which commits
                 all of them at once. Filtered to the visible side. */}
-            {pendingBatch.filter(p => p.image_side === side).map(p => (
-              <div key={p.localId} className="absolute pointer-events-none"
-                style={{ left: `${p.x}%`, top: `${p.y}%`, transform: "translate(-50%, -50%)", width: 32, height: 32 }}>
-                <div className="w-full h-full rounded-full border-2 border-[#D4AF37] bg-transparent" />
-                <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#555555] text-white px-1 rounded-full leading-none py-0.5">{p.localId}</span>
-              </div>
-            ))}
-          </div>
-        ) : certId ? (
-          /* Inline drop zone for missing side */
-          <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-[#888888] text-xs">No image</p>
-          </div>
-        )}
-      </div>
-
-      {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
-          art. Right-aligned row directly under the image, matching the
-          existing "Mark Defects / Manual Crop" button row pattern. */}
-      <div className="mt-2 flex items-center justify-end">
-        <div className="flex items-center gap-0.5 bg-[#1A1A1A] border border-[#333333] rounded-full px-1 py-0.5">
-          <button type="button" onClick={(e) => { e.stopPropagation(); zoomOut(); }} disabled={zoom <= 1}
-            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
-            <ZoomOut size={14} />
-          </button>
-          <span className="text-white text-[10px] font-mono w-10 text-center select-none">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={(e) => { e.stopPropagation(); zoomIn(); }} disabled={zoom >= 6}
-            className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full">
-            <ZoomIn size={14} />
-          </button>
-          {zoom > 1 && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); zoomReset(); }}
-              className="w-7 h-7 flex items-center justify-center text-[#555555] hover:text-white transition-colors rounded-full">
-              <RotateCcw size={12} />
-            </button>
+              {pendingBatch
+                .filter((p) => p.image_side === side)
+                .map((p) => (
+                  <div
+                    key={p.localId}
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: `${p.x}%`,
+                      top: `${p.y}%`,
+                      transform: "translate(-50%, -50%)",
+                      width: 32,
+                      height: 32,
+                    }}
+                  >
+                    <div className="w-full h-full rounded-full border-2 border-[#D4AF37] bg-transparent" />
+                    <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#555555] text-white px-1 rounded-full leading-none py-0.5">
+                      {p.localId}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          ) : certId ? (
+            /* Inline drop zone for missing side */
+            <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-[#888888] text-xs">No image</p>
+            </div>
           )}
         </div>
-      </div>
+
+        {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card
+          art. Right-aligned row directly under the image, matching the
+          existing "Mark Defects / Manual Crop" button row pattern. */}
+        <div className="mt-2 flex items-center justify-end">
+          <div className="flex items-center gap-0.5 bg-[#1A1A1A] border border-[#333333] rounded-full px-1 py-0.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                zoomOut();
+              }}
+              disabled={zoom <= 1}
+              className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full"
+            >
+              <ZoomOut size={14} />
+            </button>
+            <span className="text-white text-[10px] font-mono w-10 text-center select-none">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                zoomIn();
+              }}
+              disabled={zoom >= 6}
+              className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full"
+            >
+              <ZoomIn size={14} />
+            </button>
+            {zoom > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  zoomReset();
+                }}
+                className="w-7 h-7 flex items-center justify-center text-[#555555] hover:text-white transition-colors rounded-full"
+              >
+                <RotateCcw size={12} />
+              </button>
+            )}
+          </div>
+        </div>
       </>
     );
   }
@@ -632,17 +916,18 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
           {/* Top bar */}
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
             <div className="flex-1">{renderTabs()}</div>
-            <button type="button" onClick={exitMarkMode}
-              className="ml-4 text-[#555555] hover:text-white transition-colors p-1">
+            <button
+              type="button"
+              onClick={exitMarkMode}
+              className="ml-4 text-[#555555] hover:text-white transition-colors p-1"
+            >
               <X size={20} />
             </button>
           </div>
 
           {/* Main image — fills remaining space */}
           <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-            <div className="w-full h-full max-w-[85vh]">
-              {renderImageArea("85vh")}
-            </div>
+            <div className="w-full h-full max-w-[85vh]">{renderImageArea("85vh")}</div>
           </div>
 
           {/* Dropdown rendered below via Portal — see DropdownPortal at the
@@ -654,108 +939,112 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
             <p className="text-[#555555] text-xs">
               {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
-              <span className="text-[#555555] ml-3">Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit</span>
+              <span className="text-[#555555] ml-3">
+                Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit
+              </span>
             </p>
             <div className="flex items-center gap-3">
               {pendingBatch.length > 0 && !pickerOpen && (
-                <button type="button" onClick={openTypePicker}
-                  className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:bg-[#B8960C] transition-all border border-[#B8960C]">
+                <button
+                  type="button"
+                  onClick={openTypePicker}
+                  className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:bg-[#B8960C] transition-all border border-[#B8960C]"
+                >
                   Done — Assign Type ({pendingBatch.length})
                 </button>
               )}
-              <button type="button" onClick={exitMarkMode}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all">
+              <button
+                type="button"
+                onClick={exitMarkMode}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all"
+              >
                 Done Marking
               </button>
             </div>
           </div>
         </div>
-        {pickerOpen && pickerAnchor && (() => {
-          // Portal into document.body — bypasses any ancestor transform
-          // (image container has transform: scale(...) for zoom which would
-          // otherwise break position: fixed positioning). Anchor is the LAST
-          // pin in the batch; flip logic uses its image-relative percent.
-          const DROPDOWN_W = 180;
-          const DROPDOWN_H = 360;
-          const GAP = 6;
-          const flipLeft = pickerAnchor.xPct > 70;
-          const flipUp   = pickerAnchor.yPct > 70;
-          const left = flipLeft
-            ? pickerAnchor.pxX - GAP - DROPDOWN_W
-            : pickerAnchor.pxX + GAP;
-          const top = flipUp
-            ? pickerAnchor.pxY - GAP - DROPDOWN_H
-            : pickerAnchor.pxY + GAP;
-          const clampedLeft = Math.max(8, Math.min(window.innerWidth - DROPDOWN_W - 8, left));
-          const clampedTop  = Math.max(8, Math.min(window.innerHeight - DROPDOWN_H - 8, top));
-          return createPortal(
-            <>
-              <div
-                className="fixed inset-0"
-                style={{ zIndex: 9998 }}
-                onClick={cancelBatch}
-              />
-              <div
-                className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
-                style={{
-                  zIndex: 9999,
-                  left: clampedLeft,
-                  top: clampedTop,
-                  width: DROPDOWN_W,
-                  maxHeight: DROPDOWN_H,
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                  <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect ({pendingBatch.length})</span>
-                  <button
-                    type="button"
-                    onClick={cancelBatch}
-                    className="text-[#888888] hover:text-red-600 transition-colors"
-                    aria-label="Cancel"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                <div className="px-3 py-2 border-b border-[#E8E4DC] bg-white">
-                  <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">Tier</div>
-                  <div className="flex gap-1">
-                    {(["D1","D2","D3"] as const).map(t => (
+        {pickerOpen &&
+          pickerAnchor &&
+          (() => {
+            // Portal into document.body — bypasses any ancestor transform
+            // (image container has transform: scale(...) for zoom which would
+            // otherwise break position: fixed positioning). Anchor is the LAST
+            // pin in the batch; flip logic uses its image-relative percent.
+            const DROPDOWN_W = 180;
+            const DROPDOWN_H = 360;
+            const GAP = 6;
+            const flipLeft = pickerAnchor.xPct > 70;
+            const flipUp = pickerAnchor.yPct > 70;
+            const left = flipLeft ? pickerAnchor.pxX - GAP - DROPDOWN_W : pickerAnchor.pxX + GAP;
+            const top = flipUp ? pickerAnchor.pxY - GAP - DROPDOWN_H : pickerAnchor.pxY + GAP;
+            const clampedLeft = Math.max(8, Math.min(window.innerWidth - DROPDOWN_W - 8, left));
+            const clampedTop = Math.max(8, Math.min(window.innerHeight - DROPDOWN_H - 8, top));
+            return createPortal(
+              <>
+                <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={cancelBatch} />
+                <div
+                  className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
+                  style={{
+                    zIndex: 9999,
+                    left: clampedLeft,
+                    top: clampedTop,
+                    width: DROPDOWN_W,
+                    maxHeight: DROPDOWN_H,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
+                    <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">
+                      Defect ({pendingBatch.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={cancelBatch}
+                      className="text-[#888888] hover:text-red-600 transition-colors"
+                      aria-label="Cancel"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <div className="px-3 py-2 border-b border-[#E8E4DC] bg-white">
+                    <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">Tier</div>
+                    <div className="flex gap-1">
+                      {(["D1", "D2", "D3"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setPickerTier(t)}
+                          className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
+                            pickerTier === t
+                              ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
+                              : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                          }`}
+                          data-testid={`btn-tier-${t}`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 90 }}>
+                    {MVGS_DEFECT_TYPES.map((t) => (
                       <button
-                        key={t}
+                        key={t.code}
                         type="button"
-                        onClick={() => setPickerTier(t)}
-                        className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
-                          pickerTier === t
-                            ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                            : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
-                        }`}
-                        data-testid={`btn-tier-${t}`}
+                        onClick={() => commitBatch({ mvgsCode: t.code, label: t.label, tier: pickerTier })}
+                        className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors flex items-center justify-between gap-2"
+                        data-testid={`mvgs-pick-${t.code}`}
                       >
-                        {t}
+                        <span>{t.label}</span>
+                        <span className="font-mono text-[10px] text-[#888]">{t.code}</span>
                       </button>
                     ))}
                   </div>
                 </div>
-                <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 90 }}>
-                  {MVGS_DEFECT_TYPES.map(t => (
-                    <button
-                      key={t.code}
-                      type="button"
-                      onClick={() => commitBatch({ mvgsCode: t.code, label: t.label, tier: pickerTier })}
-                      className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors flex items-center justify-between gap-2"
-                      data-testid={`mvgs-pick-${t.code}`}
-                    >
-                      <span>{t.label}</span>
-                      <span className="font-mono text-[10px] text-[#888]">{t.code}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>,
-            document.body
-          );
-        })()}
+              </>,
+              document.body
+            );
+          })()}
       </>
     );
   }
@@ -774,7 +1063,11 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
             <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
             <div className="rounded-lg overflow-hidden" style={{ aspectRatio: "5/7" }}>
               {urls.front_cropped || urls.front_original ? (
-                <img src={urls.front_cropped || urls.front_original || ""} alt="scan front" className="w-full h-full object-contain" />
+                <img
+                  src={urls.front_cropped || urls.front_original || ""}
+                  alt="scan front"
+                  className="w-full h-full object-contain"
+                />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
                   <p className="text-[#333333] text-xs">No scan</p>
@@ -796,26 +1089,38 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
 
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button type="button" onClick={enterMarkMode}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
+        <button
+          type="button"
+          onClick={enterMarkMode}
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10"
+        >
           <Maximize2 size={11} />
           Mark Defects
         </button>
         {certId && (side === "front" || side === "back") && urls[`${side}_original` as keyof ImageUrls] && (
-          <button type="button" onClick={() => setManualCropSide(side as "front" | "back")}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10">
+          <button
+            type="button"
+            onClick={() => setManualCropSide(side as "front" | "back")}
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10"
+          >
             <Crop size={11} />
             Manual Crop
           </button>
         )}
-        <button type="button" onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40">
+        <button
+          type="button"
+          onClick={() => setShowDefects(!showDefects)}
+          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40"
+        >
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
         </button>
         {(centeringFront || centeringBack) && (
-          <button type="button" onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#D4AF37]/40"}`}>
+          <button
+            type="button"
+            onClick={() => setShowCentering(!showCentering)}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#D4AF37]/40"}`}
+          >
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
         )}
@@ -823,12 +1128,21 @@ export default function ImageViewer({ urls, defects, onDefectAdded, onDefectsCha
 
       {/* Manual Crop modal (lazy-loaded — won't crash if module fails) */}
       {manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
-        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#D4AF37] text-sm">Loading crop tool...</div>}>
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#D4AF37] text-sm">
+              Loading crop tool...
+            </div>
+          }
+        >
           <ManualCrop
             side={manualCropSide}
             certId={certId}
             rawImageUrl={urls[`${manualCropSide}_original` as keyof ImageUrls] as string}
-            onDone={() => { setManualCropSide(null); onImageDeleted?.(); }}
+            onDone={() => {
+              setManualCropSide(null);
+              onImageDeleted?.();
+            }}
             onCancel={() => setManualCropSide(null)}
           />
         </Suspense>
@@ -849,9 +1163,14 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
       const fd = new FormData();
       fd.append(side, f);
       const res = await fetch(`/api/admin/certificates/${certId}/upload-images`, {
-        method: "POST", credentials: "include", body: fd,
+        method: "POST",
+        credentials: "include",
+        body: fd,
       });
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error);
+      }
       onUploaded();
     } catch {
       setUploading(false);
@@ -861,12 +1180,29 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
   return (
     <div
       className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[#D4AF37]/10" : ""}`}
-      onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
       onDragLeave={() => setIsDragging(false)}
-      onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        const f = e.dataTransfer.files[0];
+        if (f) handleFile(f);
+      }}
       onClick={() => !uploading && inputRef.current?.click()}
     >
-      <input ref={inputRef} type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+        }}
+      />
       {uploading ? (
         <>
           <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
@@ -895,7 +1231,13 @@ function locationFromPercent(x: number, y: number, side: string): string {
 // the marker stays visible. Click-outside closes via a capture-phase mousedown
 // listener; ESC handled by the parent.
 function DefectEditPopover({
-  defect, badge, anchorAbove, anchorRect, onChangeField, onDelete, onClose,
+  defect,
+  badge,
+  anchorAbove,
+  anchorRect,
+  onChangeField,
+  onDelete,
+  onClose,
 }: {
   defect: Defect;
   badge: string;
@@ -966,7 +1308,11 @@ function DefectEditPopover({
           className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
           autoFocus
         >
-          {DEFECT_TYPES.map((t) => (<option key={t} value={t}>{t}</option>))}
+          {DEFECT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -977,7 +1323,11 @@ function DefectEditPopover({
           onChange={(e) => onChangeField("severity", e.target.value as Defect["severity"])}
           className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
         >
-          {SEVERITY_VALUES.map((s) => (<option key={s} value={s}>{s}</option>))}
+          {SEVERITY_VALUES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -1009,6 +1359,6 @@ function DefectEditPopover({
         </button>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 }

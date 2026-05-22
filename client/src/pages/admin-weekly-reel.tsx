@@ -25,14 +25,31 @@ import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
-  Loader2, PlayCircle, KeyRound, Calendar, CheckCircle2, XCircle,
-  AlertTriangle, ChevronDown, ChevronUp, Pin, Ban, Download, RotateCcw, Pause,
-  Instagram, Facebook, Music, Image as ImageIcon, Send, RefreshCw, Check,
-  Upload, Sparkles,
+  Loader2,
+  PlayCircle,
+  KeyRound,
+  Calendar,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Pin,
+  Ban,
+  Download,
+  RotateCcw,
+  Pause,
+  Instagram,
+  Facebook,
+  Music,
+  Image as ImageIcon,
+  Send,
+  RefreshCw,
+  Check,
+  Upload,
+  Sparkles,
 } from "lucide-react";
-import {
-  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -131,7 +148,9 @@ interface HistoryEntry {
   clipLengthSeconds?: number;
 }
 
-interface KeyStatus { configured: boolean }
+interface KeyStatus {
+  configured: boolean;
+}
 interface GenerateResult {
   status: "ok" | "skipped" | "failed";
   reason?: string;
@@ -160,16 +179,19 @@ interface AnalyticsRow {
   instagramComments: number | null;
   thumbnailR2Key: string | null;
 }
-interface AnalyticsResp { rows: AnalyticsRow[]; totalCostUsd: number }
+interface AnalyticsResp {
+  rows: AnalyticsRow[];
+  totalCostUsd: number;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MODEL_OPTIONS: Array<{ slug: string; label: string }> = [
   { slug: "hfai-dop-lite", label: "Higgsfield dop-lite" },
-  { slug: "seedance-1-5",  label: "Seedance 1.5" },
-  { slug: "kling-2-6",     label: "Kling 2.6" },
-  { slug: "wan-2-6",       label: "Wan 2.6" },
+  { slug: "seedance-1-5", label: "Seedance 1.5" },
+  { slug: "kling-2-6", label: "Kling 2.6" },
+  { slug: "wan-2-6", label: "Wan 2.6" },
 ];
 
 function fmtGrade(g: number | null): string {
@@ -178,15 +200,22 @@ function fmtGrade(g: number | null): string {
 }
 function fmtDate(s: string | null | undefined): string {
   if (!s) return "—";
-  try { return new Date(s).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }); }
-  catch { return s; }
+  try {
+    return new Date(s).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return s;
+  }
 }
 function statusBadge(s: HistoryEntry["status"]): { label: string; cls: string } {
   switch (s) {
-    case "ok":      return { label: "OK",      cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-    case "partial": return { label: "Partial", cls: "bg-amber-50    text-amber-700    border-amber-200" };
-    case "failed":  return { label: "Failed",  cls: "bg-red-50      text-red-700      border-red-200" };
-    default:        return { label: "Unknown", cls: "bg-[#F5F2EB]   text-[#666666]    border-[#E8E4DC]" };
+    case "ok":
+      return { label: "OK", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    case "partial":
+      return { label: "Partial", cls: "bg-amber-50    text-amber-700    border-amber-200" };
+    case "failed":
+      return { label: "Failed", cls: "bg-red-50      text-red-700      border-red-200" };
+    default:
+      return { label: "Unknown", cls: "bg-[#F5F2EB]   text-[#666666]    border-[#E8E4DC]" };
   }
 }
 
@@ -230,9 +259,11 @@ function PipelineControls({ paused }: { paused: boolean }) {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] });
     },
     onError: (err: any) => {
-      setGenerateResult(err?.message
-        ? `Request error: ${err.message} — the job may still be running. Refresh history in a few minutes.`
-        : "Request error — the job may still be running on the server.");
+      setGenerateResult(
+        err?.message
+          ? `Request error: ${err.message} — the job may still be running. Refresh history in a few minutes.`
+          : "Request error — the job may still be running on the server."
+      );
     },
   });
 
@@ -246,15 +277,23 @@ function PipelineControls({ paused }: { paused: boolean }) {
           </div>
           <button
             type="button"
-            onClick={() => { setGenerateResult(null); generateMutation.mutate(); }}
+            onClick={() => {
+              setGenerateResult(null);
+              generateMutation.mutate();
+            }}
             disabled={generateMutation.isPending || paused}
             className="mt-2 w-full inline-flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
             data-testid="btn-generate-reel"
           >
-            {generateMutation.isPending
-              ? <><Loader2 size={12} className="animate-spin" /> Generating…</>
-              : paused ? "Paused"
-              : "Generate Reel Now"}
+            {generateMutation.isPending ? (
+              <>
+                <Loader2 size={12} className="animate-spin" /> Generating…
+              </>
+            ) : paused ? (
+              "Paused"
+            ) : (
+              "Generate Reel Now"
+            )}
           </button>
           <p className="mt-2 text-[10px] text-[#888888]">
             Long-running — Segmind ~30-60 s per card. Connection may time out before completion.
@@ -268,7 +307,9 @@ function PipelineControls({ paused }: { paused: boolean }) {
             <KeyRound size={14} className="text-[#D4AF37]" /> Segmind key
           </div>
           {keyStatus === undefined ? (
-            <p className="mt-2 text-sm text-[#888888]"><Loader2 size={12} className="animate-spin inline" /> checking…</p>
+            <p className="mt-2 text-sm text-[#888888]">
+              <Loader2 size={12} className="animate-spin inline" /> checking…
+            </p>
           ) : keyStatus.configured ? (
             <p className="mt-2 text-sm font-semibold text-emerald-700 flex items-center gap-1">
               <CheckCircle2 size={14} /> Key configured
@@ -278,7 +319,9 @@ function PipelineControls({ paused }: { paused: boolean }) {
               <XCircle size={14} /> Key missing
             </p>
           )}
-          <p className="mt-1 text-[10px] text-[#888888]">Set via <code>fly secrets set SEGMIND_API_KEY=…</code></p>
+          <p className="mt-1 text-[10px] text-[#888888]">
+            Set via <code>fly secrets set SEGMIND_API_KEY=…</code>
+          </p>
         </div>
       </div>
 
@@ -297,13 +340,18 @@ function PipelineControls({ paused }: { paused: boolean }) {
           }`}
           data-testid="text-generate-result"
         >
-          {typeof generateResult === "string" ? generateResult : (
+          {typeof generateResult === "string" ? (
+            generateResult
+          ) : (
             <>
               <strong>{generateResult.status.toUpperCase()}</strong>
               {generateResult.reason && <> — {generateResult.reason}</>}
               {generateResult.date && <> — {generateResult.date}</>}
               {typeof generateResult.successCount === "number" && (
-                <> — {generateResult.successCount}/{generateResult.cardCount} ok, {generateResult.failCount} failed</>
+                <>
+                  {" "}
+                  — {generateResult.successCount}/{generateResult.cardCount} ok, {generateResult.failCount} failed
+                </>
               )}
             </>
           )}
@@ -327,7 +375,9 @@ function ScheduleCard() {
         <div className="flex items-center gap-2 text-[#666666] text-xs uppercase tracking-wider mb-1">
           <Calendar size={14} className="text-[#D4AF37]" /> Schedule (UTC)
         </div>
-        <p className="mt-2 text-sm text-[#888888]"><Loader2 size={12} className="animate-spin inline" /> loading…</p>
+        <p className="mt-2 text-sm text-[#888888]">
+          <Loader2 size={12} className="animate-spin inline" /> loading…
+        </p>
       </div>
     );
   }
@@ -343,7 +393,11 @@ function ScheduleCard() {
           className="text-xs border border-[#E8E4DC] rounded px-2 py-1 bg-white"
           data-testid="select-schedule-day"
         >
-          {DAY_LABELS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+          {DAY_LABELS.map((d, i) => (
+            <option key={i} value={i}>
+              {d}
+            </option>
+          ))}
         </select>
         <select
           value={settings.schedule_hour_utc}
@@ -353,7 +407,9 @@ function ScheduleCard() {
           data-testid="select-schedule-hour"
         >
           {Array.from({ length: 24 }, (_, h) => (
-            <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+            <option key={h} value={h}>
+              {String(h).padStart(2, "0")}:00
+            </option>
           ))}
         </select>
       </div>
@@ -371,9 +427,11 @@ function ScheduleCard() {
       </label>
       {settings.smart_schedule && (
         <p className="mt-1 text-[10px] text-[#888]">
-          {meta?.valid
-            ? "Posts at the IG-insights peak hour of the day."
-            : <span className="text-amber-700">Connect Meta to read peak hour.</span>}
+          {meta?.valid ? (
+            "Posts at the IG-insights peak hour of the day."
+          ) : (
+            <span className="text-amber-700">Connect Meta to read peak hour.</span>
+          )}
         </p>
       )}
       <p className="mt-1 text-[10px] text-[#888888]">Skipped if fewer than 3 featured cards.</p>
@@ -386,9 +444,11 @@ function PauseToggleRow() {
   if (!settings) return null;
   const paused = settings.pipeline_paused;
   return (
-    <div className={`mt-4 flex items-center justify-between rounded-xl p-3 border ${
-      paused ? "bg-red-50 border-red-200" : "bg-[#FAFAF8] border-[#E8E4DC]"
-    }`}>
+    <div
+      className={`mt-4 flex items-center justify-between rounded-xl p-3 border ${
+        paused ? "bg-red-50 border-red-200" : "bg-[#FAFAF8] border-[#E8E4DC]"
+      }`}
+    >
       <div className="flex items-center gap-2 text-sm">
         <Pause size={14} className={paused ? "text-red-700" : "text-[#888]"} />
         <span className={paused ? "text-red-800 font-semibold" : "text-[#555]"}>
@@ -400,9 +460,7 @@ function PauseToggleRow() {
         onClick={() => update({ key: "pipeline_paused", value: !paused })}
         disabled={updating}
         className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all ${
-          paused
-            ? "bg-emerald-600 text-white hover:bg-emerald-700"
-            : "bg-red-600 text-white hover:bg-red-700"
+          paused ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-red-600 text-white hover:bg-red-700"
         } disabled:opacity-50`}
         data-testid="btn-toggle-pause"
       >
@@ -426,7 +484,10 @@ function SelectionRules() {
             Min grade — {settings.min_grade === 0 ? "Any grade" : settings.min_grade}
           </label>
           <input
-            type="range" min={0} max={10} step={1}
+            type="range"
+            min={0}
+            max={10}
+            step={1}
             value={settings.min_grade}
             onChange={(e) => update({ key: "min_grade", value: Number(e.target.value) })}
             className="w-full mt-2 accent-[#D4AF37]"
@@ -434,11 +495,12 @@ function SelectionRules() {
           />
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">
-            Max cards — {settings.max_cards}
-          </label>
+          <label className="text-[10px] uppercase tracking-wider text-[#888]">Max cards — {settings.max_cards}</label>
           <input
-            type="range" min={3} max={8} step={1}
+            type="range"
+            min={3}
+            max={8}
+            step={1}
             value={settings.max_cards}
             onChange={(e) => update({ key: "max_cards", value: Number(e.target.value) })}
             className="w-full mt-2 accent-[#D4AF37]"
@@ -471,7 +533,7 @@ function VideoStyle() {
 
   useEffect(() => {
     if (settings && draftPrompt === null) setDraftPrompt(settings.video_prompt);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [settings?.video_prompt]);
 
   if (!settings) return null;
@@ -492,7 +554,9 @@ function VideoStyle() {
           />
           <button
             type="button"
-            onClick={() => { if (draftPrompt !== null) update({ key: "video_prompt", value: draftPrompt }); }}
+            onClick={() => {
+              if (draftPrompt !== null) update({ key: "video_prompt", value: draftPrompt });
+            }}
             disabled={!dirty}
             className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
           >
@@ -508,13 +572,17 @@ function VideoStyle() {
               className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
               data-testid="select-model"
             >
-              {MODEL_OPTIONS.map(m => <option key={m.slug} value={m.slug}>{m.label}</option>)}
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.slug} value={m.slug}>
+                  {m.label}
+                </option>
+              ))}
             </select>
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-[#888]">Clip length</label>
             <div className="mt-2 flex gap-2">
-              {[4, 6, 8].map(s => (
+              {[4, 6, 8].map((s) => (
                 <label key={s} className="inline-flex items-center gap-1 cursor-pointer">
                   <input
                     type="radio"
@@ -556,7 +624,7 @@ function OutputPublishing() {
 
   useEffect(() => {
     if (settings && draftCaption === null) setDraftCaption(settings.caption_template);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [settings?.caption_template]);
 
   if (!settings) return null;
@@ -569,7 +637,9 @@ function OutputPublishing() {
         <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
           <div>
             <p className="text-sm font-semibold text-[#1A1A1A]">Auto-post to Instagram</p>
-            <p className="text-[10px] text-[#888]">After each successful reel run, fire <code>runIgDailyPost</code> with <code>force=true</code>.</p>
+            <p className="text-[10px] text-[#888]">
+              After each successful reel run, fire <code>runIgDailyPost</code> with <code>force=true</code>.
+            </p>
           </div>
           <label className="inline-flex items-center gap-2 cursor-pointer">
             <input
@@ -593,11 +663,14 @@ function OutputPublishing() {
             data-testid="textarea-caption"
           />
           <p className="mt-1 text-[10px] text-[#888]">
-            Variables: <code>{"{{topGrade}}"}</code>, <code>{"{{cardCount}}"}</code>, <code>{"{{date}}"}</code>, <code>{"{{topCard}}"}</code>
+            Variables: <code>{"{{topGrade}}"}</code>, <code>{"{{cardCount}}"}</code>, <code>{"{{date}}"}</code>,{" "}
+            <code>{"{{topCard}}"}</code>
           </p>
           <button
             type="button"
-            onClick={() => { if (draftCaption !== null) update({ key: "caption_template", value: draftCaption }); }}
+            onClick={() => {
+              if (draftCaption !== null) update({ key: "caption_template", value: draftCaption });
+            }}
             disabled={!dirty}
             className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
           >
@@ -609,7 +682,7 @@ function OutputPublishing() {
           <div>
             <label className="text-[10px] uppercase tracking-wider text-[#888]">Output resolution</label>
             <div className="mt-2 flex gap-3">
-              {[720, 1080].map(r => (
+              {[720, 1080].map((r) => (
                 <label key={r} className="inline-flex items-center gap-1 cursor-pointer">
                   <input
                     type="radio"
@@ -653,11 +726,11 @@ function Notifications() {
 
   useEffect(() => {
     if (settings && draftEmail === null) setDraftEmail(settings.notify_email);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [settings?.notify_email]);
   useEffect(() => {
     if (settings && draftWebhook === null) setDraftWebhook(settings.notify_webhook_url);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [settings?.notify_webhook_url]);
 
   const testMutation = useMutation({
@@ -680,7 +753,9 @@ function Notifications() {
         <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
           <div>
             <p className="text-sm font-semibold text-[#1A1A1A]">Notify card owners when featured</p>
-            <p className="text-[10px] text-[#888]">Emails each cert's owner only if they have <code>marketing_feature_consent</code>.</p>
+            <p className="text-[10px] text-[#888]">
+              Emails each cert's owner only if they have <code>marketing_feature_consent</code>.
+            </p>
           </div>
           <label className="inline-flex items-center gap-2 cursor-pointer">
             <input
@@ -706,7 +781,9 @@ function Notifications() {
             />
             <button
               type="button"
-              onClick={() => { if (draftEmail !== null) update({ key: "notify_email", value: draftEmail }); }}
+              onClick={() => {
+                if (draftEmail !== null) update({ key: "notify_email", value: draftEmail });
+              }}
               disabled={!emailDirty}
               className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
             >
@@ -728,7 +805,9 @@ function Notifications() {
             />
             <button
               type="button"
-              onClick={() => { if (draftWebhook !== null) update({ key: "notify_webhook_url", value: draftWebhook }); }}
+              onClick={() => {
+                if (draftWebhook !== null) update({ key: "notify_webhook_url", value: draftWebhook });
+              }}
               disabled={!hookDirty}
               className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
             >
@@ -736,7 +815,10 @@ function Notifications() {
             </button>
             <button
               type="button"
-              onClick={() => { setTestResult(null); testMutation.mutate(); }}
+              onClick={() => {
+                setTestResult(null);
+                testMutation.mutate();
+              }}
               disabled={!settings.notify_webhook_url || testMutation.isPending}
               className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white border border-[#E8E4DC] text-[#555] hover:bg-[#FAFAF8] disabled:opacity-50"
             >
@@ -744,7 +826,9 @@ function Notifications() {
             </button>
           </div>
           {testResult && (
-            <p className={`mt-2 text-xs ${testResult.startsWith("Webhook accepted") ? "text-emerald-700" : "text-red-700"}`}>
+            <p
+              className={`mt-2 text-xs ${testResult.startsWith("Webhook accepted") ? "text-emerald-700" : "text-red-700"}`}
+            >
               {testResult}
             </p>
           )}
@@ -780,9 +864,13 @@ function SocialPublishing() {
             <Facebook size={14} className="text-[#D4AF37]" />
             <span className="text-xs uppercase tracking-wider text-[#666]">Meta (Instagram + Facebook)</span>
           </div>
-          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
-            meta?.valid ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
-          }`}>
+          <span
+            className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
+              meta?.valid
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-red-50 text-red-700 border-red-200"
+            }`}
+          >
             {meta === undefined ? "…" : meta.valid ? "Connected" : "Not connected"}
           </span>
         </div>
@@ -792,18 +880,30 @@ function SocialPublishing() {
           </p>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <ToggleRow label="Auto-post Instagram video" value={settings.auto_post_instagram_video}
-            onChange={(v) => update({ key: "auto_post_instagram_video", value: v })} />
-          <ToggleRow label="Auto-post Facebook" value={settings.auto_post_facebook}
-            onChange={(v) => update({ key: "auto_post_facebook", value: v })} />
-          <ToggleRow label="Draft mode (hold for manual)" value={settings.instagram_draft_mode}
-            onChange={(v) => update({ key: "instagram_draft_mode", value: v })} />
+          <ToggleRow
+            label="Auto-post Instagram video"
+            value={settings.auto_post_instagram_video}
+            onChange={(v) => update({ key: "auto_post_instagram_video", value: v })}
+          />
+          <ToggleRow
+            label="Auto-post Facebook"
+            value={settings.auto_post_facebook}
+            onChange={(v) => update({ key: "auto_post_facebook", value: v })}
+          />
+          <ToggleRow
+            label="Draft mode (hold for manual)"
+            value={settings.instagram_draft_mode}
+            onChange={(v) => update({ key: "instagram_draft_mode", value: v })}
+          />
           <div>
             <label className="text-[10px] uppercase tracking-wider text-[#888]">
               Post delay — {settings.post_delay_minutes} min
             </label>
             <input
-              type="range" min={0} max={120} step={5}
+              type="range"
+              min={0}
+              max={120}
+              step={5}
               value={settings.post_delay_minutes}
               onChange={(e) => update({ key: "post_delay_minutes", value: Number(e.target.value) })}
               className="w-full mt-2 accent-[#D4AF37]"
@@ -820,18 +920,23 @@ function SocialPublishing() {
             <Music size={14} className="text-[#D4AF37]" />
             <span className="text-xs uppercase tracking-wider text-[#666]">TikTok</span>
           </div>
-          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
-            tiktok?.valid ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
-          }`}>
+          <span
+            className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
+              tiktok?.valid
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-red-50 text-red-700 border-red-200"
+            }`}
+          >
             {tiktok === undefined ? "…" : tiktok.valid ? "Connected" : "Not connected"}
           </span>
         </div>
-        {tiktok && (
-          <p className="text-[10px] text-[#888] mb-3 font-mono">open_id: {tiktok.openId ?? "—"}</p>
-        )}
+        {tiktok && <p className="text-[10px] text-[#888] mb-3 font-mono">open_id: {tiktok.openId ?? "—"}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <ToggleRow label="Auto-post TikTok" value={settings.auto_post_tiktok}
-            onChange={(v) => update({ key: "auto_post_tiktok", value: v })} />
+          <ToggleRow
+            label="Auto-post TikTok"
+            value={settings.auto_post_tiktok}
+            onChange={(v) => update({ key: "auto_post_tiktok", value: v })}
+          />
           <div>
             <label className="text-[10px] uppercase tracking-wider text-[#888]">Privacy</label>
             <select
@@ -845,10 +950,16 @@ function SocialPublishing() {
               <option value="SELF_ONLY">Self only</option>
             </select>
           </div>
-          <ToggleRow label="Disable duet" value={settings.tiktok_disable_duet}
-            onChange={(v) => update({ key: "tiktok_disable_duet", value: v })} />
-          <ToggleRow label="Disable stitch" value={settings.tiktok_disable_stitch}
-            onChange={(v) => update({ key: "tiktok_disable_stitch", value: v })} />
+          <ToggleRow
+            label="Disable duet"
+            value={settings.tiktok_disable_duet}
+            onChange={(v) => update({ key: "tiktok_disable_duet", value: v })}
+          />
+          <ToggleRow
+            label="Disable stitch"
+            value={settings.tiktok_disable_stitch}
+            onChange={(v) => update({ key: "tiktok_disable_stitch", value: v })}
+          />
         </div>
       </div>
     </div>
@@ -860,12 +971,7 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
     <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg px-3 py-2">
       <span className="text-sm text-[#1A1A1A]">{label}</span>
       <label className="inline-flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={value}
-          onChange={() => onChange(!value)}
-          className="accent-[#D4AF37] h-4 w-4"
-        />
+        <input type="checkbox" checked={value} onChange={() => onChange(!value)} className="accent-[#D4AF37] h-4 w-4" />
         <span className="text-xs text-[#666]">{value ? "on" : "off"}</span>
       </label>
     </div>
@@ -881,7 +987,7 @@ function ContentEnhancement() {
 
   useEffect(() => {
     if (settings && draftFormat === null) setDraftFormat(settings.text_overlay_format);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [settings?.text_overlay_format]);
 
   async function upload(endpoint: string, file: File) {
@@ -900,17 +1006,32 @@ function ContentEnhancement() {
     <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
       <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Content Enhancement</h2>
       <div className="space-y-4">
-        <AssetUploadRow label="Intro clip" current={settings.intro_video_r2_key} accept="video/mp4"
-          onPick={(f) => upload("/api/admin/weekly-reel/upload-intro", f)} />
-        <AssetUploadRow label="Outro clip" current={settings.outro_video_r2_key} accept="video/mp4"
-          onPick={(f) => upload("/api/admin/weekly-reel/upload-outro", f)} />
-        <AssetUploadRow label="Background music" current={settings.background_music_r2_key} accept="audio/mpeg,audio/mp3"
-          onPick={(f) => upload("/api/admin/weekly-reel/upload-music", f)} />
+        <AssetUploadRow
+          label="Intro clip"
+          current={settings.intro_video_r2_key}
+          accept="video/mp4"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-intro", f)}
+        />
+        <AssetUploadRow
+          label="Outro clip"
+          current={settings.outro_video_r2_key}
+          accept="video/mp4"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-outro", f)}
+        />
+        <AssetUploadRow
+          label="Background music"
+          current={settings.background_music_r2_key}
+          accept="audio/mpeg,audio/mp3"
+          onPick={(f) => upload("/api/admin/weekly-reel/upload-music", f)}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           <div>
-            <ToggleRow label="Text overlay" value={settings.text_overlay_enabled}
-              onChange={(v) => update({ key: "text_overlay_enabled", value: v })} />
+            <ToggleRow
+              label="Text overlay"
+              value={settings.text_overlay_enabled}
+              onChange={(v) => update({ key: "text_overlay_enabled", value: v })}
+            />
             <label className="mt-3 block text-[10px] uppercase tracking-wider text-[#888]">Format</label>
             <input
               type="text"
@@ -924,7 +1045,9 @@ function ContentEnhancement() {
             </p>
             <button
               type="button"
-              onClick={() => { if (draftFormat !== null) update({ key: "text_overlay_format", value: draftFormat }); }}
+              onClick={() => {
+                if (draftFormat !== null) update({ key: "text_overlay_format", value: draftFormat });
+              }}
               disabled={!formatDirty}
               className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
             >
@@ -947,19 +1070,32 @@ function ContentEnhancement() {
         </div>
 
         <div className="border-t border-[#F0EDE5] pt-3">
-          <ToggleRow label="Auto-generate thumbnail" value={settings.auto_generate_thumbnail}
-            onChange={(v) => update({ key: "auto_generate_thumbnail", value: v })} />
-          <ToggleRow label="Require per-card approval before publish"
+          <ToggleRow
+            label="Auto-generate thumbnail"
+            value={settings.auto_generate_thumbnail}
+            onChange={(v) => update({ key: "auto_generate_thumbnail", value: v })}
+          />
+          <ToggleRow
+            label="Require per-card approval before publish"
             value={settings.require_card_approval}
-            onChange={(v) => update({ key: "require_card_approval", value: v })} />
+            onChange={(v) => update({ key: "require_card_approval", value: v })}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-function AssetUploadRow({ label, current, accept, onPick }: {
-  label: string; current: string; accept: string; onPick: (f: File) => Promise<any>;
+function AssetUploadRow({
+  label,
+  current,
+  accept,
+  onPick,
+}: {
+  label: string;
+  current: string;
+  accept: string;
+  onPick: (f: File) => Promise<any>;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -970,9 +1106,13 @@ function AssetUploadRow({ label, current, accept, onPick }: {
         <p className="text-[10px] text-[#888] truncate font-mono">{current || "none"}</p>
         {err && <p className="text-[10px] text-red-700">{err}</p>}
       </div>
-      <label className={`inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg cursor-pointer ${
-        busy ? "bg-white text-[#888] border border-[#E8E4DC] opacity-50" : "bg-white text-[#555] border border-[#E8E4DC] hover:border-[#D4AF37]"
-      }`}>
+      <label
+        className={`inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg cursor-pointer ${
+          busy
+            ? "bg-white text-[#888] border border-[#E8E4DC] opacity-50"
+            : "bg-white text-[#555] border border-[#E8E4DC] hover:border-[#D4AF37]"
+        }`}
+      >
         <Upload size={12} /> {busy ? "Uploading…" : "Upload"}
         <input
           type="file"
@@ -982,10 +1122,16 @@ function AssetUploadRow({ label, current, accept, onPick }: {
           onChange={async (e) => {
             const f = e.target.files?.[0];
             if (!f) return;
-            setBusy(true); setErr(null);
-            try { await onPick(f); }
-            catch (x: any) { setErr(x?.message ?? "Upload failed"); }
-            finally { setBusy(false); e.target.value = ""; }
+            setBusy(true);
+            setErr(null);
+            try {
+              await onPick(f);
+            } catch (x: any) {
+              setErr(x?.message ?? "Upload failed");
+            } finally {
+              setBusy(false);
+              e.target.value = "";
+            }
           }}
         />
       </label>
@@ -1015,30 +1161,36 @@ function FeaturedCardsTable() {
   };
   const toggleFeatured = useMutation({
     mutationFn: async ({ certNumber, value }: { certNumber: string; value: boolean }) => {
-      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/featured`, { featured: value });
+      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/featured`, {
+        featured: value,
+      });
       return r.json();
     },
     ...mutationOpts,
   });
   const togglePinned = useMutation({
     mutationFn: async ({ certNumber, value }: { certNumber: string; value: boolean }) => {
-      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/pinned`, { pinned: value });
+      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/pinned`, {
+        pinned: value,
+      });
       return r.json();
     },
     ...mutationOpts,
   });
   const toggleBlacklisted = useMutation({
     mutationFn: async ({ certNumber, value }: { certNumber: string; value: boolean }) => {
-      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/blacklisted`, { blacklisted: value });
+      const r = await apiRequest("PATCH", `/api/admin/weekly-reel/card/${encodeURIComponent(certNumber)}/blacklisted`, {
+        blacklisted: value,
+      });
       return r.json();
     },
     ...mutationOpts,
   });
 
   const allCards = data?.cards ?? [];
-  const visible = allCards.filter(c => !c.blacklisted);
-  const blacklisted = allCards.filter(c => c.blacklisted);
-  const featuredCount = visible.filter(c => c.featured || c.pinned).length;
+  const visible = allCards.filter((c) => !c.blacklisted);
+  const blacklisted = allCards.filter((c) => c.blacklisted);
+  const featuredCount = visible.filter((c) => c.featured || c.pinned).length;
 
   return (
     <>
@@ -1050,12 +1202,14 @@ function FeaturedCardsTable() {
           </span>
         </div>
         <p className="text-xs text-[#666666] mb-4">
-          Admin-curated pool. <strong>Pinned</strong> cards (📌) always appear first regardless of grade or sort
-          order. <strong>Blacklisted</strong> cards (🚫) are excluded permanently. Toggles write
+          Admin-curated pool. <strong>Pinned</strong> cards (📌) always appear first regardless of grade or sort order.{" "}
+          <strong>Blacklisted</strong> cards (🚫) are excluded permanently. Toggles write
           <code className="mx-1">audit_log</code> rows.
         </p>
         {isLoading ? (
-          <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
+          <div className="py-12 flex justify-center">
+            <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+          </div>
         ) : visible.length === 0 ? (
           <p className="text-sm text-[#888888] py-6 text-center">No graded cards yet.</p>
         ) : (
@@ -1067,9 +1221,13 @@ function FeaturedCardsTable() {
                   <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Card Name</th>
                   <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Set</th>
                   <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Grade</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">Featured</th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">
+                    Featured
+                  </th>
                   <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">Pinned</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">Blacklist</th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">
+                    Blacklist
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1086,14 +1244,20 @@ function FeaturedCardsTable() {
                         {c.certNumber}
                       </td>
                       <td className="py-2 px-3 text-[#1A1A1A]">{c.cardName ?? "—"}</td>
-                      <td className="py-2 px-3 text-[#555]">{c.cardSet ?? "—"}{c.year ? ` (${c.year})` : ""}</td>
+                      <td className="py-2 px-3 text-[#555]">
+                        {c.cardSet ?? "—"}
+                        {c.year ? ` (${c.year})` : ""}
+                      </td>
                       <td className="py-2 px-3 font-bold text-[#1A1A1A]">{fmtGrade(c.grade)}</td>
                       <td className="py-2 px-3 text-center">
                         <input
                           type="checkbox"
                           checked={c.featured}
                           disabled={busy}
-                          onChange={() => { setBusyCert(c.certNumber); toggleFeatured.mutate({ certNumber: c.certNumber, value: !c.featured }); }}
+                          onChange={() => {
+                            setBusyCert(c.certNumber);
+                            toggleFeatured.mutate({ certNumber: c.certNumber, value: !c.featured });
+                          }}
                           className="accent-[#D4AF37] h-4 w-4"
                           data-testid={`toggle-featured-${c.certNumber}`}
                         />
@@ -1101,10 +1265,15 @@ function FeaturedCardsTable() {
                       <td className="py-2 px-3 text-center">
                         <button
                           type="button"
-                          onClick={() => { setBusyCert(c.certNumber); togglePinned.mutate({ certNumber: c.certNumber, value: !c.pinned }); }}
+                          onClick={() => {
+                            setBusyCert(c.certNumber);
+                            togglePinned.mutate({ certNumber: c.certNumber, value: !c.pinned });
+                          }}
                           disabled={busy}
                           className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${
-                            c.pinned ? "bg-[#D4AF37] text-[#1A1400]" : "bg-white border border-[#E8E4DC] text-[#888] hover:border-[#D4AF37]"
+                            c.pinned
+                              ? "bg-[#D4AF37] text-[#1A1400]"
+                              : "bg-white border border-[#E8E4DC] text-[#888] hover:border-[#D4AF37]"
                           } disabled:opacity-50`}
                           aria-label={c.pinned ? "Unpin" : "Pin"}
                           title={c.pinned ? "Unpin" : "Pin"}
@@ -1116,7 +1285,10 @@ function FeaturedCardsTable() {
                       <td className="py-2 px-3 text-center">
                         <button
                           type="button"
-                          onClick={() => { setBusyCert(c.certNumber); toggleBlacklisted.mutate({ certNumber: c.certNumber, value: true }); }}
+                          onClick={() => {
+                            setBusyCert(c.certNumber);
+                            toggleBlacklisted.mutate({ certNumber: c.certNumber, value: true });
+                          }}
                           disabled={busy}
                           className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white border border-[#E8E4DC] text-[#888] hover:border-red-400 hover:text-red-600 disabled:opacity-50"
                           aria-label="Blacklist"
@@ -1135,22 +1307,39 @@ function FeaturedCardsTable() {
         )}
 
         {error && (
-          <div className="mt-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
+          <div
+            className="mt-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm"
+            role="alert"
+          >
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
       </div>
 
-      {blacklisted.length > 0 && <BlacklistSection cards={blacklisted} onRestore={(certNumber) => {
-        setBusyCert(certNumber);
-        toggleBlacklisted.mutate({ certNumber, value: false });
-      }} busyCert={busyCert} />}
+      {blacklisted.length > 0 && (
+        <BlacklistSection
+          cards={blacklisted}
+          onRestore={(certNumber) => {
+            setBusyCert(certNumber);
+            toggleBlacklisted.mutate({ certNumber, value: false });
+          }}
+          busyCert={busyCert}
+        />
+      )}
     </>
   );
 }
 
-function BlacklistSection({ cards, onRestore, busyCert }: { cards: FeaturedCard[]; onRestore: (c: string) => void; busyCert: string | null }) {
+function BlacklistSection({
+  cards,
+  onRestore,
+  busyCert,
+}: {
+  cards: FeaturedCard[];
+  onRestore: (c: string) => void;
+  busyCert: string | null;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
@@ -1159,16 +1348,14 @@ function BlacklistSection({ cards, onRestore, busyCert }: { cards: FeaturedCard[
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-[#FAFAF8] transition-colors"
       >
-        <h2 className="text-sm font-bold text-[#888] uppercase tracking-widest">
-          Blacklisted ({cards.length})
-        </h2>
+        <h2 className="text-sm font-bold text-[#888] uppercase tracking-widest">Blacklisted ({cards.length})</h2>
         {open ? <ChevronUp size={16} className="text-[#888]" /> : <ChevronDown size={16} className="text-[#888]" />}
       </button>
       {open && (
         <div className="border-t border-[#E8E4DC] px-6 py-4">
           <table className="w-full text-sm">
             <tbody>
-              {cards.map(c => (
+              {cards.map((c) => (
                 <tr key={c.certNumber} className="border-b border-[#F0EDE5]">
                   <td className="py-2 px-3 font-mono text-[#1A1A1A]">{c.certNumber}</td>
                   <td className="py-2 px-3 text-[#555]">{c.cardName ?? "—"}</td>
@@ -1202,8 +1389,11 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
   const [pubMsg, setPubMsg] = useState<string | null>(null);
   const badge = statusBadge(entry.status);
   const ageHours = useMemo(() => {
-    try { return (Date.now() - new Date(entry.createdAt).getTime()) / (1000 * 60 * 60); }
-    catch { return 0; }
+    try {
+      return (Date.now() - new Date(entry.createdAt).getTime()) / (1000 * 60 * 60);
+    } catch {
+      return 0;
+    }
   }, [entry.createdAt]);
   const stale = ageHours > 24;
 
@@ -1214,7 +1404,9 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
   });
   const approvals: Record<string, ApprovalCard> = useMemo(() => {
     const m: Record<string, ApprovalCard> = {};
-    (approvalsData?.cards ?? []).forEach(a => { m[a.certNumber] = a; });
+    (approvalsData?.cards ?? []).forEach((a) => {
+      m[a.certNumber] = a;
+    });
     return m;
   }, [approvalsData]);
   const hasApprovals = (approvalsData?.cards.length ?? 0) > 0;
@@ -1230,11 +1422,13 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
         if (!cancelled) setThumbUrl(j.url ?? null);
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, entry.date]);
 
   function downloadAll() {
-    const valid = entry.cards.filter(c => c.videoUrl).map(c => c.videoUrl as string);
+    const valid = entry.cards.filter((c) => c.videoUrl).map((c) => c.videoUrl as string);
     if (valid.length === 0) return;
     if (stale && !confirm("Segmind URLs may have expired (manifest > 24h old). Try anyway?")) return;
     valid.forEach((url, i) => {
@@ -1257,9 +1451,13 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
       const r = await apiRequest("POST", `/api/admin/weekly-reel/publish-${channel}`, { date: entry.date });
       const j = await r.json();
       if (j.error === "token_not_configured") setPubMsg(`${channel}: token not configured`);
-      else if (j.error === "approvals_pending") setPubMsg(`${channel}: pending approval — ${(j.pending ?? []).join(", ")}`);
+      else if (j.error === "approvals_pending")
+        setPubMsg(`${channel}: pending approval — ${(j.pending ?? []).join(", ")}`);
       else if (j.error) setPubMsg(`${channel}: ${j.error}`);
-      else { setPubMsg(`${channel}: published — ${j.postId}`); queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] }); }
+      else {
+        setPubMsg(`${channel}: published — ${j.postId}`);
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] });
+      }
     } catch (err: any) {
       setPubMsg(`${channel}: ${err?.message ?? "publish failed"}`);
     }
@@ -1271,12 +1469,19 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
       const r = await apiRequest("POST", "/api/admin/weekly-reel/refresh-insights", { date: entry.date });
       const j = await r.json();
       if (j.error) setPubMsg(`insights: ${j.error}`);
-      else { setPubMsg("insights: refreshed"); queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] }); }
-    } catch (err: any) { setPubMsg(`insights: ${err?.message ?? "failed"}`); }
+      else {
+        setPubMsg("insights: refreshed");
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/analytics"] });
+      }
+    } catch (err: any) {
+      setPubMsg(`insights: ${err?.message ?? "failed"}`);
+    }
   }
 
   async function toggleApproval(certNumber: string, approved: boolean) {
-    await apiRequest("PATCH", `/api/admin/weekly-reel/approvals/${entry.date}/${encodeURIComponent(certNumber)}`, { approved });
+    await apiRequest("PATCH", `/api/admin/weekly-reel/approvals/${entry.date}/${encodeURIComponent(certNumber)}`, {
+      approved,
+    });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/approvals/", entry.date] });
   }
   async function approveAll() {
@@ -1290,7 +1495,9 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
       const j = await r.json();
       setPubMsg(j.error ? `regen: ${j.error}` : `regen: ${certNumber} ${j.videoUrl ? "ok" : "failed"}`);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/status"] });
-    } catch (err: any) { setPubMsg(`regen: ${err?.message ?? "failed"}`); }
+    } catch (err: any) {
+      setPubMsg(`regen: ${err?.message ?? "failed"}`);
+    }
   }
 
   return (
@@ -1305,45 +1512,71 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
             <img src={thumbUrl} alt="" className="w-[60px] h-[60px] object-cover rounded border border-[#E8E4DC]" />
           )}
           <span className="font-mono text-sm text-[#1A1A1A]">{entry.date}</span>
-          <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${badge.cls}`}>
+          <span
+            className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${badge.cls}`}
+          >
             {badge.label}
           </span>
           <span className="text-xs text-[#666] truncate">
             {entry.successCount}/{entry.cardCount} ok
             {entry.failCount > 0 && <> · {entry.failCount} failed</>}
-            {entry.model && <> · {entry.model} {entry.clipLengthSeconds ? `${entry.clipLengthSeconds}s` : ""}</>}
+            {entry.model && (
+              <>
+                {" "}
+                · {entry.model} {entry.clipLengthSeconds ? `${entry.clipLengthSeconds}s` : ""}
+              </>
+            )}
             {!entry.manifestPresent && <> · manifest missing</>}
           </span>
         </button>
         <div className="flex items-center gap-1 shrink-0">
-          <button type="button" onClick={() => publish("instagram")}
+          <button
+            type="button"
+            onClick={() => publish("instagram")}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Publish to Instagram">
+            title="Publish to Instagram"
+          >
             <Instagram size={12} />
           </button>
-          <button type="button" onClick={() => publish("facebook")}
+          <button
+            type="button"
+            onClick={() => publish("facebook")}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Publish to Facebook">
+            title="Publish to Facebook"
+          >
             <Facebook size={12} />
           </button>
-          <button type="button" onClick={() => publish("tiktok")}
+          <button
+            type="button"
+            onClick={() => publish("tiktok")}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Publish to TikTok">
+            title="Publish to TikTok"
+          >
             <Music size={12} />
           </button>
-          <button type="button" onClick={refreshInsights}
+          <button
+            type="button"
+            onClick={refreshInsights}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Refresh IG insights">
+            title="Refresh IG insights"
+          >
             <RefreshCw size={12} />
           </button>
-          <button type="button" onClick={downloadAll} disabled={entry.successCount === 0}
+          <button
+            type="button"
+            onClick={downloadAll}
+            disabled={entry.successCount === 0}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37] disabled:opacity-40"
-            title={stale ? "URLs may have expired" : "Download all videos"}>
+            title={stale ? "URLs may have expired" : "Download all videos"}
+          >
             <Download size={12} /> {stale ? "Stale" : ""}
           </button>
-          <button type="button" onClick={onRerun}
+          <button
+            type="button"
+            onClick={onRerun}
             className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
-            title="Re-run with force=true">
+            title="Re-run with force=true"
+          >
             <RotateCcw size={12} />
           </button>
           {open ? <ChevronUp size={16} className="text-[#888]" /> : <ChevronDown size={16} className="text-[#888]" />}
@@ -1362,8 +1595,11 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           {hasApprovals && (
             <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg p-2">
               <span className="text-xs text-amber-800">Per-card approval required before publishing.</span>
-              <button type="button" onClick={approveAll}
-                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">
+              <button
+                type="button"
+                onClick={approveAll}
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+              >
                 Approve All
               </button>
             </div>
@@ -1375,39 +1611,67 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
               {entry.cards.map((c, i) => {
                 const ap = approvals[c.certNumber];
                 return (
-                  <li key={`${entry.date}-${c.certNumber}-${i}`} className="bg-white border border-[#E8E4DC] rounded-lg p-3" data-testid={`history-card-${entry.date}-${c.certNumber}`}>
+                  <li
+                    key={`${entry.date}-${c.certNumber}-${i}`}
+                    className="bg-white border border-[#E8E4DC] rounded-lg p-3"
+                    data-testid={`history-card-${entry.date}-${c.certNumber}`}
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="flex items-baseline gap-2 min-w-0">
                         <span className="font-mono text-sm font-semibold text-[#1A1A1A]">{c.certNumber}</span>
                         <span className="text-xs text-[#666]">grade {fmtGrade(c.grade)}</span>
                         {c.cardName && <span className="text-xs text-[#888] truncate">· {c.cardName}</span>}
                         {ap && (
-                          <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-semibold ${
-                            ap.approved ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-red-50 text-red-700 border-red-200"
-                          }`}>
+                          <span
+                            className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-semibold ${
+                              ap.approved
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-red-50 text-red-700 border-red-200"
+                            }`}
+                          >
                             {ap.approved ? "approved" : "pending"}
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {ap && (ap.approved
-                          ? <button type="button" onClick={() => toggleApproval(c.certNumber, false)}
-                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-red-400 hover:text-red-700">Reject</button>
-                          : <button type="button" onClick={() => toggleApproval(c.certNumber, true)}
-                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-emerald-400 hover:text-emerald-700">
+                        {ap &&
+                          (ap.approved ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleApproval(c.certNumber, false)}
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-red-400 hover:text-red-700"
+                            >
+                              Reject
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleApproval(c.certNumber, true)}
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-emerald-400 hover:text-emerald-700"
+                            >
                               <Check size={10} className="inline" /> Approve
                             </button>
-                        )}
-                        <button type="button" onClick={() => regenerate(c.certNumber)}
-                          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]">
+                          ))}
+                        <button
+                          type="button"
+                          onClick={() => regenerate(c.certNumber)}
+                          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+                        >
                           <RotateCcw size={10} className="inline" /> Regen
                         </button>
                       </div>
                     </div>
                     {c.videoUrl ? (
-                      <video src={c.videoUrl} controls preload="none" className="w-full max-w-sm rounded-lg border border-[#E8E4DC] bg-black" />
+                      <video
+                        src={c.videoUrl}
+                        controls
+                        preload="none"
+                        className="w-full max-w-sm rounded-lg border border-[#E8E4DC] bg-black"
+                      />
                     ) : c.error ? (
-                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 font-mono break-words">{c.error}</p>
+                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 font-mono break-words">
+                        {c.error}
+                      </p>
                     ) : (
                       <p className="text-xs text-[#888]">No video URL · no error recorded</p>
                     )}
@@ -1443,14 +1707,16 @@ function HistorySection() {
         <span className="text-xs text-[#888888]">Last 10 runs</span>
       </div>
       {isLoading ? (
-        <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
+        <div className="py-12 flex justify-center">
+          <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+        </div>
       ) : (data?.history.length ?? 0) === 0 ? (
         <p className="text-sm text-[#888] py-6 text-center">
           No reel runs yet. Audit-log only captures completed runs — pure skips won't appear.
         </p>
       ) : (
         <div className="space-y-3">
-          {data?.history.map(e => (
+          {data?.history.map((e) => (
             <HistoryEntryRow key={e.date} entry={e} onRerun={() => rerunMutation.mutate()} />
           ))}
         </div>
@@ -1467,17 +1733,21 @@ function AnalyticsSection() {
     queryFn: async () => (await fetch("/api/admin/weekly-reel/analytics")).json(),
   });
   const rows = data?.rows ?? [];
-  const chartData = useMemo(() => [...rows].reverse().map(r => ({
-    date: r.reelDate,
-    success: r.successCount ?? 0,
-  })), [rows]);
+  const chartData = useMemo(
+    () =>
+      [...rows].reverse().map((r) => ({
+        date: r.reelDate,
+        success: r.successCount ?? 0,
+      })),
+    [rows]
+  );
   const totalUsd = data?.totalCostUsd ?? 0;
 
   // Best-performing: max instagram_likes (when any). Falls back to highest
   // successCount when no IG data yet.
   const best = useMemo(() => {
     if (rows.length === 0) return null;
-    const withLikes = rows.filter(r => r.instagramLikes != null);
+    const withLikes = rows.filter((r) => r.instagramLikes != null);
     if (withLikes.length > 0) {
       return withLikes.reduce((a, b) => ((a.instagramLikes ?? 0) >= (b.instagramLikes ?? 0) ? a : b));
     }
@@ -1499,9 +1769,7 @@ function AnalyticsSection() {
     <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
       <div className="flex items-baseline justify-between mb-4">
         <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Analytics</h2>
-        <span className="text-xs text-[#888888]">
-          {isLoading ? "…" : `$${totalUsd.toFixed(2)} spent to date`}
-        </span>
+        <span className="text-xs text-[#888888]">{isLoading ? "…" : `$${totalUsd.toFixed(2)} spent to date`}</span>
       </div>
       {best && (
         <div className="mb-4 inline-flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-[#FAF5E0] border border-[#D4AF37] text-[#1A1400]">
@@ -1522,7 +1790,9 @@ function AnalyticsSection() {
         </div>
       )}
       {isLoading ? (
-        <div className="py-12 flex justify-center"><Loader2 size={20} className="text-[#D4AF37] animate-spin" /></div>
+        <div className="py-12 flex justify-center">
+          <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+        </div>
       ) : rows.length === 0 ? (
         <p className="text-sm text-[#888] py-6 text-center">No runs recorded yet.</p>
       ) : (
@@ -1557,8 +1827,13 @@ function AnalyticsSection() {
                     <td className="py-2 px-3 text-[#555]">{trendArrow(r, prev)}</td>
                     <td className="py-2 px-3 text-[10px] text-[#555] space-x-1">
                       {r.instagramPostId && (
-                        <a href={`https://www.instagram.com/p/${r.instagramPostId}`} target="_blank" rel="noopener"
-                           className="inline-flex items-center hover:text-[#D4AF37]" title="View on Instagram">
+                        <a
+                          href={`https://www.instagram.com/p/${r.instagramPostId}`}
+                          target="_blank"
+                          rel="noopener"
+                          className="inline-flex items-center hover:text-[#D4AF37]"
+                          title="View on Instagram"
+                        >
                           <Instagram size={12} />
                         </a>
                       )}

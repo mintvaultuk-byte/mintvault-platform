@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
+import DOMPurify from "dompurify";
 
 interface FaqItem {
   question: string;
   answer: string;
 }
 
-export default function FaqSection({ faqs, title = "Frequently Asked Questions" }: { faqs: FaqItem[]; title?: string }) {
+export default function FaqSection({
+  faqs,
+  title = "Frequently Asked Questions",
+}: {
+  faqs: FaqItem[];
+  title?: string;
+}) {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
@@ -33,8 +40,13 @@ export default function FaqSection({ faqs, title = "Frequently Asked Questions" 
               />
             </button>
             {openIndex === i && (
-              <div id={`faq-answer-${i}`} role="region" className="px-5 pb-4 text-[#d4d4d4] text-sm leading-relaxed border-t border-[#D4AF37]/20" data-testid={`text-faq-answer-${i}`}>
-                <div className="pt-3" dangerouslySetInnerHTML={{ __html: faq.answer }} />
+              <div
+                id={`faq-answer-${i}`}
+                role="region"
+                className="px-5 pb-4 text-[#d4d4d4] text-sm leading-relaxed border-t border-[#D4AF37]/20"
+                data-testid={`text-faq-answer-${i}`}
+              >
+                <div className="pt-3" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(faq.answer) }} />
               </div>
             )}
           </div>
@@ -48,12 +60,12 @@ export function faqSchema(faqs: FaqItem[]) {
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    "mainEntity": faqs.map(faq => ({
+    mainEntity: faqs.map((faq) => ({
       "@type": "Question",
-      "name": faq.question,
-      "acceptedAnswer": {
+      name: faq.question,
+      acceptedAnswer: {
         "@type": "Answer",
-        "text": faq.answer.replace(/<[^>]*>/g, ""),
+        text: faq.answer.replace(/<[^>]*>/g, ""),
       },
     })),
   };

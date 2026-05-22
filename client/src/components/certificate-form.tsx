@@ -2,13 +2,39 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
-import { Save, Upload, Search, Check, AlertTriangle, X, ChevronDown, HelpCircle, Link2, FileText, Plus, Cpu, Loader2, CheckCircle2, Trash2, RefreshCw, Database, Pencil } from "lucide-react";
+import {
+  Save,
+  Upload,
+  Search,
+  Check,
+  AlertTriangle,
+  X,
+  ChevronDown,
+  HelpCircle,
+  Link2,
+  FileText,
+  Plus,
+  Cpu,
+  Loader2,
+  CheckCircle2,
+  Trash2,
+  RefreshCw,
+  Database,
+  Pencil,
+} from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
 import { mapVariantTextToCode } from "@/lib/variantOptions";
-import { UNIFIED_OPTIONS, parseUnifiedValue, buildUnifiedValue, buildOtherText, getUnifiedDisplayLabel, type UnifiedOption } from "@/lib/unifiedCardOptions";
+import {
+  UNIFIED_OPTIONS,
+  parseUnifiedValue,
+  buildUnifiedValue,
+  buildOtherText,
+  getUnifiedDisplayLabel,
+  type UnifiedOption,
+} from "@/lib/unifiedCardOptions";
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
 
 interface Props {
@@ -31,14 +57,14 @@ interface Props {
  * below normalises both forms back to the slug at form-load time.
  */
 const cardGames: { value: string; label: string }[] = [
-  { value: "pokemon",  label: "Pokémon" },
-  { value: "yugioh",   label: "Yu-Gi-Oh!" },
-  { value: "mtg",      label: "Magic: The Gathering" },
+  { value: "pokemon", label: "Pokémon" },
+  { value: "yugioh", label: "Yu-Gi-Oh!" },
+  { value: "mtg", label: "Magic: The Gathering" },
   { value: "onepiece", label: "One Piece" },
-  { value: "digimon",  label: "Digimon" },
-  { value: "lorcana",  label: "Lorcana" },
-  { value: "sports",   label: "Sports" },
-  { value: "other",    label: "Other" },
+  { value: "digimon", label: "Digimon" },
+  { value: "lorcana", label: "Lorcana" },
+  { value: "sports", label: "Sports" },
+  { value: "other", label: "Other" },
 ];
 
 /**
@@ -52,11 +78,15 @@ function slugifyCardGame(stored: string | null | undefined): string {
   const s = String(stored).trim();
   if (!s) return "";
   // Already a known slug
-  if (cardGames.some(g => g.value === s)) return s;
+  if (cardGames.some((g) => g.value === s)) return s;
   // Match against label (case-insensitive, normalise é/è and punctuation)
-  const norm = (x: string) => x.toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  const norm = (x: string) =>
+    x
+      .toLowerCase()
+      .replace(/[éè]/g, "e")
+      .replace(/[^a-z0-9]/g, "");
   const target = norm(s);
-  const byLabel = cardGames.find(g => norm(g.label) === target);
+  const byLabel = cardGames.find((g) => norm(g.label) === target);
   if (byLabel) return byLabel.value;
   // Last-ditch: aliases used historically in the codebase
   if (target === "magic" || target === "magicthegathering") return "mtg";
@@ -98,10 +128,16 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
     text: "Card verified as genuine.\nNo physical alterations detected.\nAuthenticity confirmed by MintVault UK.",
   },
 ];
-type AutofillField = typeof AUTOFILL_FIELDS[number];
+type AutofillField = (typeof AUTOFILL_FIELDS)[number];
 type ProtectedField = AutofillField | "designations";
 
-export default function CertificateForm({ certificate, onSuccess, onIdentifyAndGrade, externalIdentification, onExternalIdentificationConsumed }: Props) {
+export default function CertificateForm({
+  certificate,
+  onSuccess,
+  onIdentifyAndGrade,
+  externalIdentification,
+  onExternalIdentificationConsumed,
+}: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -119,7 +155,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     submissionItemId: (certificate as any)?.submissionItemId || "",
     cardGame: slugifyCardGame(certificate?.cardGame),
     setName: certificate?.setName || "",
-    cardName: (certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)") ? "" : (certificate?.cardName || ""),
+    cardName:
+      certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)"
+        ? ""
+        : certificate?.cardName || "",
     cardNumber: certificate?.cardNumber || "",
     rarity: initRarity,
     rarityOther: initRarityOther,
@@ -127,7 +166,14 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     collectionOther: initCollOther,
     variant: initVariant,
     variantOther: initVariantOther,
-    unifiedSelect: buildUnifiedValue(initRarity, initVariant, initCollCode, initRarityOther, initVariantOther, initCollOther),
+    unifiedSelect: buildUnifiedValue(
+      initRarity,
+      initVariant,
+      initCollCode,
+      initRarityOther,
+      initVariantOther,
+      initCollOther
+    ),
     otherText: buildOtherText(initRarityOther, initVariantOther, initCollOther),
     language: certificate?.language || "English",
     year: certificate?.year || "",
@@ -137,9 +183,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     status: certificate?.status || "active",
   });
 
-  const [designations, setDesignations] = useState<string[]>(
-    () => (certificate?.designations as string[]) || []
-  );
+  const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
 
   // Sync form state when the cert prop changes (e.g. after AI autofill refetches the cert)
   // Only overwrite fields that are currently empty — never stomp manual edits
@@ -151,26 +195,53 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       const m = String(v).match(/\d{4}/);
       return m ? m[0] : "";
     };
-    const clean = (v: any) => isEmpty(v) ? "" : String(v);
+    const clean = (v: any) => (isEmpty(v) ? "" : String(v));
 
-    setForm(prev => {
+    setForm((prev) => {
       let changed = false;
       const next = { ...prev };
       const cn = clean(certificate.cardName);
       const yr = normalizeYear(certificate.year);
-      if (isEmpty(prev.cardName) && cn)             { next.cardName = cn; changed = true; }
-      if (isEmpty(prev.setName) && clean(certificate.setName))  { next.setName = clean(certificate.setName); changed = true; }
-      if (isEmpty(prev.cardNumber) && clean(certificate.cardNumber)) { next.cardNumber = clean(certificate.cardNumber); changed = true; }
-      if (isEmpty(prev.year) && yr)                  { next.year = yr; changed = true; }
-      if (isEmpty(prev.cardGame) && slugifyCardGame(certificate.cardGame)) { next.cardGame = slugifyCardGame(certificate.cardGame); changed = true; }
-      if (isEmpty(prev.language) && clean(certificate.language)) { next.language = clean(certificate.language); changed = true; }
-      if (isEmpty(prev.rarity) && clean((certificate as any)?.rarity)) { next.rarity = clean((certificate as any).rarity); changed = true; }
-      if (isEmpty(prev.variant) && clean((certificate as any)?.variant)) { next.variant = clean((certificate as any).variant); changed = true; }
-      if (isEmpty(prev.gradeOverall) && certificate.gradeOverall) { next.gradeOverall = certificate.gradeOverall; changed = true; }
+      if (isEmpty(prev.cardName) && cn) {
+        next.cardName = cn;
+        changed = true;
+      }
+      if (isEmpty(prev.setName) && clean(certificate.setName)) {
+        next.setName = clean(certificate.setName);
+        changed = true;
+      }
+      if (isEmpty(prev.cardNumber) && clean(certificate.cardNumber)) {
+        next.cardNumber = clean(certificate.cardNumber);
+        changed = true;
+      }
+      if (isEmpty(prev.year) && yr) {
+        next.year = yr;
+        changed = true;
+      }
+      if (isEmpty(prev.cardGame) && slugifyCardGame(certificate.cardGame)) {
+        next.cardGame = slugifyCardGame(certificate.cardGame);
+        changed = true;
+      }
+      if (isEmpty(prev.language) && clean(certificate.language)) {
+        next.language = clean(certificate.language);
+        changed = true;
+      }
+      if (isEmpty(prev.rarity) && clean((certificate as any)?.rarity)) {
+        next.rarity = clean((certificate as any).rarity);
+        changed = true;
+      }
+      if (isEmpty(prev.variant) && clean((certificate as any)?.variant)) {
+        next.variant = clean((certificate as any).variant);
+        changed = true;
+      }
+      if (isEmpty(prev.gradeOverall) && certificate.gradeOverall) {
+        next.gradeOverall = certificate.gradeOverall;
+        changed = true;
+      }
       if (changed) toast({ title: "Card details auto-filled from AI" });
       return changed ? next : prev;
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [certificate?.cardName, certificate?.setName, certificate?.cardNumber, certificate?.year]);
 
   const isNonNum = isNonNumericGrade(form.gradeType);
@@ -208,7 +279,17 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   // TCG manual search state
   const [tcgSearchOpen, setTcgSearchOpen] = useState(false);
   const [tcgQuery, setTcgQuery] = useState("");
-  const [tcgResults, setTcgResults] = useState<{ id: string; name: string; setName: string; number: string | null; rarity: string | null; year: string | null; imageUrl: string | null }[]>([]);
+  const [tcgResults, setTcgResults] = useState<
+    {
+      id: string;
+      name: string;
+      setName: string;
+      number: string | null;
+      rarity: string | null;
+      year: string | null;
+      imageUrl: string | null;
+    }[]
+  >([]);
   const [tcgLoading, setTcgLoading] = useState(false);
   const [tcgCache] = useState(() => new Map<string, typeof tcgResults>());
   const [manuallyVerified, setManuallyVerified] = useState(false);
@@ -218,7 +299,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   useEffect(() => {
     if (externalIdentification) {
       const id = externalIdentification as any;
-      setForm(prev => ({
+      setForm((prev) => ({
         ...prev,
         cardName: id.officialName || id.detected_name || prev.cardName,
         setName: id.officialSet || id.detected_set || prev.setName,
@@ -234,15 +315,25 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   function handleTcgSearch(query: string) {
     setTcgQuery(query);
     if (tcgDebounceRef.current) clearTimeout(tcgDebounceRef.current);
-    if (query.trim().length < 3) { setTcgResults([]); setTcgLoading(false); return; }
+    if (query.trim().length < 3) {
+      setTcgResults([]);
+      setTcgLoading(false);
+      return;
+    }
 
     const cacheKey = `${form.cardGame || "pokemon"}:${query.trim().toLowerCase()}`;
-    if (tcgCache.has(cacheKey)) { setTcgResults(tcgCache.get(cacheKey)!); return; }
+    if (tcgCache.has(cacheKey)) {
+      setTcgResults(tcgCache.get(cacheKey)!);
+      return;
+    }
 
     setTcgLoading(true);
     tcgDebounceRef.current = setTimeout(async () => {
       try {
-        const gameSlug = (form.cardGame || "pokemon").toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+        const gameSlug = (form.cardGame || "pokemon")
+          .toLowerCase()
+          .replace(/[éè]/g, "e")
+          .replace(/[^a-z0-9]/g, "");
         const fetchUrl = `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`;
         console.log("[tcg-search] fetching:", fetchUrl);
         const res = await fetch(fetchUrl, { credentials: "include" });
@@ -259,8 +350,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     }, 400);
   }
 
-  function selectTcgCard(card: typeof tcgResults[number]) {
-    setForm(prev => ({
+  function selectTcgCard(card: (typeof tcgResults)[number]) {
+    setForm((prev) => ({
       ...prev,
       cardName: card.name || prev.cardName,
       setName: card.setName || prev.setName,
@@ -272,7 +363,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     setTcgSearchOpen(false);
     setTcgQuery("");
     setTcgResults([]);
-    toast({ title: "Card selected", description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}` });
+    toast({
+      title: "Card selected",
+      description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}`,
+    });
 
     // Sync manual verification to AI panel via the existing pipeline
     const manualId = {
@@ -305,7 +399,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     setIdentifyConfidence(null);
     try {
       const res = await fetch(`/api/admin/certificates/${certificate.id}/identify`, {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Identify failed");
@@ -316,18 +412,45 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       if (data.detailsWritten !== false) {
         const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
         const overwrite = data.verified || data.confidence === "high";
-        setForm(prev => ({
+        setForm((prev) => ({
           ...prev,
-          cardName:   overwrite ? (data.card_name || prev.cardName)     : (isEmpty(prev.cardName)   ? (data.card_name || prev.cardName)     : prev.cardName),
-          setName:    overwrite ? (data.set_name || prev.setName)        : (isEmpty(prev.setName)    ? (data.set_name || prev.setName)        : prev.setName),
-          cardNumber: overwrite ? (data.card_number || prev.cardNumber)  : (isEmpty(prev.cardNumber) ? (data.card_number || prev.cardNumber)  : prev.cardNumber),
-          year:       overwrite ? (data.year || prev.year)               : (isEmpty(prev.year)       ? (data.year || prev.year)               : prev.year),
-          rarity:     overwrite ? (data.rarity || prev.rarity)           : (isEmpty(prev.rarity)     ? (data.rarity || prev.rarity)           : prev.rarity),
-          language:   overwrite ? (data.language || prev.language)       : (isEmpty(prev.language)   ? (data.language || prev.language)       : prev.language),
+          cardName: overwrite
+            ? data.card_name || prev.cardName
+            : isEmpty(prev.cardName)
+              ? data.card_name || prev.cardName
+              : prev.cardName,
+          setName: overwrite
+            ? data.set_name || prev.setName
+            : isEmpty(prev.setName)
+              ? data.set_name || prev.setName
+              : prev.setName,
+          cardNumber: overwrite
+            ? data.card_number || prev.cardNumber
+            : isEmpty(prev.cardNumber)
+              ? data.card_number || prev.cardNumber
+              : prev.cardNumber,
+          year: overwrite ? data.year || prev.year : isEmpty(prev.year) ? data.year || prev.year : prev.year,
+          rarity: overwrite
+            ? data.rarity || prev.rarity
+            : isEmpty(prev.rarity)
+              ? data.rarity || prev.rarity
+              : prev.rarity,
+          language: overwrite
+            ? data.language || prev.language
+            : isEmpty(prev.language)
+              ? data.language || prev.language
+              : prev.language,
         }));
-        toast({ title: "Card identified", description: `${data.card_name || "Card"} — ${data.set_name || "Unknown set"}` });
+        toast({
+          title: "Card identified",
+          description: `${data.card_name || "Card"} — ${data.set_name || "Unknown set"}`,
+        });
       } else {
-        toast({ title: "Couldn't identify confidently", description: "Please fill in card details manually", variant: "destructive" });
+        toast({
+          title: "Couldn't identify confidently",
+          description: "Please fill in card details manually",
+          variant: "destructive",
+        });
       }
     } catch (e: any) {
       toast({ title: "Identify failed", description: e.message, variant: "destructive" });
@@ -343,7 +466,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     setGradeLoading(true);
     try {
       const res = await fetch(`/api/admin/certificates/${certificate.id}/grade`, {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Grade failed");
@@ -369,14 +494,21 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   const [suggestions, setSuggestions] = useState<CardMaster[]>([]);
   const [fallbackMatch, setFallbackMatch] = useState<CardMaster | null>(null);
   const [fallbackSetName, setFallbackSetName] = useState<string | null>(null);
-  const [overwriteConfirm, setOverwriteConfirm] = useState<{ fields: ProtectedField[]; card: CardMaster; setName: string | null } | null>(null);
+  const [overwriteConfirm, setOverwriteConfirm] = useState<{
+    fields: ProtectedField[];
+    card: CardMaster;
+    setName: string | null;
+  } | null>(null);
   const [unifiedSearch, setUnifiedSearch] = useState("");
   const [unifiedOpen, setUnifiedOpen] = useState(false);
   const unifiedRef = useRef<HTMLDivElement>(null);
 
   const [customVariants, setCustomVariants] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("mv-custom-variants") || "[]"); }
-    catch { return []; }
+    try {
+      return JSON.parse(localStorage.getItem("mv-custom-variants") || "[]");
+    } catch {
+      return [];
+    }
   });
 
   const { data: dbVariants = [] } = useQuery<string[]>({
@@ -412,9 +544,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     setGradingUploading(true);
     try {
       const fd = new FormData();
-      if (gradingImages.front)   fd.append("front",   gradingImages.front);
-      if (gradingImages.back)    fd.append("back",    gradingImages.back);
-      if (gradingImages.angled)  fd.append("angled",  gradingImages.angled);
+      if (gradingImages.front) fd.append("front", gradingImages.front);
+      if (gradingImages.back) fd.append("back", gradingImages.back);
+      if (gradingImages.angled) fd.append("angled", gradingImages.angled);
       if (gradingImages.closeup) fd.append("closeup", gradingImages.closeup);
       const res = await fetch(`/api/admin/certificates/${certificate.id}/upload-images`, {
         method: "POST",
@@ -455,7 +587,13 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiAnalysis, setAiAnalysis] = useState<any>(null);
-  const [aiDraft, setAiDraft] = useState<{centering: string; corners: string; edges: string; surface: string; overall: string}>({ centering: "", corners: "", edges: "", surface: "", overall: "" });
+  const [aiDraft, setAiDraft] = useState<{
+    centering: string;
+    corners: string;
+    edges: string;
+    surface: string;
+    overall: string;
+  }>({ centering: "", corners: "", edges: "", surface: "", overall: "" });
   const [aiDefects, setAiDefects] = useState<any[]>([]);
   const [approveLoading, setApproveLoading] = useState(false);
   const [approved, setApproved] = useState(false);
@@ -476,10 +614,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       setAiAnalysis(a);
       setAiDraft({
         centering: String(a.centering?.subgrade ?? ""),
-        corners:   String(a.corners?.subgrade   ?? ""),
-        edges:     String(a.edges?.subgrade      ?? ""),
-        surface:   String(a.surface?.subgrade    ?? ""),
-        overall:   String(a.overall_grade         ?? ""),
+        corners: String(a.corners?.subgrade ?? ""),
+        edges: String(a.edges?.subgrade ?? ""),
+        surface: String(a.surface?.subgrade ?? ""),
+        overall: String(a.overall_grade ?? ""),
       });
       setAiDefects(a.defects || []);
     } catch (e: any) {
@@ -518,8 +656,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     const n = parseFloat(val);
     if (isNaN(n)) return "#999999";
     if (n >= 10) return "#D4AF37";
-    if (n >= 9)  return "#16A34A";
-    if (n >= 7)  return "#CA8A04";
+    if (n >= 9) return "#16A34A";
+    if (n >= 7) return "#CA8A04";
     return "#DC2626";
   }
 
@@ -537,9 +675,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       if (frontImage) formData.append("frontImage", frontImage);
       if (backImage) formData.append("backImage", backImage);
 
-      const url = isEdit
-        ? `/api/admin/certificates/${certificate.id}`
-        : "/api/admin/certificates";
+      const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
 
       const res = await fetch(url, {
@@ -704,7 +840,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     });
 
     if (isPromo && (forceOverwrite || !designations.includes("PROMO"))) {
-      setDesignations((prev) => prev.includes("PROMO") ? prev : [...prev, "PROMO"]);
+      setDesignations((prev) => (prev.includes("PROMO") ? prev : [...prev, "PROMO"]));
     }
 
     setAutofillRan(true);
@@ -779,7 +915,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
     <div>
       <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
         {isEdit
-          ? (!certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)" ? `NEW ${certificate.certId}` : `EDIT ${certificate.certId}`)
+          ? !certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)"
+            ? `NEW ${certificate.certId}`
+            : `EDIT ${certificate.certId}`
           : "NEW CERTIFICATE"}
       </h2>
       <p className="text-[#999999] text-sm mb-6">
@@ -789,22 +927,26 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {!isEdit && <SubmissionItemLink
-          value={form.submissionItemId}
-          onChange={(itemId, item) => {
-            setForm((f) => ({
-              ...f,
-              submissionItemId: itemId,
-              ...(item ? {
-                cardGame: slugifyCardGame(item.game) || f.cardGame,
-                setName: item.card_set || f.setName,
-                cardName: (item.card_name || "").toUpperCase() || f.cardName,
-                cardNumber: item.card_number || f.cardNumber,
-                year: item.year || f.year,
-              } : {}),
-            }));
-          }}
-        />}
+        {!isEdit && (
+          <SubmissionItemLink
+            value={form.submissionItemId}
+            onChange={(itemId, item) => {
+              setForm((f) => ({
+                ...f,
+                submissionItemId: itemId,
+                ...(item
+                  ? {
+                      cardGame: slugifyCardGame(item.game) || f.cardGame,
+                      setName: item.card_set || f.setName,
+                      cardName: (item.card_name || "").toUpperCase() || f.cardName,
+                      cardNumber: item.card_number || f.cardNumber,
+                      year: item.year || f.year,
+                    }
+                  : {}),
+              }));
+            }}
+          />
+        )}
         {/* AI actions — Identify and Grade are independent and gated separately */}
         {isEdit && certificate?.id && (
           <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-3">
@@ -852,12 +994,27 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 
             {identifyConfidence && (
               <div className="flex items-center gap-2 text-xs">
-                <span className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`} />
-                <span className={identifyConfidence === "high" ? "text-emerald-600" : identifyConfidence === "medium" ? "text-yellow-600" : "text-red-600"}>
+                <span
+                  className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`}
+                />
+                <span
+                  className={
+                    identifyConfidence === "high"
+                      ? "text-emerald-600"
+                      : identifyConfidence === "medium"
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                  }
+                >
                   {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
                 </span>
                 {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                  <button type="button" onClick={runIdentify} disabled={identifyLoading} className="text-[#D4AF37] text-[10px] hover:underline">
+                  <button
+                    type="button"
+                    onClick={runIdentify}
+                    disabled={identifyLoading}
+                    className="text-[#D4AF37] text-[10px] hover:underline"
+                  >
                     Retry
                   </button>
                 )}
@@ -874,7 +1031,11 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             <span className="text-[#888888]">Can't find the right card?</span>
             <button
               type="button"
-              onClick={() => { setTcgSearchOpen(true); setTcgQuery(""); setTcgResults([]); }}
+              onClick={() => {
+                setTcgSearchOpen(true);
+                setTcgQuery("");
+                setTcgResults([]);
+              }}
               disabled={!form.cardGame}
               className="flex items-center gap-1 text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
@@ -907,7 +1068,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   />
                   {tcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
                 </div>
-                <p className="text-[#AAAAAA] text-[9px] mt-1">Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters</p>
+                <p className="text-[#AAAAAA] text-[9px] mt-1">
+                  Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
+                </p>
               </div>
               <div className="max-h-[320px] overflow-y-auto">
                 {tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
@@ -932,7 +1095,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-[#1A1A1A] text-sm font-bold truncate">{card.name}</p>
-                      <p className="text-[#555555] text-xs truncate">{card.setName}{card.number ? ` · #${card.number}` : ""}</p>
+                      <p className="text-[#555555] text-xs truncate">
+                        {card.setName}
+                        {card.number ? ` · #${card.number}` : ""}
+                      </p>
                       <p className="text-[#AAAAAA] text-[10px]">
                         {[card.rarity, card.year].filter(Boolean).join(" · ")}
                       </p>
@@ -954,11 +1120,16 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             <div>
               <PokemonSetPicker
                 value={form.setName}
-                onChange={(name, id) => { updateField("setName", name); if (id) setSetId(id); }}
+                onChange={(name, id) => {
+                  updateField("setName", name);
+                  if (id) setSetId(id);
+                }}
                 testId="input-set-name"
               />
               <div className="mt-1.5">
-                <label className="text-[#D4AF37]/40 text-[10px] uppercase tracking-wider block mb-1">Set ID (for autofill)</label>
+                <label className="text-[#D4AF37]/40 text-[10px] uppercase tracking-wider block mb-1">
+                  Set ID (for autofill)
+                </label>
                 <input
                   type="text"
                   value={setId}
@@ -1008,7 +1179,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               </div>
 
               {suggestions.length > 0 && (
-                <div className="mt-2 border border-[#D4AF37]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto" data-testid="autofill-suggestions">
+                <div
+                  className="mt-2 border border-[#D4AF37]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto"
+                  data-testid="autofill-suggestions"
+                >
                   <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">Suggestions</p>
                   {suggestions.map((s) => (
                     <button
@@ -1040,13 +1214,17 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               )}
 
               {fallbackMatch && (
-                <div className="mt-2 border border-amber-500/40 bg-amber-500/5 rounded p-3" data-testid="fallback-banner">
+                <div
+                  className="mt-2 border border-amber-500/40 bg-amber-500/5 rounded p-3"
+                  data-testid="fallback-banner"
+                >
                   <div className="flex items-start gap-2">
                     <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
                     <div className="flex-1">
                       <p className="text-amber-400 text-sm font-medium">Match found in different language</p>
                       <p className="text-[#666666] text-xs mt-1">
-                        Found: <span className="text-[#1A1A1A]">{fallbackMatch.cardName}</span> ({fallbackMatch.language})
+                        Found: <span className="text-[#1A1A1A]">{fallbackMatch.cardName}</span> (
+                        {fallbackMatch.language})
                       </p>
                       <div className="flex gap-2 mt-2">
                         <button
@@ -1090,9 +1268,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <p className="text-amber-400 text-sm font-medium">Overwrite manually edited fields?</p>
-                  <p className="text-[#666666] text-xs mt-1">
-                    You edited: {overwriteConfirm.fields.join(", ")}
-                  </p>
+                  <p className="text-[#666666] text-xs mt-1">You edited: {overwriteConfirm.fields.join(", ")}</p>
                   <div className="flex gap-2 mt-2">
                     <button
                       type="button"
@@ -1121,7 +1297,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
             // built-in DB-stored codes appearing as duplicate custom entries.
             const builtInLabels = new Set(UNIFIED_OPTIONS.map((o) => o.label.toLowerCase()));
-            const builtInCodes  = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
+            const builtInCodes = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
             const seenLabels = new Set<string>([...builtInLabels, ...builtInCodes]);
             const extraVariants: UnifiedOption[] = [];
             // DB variants first (shared across all admins/devices)
@@ -1147,12 +1323,11 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               otherOpt,
             ];
             const q = unifiedSearch.toLowerCase().trim();
-            const filteredOpts = allOptions.filter((o) =>
-              !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
+            const filteredOpts = allOptions.filter(
+              (o) => !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
             );
-            const hasExactMatch = !q || allOptions.some(
-              (o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q
-            );
+            const hasExactMatch =
+              !q || allOptions.some((o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q);
             const showAddButton = q.length > 1 && !hasExactMatch;
 
             return (
@@ -1160,19 +1335,27 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Variant</label>
                 <button
                   type="button"
-                  onClick={() => { setUnifiedOpen(!unifiedOpen); setUnifiedSearch(""); }}
+                  onClick={() => {
+                    setUnifiedOpen(!unifiedOpen);
+                    setUnifiedSearch("");
+                  }}
                   className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[#D4AF37] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
                   data-testid="select-unified"
                 >
                   <span className={form.unifiedSelect ? "text-[#1A1A1A]" : "text-[#D4AF37]/20"}>
                     {form.unifiedSelect
-                      ? (form.unifiedSelect === "OTHER" ? "OTHER (manual)" : getUnifiedDisplayLabel(form.unifiedSelect))
+                      ? form.unifiedSelect === "OTHER"
+                        ? "OTHER (manual)"
+                        : getUnifiedDisplayLabel(form.unifiedSelect)
                       : "Select or type a variant..."}
                   </span>
                   <ChevronDown size={14} className="text-[#D4AF37]/50" />
                 </button>
                 {unifiedOpen && (
-                  <div className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col" data-testid="unified-dropdown">
+                  <div
+                    className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
+                    data-testid="unified-dropdown"
+                  >
                     <div className="p-2 border-b border-[#D4AF37]/10">
                       <input
                         type="text"
@@ -1201,7 +1384,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       {form.unifiedSelect && (
                         <button
                           type="button"
-                          onClick={() => { applyUnifiedSelection(""); setUnifiedOpen(false); }}
+                          onClick={() => {
+                            applyUnifiedSelection("");
+                            setUnifiedOpen(false);
+                          }}
                           className="w-full text-left px-3 py-2 text-xs text-[#999999] hover:bg-[#D4AF37]/10 hover:text-[#666666] transition-colors border-b border-[#D4AF37]/10"
                           data-testid="unified-clear"
                         >
@@ -1223,25 +1409,37 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                         <button
                           key={o.value}
                           type="button"
-                          onClick={() => { applyUnifiedSelection(o.value); setUnifiedOpen(false); setUnifiedSearch(""); }}
+                          onClick={() => {
+                            applyUnifiedSelection(o.value);
+                            setUnifiedOpen(false);
+                            setUnifiedSearch("");
+                          }}
                           className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A]"}`}
                           data-testid={`unified-option-${o.value}`}
                         >
                           <span className="block">{o.label}</span>
-                          {o.help && <span className="block text-[10px] text-[#999999] group-hover:text-[#666666] mt-0.5">{o.help}</span>}
+                          {o.help && (
+                            <span className="block text-[10px] text-[#999999] group-hover:text-[#666666] mt-0.5">
+                              {o.help}
+                            </span>
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
-                {form.unifiedSelect && (() => {
-                  const opt = allOptions.find((o) => o.value === form.unifiedSelect);
-                  return opt?.help ? (
-                    <p className="text-[#999999] text-[10px] mt-1 flex items-center gap-1" data-testid="text-unified-help">
-                      <HelpCircle size={10} className="shrink-0" /> {opt.help}
-                    </p>
-                  ) : null;
-                })()}
+                {form.unifiedSelect &&
+                  (() => {
+                    const opt = allOptions.find((o) => o.value === form.unifiedSelect);
+                    return opt?.help ? (
+                      <p
+                        className="text-[#999999] text-[10px] mt-1 flex items-center gap-1"
+                        data-testid="text-unified-help"
+                      >
+                        <HelpCircle size={10} className="shrink-0" /> {opt.help}
+                      </p>
+                    ) : null;
+                  })()}
                 {form.unifiedSelect === "OTHER" && (
                   <div className="mt-2 space-y-2">
                     <input
@@ -1318,7 +1516,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 highlight={languageChangedByFallback}
               />
               {languageChangedByFallback && (
-                <p className="text-amber-400 text-[10px] mt-1" data-testid="text-language-fallback-notice">Changed by fallback match</p>
+                <p className="text-amber-400 text-[10px] mt-1" data-testid="text-language-fallback-notice">
+                  Changed by fallback match
+                </p>
               )}
             </div>
             <FormInput
@@ -1371,7 +1571,10 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               <p className="text-[#D4AF37]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
               <div className="flex flex-wrap gap-1.5">
                 {PRESET_NOTES.map((preset) => {
-                  const lines = form.notes.split("\n").map((l) => l.trim()).filter(Boolean);
+                  const lines = form.notes
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean);
                   const alreadyAdded = lines.includes(preset);
                   return (
                     <button
@@ -1408,26 +1611,32 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               value={form.gradeType}
               onChange={(e) => {
                 const gt = e.target.value;
-                setForm(f => ({
+                setForm((f) => ({
                   ...f,
                   gradeType: gt,
-                  ...(isNonNumericGrade(gt) ? {
-                    gradeOverall: "",
-                    gradeCentering: "",
-                    gradeCorners: "",
-                    gradeEdges: "",
-                    gradeSurface: "",
-                  } : {
-                    gradeOverall: f.gradeOverall || "",
-                  }),
+                  ...(isNonNumericGrade(gt)
+                    ? {
+                        gradeOverall: "",
+                        gradeCentering: "",
+                        gradeCorners: "",
+                        gradeEdges: "",
+                        gradeSurface: "",
+                      }
+                    : {
+                        gradeOverall: f.gradeOverall || "",
+                      }),
                 }));
               }}
               className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
               data-testid="select-grade-type"
             >
-              <option value="numeric" className="bg-white">Numeric (1–10)</option>
-              {NON_NUMERIC_GRADES.map(ng => (
-                <option key={ng.value} value={ng.value} className="bg-white">{ng.value} – {ng.description}</option>
+              <option value="numeric" className="bg-white">
+                Numeric (1–10)
+              </option>
+              {NON_NUMERIC_GRADES.map((ng) => (
+                <option key={ng.value} value={ng.value} className="bg-white">
+                  {ng.value} – {ng.description}
+                </option>
               ))}
             </select>
           </div>
@@ -1448,24 +1657,32 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
           {!isNonNum && (
             <>
               <div>
-                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Overall Grade *</label>
+                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">
+                  Overall Grade *
+                </label>
                 <select
                   value={form.gradeOverall === "10" && form.labelType === "black" ? "black_label" : form.gradeOverall}
                   onChange={(e) => {
                     const v = e.target.value;
                     if (v === "black_label") {
-                      setForm(f => ({ ...f, gradeOverall: "10", labelType: "black" }));
+                      setForm((f) => ({ ...f, gradeOverall: "10", labelType: "black" }));
                     } else {
-                      setForm(f => ({ ...f, gradeOverall: v, labelType: "standard" }));
+                      setForm((f) => ({ ...f, gradeOverall: v, labelType: "standard" }));
                     }
                   }}
                   className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="select-grade-overall"
                 >
-                  <option value="" className="bg-white">Select grade...</option>
-                  <option value="black_label" className="bg-white">★ 10 — BLACK LABEL (Gem Mint)</option>
-                  {NUMERIC_GRADES.map(g => (
-                    <option key={g.value} value={String(g.value)} className="bg-white">{g.value} – {g.label} ({g.description})</option>
+                  <option value="" className="bg-white">
+                    Select grade...
+                  </option>
+                  <option value="black_label" className="bg-white">
+                    ★ 10 — BLACK LABEL (Gem Mint)
+                  </option>
+                  {NUMERIC_GRADES.map((g) => (
+                    <option key={g.value} value={String(g.value)} className="bg-white">
+                      {g.value} – {g.label} ({g.description})
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1478,10 +1695,18 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
                   data-testid="select-service-tier"
                 >
-                  <option value="" className="bg-white">Standard (default)</option>
-                  <option value="vault-queue" className="bg-white">Vault Queue — £19</option>
-                  <option value="standard" className="bg-white">Standard — £25</option>
-                  <option value="express" className="bg-white">Express — £45</option>
+                  <option value="" className="bg-white">
+                    Standard (default)
+                  </option>
+                  <option value="vault-queue" className="bg-white">
+                    Vault Queue — £19
+                  </option>
+                  <option value="standard" className="bg-white">
+                    Standard — £25
+                  </option>
+                  <option value="express" className="bg-white">
+                    Express — £45
+                  </option>
                 </select>
               </div>
             </>
@@ -1498,13 +1723,23 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
               Grading Images
             </legend>
 
-            <p className="text-[#666666] text-xs">Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed into analysis variants.</p>
+            <p className="text-[#666666] text-xs">
+              Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed
+              into analysis variants.
+            </p>
 
             {/* 2×2 upload grid */}
             <div className="grid grid-cols-2 gap-3">
               {(["front", "back", "angled", "closeup"] as const).map((angle) => {
                 const isRequired = angle === "front" || angle === "back";
-                const label = angle === "front" ? "Front (required)" : angle === "back" ? "Back (required)" : angle === "angled" ? "Angled (optional)" : "Closeup (optional)";
+                const label =
+                  angle === "front"
+                    ? "Front (required)"
+                    : angle === "back"
+                      ? "Back (required)"
+                      : angle === "angled"
+                        ? "Angled (optional)"
+                        : "Closeup (optional)";
                 const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
                 const previewUrl = gradingImages[angle] ? URL.createObjectURL(gradingImages[angle]!) : null;
                 const displayUrl = previewUrl || existingUrl;
@@ -1520,7 +1755,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       className="sr-only"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) setGradingImages(prev => ({ ...prev, [angle]: f }));
+                        if (f) setGradingImages((prev) => ({ ...prev, [angle]: f }));
                       }}
                     />
                     {displayUrl ? (
@@ -1528,8 +1763,14 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     ) : (
                       <Upload size={20} className={isRequired ? "text-[#D4AF37]/60" : "text-[#CCCCCC]"} />
                     )}
-                    <span className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[#666666] font-semibold" : "text-[#AAAAAA]"}`}>{label}</span>
-                    {gradingImages[angle] && <span className="text-[9px] text-[#D4AF37] truncate w-full">{gradingImages[angle]!.name}</span>}
+                    <span
+                      className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[#666666] font-semibold" : "text-[#AAAAAA]"}`}
+                    >
+                      {label}
+                    </span>
+                    {gradingImages[angle] && (
+                      <span className="text-[9px] text-[#D4AF37] truncate w-full">{gradingImages[angle]!.name}</span>
+                    )}
                   </label>
                 );
               })}
@@ -1546,7 +1787,11 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {gradingUploading ? "Uploading…" : "Upload & Process"}
               </button>
-              {gradingUploadDone && <span className="text-emerald-600 text-xs flex items-center gap-1"><CheckCircle2 size={12} /> Uploaded — variants generating in background</span>}
+              {gradingUploadDone && (
+                <span className="text-emerald-600 text-xs flex items-center gap-1">
+                  <CheckCircle2 size={12} /> Uploaded — variants generating in background
+                </span>
+              )}
             </div>
 
             {/* Quality check results */}
@@ -1555,10 +1800,22 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                 <p className="text-[#666666] text-[10px] uppercase tracking-widest">Image Quality Checks</p>
                 {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
                   <div key={angle} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
-                    <p className="text-[#1A1A1A] text-[10px] font-bold uppercase mb-1">{angle} — {q.overall === "pass" ? <span className="text-emerald-600">PASS</span> : q.overall === "warn" ? <span className="text-amber-600">WARN</span> : <span className="text-red-600">FAIL</span>}</p>
+                    <p className="text-[#1A1A1A] text-[10px] font-bold uppercase mb-1">
+                      {angle} —{" "}
+                      {q.overall === "pass" ? (
+                        <span className="text-emerald-600">PASS</span>
+                      ) : q.overall === "warn" ? (
+                        <span className="text-amber-600">WARN</span>
+                      ) : (
+                        <span className="text-red-600">FAIL</span>
+                      )}
+                    </p>
                     <div className="space-y-0.5">
                       {(q.checks || []).map((c: any, i: number) => (
-                        <p key={i} className={`text-[10px] ${c.status === "pass" ? "text-[#888888]" : c.status === "warn" ? "text-amber-600" : "text-red-600"}`}>
+                        <p
+                          key={i}
+                          className={`text-[10px] ${c.status === "pass" ? "text-[#888888]" : c.status === "warn" ? "text-amber-600" : "text-red-600"}`}
+                        >
                           {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
                         </p>
                       ))}
@@ -1607,18 +1864,24 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                       onClick={() => {
                         updateField("cardName", r.name);
                         if (r.setName) updateField("setName", r.setName);
-                        if (r.year)    updateField("year", r.year);
-                        if (r.number)  updateField("cardNumber", r.number);
-                        if (r.rarity)  updateField("rarity", r.rarity);
+                        if (r.year) updateField("year", r.year);
+                        if (r.number) updateField("cardNumber", r.number);
+                        if (r.rarity) updateField("rarity", r.rarity);
                         setCardLookupResults([]);
                         toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
                       }}
                       className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0 flex items-start gap-3"
                     >
-                      {r.imageUrl && <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />}
+                      {r.imageUrl && (
+                        <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />
+                      )}
                       <div>
                         <p className="text-[#1A1A1A] font-medium">{r.name}</p>
-                        <p className="text-[#666666] text-[10px]">{r.setName}{r.number ? ` · #${r.number}` : ""}{r.rarity ? ` · ${r.rarity}` : ""}</p>
+                        <p className="text-[#666666] text-[10px]">
+                          {r.setName}
+                          {r.number ? ` · #${r.number}` : ""}
+                          {r.rarity ? ` · ${r.rarity}` : ""}
+                        </p>
                         <p className="text-[#AAAAAA] text-[9px]">{r.source}</p>
                       </div>
                     </button>
@@ -1641,7 +1904,9 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             </legend>
 
             <div className="flex items-center justify-between">
-              <p className="text-[#666666] text-xs">Analyze card photos with Claude Vision to generate a draft grade.</p>
+              <p className="text-[#666666] text-xs">
+                Analyze card photos with Claude Vision to generate a draft grade.
+              </p>
               <button
                 type="button"
                 onClick={runAiAnalysis}
@@ -1675,12 +1940,16 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
                     <div key={cat} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3 text-center">
                       <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
-                      <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>{aiDraft[cat] || "—"}</p>
+                      <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
+                        {aiDraft[cat] || "—"}
+                      </p>
                       <input
                         type="number"
-                        min="1" max="10" step="0.5"
+                        min="1"
+                        max="10"
+                        step="0.5"
                         value={aiDraft[cat]}
-                        onChange={(e) => setAiDraft(d => ({ ...d, [cat]: e.target.value }))}
+                        onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
                         className="w-full bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-xs text-center focus:outline-none focus:border-[#D4AF37]"
                       />
                       <p className="text-[#888888] text-[9px] leading-tight mt-1.5 line-clamp-2">
@@ -1696,8 +1965,8 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     {[
                       ["Front L/R", aiAnalysis.centering.front_left_right],
                       ["Front T/B", aiAnalysis.centering.front_top_bottom],
-                      ["Back L/R",  aiAnalysis.centering.back_left_right],
-                      ["Back T/B",  aiAnalysis.centering.back_top_bottom],
+                      ["Back L/R", aiAnalysis.centering.back_left_right],
+                      ["Back T/B", aiAnalysis.centering.back_top_bottom],
                     ].map(([label, val]) => (
                       <div key={label}>
                         <p className="text-[#AAAAAA] text-[9px] uppercase">{label}</p>
@@ -1713,9 +1982,14 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                     <p className="text-[#666666] text-[10px] uppercase tracking-widest mb-2">Identified Defects</p>
                     <div className="space-y-1.5">
                       {aiDefects.map((d, i) => (
-                        <div key={i} className="flex items-start gap-2 bg-[#FAFAF8] border border-[#E8E4DC] rounded px-3 py-2">
+                        <div
+                          key={i}
+                          className="flex items-start gap-2 bg-[#FAFAF8] border border-[#E8E4DC] rounded px-3 py-2"
+                        >
                           <div className="flex-1 min-w-0">
-                            <span className="text-[#D4AF37] text-xs font-semibold uppercase">{d.type?.replace(/_/g, " ")}</span>
+                            <span className="text-[#D4AF37] text-xs font-semibold uppercase">
+                              {d.type?.replace(/_/g, " ")}
+                            </span>
                             <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
                             <span className="text-[#666666] text-xs">{d.location}</span>
                             <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
@@ -1724,7 +1998,7 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                           </div>
                           <button
                             type="button"
-                            onClick={() => setAiDefects(prev => prev.filter((_, j) => j !== i))}
+                            onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
                             className="text-[#CCCCCC] hover:text-red-500 transition-colors shrink-0 mt-0.5"
                           >
                             <Trash2 size={12} />
@@ -1740,25 +2014,33 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <p className="text-[#888888] text-[10px] uppercase tracking-widest">AI Draft Overall</p>
-                      <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>{aiDraft.overall || "—"}</p>
+                      <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
+                        {aiDraft.overall || "—"}
+                      </p>
                       <p className="text-[#D4AF37] text-xs">{aiAnalysis.grade_label || ""}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">Override Overall</p>
                       <input
                         type="number"
-                        min="1" max="10" step="0.5"
+                        min="1"
+                        max="10"
+                        step="0.5"
                         value={aiDraft.overall}
-                        onChange={(e) => setAiDraft(d => ({ ...d, overall: e.target.value }))}
+                        onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
                         className="w-24 bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-sm text-center focus:outline-none focus:border-[#D4AF37]"
                       />
                     </div>
                   </div>
                   {aiAnalysis.grade_explanation && (
-                    <p className="text-[#555555] text-xs leading-relaxed border-t border-[#E8E4DC] pt-3">{aiAnalysis.grade_explanation}</p>
+                    <p className="text-[#555555] text-xs leading-relaxed border-t border-[#E8E4DC] pt-3">
+                      {aiAnalysis.grade_explanation}
+                    </p>
                   )}
                   {aiAnalysis.authentication_notes && (
-                    <p className="text-[#888888] text-[11px] leading-relaxed mt-2 italic">{aiAnalysis.authentication_notes}</p>
+                    <p className="text-[#888888] text-[11px] leading-relaxed mt-2 italic">
+                      {aiAnalysis.authentication_notes}
+                    </p>
                   )}
                 </div>
 
@@ -1784,13 +2066,16 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
             )}
 
             <p className="text-[#AAAAAA] text-[10px] leading-relaxed">
-              Upload high-res scans (600+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
+              Upload high-res scans (600+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
+              lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
             </p>
           </fieldset>
         )}
 
         {error && (
-          <p className="text-red-400 text-sm" data-testid="text-form-error">{error}</p>
+          <p className="text-red-400 text-sm" data-testid="text-form-error">
+            {error}
+          </p>
         )}
 
         <button
@@ -1808,7 +2093,17 @@ export default function CertificateForm({ certificate, onSuccess, onIdentifyAndG
 }
 
 function FormInput({
-  label, value, onChange, onBlur, testId, placeholder, type, step, min, max, highlight,
+  label,
+  value,
+  onChange,
+  onBlur,
+  testId,
+  placeholder,
+  type,
+  step,
+  min,
+  max,
+  highlight,
 }: {
   label: string;
   value: string;
@@ -1844,7 +2139,11 @@ function FormInput({
 type SelectOption = string | { value: string; label: string };
 
 function FormSelect({
-  label, value, onChange, options, testId,
+  label,
+  value,
+  onChange,
+  options,
+  testId,
 }: {
   label: string;
   value: string;
@@ -1865,7 +2164,11 @@ function FormSelect({
         {options.map((opt) => {
           const v = typeof opt === "string" ? opt : opt.value;
           const l = typeof opt === "string" ? opt : opt.label;
-          return <option key={v} value={v}>{l}</option>;
+          return (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          );
         })}
       </select>
     </div>
@@ -1873,7 +2176,10 @@ function FormSelect({
 }
 
 function FileUpload({
-  label, current, onChange, testId,
+  label,
+  current,
+  onChange,
+  testId,
 }: {
   label: string;
   current?: string | null;
@@ -1896,7 +2202,10 @@ function FileUpload({
       <label
         className={`relative block border-2 border-dashed rounded-xl cursor-pointer transition-all overflow-hidden
           ${dragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : displaySrc ? "border-[#D4AF37]/40 bg-[#FAFAF8]" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
           e.preventDefault();
@@ -1909,7 +2218,9 @@ function FileUpload({
           <div className="relative">
             <img src={displaySrc} alt={label} className="w-full h-40 object-contain rounded-xl bg-white p-2" />
             <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/20 transition-all rounded-xl">
-              <span className="opacity-0 hover:opacity-100 text-white text-xs font-bold bg-black/50 px-2 py-1 rounded transition-opacity">Replace</span>
+              <span className="opacity-0 hover:opacity-100 text-white text-xs font-bold bg-black/50 px-2 py-1 rounded transition-opacity">
+                Replace
+              </span>
             </div>
           </div>
         ) : (
@@ -1931,13 +2242,7 @@ function FileUpload({
   );
 }
 
-function SubmissionItemLink({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (id: string, item?: any) => void;
-}) {
+function SubmissionItemLink({ value, onChange }: { value: string; onChange: (id: string, item?: any) => void }) {
   const { data: items, isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/submission-items/unlinked"],
     queryFn: async () => {
@@ -1952,7 +2257,9 @@ function SubmissionItemLink({
       <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
         <Link2 size={12} /> Link to Submission
       </legend>
-      <p className="text-[#999999] text-xs">Optionally link this certificate to a customer submission item. Fields will auto-populate.</p>
+      <p className="text-[#999999] text-xs">
+        Optionally link this certificate to a customer submission item. Fields will auto-populate.
+      </p>
       <select
         value={value}
         onChange={(e) => {
@@ -1968,10 +2275,15 @@ function SubmissionItemLink({
         data-testid="select-submission-item"
       >
         <option value="">No link (standalone certificate)</option>
-        {isLoading && <option value="" disabled>Loading...</option>}
+        {isLoading && (
+          <option value="" disabled>
+            Loading...
+          </option>
+        )}
         {items?.map((item: any) => (
           <option key={item.id} value={String(item.id)}>
-            Sub #{item.submission_id} Card {item.card_index} — {item.card_name || item.game || "Unnamed"} {item.card_set ? `(${item.card_set})` : ""} — {item.customer_first_name} {item.customer_last_name}
+            Sub #{item.submission_id} Card {item.card_index} — {item.card_name || item.game || "Unnamed"}{" "}
+            {item.card_set ? `(${item.card_set})` : ""} — {item.customer_first_name} {item.customer_last_name}
           </option>
         ))}
       </select>
@@ -1981,9 +2293,25 @@ function SubmissionItemLink({
 
 // ── Pokemon Set Picker — searchable dropdown from TCG API ────────────────
 
-interface PokemonSet { id: string; name: string; series: string; ptcgoCode: string | null; releaseDate: string; total: number; source?: string; }
+interface PokemonSet {
+  id: string;
+  name: string;
+  series: string;
+  ptcgoCode: string | null;
+  releaseDate: string;
+  total: number;
+  source?: string;
+}
 
-function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange: (name: string, id?: string) => void; testId?: string }) {
+function PokemonSetPicker({
+  value,
+  onChange,
+  testId,
+}: {
+  value: string;
+  onChange: (name: string, id?: string) => void;
+  testId?: string;
+}) {
   const { toast } = useToast();
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -1993,30 +2321,53 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
   const [addSaving, setAddSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setQuery(value); }, [value]);
+  useEffect(() => {
+    setQuery(value);
+  }, [value]);
 
   function fetchSets() {
-    fetch("/api/pokemon-sets").then(r => r.json()).then(d => { if (Array.isArray(d)) setSets(d); }).catch(() => {});
+    fetch("/api/pokemon-sets")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d)) setSets(d);
+      })
+      .catch(() => {});
   }
-  useEffect(() => { fetchSets(); }, []);
+  useEffect(() => {
+    fetchSets();
+  }, []);
 
   useEffect(() => {
-    function handleClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowAddForm(false); } }
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setShowAddForm(false);
+      }
+    }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   const q = query.toLowerCase();
-  const filtered = q ? sets.filter(s =>
-    s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.ptcgoCode || "").toLowerCase().includes(q) || s.series.toLowerCase().includes(q)
-  ).slice(0, 12) : sets.slice(0, 12);
+  const filtered = q
+    ? sets
+        .filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.id.toLowerCase().includes(q) ||
+            (s.ptcgoCode || "").toLowerCase().includes(q) ||
+            s.series.toLowerCase().includes(q)
+        )
+        .slice(0, 12)
+    : sets.slice(0, 12);
 
   async function saveNewSet() {
     if (!addForm.setId || !addForm.setName) return;
     setAddSaving(true);
     try {
       const r = await fetch("/api/admin/custom-sets", {
-        method: "POST", credentials: "include",
+        method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           setId: addForm.setId.replace(/\s+/g, "").toLowerCase(),
@@ -2047,7 +2398,11 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
       <input
         type="text"
         value={query}
-        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          onChange(e.target.value);
+          setOpen(true);
+        }}
         onFocus={() => setOpen(true)}
         placeholder="Type to search sets…"
         data-testid={testId}
@@ -2055,20 +2410,36 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
       />
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-72 overflow-y-auto">
-          {filtered.map(s => (
-            <button key={s.id} type="button"
-              onClick={() => { onChange(s.name, s.id); setQuery(s.name); setOpen(false); }}
+          {filtered.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => {
+                onChange(s.name, s.id);
+                setQuery(s.name);
+                setOpen(false);
+              }}
               className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0"
             >
               <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
               <span className="text-[#1A1A1A] font-medium">{s.name}</span>
-              {(s as any).source === "custom" && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">Custom</span>}
-              <span className="text-[#999999] ml-2">· {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}</span>
+              {(s as any).source === "custom" && (
+                <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">
+                  Custom
+                </span>
+              )}
+              <span className="text-[#999999] ml-2">
+                · {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}
+              </span>
             </button>
           ))}
           {/* Add new set button */}
-          <button type="button"
-            onClick={() => { setShowAddForm(true); setAddForm(f => ({ ...f, setId: query, setName: "" })); }}
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddForm(true);
+              setAddForm((f) => ({ ...f, setId: query, setName: "" }));
+            }}
             className="w-full text-left px-3 py-2.5 text-xs text-[#D4AF37] font-bold hover:bg-[#D4AF37]/5 border-t border-[#E8E4DC] flex items-center gap-1"
           >
             <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
@@ -2078,40 +2449,75 @@ function PokemonSetPicker({ value, onChange, testId }: { value: string; onChange
 
       {/* Add set modal */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddForm(false)}>
-          <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowAddForm(false)}
+        >
+          <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
             <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
             <div>
               <label className="text-[#666666] text-[10px] block mb-0.5">Set Code *</label>
-              <input value={addForm.setId} onChange={e => setAddForm(f => ({ ...f, setId: e.target.value }))}
-                placeholder="e.g. M24 EN" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              <input
+                value={addForm.setId}
+                onChange={(e) => setAddForm((f) => ({ ...f, setId: e.target.value }))}
+                placeholder="e.g. M24 EN"
+                className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+              />
             </div>
             <div>
               <label className="text-[#666666] text-[10px] block mb-0.5">Set Name *</label>
-              <input value={addForm.setName} onChange={e => setAddForm(f => ({ ...f, setName: e.target.value }))}
-                placeholder="e.g. McDonald's Match Battle 2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+              <input
+                value={addForm.setName}
+                onChange={(e) => setAddForm((f) => ({ ...f, setName: e.target.value }))}
+                placeholder="e.g. McDonald's Match Battle 2024"
+                className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+              />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-[#666666] text-[10px] block mb-0.5">Series</label>
-                <input value={addForm.series} onChange={e => setAddForm(f => ({ ...f, series: e.target.value }))}
-                  placeholder="Promo" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+                <input
+                  value={addForm.series}
+                  onChange={(e) => setAddForm((f) => ({ ...f, series: e.target.value }))}
+                  placeholder="Promo"
+                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                />
               </div>
               <div>
                 <label className="text-[#666666] text-[10px] block mb-0.5">Year</label>
-                <input type="number" value={addForm.releaseYear} onChange={e => setAddForm(f => ({ ...f, releaseYear: e.target.value }))}
-                  placeholder="2024" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+                <input
+                  type="number"
+                  value={addForm.releaseYear}
+                  onChange={(e) => setAddForm((f) => ({ ...f, releaseYear: e.target.value }))}
+                  placeholder="2024"
+                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                />
               </div>
               <div>
                 <label className="text-[#666666] text-[10px] block mb-0.5">Total Cards</label>
-                <input type="number" value={addForm.totalCards} onChange={e => setAddForm(f => ({ ...f, totalCards: e.target.value }))}
-                  placeholder="15" className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs" />
+                <input
+                  type="number"
+                  value={addForm.totalCards}
+                  onChange={(e) => setAddForm((f) => ({ ...f, totalCards: e.target.value }))}
+                  placeholder="15"
+                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                />
               </div>
             </div>
             <div className="flex gap-2 pt-1">
-              <button type="button" onClick={() => setShowAddForm(false)} className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]">Cancel</button>
-              <button type="button" onClick={saveNewSet} disabled={addSaving || !addForm.setId || !addForm.setName}
-                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50">
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveNewSet}
+                disabled={addSaving || !addForm.setId || !addForm.setName}
+                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
+              >
                 {addSaving ? "Saving…" : "Add Set"}
               </button>
             </div>
