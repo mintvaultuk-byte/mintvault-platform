@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
+import GradientButton from "@/components/ui/gradient-button";
 import { guides, getGuideBySlug, type Guide } from "@/data/guides";
 
 function formatDate(iso: string): string {
@@ -138,12 +139,10 @@ export default function JournalDetailV2() {
             <p className="font-body mt-4" style={{ color: "var(--v2-ink-soft)" }}>
               The piece you&rsquo;re looking for doesn&rsquo;t exist or has been moved.
             </p>
-            <Link
-              href="/journal"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full mt-8 transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Back to journal <ArrowRight size={14} />
+            <Link href="/journal" className="no-underline inline-block mt-8">
+              <GradientButton className="gradient-btn-filled">
+                Back to journal <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
         </section>

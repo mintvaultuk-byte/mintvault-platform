@@ -411,13 +411,10 @@ export default function HeaderV2() {
               </GradientButton>
             </Link>
             {!isAuthed && (
-              <Link
-                href="/customer-login"
-                onClick={() => setMobileOpen(false)}
-                className="inline-flex items-center justify-center font-body text-sm font-medium no-underline px-5 py-3 rounded-full"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
-                Sign in
+              <Link href="/customer-login" onClick={() => setMobileOpen(false)} className="no-underline">
+                <GradientButton height="44px" className="gradient-btn-filled">
+                  Sign in
+                </GradientButton>
               </Link>
             )}
           </div>

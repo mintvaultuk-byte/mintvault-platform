@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Lock } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface LoginResponse {
   ok?: boolean;
@@ -43,7 +44,10 @@ export default function CustomerLoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw Object.assign(new Error(data.error || "Sign-in failed."), { status: res.status, retryAfterSeconds: data.retryAfterSeconds });
+        throw Object.assign(new Error(data.error || "Sign-in failed."), {
+          status: res.status,
+          retryAfterSeconds: data.retryAfterSeconds,
+        });
       }
       return data as LoginResponse;
     },
@@ -119,13 +123,13 @@ export default function CustomerLoginPage() {
           <Lock size={18} className="text-[#D4AF37]" />
         </div>
         <h1 className="text-2xl font-black text-white mb-2 text-center">Sign In</h1>
-        <p className="text-[#888888] text-sm mb-6 text-center">
-          Enter your email and 6-digit PIN.
-        </p>
+        <p className="text-[#888888] text-sm mb-6 text-center">Enter your email and 6-digit PIN.</p>
 
         <form onSubmit={handleLogin} className="space-y-3" data-testid="customer-login-form">
           <div>
-            <label htmlFor="email" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">Email</label>
+            <label htmlFor="email" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">
+              Email
+            </label>
             <input
               id="email"
               type="email"
@@ -139,7 +143,9 @@ export default function CustomerLoginPage() {
             />
           </div>
           <div>
-            <label htmlFor="pin" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">PIN</label>
+            <label htmlFor="pin" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">
+              PIN
+            </label>
             <input
               id="pin"
               type="password"
@@ -155,16 +161,27 @@ export default function CustomerLoginPage() {
               data-testid="input-pin"
             />
           </div>
-          {error && <p className="text-xs text-red-400" data-testid="login-error">{error}</p>}
-          <button
+          {error && (
+            <p className="text-xs text-red-400" data-testid="login-error">
+              {error}
+            </p>
+          )}
+          <GradientButton
+            as="button"
             type="submit"
             disabled={loginMutation.isPending || pin.length !== 6}
-            className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-60 transition-all flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            className="gradient-btn-filled w-full"
+            height="48px"
             data-testid="button-sign-in"
           >
-            {loginMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Signing In…</> : "Sign In"}
-          </button>
+            {loginMutation.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Signing In…
+              </>
+            ) : (
+              "Sign In"
+            )}
+          </GradientButton>
         </form>
 
         <div className="border-t border-[#333333] my-6" />

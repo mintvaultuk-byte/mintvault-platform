@@ -2,11 +2,22 @@ import { useState, useMemo, useEffect } from "react";
 import { Link, useRoute } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Shield, Lock, Grid2x2, List, Copy, Check, ExternalLink,
-  Star, Award, TrendingUp, Layers, Hash,
+  Shield,
+  Lock,
+  Grid2x2,
+  List,
+  Copy,
+  Check,
+  ExternalLink,
+  Star,
+  Award,
+  TrendingUp,
+  Layers,
+  Hash,
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
 import VaultClubBadge from "@/components/vault-club-badge";
+import GradientButton from "@/components/ui/gradient-button";
 
 // Plain dark page shell. Wraps all 4 states (loading, not-found, reserved,
 // active) so the bg is consistent across transitions.
@@ -21,9 +32,7 @@ function ShowroomShell({ children }: { children: React.ReactNode }) {
         overflow: "hidden",
       }}
     >
-      <div style={{ position: "relative", zIndex: 1 }}>
-        {children}
-      </div>
+      <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
     </div>
   );
 }
@@ -63,9 +72,11 @@ interface ShowroomData {
 function CardGridItem({ card }: { card: ShowroomCard }) {
   return (
     <Link href={`/vault/${card.cert_id}`}>
-      <div className={`group relative bg-white rounded-xl overflow-hidden border transition-all cursor-pointer hover:-translate-y-1 hover:shadow-lg ${
-        card.is_black_label ? "border-[#1A1A1A]" : "border-[#E8E4DC]"
-      }`}>
+      <div
+        className={`group relative bg-white rounded-xl overflow-hidden border transition-all cursor-pointer hover:-translate-y-1 hover:shadow-lg ${
+          card.is_black_label ? "border-[#1A1A1A]" : "border-[#E8E4DC]"
+        }`}
+      >
         {/* Image */}
         <div className="relative aspect-[2.5/3.5] bg-[#F5F2EB] overflow-hidden">
           {card.front_image_url ? (
@@ -114,13 +125,20 @@ function CardGridItem({ card }: { card: ShowroomCard }) {
 
 function CardListItem({ card }: { card: ShowroomCard }) {
   return (
-    <div className={`flex items-center gap-4 p-3 rounded-xl border bg-white hover:border-[#D4AF37]/40 transition-all ${
-      card.is_black_label ? "border-[#1A1A1A]" : "border-[#E8E4DC]"
-    }`}>
+    <div
+      className={`flex items-center gap-4 p-3 rounded-xl border bg-white hover:border-[#D4AF37]/40 transition-all ${
+        card.is_black_label ? "border-[#1A1A1A]" : "border-[#E8E4DC]"
+      }`}
+    >
       {/* Thumbnail */}
       <div className="w-12 h-[68px] rounded-lg bg-[#F5F2EB] overflow-hidden flex-shrink-0">
         {card.front_image_url ? (
-          <img src={card.front_image_url} alt={card.card_name || ""} loading="lazy" className="w-full h-full object-cover" />
+          <img
+            src={card.front_image_url}
+            alt={card.card_name || ""}
+            loading="lazy"
+            className="w-full h-full object-cover"
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-[#CCCCCC]">
             <Award size={18} />
@@ -152,7 +170,10 @@ function CardListItem({ card }: { card: ShowroomCard }) {
       </div>
       {/* Vault link */}
       <div className="flex-shrink-0">
-        <Link href={`/vault/${card.cert_id}`} className="text-xs text-[#B8960C] font-semibold hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors">
+        <Link
+          href={`/vault/${card.cert_id}`}
+          className="text-xs text-[#B8960C] font-semibold hover:text-[#D4AF37] flex items-center gap-0.5 transition-colors"
+        >
           Vault <ExternalLink size={10} />
         </Link>
       </div>
@@ -179,11 +200,16 @@ type SortKey = "newest" | "oldest" | "grade_high" | "grade_low" | "name_az";
 function sortCards(cards: ShowroomCard[], sort: SortKey): ShowroomCard[] {
   return [...cards].sort((a, b) => {
     switch (sort) {
-      case "newest": return new Date(b.graded_at).getTime() - new Date(a.graded_at).getTime();
-      case "oldest": return new Date(a.graded_at).getTime() - new Date(b.graded_at).getTime();
-      case "grade_high": return (b.grade ?? 0) - (a.grade ?? 0);
-      case "grade_low": return (a.grade ?? 0) - (b.grade ?? 0);
-      case "name_az": return (a.card_name ?? "").localeCompare(b.card_name ?? "");
+      case "newest":
+        return new Date(b.graded_at).getTime() - new Date(a.graded_at).getTime();
+      case "oldest":
+        return new Date(a.graded_at).getTime() - new Date(b.graded_at).getTime();
+      case "grade_high":
+        return (b.grade ?? 0) - (a.grade ?? 0);
+      case "grade_low":
+        return (a.grade ?? 0) - (b.grade ?? 0);
+      case "name_az":
+        return (a.card_name ?? "").localeCompare(b.card_name ?? "");
     }
   });
 }
@@ -195,14 +221,22 @@ export default function ShowroomPage() {
   const username = params?.username ?? "";
 
   const [layout, setLayout] = useState<"grid" | "list">(() => {
-    try { return (localStorage.getItem("showroom_layout") as "grid" | "list") || "grid"; } catch { return "grid"; }
+    try {
+      return (localStorage.getItem("showroom_layout") as "grid" | "list") || "grid";
+    } catch {
+      return "grid";
+    }
   });
   const [sort, setSort] = useState<SortKey>("newest");
   const [gradeFilter, setGradeFilter] = useState<string>("all");
   const [setFilter, setSetFilter] = useState<string>("all");
 
   useEffect(() => {
-    try { localStorage.setItem("showroom_layout", layout); } catch { /* ok */ }
+    try {
+      localStorage.setItem("showroom_layout", layout);
+    } catch {
+      /* ok */
+    }
   }, [layout]);
 
   const { data, isLoading, isError } = useQuery<ShowroomData>({
@@ -222,7 +256,9 @@ export default function ShowroomPage() {
   const sets = useMemo(() => {
     if (!data?.cards) return [];
     const s = new Set<string>();
-    data.cards.forEach(c => { if (c.set_name) s.add(c.set_name); });
+    data.cards.forEach((c) => {
+      if (c.set_name) s.add(c.set_name);
+    });
     return Array.from(s).sort();
   }, [data?.cards]);
 
@@ -231,10 +267,10 @@ export default function ShowroomPage() {
     let cards = data.cards;
     if (gradeFilter !== "all") {
       const target = parseFloat(gradeFilter);
-      cards = cards.filter(c => c.grade !== null && Math.floor(c.grade) === Math.floor(target));
+      cards = cards.filter((c) => c.grade !== null && Math.floor(c.grade) === Math.floor(target));
     }
     if (setFilter !== "all") {
-      cards = cards.filter(c => c.set_name === setFilter);
+      cards = cards.filter((c) => c.set_name === setFilter);
     }
     return sortCards(cards, sort);
   }, [data?.cards, sort, gradeFilter, setFilter]);
@@ -259,9 +295,7 @@ export default function ShowroomPage() {
             <div className="w-16 h-16 rounded-full bg-[#F5F2EB] border border-[#E8E4DC] flex items-center justify-center mx-auto mb-6">
               <Hash size={28} className="text-[#CCCCCC]" />
             </div>
-            <h1 className="text-2xl font-black text-white mb-3">
-              Showroom not found
-            </h1>
+            <h1 className="text-2xl font-black text-white mb-3">Showroom not found</h1>
             <p className="text-sm text-white/70 mb-8">
               The username <strong className="text-white">{username}</strong> isn't registered with MintVault.
             </p>
@@ -272,10 +306,7 @@ export default function ShowroomPage() {
                 </button>
               </Link>
               <Link href="/dashboard">
-                <button className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}>
-                  Claim your own
-                </button>
+                <GradientButton className="gradient-btn-filled">Claim your own</GradientButton>
               </Link>
             </div>
           </div>
@@ -296,7 +327,10 @@ export default function ShowroomPage() {
           />
           <div className="text-center max-w-md">
             {/* Faded mock with lock overlay */}
-            <div className="relative w-full rounded-2xl border border-white/10 overflow-hidden mb-8 select-none pointer-events-none" style={{ height: 180 }}>
+            <div
+              className="relative w-full rounded-2xl border border-white/10 overflow-hidden mb-8 select-none pointer-events-none"
+              style={{ height: 180 }}
+            >
               <div className="absolute inset-0 grid grid-cols-4 gap-2 p-3 opacity-20">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <div key={i} className="aspect-[2.5/3.5] bg-[#D4AF37]/30 rounded-lg" />
@@ -308,14 +342,15 @@ export default function ShowroomPage() {
               </div>
             </div>
 
-            <h1 className="text-2xl font-black text-white mb-3">
-              {data.username}'s Showroom
-            </h1>
+            <h1 className="text-2xl font-black text-white mb-3">{data.username}'s Showroom</h1>
             <p className="text-sm text-white/70 mb-6">
               This Showroom is reserved. The owner hasn't activated their Vault Club membership yet.
             </p>
             <div className="flex flex-col items-center gap-3">
-              <Link href="/vault-club" className="text-sm text-[#D4AF37] font-semibold hover:text-[#E8C76A] transition-colors">
+              <Link
+                href="/vault-club"
+                className="text-sm text-[#D4AF37] font-semibold hover:text-[#E8C76A] transition-colors"
+              >
                 Are you {data.username}? Activate your Showroom →
               </Link>
               <Link href="/showrooms" className="text-xs text-white/50 hover:text-white/70 transition-colors">
@@ -337,7 +372,10 @@ export default function ShowroomPage() {
     <ShowroomShell>
       <SeoHead
         title={`${data.display_name}'s Showroom | MintVault UK`}
-        description={data.bio || `${data.display_name}'s verified MintVault collection — ${data.stats?.total_cards ?? 0} graded cards.`}
+        description={
+          data.bio ||
+          `${data.display_name}'s verified MintVault collection — ${data.stats?.total_cards ?? 0} graded cards.`
+        }
         canonical={`https://mintvaultuk.com/showroom/${data.username}`}
       />
 
@@ -346,28 +384,30 @@ export default function ShowroomPage() {
         className="relative overflow-hidden"
         style={{ background: "linear-gradient(135deg,#0A0A0A 0%,#1A1200 100%)" }}
       >
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.12) 0%, transparent 70%)" }} />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse 70% 60% at 50% 0%, rgba(212,175,55,0.12) 0%, transparent 70%)",
+          }}
+        />
         <div className="relative max-w-4xl mx-auto px-4 py-16 text-center">
           <div className="inline-flex items-center gap-1.5 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-full px-3 py-1 mb-5">
             <Shield size={11} className="text-[#D4AF37]" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#D4AF37]">Verified MintVault Collector</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#D4AF37]">
+              Verified MintVault Collector
+            </span>
           </div>
           <div className="flex items-center justify-center gap-3 mb-3">
-            <h1
-              className="text-4xl md:text-5xl font-black"
-              style={{ color: "#D4AF37" }}
-            >
+            <h1 className="text-4xl md:text-5xl font-black" style={{ color: "#D4AF37" }}>
               {data.display_name}
             </h1>
-            {data.vault_club_tier && (
-              <VaultClubBadge tier={data.vault_club_tier} size="lg" showLabel={false} />
-            )}
+            {data.vault_club_tier && <VaultClubBadge tier={data.vault_club_tier} size="lg" showLabel={false} />}
           </div>
-          {data.bio && (
-            <p className="text-[#B8A060] text-base max-w-lg mx-auto mb-4">{data.bio}</p>
-          )}
+          {data.bio && <p className="text-[#B8A060] text-base max-w-lg mx-auto mb-4">{data.bio}</p>}
           <div className="flex items-center justify-center gap-4 text-[#888888] text-xs mt-4 flex-wrap">
-            <span><strong className="text-white">{data.stats?.total_cards ?? 0}</strong> cards</span>
+            <span>
+              <strong className="text-white">{data.stats?.total_cards ?? 0}</strong> cards
+            </span>
             <span className="text-[#444]">·</span>
             <span>Member since {memberSince}</span>
           </div>
@@ -375,7 +415,6 @@ export default function ShowroomPage() {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-10">
-
         {/* Stats bar */}
         {data.stats && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-10">
@@ -391,7 +430,7 @@ export default function ShowroomPage() {
         <div className="flex items-center gap-3 mb-6 flex-wrap">
           <select
             value={sort}
-            onChange={e => setSort(e.target.value as SortKey)}
+            onChange={(e) => setSort(e.target.value as SortKey)}
             className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
           >
             <option value="newest">Newest First</option>
@@ -402,22 +441,28 @@ export default function ShowroomPage() {
           </select>
           <select
             value={gradeFilter}
-            onChange={e => setGradeFilter(e.target.value)}
+            onChange={(e) => setGradeFilter(e.target.value)}
             className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
           >
             <option value="all">All Grades</option>
-            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(g => (
-              <option key={g} value={String(g)}>{g}s only</option>
+            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+              <option key={g} value={String(g)}>
+                {g}s only
+              </option>
             ))}
           </select>
           {sets.length > 0 && (
             <select
               value={setFilter}
-              onChange={e => setSetFilter(e.target.value)}
+              onChange={(e) => setSetFilter(e.target.value)}
               className="text-xs border border-[#E8E4DC] rounded-lg px-3 py-2 bg-white text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
             >
               <option value="all">All Sets</option>
-              {sets.map(s => <option key={s} value={s}>{s}</option>)}
+              {sets.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           )}
           <div className="ml-auto flex items-center gap-1 border border-[#E8E4DC] rounded-lg overflow-hidden">
@@ -443,11 +488,15 @@ export default function ShowroomPage() {
           <div className="text-center py-16 text-white/60 text-sm">No cards match this filter.</div>
         ) : layout === "grid" ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {filtered.map(c => <CardGridItem key={c.cert_id} card={c} />)}
+            {filtered.map((c) => (
+              <CardGridItem key={c.cert_id} card={c} />
+            ))}
           </div>
         ) : (
           <div className="space-y-2">
-            {filtered.map(c => <CardListItem key={c.cert_id} card={c} />)}
+            {filtered.map((c) => (
+              <CardListItem key={c.cert_id} card={c} />
+            ))}
           </div>
         )}
 
@@ -455,12 +504,7 @@ export default function ShowroomPage() {
         <div className="mt-16 border-t border-white/10 pt-8 text-center">
           <p className="text-sm text-white/60 mb-3">Want your own Showroom?</p>
           <Link href="/dashboard">
-            <button
-              className="px-6 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-            >
-              Claim yours →
-            </button>
+            <GradientButton className="gradient-btn-filled">Claim yours →</GradientButton>
           </Link>
         </div>
       </div>

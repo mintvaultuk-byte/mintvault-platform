@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -28,18 +29,24 @@ const STEPS = [
 
 const RETURNS_ITEMS = [
   { title: "Card identity", body: "Name, set, year, rarity, and a per-field confidence label." },
-  { title: "Subgrade breakdown", body: "Centering, corners, edges, surface each scored 1\u201310 with a note explaining the score." },
+  {
+    title: "Subgrade breakdown",
+    body: "Centering, corners, edges, surface each scored 1\u201310 with a note explaining the score.",
+  },
   { title: "Per-subgrade confidence", body: "Low / medium / high for each axis. Know which subgrades to trust." },
   { title: "Grade range", body: "A low-to-high overall range plus the most-likely grade." },
-  { title: "Potential issues & recommendation", body: "Flagged areas (e.g. surface scratching, edge wear) plus a recommendation on whether to submit." },
+  {
+    title: "Potential issues & recommendation",
+    body: "Flagged areas (e.g. surface scratching, edge wear) plus a recommendation on whether to submit.",
+  },
 ];
 
 // ── Credit packs (Section III) ─────────────────────────────────────────────
 
 const PACKS = [
-  { credits: "5 estimates",   price: "£2",  perUnit: "40p each", featured: false },
-  { credits: "15 estimates",  price: "£4",  perUnit: "27p each", featured: false },
-  { credits: "100 estimates", price: "£10", perUnit: "10p each", featured: true  },
+  { credits: "5 estimates", price: "£2", perUnit: "40p each", featured: false },
+  { credits: "15 estimates", price: "£4", perUnit: "27p each", featured: false },
+  { credits: "100 estimates", price: "£10", perUnit: "10p each", featured: true },
 ];
 
 // ── FAQ (Section V) ────────────────────────────────────────────────────────
@@ -81,105 +88,98 @@ export default function AiPreGradeV2() {
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
-            <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#D4AF37" }}
-            >
-              Est. Kent &middot; AI Pre-Grade
-            </p>
-            <h1
-              className="font-display italic font-medium leading-[0.95] mb-6"
-              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
-            >
-              A quick<br />second opinion.
-            </h1>
-            <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
-              style={{ color: "var(--v2-ink-soft)" }}
-            >
-              Upload one photo. Get a subgrade breakdown, card identity, and a grade range
-              in seconds. Free first estimate, no account needed, credit packs from &pound;2.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <Link
-                href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+          <p
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+            style={{ color: "#D4AF37" }}
+          >
+            Est. Kent &middot; AI Pre-Grade
+          </p>
+          <h1
+            className="font-display italic font-medium leading-[0.95] mb-6"
+            style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+          >
+            A quick
+            <br />
+            second opinion.
+          </h1>
+          <p
+            className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
+            style={{ color: "var(--v2-ink-soft)" }}
+          >
+            Upload one photo. Get a subgrade breakdown, card identity, and a grade range in seconds. Free first
+            estimate, no account needed, credit packs from &pound;2.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
                 Try it free <ArrowRight size={14} />
-              </Link>
-              <Link
-                href="/pricing"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+              </GradientButton>
+            </Link>
+            <Link href="/pricing" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
                 See pricing <ArrowRight size={14} />
-              </Link>
-            </div>
+              </GradientButton>
+            </Link>
+          </div>
 
-            {/* Price strip — Bloomberg-style data row. Mirrors Section III PACKS config. */}
-            <div
-              className="flex flex-col md:flex-row md:items-end gap-3 md:gap-0 py-4 mt-5 mb-5"
-              style={{
-                borderTop: "1px solid var(--v2-line-soft)",
-                borderBottom: "1px solid var(--v2-line-soft)",
-              }}
-            >
-              {PACKS.map((p, i) => (
+          {/* Price strip — Bloomberg-style data row. Mirrors Section III PACKS config. */}
+          <div
+            className="flex flex-col md:flex-row md:items-end gap-3 md:gap-0 py-4 mt-5 mb-5"
+            style={{
+              borderTop: "1px solid var(--v2-line-soft)",
+              borderBottom: "1px solid var(--v2-line-soft)",
+            }}
+          >
+            {PACKS.map((p, i) => (
+              <div
+                key={p.credits}
+                className="flex-1 flex flex-col gap-1"
+                style={i > 0 ? { borderLeft: undefined } : undefined}
+              >
                 <div
-                  key={p.credits}
-                  className="flex-1 flex flex-col gap-1"
-                  style={i > 0 ? { borderLeft: undefined } : undefined}
+                  className="md:pl-6"
+                  style={
+                    // Vertical divider between items on md+ only, skipping the first item.
+                    i > 0 ? { borderLeft: "1px solid var(--v2-line-soft)" } : undefined
+                  }
                 >
-                  <div
-                    className="md:pl-6"
-                    style={
-                      // Vertical divider between items on md+ only, skipping the first item.
-                      i > 0
-                        ? { borderLeft: "1px solid var(--v2-line-soft)" }
-                        : undefined
-                    }
+                  {p.featured && (
+                    <p
+                      className="font-mono-v2 text-[8px] uppercase tracking-widest mb-1"
+                      style={{ color: "var(--v2-gold)" }}
+                    >
+                      Best
+                    </p>
+                  )}
+                  <p
+                    className="font-mono-v2 text-[9px] uppercase tracking-widest"
+                    style={{ color: "var(--v2-ink-mute)" }}
                   >
-                    {p.featured && (
-                      <p
-                        className="font-mono-v2 text-[8px] uppercase tracking-widest mb-1"
-                        style={{ color: "var(--v2-gold)" }}
-                      >
-                        Best
-                      </p>
-                    )}
-                    <p
-                      className="font-mono-v2 text-[9px] uppercase tracking-widest"
-                      style={{ color: "var(--v2-ink-mute)" }}
-                    >
-                      {p.credits}
-                    </p>
-                    <p
-                      className="font-numeral font-semibold leading-none mt-1"
-                      style={{
-                        fontSize: "clamp(1.25rem, 2vw, 1.5rem)",
-                        color: p.featured ? "var(--v2-gold)" : "var(--v2-ink)",
-                      }}
-                    >
-                      {p.price}
-                    </p>
-                    <p
-                      className="font-mono-v2 text-[10px] uppercase mt-1"
-                      style={{ color: "var(--v2-ink-soft)" }}
-                    >
-                      {p.perUnit}
-                    </p>
-                  </div>
+                    {p.credits}
+                  </p>
+                  <p
+                    className="font-numeral font-semibold leading-none mt-1"
+                    style={{
+                      fontSize: "clamp(1.25rem, 2vw, 1.5rem)",
+                      color: p.featured ? "var(--v2-gold)" : "var(--v2-ink)",
+                    }}
+                  >
+                    {p.price}
+                  </p>
+                  <p className="font-mono-v2 text-[10px] uppercase mt-1" style={{ color: "var(--v2-ink-soft)" }}>
+                    {p.perUnit}
+                  </p>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+          </div>
 
-            <p
-              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
-              style={{ color: "var(--v2-ink-mute)" }}
-            >
-              From 10p per estimate &middot; First one free &middot; No account needed
-            </p>
+          <p
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
+            style={{ color: "var(--v2-ink-mute)" }}
+          >
+            From 10p per estimate &middot; First one free &middot; No account needed
+          </p>
         </div>
       </section>
 
@@ -188,14 +188,19 @@ export default function AiPreGradeV2() {
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="I" label="How It Works" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-              One photo.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>Four subgrades.</span>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "#FFFFFF" }}
+            >
+              One photo.
+              <br />
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
+                Four subgrades.
+              </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Take a photo or upload one. Our AI analyses centering, corners, edges, and
-              surface separately and returns a subgrade breakdown plus a grade range.
-              It&rsquo;s a sense-check, not a definitive grade.
+              Take a photo or upload one. Our AI analyses centering, corners, edges, and surface separately and returns
+              a subgrade breakdown plus a grade range. It&rsquo;s a sense-check, not a definitive grade.
             </p>
           </div>
 
@@ -216,7 +221,10 @@ export default function AiPreGradeV2() {
                   {s.number}
                 </p>
                 <div>
-                  <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
+                  <h3
+                    className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                    style={{ color: "#FFFFFF" }}
+                  >
                     {s.title}
                   </h3>
                   <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
@@ -234,10 +242,16 @@ export default function AiPreGradeV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="What You See" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               The full breakdown.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
               Every estimate returns the same shape of data, regardless of free or paid.
             </p>
           </div>
@@ -253,7 +267,10 @@ export default function AiPreGradeV2() {
                   paddingBottom: "20px",
                 }}
               >
-                <h3 className="font-display italic font-medium text-lg md:text-xl mb-2" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-lg md:text-xl mb-2"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.title}
                 </h3>
                 <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -269,21 +286,37 @@ export default function AiPreGradeV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="Pricing" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
-            Try one free.<br />Buy more for less.
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
+            Try one free.
+            <br />
+            Buy more for less.
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Free card */}
-            <div className="rounded-xl p-8" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-ink-mute)" }}>
+            <div
+              className="rounded-xl p-8"
+              style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}
+            >
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4"
+                style={{ color: "var(--v2-ink-mute)" }}
+              >
                 Free
               </p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
+                <span
+                  className="font-numeral font-semibold"
+                  style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}
+                >
                   1
                 </span>
-                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>estimate / day</span>
+                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>
+                  estimate / day
+                </span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
                 No account. No email. Just upload and go.
@@ -294,23 +327,39 @@ export default function AiPreGradeV2() {
             </div>
 
             {/* Credit packs card */}
-            <div className="relative rounded-xl p-8" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}>
+            <div
+              className="relative rounded-xl p-8"
+              style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}
+            >
               <span
                 className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded whitespace-nowrap"
                 style={{ top: "-14px", backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Most chosen
               </span>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-gold)" }}>
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 Credit packs
               </p>
               <div className="space-y-3 mb-6">
                 {PACKS.map((p) => (
-                  <div key={p.credits} className="flex items-center justify-between pb-2" style={{ borderBottom: "1px solid var(--v2-line-soft)" }}>
-                    <span className="font-body text-sm" style={{ color: "var(--v2-ink)" }}>{p.credits}</span>
+                  <div
+                    key={p.credits}
+                    className="flex items-center justify-between pb-2"
+                    style={{ borderBottom: "1px solid var(--v2-line-soft)" }}
+                  >
+                    <span className="font-body text-sm" style={{ color: "var(--v2-ink)" }}>
+                      {p.credits}
+                    </span>
                     <div className="text-right">
-                      <span className="font-mono-v2 text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>{p.price}</span>
-                      <span className="font-mono-v2 text-[10px] ml-2" style={{ color: "var(--v2-ink-mute)" }}>{p.perUnit}</span>
+                      <span className="font-mono-v2 text-sm font-semibold" style={{ color: "var(--v2-ink)" }}>
+                        {p.price}
+                      </span>
+                      <span className="font-mono-v2 text-[10px] ml-2" style={{ color: "var(--v2-ink-mute)" }}>
+                        {p.perUnit}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -321,7 +370,10 @@ export default function AiPreGradeV2() {
             </div>
           </div>
 
-          <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-10 text-center" style={{ color: "#ffffff" }}>
+          <p
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-10 text-center"
+            style={{ color: "#ffffff" }}
+          >
             Vault Club Silver members will get 100 credits every month when the club reopens.
           </p>
           <p className="font-body text-xs text-center mt-2" style={{ color: "var(--v2-ink-mute)" }}>
@@ -336,30 +388,37 @@ export default function AiPreGradeV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="Honesty" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             What this isn&rsquo;t.
           </h2>
 
           <div className="space-y-8">
             <div>
-              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+              <h3
+                className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 Not a definitive grade.
               </h3>
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                This is an AI-assisted first-look estimate from a single photo. Full
-                MintVault grading uses a high-resolution scanner, multiple image variants
-                (greyscale, high-contrast, angled), and physical inspection under
-                magnification. The estimate is a sense-check, not a grade.
+                This is an AI-assisted first-look estimate from a single photo. Full MintVault grading uses a
+                high-resolution scanner, multiple image variants (greyscale, high-contrast, angled), and physical
+                inspection under magnification. The estimate is a sense-check, not a grade.
               </p>
             </div>
             <div>
-              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+              <h3
+                className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 Not a counterfeit or authenticity check.
               </h3>
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                This tool estimates condition. It does not detect counterfeits, fakes, or
-                reprints. For authenticity, add the Authentication service to a full
-                grading submission.
+                This tool estimates condition. It does not detect counterfeits, fakes, or reprints. For authenticity,
+                add the Authentication service to a full grading submission.
               </p>
             </div>
           </div>
@@ -370,14 +429,20 @@ export default function AiPreGradeV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="V" label="FAQ" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Pre-grade questions.
           </h2>
 
           <div className="space-y-10">
             {FAQS.map((item) => (
               <div key={item.q}>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.q}
                 </h3>
                 <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -393,20 +458,25 @@ export default function AiPreGradeV2() {
       <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
           <SectionEyebrow numeral="VI" label="Try it" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
-            One photo.<br />One grade range.<br />Zero friction.
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6"
+            style={{ color: "#FFFFFF" }}
+          >
+            One photo.
+            <br />
+            One grade range.
+            <br />
+            Zero friction.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
-            First estimate is free. Credit packs start at &pound;2. Full grading starts at
-            &pound;19 when you&rsquo;re ready.
+            First estimate is free. Credit packs start at &pound;2. Full grading starts at &pound;19 when you&rsquo;re
+            ready.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-            <Link
-              href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Try it free <ArrowRight size={14} />
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Try it free <ArrowRight size={14} />
+              </GradientButton>
             </Link>
             <Link
               href="/pricing"

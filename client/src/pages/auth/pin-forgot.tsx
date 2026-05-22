@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Mail } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface ForgotResponse {
   ok?: boolean;
@@ -53,21 +54,22 @@ export default function PinForgotPage() {
           <Mail size={18} className="text-[#D4AF37]" />
         </div>
         <h1 className="text-2xl font-black text-white mb-2 text-center">Reset Your PIN</h1>
-        <p className="text-[#888888] text-sm mb-6 text-center">
-          Enter your email and we'll send a reset link.
-        </p>
+        <p className="text-[#888888] text-sm mb-6 text-center">Enter your email and we'll send a reset link.</p>
 
         {sent ? (
           <div
             className="bg-emerald-900/30 border border-emerald-700/40 rounded-xl p-4 text-sm text-emerald-400"
             data-testid="forgot-success"
           >
-            If an account exists for that email, a reset link has been sent. Check your inbox — the link is valid for 15 minutes.
+            If an account exists for that email, a reset link has been sent. Check your inbox — the link is valid for 15
+            minutes.
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-3" data-testid="pin-forgot-form">
             <div>
-              <label htmlFor="email" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">Email</label>
+              <label htmlFor="email" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">
+                Email
+              </label>
               <input
                 id="email"
                 type="email"
@@ -80,22 +82,36 @@ export default function PinForgotPage() {
                 data-testid="input-email"
               />
             </div>
-            {error && <p className="text-xs text-red-400" data-testid="forgot-error">{error}</p>}
-            <button
+            {error && (
+              <p className="text-xs text-red-400" data-testid="forgot-error">
+                {error}
+              </p>
+            )}
+            <GradientButton
+              as="button"
               type="submit"
               disabled={forgotMutation.isPending}
-              className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-60 transition-all flex items-center justify-center gap-2"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+              className="gradient-btn-filled w-full"
+              height="48px"
               data-testid="button-send-reset"
             >
-              {forgotMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : "Send Reset Link"}
-            </button>
+              {forgotMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Sending…
+                </>
+              ) : (
+                "Send Reset Link"
+              )}
+            </GradientButton>
           </form>
         )}
 
         <div className="border-t border-[#333333] my-6" />
 
-        <Link href="/customer-login" className="block text-xs text-[#888888] hover:text-[#D4AF37] transition-colors text-center">
+        <Link
+          href="/customer-login"
+          className="block text-xs text-[#888888] hover:text-[#D4AF37] transition-colors text-center"
+        >
           Back to sign-in
         </Link>
       </div>

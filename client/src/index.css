@@ -805,6 +805,13 @@
   background: conic-gradient(from var(--r), #b8960c 0%, #d4af37 25%, #ffd700 50%, #d4af37 75%, #b8960c 100%);
   animation: rotateGradient 3s linear infinite;
   --gradient-btn-bg: #0a0e1a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  backface-visibility: hidden;
+}
+
+.gradient-btn-wrapper > span {
+  transform: translateZ(0);
 }
 
 .gradient-btn-wrapper:hover:not([aria-disabled="true"]) {

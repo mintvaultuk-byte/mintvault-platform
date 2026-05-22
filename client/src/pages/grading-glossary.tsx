@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import SeoHead from "@/components/seo-head";
 import { BookOpen, ArrowRight } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 const terms = [
   {
@@ -80,7 +81,10 @@ export default function GradingGlossaryPage() {
       />
 
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
+        <div
+          className="w-9 h-9 rounded-lg flex items-center justify-center"
+          style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}
+        >
           <BookOpen size={18} className="text-[#1A1400]" />
         </div>
         <h1 className="text-3xl md:text-4xl font-bold text-white tracking-wide" data-testid="text-h1-grading-glossary">
@@ -88,7 +92,8 @@ export default function GradingGlossaryPage() {
         </h1>
       </div>
       <p className="text-white text-base leading-relaxed mb-10">
-        Plain-English definitions of every term used in professional trading card grading. Bookmark this page before submitting your first order.
+        Plain-English definitions of every term used in professional trading card grading. Bookmark this page before
+        submitting your first order.
       </p>
 
       {/* Alphabetical terms */}
@@ -117,8 +122,7 @@ export default function GradingGlossaryPage() {
       <section className="mb-12 reveal-on-scroll">
         <div className="border-l-4 border-[#D4AF37] pl-5 py-2">
           <p className="text-white text-sm leading-relaxed">
-            <span className="font-semibold text-white">Want to see how these factors affect grades?</span>{" "}
-            Visit the{" "}
+            <span className="font-semibold text-white">Want to see how these factors affect grades?</span> Visit the{" "}
             <Link href="/grading-scale">
               <span className="text-[#B8960C] font-semibold underline underline-offset-2 cursor-pointer">
                 MintVault Grading Scale
@@ -132,23 +136,17 @@ export default function GradingGlossaryPage() {
       {/* CTA */}
       <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to submit your cards?</h3>
-        <p className="text-[#1a1a1a] text-sm mb-4">
-          Now you know the terminology — let's grade your collection.
-        </p>
+        <p className="text-[#1a1a1a] text-sm mb-4">Now you know the terminology — let's grade your collection.</p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Link
-            href="/submit"
-            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-          >
-            Submit Cards <ArrowRight size={14} />
+          <Link href="/submit" className="no-underline">
+            <GradientButton className="gradient-btn-filled">
+              Submit Cards <ArrowRight size={14} />
+            </GradientButton>
           </Link>
-          <Link
-            href="/grading-scale"
-            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-          >
-            Grading Scale <ArrowRight size={14} />
+          <Link href="/grading-scale" className="no-underline">
+            <GradientButton className="gradient-btn-filled">
+              Grading Scale <ArrowRight size={14} />
+            </GradientButton>
           </Link>
         </div>
       </div>

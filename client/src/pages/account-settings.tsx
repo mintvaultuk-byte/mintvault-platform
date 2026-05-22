@@ -4,10 +4,20 @@ import AuthRequiredPage from "@/components/auth-required-page";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
-  Eye, EyeOff, Loader2, Lock, Mail, User, Trash2,
-  CheckCircle, AlertTriangle, Settings, Megaphone,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  Mail,
+  User,
+  Trash2,
+  CheckCircle,
+  AlertTriangle,
+  Settings,
+  Megaphone,
 } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface AuthMe {
   id: string;
@@ -59,11 +69,7 @@ function MarketingTab() {
 
   const toggleMutation = useMutation({
     mutationFn: async ({ id, consent }: { id: number; consent: boolean }) => {
-      const r = await apiRequest(
-        "PATCH",
-        `/api/customer/submissions/${id}/marketing-consent`,
-        { consent },
-      );
+      const r = await apiRequest("PATCH", `/api/customer/submissions/${id}/marketing-consent`, { consent });
       return r.json();
     },
     onSuccess: () => {
@@ -88,18 +94,22 @@ function MarketingTab() {
   });
 
   if (isLoading) {
-    return <div className="flex justify-center py-12"><Loader2 size={24} className="text-[#D4AF37] animate-spin" /></div>;
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
+      </div>
+    );
   }
 
-  const consentedCount = submissions.filter(s => s.marketingFeatureConsent).length;
+  const consentedCount = submissions.filter((s) => s.marketingFeatureConsent).length;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-base font-bold text-[#1A1A1A] mb-1">Marketing Feature Consent</h2>
         <p className="text-xs text-[#666666]">
-          Control whether MintVault may feature your cards in marketing (social videos, weekly highlights).
-          Your cert ID and grade may be shown publicly when consent is granted.
+          Control whether MintVault may feature your cards in marketing (social videos, weekly highlights). Your cert ID
+          and grade may be shown publicly when consent is granted.
         </p>
       </div>
 
@@ -118,7 +128,12 @@ function MarketingTab() {
             type="button"
             onClick={() => {
               if (consentedCount === 0) return;
-              if (!window.confirm(`Withdraw marketing consent on all ${consentedCount} submission${consentedCount === 1 ? "" : "s"}?`)) return;
+              if (
+                !window.confirm(
+                  `Withdraw marketing consent on all ${consentedCount} submission${consentedCount === 1 ? "" : "s"}?`
+                )
+              )
+                return;
               setWithdrawAllBusy(true);
               withdrawAllMutation.mutate();
             }}
@@ -138,7 +153,7 @@ function MarketingTab() {
           <p className="text-sm text-[#888888]">No submissions yet.</p>
         ) : (
           <ul className="space-y-2">
-            {submissions.map(sub => {
+            {submissions.map((sub) => {
               const consented = !!sub.marketingFeatureConsent;
               const busy = busyId === sub.id || toggleMutation.isPending;
               return (
@@ -178,7 +193,10 @@ function MarketingTab() {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
+        <div
+          className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm"
+          role="alert"
+        >
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
@@ -206,20 +224,6 @@ function InputBase({ className = "", ...props }: React.InputHTMLAttributes<HTMLI
   );
 }
 
-function GoldButton({
-  children, className = "", ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      {...props}
-      className={`px-6 py-2.5 rounded-xl font-bold text-sm text-[#1A1400] flex items-center justify-center gap-2 disabled:opacity-60 transition-all ${className}`}
-      style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-    >
-      {children}
-    </button>
-  );
-}
-
 function SuccessBanner({ msg }: { msg: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
@@ -230,9 +234,7 @@ function SuccessBanner({ msg }: { msg: string }) {
 }
 
 function ErrorBanner({ msg }: { msg: string }) {
-  return (
-    <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{msg}</p>
-  );
+  return <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{msg}</p>;
 }
 
 // ── Profile tab ────────────────────────────────────────────────────────────────
@@ -255,7 +257,10 @@ function ProfileTab({ me }: { me: AuthMe }) {
       setError("");
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
-    onError: (err: Error) => { setError(err.message); setSuccess(""); },
+    onError: (err: Error) => {
+      setError(err.message);
+      setSuccess("");
+    },
   });
 
   // Optimistic UI with rollback on error — toggling shouldn't churn the
@@ -283,7 +288,10 @@ function ProfileTab({ me }: { me: AuthMe }) {
   return (
     <form
       className="space-y-4"
-      onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        mutation.mutate();
+      }}
     >
       <Field label="Email Address">
         <div className="relative">
@@ -299,7 +307,7 @@ function ProfileTab({ me }: { me: AuthMe }) {
           <InputBase
             type="text"
             value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
+            onChange={(e) => setDisplayName(e.target.value)}
             placeholder="How we'll address you"
             className="pl-9"
           />
@@ -322,16 +330,13 @@ function ProfileTab({ me }: { me: AuthMe }) {
                 Show my display name on public cert verification
               </div>
               <p className="text-xs text-[#888888] mt-0.5">
-                When on, anyone who verifies a card you own will see your display name. Off by default. Email and real name are never shown.
+                When on, anyone who verifies a card you own will see your display name. Off by default. Email and real
+                name are never shown.
               </p>
               {!publicName && !canToggleOn && (
-                <p className="text-xs text-[#B8960C] mt-1.5">
-                  Set a display name above first.
-                </p>
+                <p className="text-xs text-[#B8960C] mt-1.5">Set a display name above first.</p>
               )}
-              {toggleError && (
-                <p className="text-xs text-red-600 mt-1.5">{toggleError}</p>
-              )}
+              {toggleError && <p className="text-xs text-red-600 mt-1.5">{toggleError}</p>}
             </div>
           </label>
         </div>
@@ -340,10 +345,16 @@ function ProfileTab({ me }: { me: AuthMe }) {
       {success && <SuccessBanner msg={success} />}
       {error && <ErrorBanner msg={error} />}
 
-      <GoldButton type="submit" disabled={mutation.isPending}>
+      <GradientButton
+        as="button"
+        type="submit"
+        disabled={mutation.isPending}
+        className="gradient-btn-filled w-full"
+        height="48px"
+      >
         {mutation.isPending && <Loader2 size={14} className="animate-spin" />}
         Save Changes
-      </GoldButton>
+      </GradientButton>
     </form>
   );
 }
@@ -360,16 +371,21 @@ function PasswordTab() {
   const strength = passwordStrength(newPw);
 
   const mutation = useMutation({
-    mutationFn: () => apiRequest("PUT", "/api/auth/change-password", {
-      current_password: currentPw,
-      new_password: newPw,
-    }),
+    mutationFn: () =>
+      apiRequest("PUT", "/api/auth/change-password", {
+        current_password: currentPw,
+        new_password: newPw,
+      }),
     onSuccess: () => {
       setSuccess("Password changed. A confirmation email has been sent.");
       setError("");
-      setCurrentPw(""); setNewPw("");
+      setCurrentPw("");
+      setNewPw("");
     },
-    onError: (err: Error) => { setError(err.message); setSuccess(""); },
+    onError: (err: Error) => {
+      setError(err.message);
+      setSuccess("");
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -388,13 +404,18 @@ function PasswordTab() {
         <div className="relative">
           <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
           <InputBase
-            type={showCurrent ? "text" : "password"} required
-            value={currentPw} onChange={e => setCurrentPw(e.target.value)}
+            type={showCurrent ? "text" : "password"}
+            required
+            value={currentPw}
+            onChange={(e) => setCurrentPw(e.target.value)}
             placeholder="Your current password"
             className="pl-9 pr-10"
           />
-          <button type="button" onClick={() => setShowCurrent(s => !s)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
+          <button
+            type="button"
+            onClick={() => setShowCurrent((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]"
+          >
             {showCurrent ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
@@ -404,23 +425,35 @@ function PasswordTab() {
         <div className="relative">
           <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
           <InputBase
-            type={showNew ? "text" : "password"} required
-            value={newPw} onChange={e => setNewPw(e.target.value)}
+            type={showNew ? "text" : "password"}
+            required
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
             placeholder="10+ characters, letter + number"
             className="pl-9 pr-10"
           />
-          <button type="button" onClick={() => setShowNew(s => !s)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
+          <button
+            type="button"
+            onClick={() => setShowNew((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]"
+          >
             {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
         {newPw.length > 0 && (
           <div className="mt-2 flex items-center gap-2">
             <div className="flex-1 h-1.5 rounded-full bg-[#E8E4DC] overflow-hidden">
-              <div className="h-full rounded-full transition-all"
-                style={{ width: strength.level === "weak" ? "33%" : strength.level === "medium" ? "66%" : "100%", background: strength.color }} />
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: strength.level === "weak" ? "33%" : strength.level === "medium" ? "66%" : "100%",
+                  background: strength.color,
+                }}
+              />
             </div>
-            <span className="text-xs font-bold" style={{ color: strength.color }}>{strength.label}</span>
+            <span className="text-xs font-bold" style={{ color: strength.color }}>
+              {strength.label}
+            </span>
           </div>
         )}
       </Field>
@@ -428,10 +461,16 @@ function PasswordTab() {
       {success && <SuccessBanner msg={success} />}
       {error && <ErrorBanner msg={error} />}
 
-      <GoldButton type="submit" disabled={mutation.isPending}>
+      <GradientButton
+        as="button"
+        type="submit"
+        disabled={mutation.isPending}
+        className="gradient-btn-filled w-full"
+        height="48px"
+      >
         {mutation.isPending && <Loader2 size={14} className="animate-spin" />}
         Update Password
-      </GoldButton>
+      </GradientButton>
     </form>
   );
 }
@@ -446,21 +485,32 @@ function EmailTab({ me }: { me: AuthMe }) {
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => apiRequest("PUT", "/api/auth/change-email", {
-      new_email: newEmail.trim().toLowerCase(),
-      password,
-    }),
+    mutationFn: () =>
+      apiRequest("PUT", "/api/auth/change-email", {
+        new_email: newEmail.trim().toLowerCase(),
+        password,
+      }),
     onSuccess: () => {
       setSuccess("Email updated. Check your new inbox for a verification link.");
       setError("");
-      setNewEmail(""); setPassword("");
+      setNewEmail("");
+      setPassword("");
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
     },
-    onError: (err: Error) => { setError(err.message); setSuccess(""); },
+    onError: (err: Error) => {
+      setError(err.message);
+      setSuccess("");
+    },
   });
 
   return (
-    <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); mutation.mutate(); }}>
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        mutation.mutate();
+      }}
+    >
       <Field label="Current Email">
         <div className="relative">
           <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
@@ -472,8 +522,10 @@ function EmailTab({ me }: { me: AuthMe }) {
         <div className="relative">
           <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
           <InputBase
-            type="email" required
-            value={newEmail} onChange={e => setNewEmail(e.target.value)}
+            type="email"
+            required
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
             placeholder="new@email.com"
             className="pl-9"
           />
@@ -484,13 +536,18 @@ function EmailTab({ me }: { me: AuthMe }) {
         <div className="relative">
           <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
           <InputBase
-            type={showPw ? "text" : "password"} required
-            value={password} onChange={e => setPassword(e.target.value)}
+            type={showPw ? "text" : "password"}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             placeholder="Your current password"
             className="pl-9 pr-10"
           />
-          <button type="button" onClick={() => setShowPw(s => !s)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
+          <button
+            type="button"
+            onClick={() => setShowPw((s) => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]"
+          >
             {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
@@ -499,10 +556,16 @@ function EmailTab({ me }: { me: AuthMe }) {
       {success && <SuccessBanner msg={success} />}
       {error && <ErrorBanner msg={error} />}
 
-      <GoldButton type="submit" disabled={mutation.isPending}>
+      <GradientButton
+        as="button"
+        type="submit"
+        disabled={mutation.isPending}
+        className="gradient-btn-filled w-full"
+        height="48px"
+      >
         {mutation.isPending && <Loader2 size={14} className="animate-spin" />}
         Update Email
-      </GoldButton>
+      </GradientButton>
     </form>
   );
 }
@@ -517,10 +580,11 @@ function DangerTab() {
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => apiRequest("DELETE", "/api/auth/delete-account", {
-      password,
-      confirm: confirm,
-    }),
+    mutationFn: () =>
+      apiRequest("DELETE", "/api/auth/delete-account", {
+        password,
+        confirm: confirm,
+      }),
     onSuccess: () => {
       queryClient.setQueryData(["/api/auth/me"], null);
       navigate("/");
@@ -532,7 +596,7 @@ function DangerTab() {
     e.preventDefault();
     setError("");
     if (confirm !== "DELETE") {
-      setError('Please type DELETE (all caps) to confirm.');
+      setError("Please type DELETE (all caps) to confirm.");
       return;
     }
     mutation.mutate();
@@ -545,9 +609,9 @@ function DangerTab() {
         <div>
           <p className="text-sm font-bold text-red-700 mb-1">Permanent action</p>
           <p className="text-xs text-red-600">
-            Deleting your account will remove your personal information. Your certificates and
-            ownership history are preserved for registry integrity, but all account data (name,
-            email, login) will be anonymised. This cannot be undone.
+            Deleting your account will remove your personal information. Your certificates and ownership history are
+            preserved for registry integrity, but all account data (name, email, login) will be anonymised. This cannot
+            be undone.
           </p>
         </div>
       </div>
@@ -557,22 +621,29 @@ function DangerTab() {
           <div className="relative">
             <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#CCCCCC]" />
             <InputBase
-              type={showPw ? "text" : "password"} required
-              value={password} onChange={e => setPassword(e.target.value)}
+              type={showPw ? "text" : "password"}
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               placeholder="Confirm with your password"
               className="pl-9 pr-10"
             />
-            <button type="button" onClick={() => setShowPw(s => !s)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]">
+            <button
+              type="button"
+              onClick={() => setShowPw((s) => !s)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#AAAAAA]"
+            >
               {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
         </Field>
 
-        <Field label='Type DELETE to confirm'>
+        <Field label="Type DELETE to confirm">
           <InputBase
-            type="text" required
-            value={confirm} onChange={e => setConfirm(e.target.value)}
+            type="text"
+            required
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
             placeholder="DELETE"
           />
         </Field>
@@ -620,11 +691,11 @@ export default function AccountSettingsPage() {
   }
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "profile",   label: "Profile",       icon: <User size={14} /> },
-    { key: "password",  label: "Password",      icon: <Lock size={14} /> },
-    { key: "email",     label: "Email",         icon: <Mail size={14} /> },
-    { key: "marketing", label: "Marketing",     icon: <Megaphone size={14} /> },
-    { key: "danger",    label: "Delete Account", icon: <Trash2 size={14} /> },
+    { key: "profile", label: "Profile", icon: <User size={14} /> },
+    { key: "password", label: "Password", icon: <Lock size={14} /> },
+    { key: "email", label: "Email", icon: <Mail size={14} /> },
+    { key: "marketing", label: "Marketing", icon: <Megaphone size={14} /> },
+    { key: "danger", label: "Delete Account", icon: <Trash2 size={14} /> },
   ];
 
   return (
@@ -636,16 +707,13 @@ export default function AccountSettingsPage() {
       />
       <div className="min-h-screen bg-[#FAFAF8] px-4 py-12">
         <div className="max-w-2xl mx-auto">
-
           {/* Page header */}
           <div className="flex items-center gap-3 mb-8">
             <div className="w-10 h-10 rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center">
               <Settings size={18} className="text-[#D4AF37]" />
             </div>
             <div>
-              <h1 className="text-xl font-black text-[#1A1A1A]">
-                Account Settings
-              </h1>
+              <h1 className="text-xl font-black text-[#1A1A1A]">Account Settings</h1>
               <p className="text-xs text-[#888888]">{me.email}</p>
             </div>
           </div>
@@ -653,7 +721,7 @@ export default function AccountSettingsPage() {
           <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6">
             {/* Sidebar tabs */}
             <nav className="flex md:flex-col gap-1 flex-wrap">
-              {TABS.map(t => (
+              {TABS.map((t) => (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
@@ -670,7 +738,10 @@ export default function AccountSettingsPage() {
                 </button>
               ))}
               <div className="hidden md:block mt-4 pt-4 border-t border-[#E8E4DC]">
-                <Link href="/dashboard" className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-[#666666] hover:bg-[#F5F2EB] transition-all">
+                <Link
+                  href="/dashboard"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-[#666666] hover:bg-[#F5F2EB] transition-all"
+                >
                   ← Dashboard
                 </Link>
               </div>
@@ -678,14 +749,13 @@ export default function AccountSettingsPage() {
 
             {/* Panel */}
             <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6 md:p-8">
-              {tab === "profile"   && <ProfileTab me={me} />}
-              {tab === "password"  && <PasswordTab />}
-              {tab === "email"     && <EmailTab me={me} />}
+              {tab === "profile" && <ProfileTab me={me} />}
+              {tab === "password" && <PasswordTab />}
+              {tab === "email" && <EmailTab me={me} />}
               {tab === "marketing" && <MarketingTab />}
-              {tab === "danger"    && <DangerTab />}
+              {tab === "danger" && <DangerTab />}
             </div>
           </div>
-
         </div>
       </div>
     </>

@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, Loader2 } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -17,8 +18,7 @@ const SILVER = {
   grading_discount_percent: VAULT_CLUB_SILVER_DISCOUNT_PERCENT, // 10
 } as const;
 
-const poundsFromPence = (p: number) =>
-  `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
+const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
 
 const ANNUAL_SAVINGS_PENCE = SILVER.monthly_price_pence * 12 - SILVER.annual_price_pence; // 2088
 
@@ -126,42 +126,48 @@ export default function VaultClubV2() {
             className="font-display italic font-medium leading-[0.95] mb-6"
             style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
           >
-            For the<br />regular submitter.
+            For the
+            <br />
+            regular submitter.
           </h1>
           <p
             className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
             style={{ color: "var(--v2-ink-soft)" }}
           >
-            Silver is a paid membership for collectors who submit regularly.
-            {" "}{SILVER.grading_discount_percent}% off every grading fee, {SILVER.ai_credits_monthly} AI Pre-Grade credits
-            every month, your own public Showroom, and a member badge across the
-            registry.
+            Silver is a paid membership for collectors who submit regularly. {SILVER.grading_discount_percent}% off
+            every grading fee, {SILVER.ai_credits_monthly} AI Pre-Grade credits every month, your own public Showroom,
+            and a member badge across the registry.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
-            <button
+            <GradientButton
+              as="button"
               type="button"
               onClick={() => checkoutMutation.mutate({ interval: "month" })}
               disabled={checkoutMutation.isPending}
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              className="gradient-btn-filled"
             >
-              {checkoutMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                : <>Subscribe — {poundsFromPence(SILVER.monthly_price_pence)}/mo <ArrowRight size={14} /></>}
-            </button>
-            <Link
-              href="/tools/estimate"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Try AI Pre-Grade (free) <ArrowRight size={14} />
+              {checkoutMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Loading…
+                </>
+              ) : (
+                <>
+                  Subscribe — {poundsFromPence(SILVER.monthly_price_pence)}/mo <ArrowRight size={14} />
+                </>
+              )}
+            </GradientButton>
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Try AI Pre-Grade (free) <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
           <p
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)} / year &middot; Available now
+            {poundsFromPence(SILVER.monthly_price_pence)} / month &middot; {poundsFromPence(SILVER.annual_price_pence)}{" "}
+            / year &middot; Available now
           </p>
         </div>
       </section>
@@ -171,15 +177,20 @@ export default function VaultClubV2() {
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="I" label="Why Silver" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-              Four perks.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>All enforced.</span>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "#FFFFFF" }}
+            >
+              Four perks.
+              <br />
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
+                All enforced.
+              </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Every Silver perk is wired into code &mdash; the discount applies at
-              checkout, the credits land in your account, the Showroom activates
-              on first billing, the badge renders on your certs. Nothing promised
-              that we don&rsquo;t deliver.
+              Every Silver perk is wired into code &mdash; the discount applies at checkout, the credits land in your
+              account, the Showroom activates on first billing, the badge renders on your certs. Nothing promised that
+              we don&rsquo;t deliver.
             </p>
           </div>
 
@@ -189,7 +200,10 @@ export default function VaultClubV2() {
               <div
                 key={perk.number}
                 className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto] gap-6 md:gap-10 py-8 md:py-10"
-                style={{ borderTop: i === 0 ? "1px solid rgba(255,255,255,0.1)" : undefined, borderBottom: "1px solid rgba(255,255,255,0.1)" }}
+                style={{
+                  borderTop: i === 0 ? "1px solid rgba(255,255,255,0.1)" : undefined,
+                  borderBottom: "1px solid rgba(255,255,255,0.1)",
+                }}
               >
                 <p
                   className="font-display italic font-medium leading-none"
@@ -201,14 +215,20 @@ export default function VaultClubV2() {
                   {perk.number}
                 </p>
                 <div>
-                  <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
+                  <h3
+                    className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                    style={{ color: "#FFFFFF" }}
+                  >
                     {perk.title}
                   </h3>
                   <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
                     {perk.body}
                   </p>
                   {perk.value && (
-                    <p className="md:hidden font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-3" style={{ color: "#ffffff" }}>
+                    <p
+                      className="md:hidden font-mono-v2 text-xs md:text-sm uppercase tracking-widest mt-3"
+                      style={{ color: "#ffffff" }}
+                    >
                       {perk.value}
                     </p>
                   )}
@@ -232,15 +252,20 @@ export default function VaultClubV2() {
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="When it pays off" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               Roughly four cards a month.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              Membership is {poundsFromPence(SILVER.monthly_price_pence)}/month. At Standard grading
-              (£25/card), the {SILVER.grading_discount_percent}% discount alone returns £2.50 per card &mdash; four cards covers
-              the membership. AI Pre-Grade credits, Showroom, and the badge are
-              bonus on top. Submit fewer than that and you&rsquo;re better off paying
-              per-card.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Membership is {poundsFromPence(SILVER.monthly_price_pence)}/month. At Standard grading (£25/card), the{" "}
+              {SILVER.grading_discount_percent}% discount alone returns £2.50 per card &mdash; four cards covers the
+              membership. AI Pre-Grade credits, Showroom, and the badge are bonus on top. Submit fewer than that and
+              you&rsquo;re better off paying per-card.
             </p>
           </div>
         </div>
@@ -250,21 +275,35 @@ export default function VaultClubV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="Pricing" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Monthly or annual.
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Monthly card */}
-            <div className="rounded-xl p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-ink-mute)" }}>
+            <div
+              className="rounded-xl p-8 flex flex-col"
+              style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-line)" }}
+            >
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4"
+                style={{ color: "var(--v2-ink-mute)" }}
+              >
                 Monthly
               </p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
+                <span
+                  className="font-numeral font-semibold"
+                  style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}
+                >
                   {poundsFromPence(SILVER.monthly_price_pence)}
                 </span>
-                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ month</span>
+                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>
+                  / month
+                </span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
                 Cancel anytime. Bill renews monthly.
@@ -276,47 +315,76 @@ export default function VaultClubV2() {
                 className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 mb-4"
                 style={{ backgroundColor: "var(--v2-ink)", color: "var(--v2-paper)" }}
               >
-                {checkoutMutation.isPending
-                  ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                  : <>Subscribe monthly <ArrowRight size={14} /></>}
+                {checkoutMutation.isPending ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Loading…
+                  </>
+                ) : (
+                  <>
+                    Subscribe monthly <ArrowRight size={14} />
+                  </>
+                )}
               </button>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-auto" style={{ color: "var(--v2-ink-mute)" }}>
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mt-auto"
+                style={{ color: "var(--v2-ink-mute)" }}
+              >
                 Good for month-to-month flexibility.
               </p>
             </div>
 
             {/* Annual card */}
-            <div className="relative rounded-xl p-8 flex flex-col" style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}>
+            <div
+              className="relative rounded-xl p-8 flex flex-col"
+              style={{ backgroundColor: "var(--v2-paper)", border: "1px solid var(--v2-gold-soft)" }}
+            >
               <span
                 className="absolute left-1/2 -translate-x-1/2 font-mono-v2 text-[9px] uppercase tracking-widest px-4 py-1.5 rounded whitespace-nowrap"
                 style={{ top: "-14px", backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
               >
                 Save {poundsFromPence(ANNUAL_SAVINGS_PENCE)}
               </span>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4" style={{ color: "var(--v2-gold)" }}>
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-4"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 Annual
               </p>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-numeral font-semibold" style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}>
+                <span
+                  className="font-numeral font-semibold"
+                  style={{ color: "var(--v2-ink)", fontSize: "clamp(48px, 5vw, 64px)", lineHeight: 1 }}
+                >
                   {poundsFromPence(SILVER.annual_price_pence)}
                 </span>
-                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>/ year</span>
+                <span className="font-body text-sm" style={{ color: "var(--v2-ink-mute)" }}>
+                  / year
+                </span>
               </div>
               <p className="font-body text-sm mb-6" style={{ color: "var(--v2-ink-soft)" }}>
                 Equivalent to two months free. Bill renews yearly.
               </p>
-              <button
+              <GradientButton
+                as="button"
                 type="button"
                 onClick={() => checkoutMutation.mutate({ interval: "year" })}
                 disabled={checkoutMutation.isPending}
-                className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60 mb-4"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                className="gradient-btn-filled mb-4 w-full"
               >
-                {checkoutMutation.isPending
-                  ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                  : <>Subscribe annual <ArrowRight size={14} /></>}
-              </button>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-auto" style={{ color: "var(--v2-gold)" }}>
+                {checkoutMutation.isPending ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Loading…
+                  </>
+                ) : (
+                  <>
+                    Subscribe annual <ArrowRight size={14} />
+                  </>
+                )}
+              </GradientButton>
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mt-auto"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 Best value for regular submitters.
               </p>
             </div>
@@ -328,31 +396,38 @@ export default function VaultClubV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="Honesty" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             What Silver isn&rsquo;t.
           </h2>
 
           <div className="space-y-8">
             <div>
-              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+              <h3
+                className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 Not stacked with bulk discounts.
               </h3>
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                The basket applies whichever saves you more, never both. Silver&rsquo;s
-                {" "}{SILVER.grading_discount_percent}% wins up to 49 cards per submission. The bulk discount overtakes
-                Silver at 50+ cards (15% bracket). Either way, you get the better
-                number.
+                The basket applies whichever saves you more, never both. Silver&rsquo;s{" "}
+                {SILVER.grading_discount_percent}% wins up to 49 cards per submission. The bulk discount overtakes
+                Silver at 50+ cards (15% bracket). Either way, you get the better number.
               </p>
             </div>
             <div>
-              <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+              <h3
+                className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                style={{ color: "var(--v2-ink)" }}
+              >
                 Not free shipping or free authentication.
               </h3>
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                Earlier drafts of Silver promised free return shipping and free
-                Authentication add-ons. We didn&rsquo;t ship those for v1, so we
-                stripped them rather than overclaim. They may return as paid perks
-                later if there&rsquo;s demand.
+                Earlier drafts of Silver promised free return shipping and free Authentication add-ons. We didn&rsquo;t
+                ship those for v1, so we stripped them rather than overclaim. They may return as paid perks later if
+                there&rsquo;s demand.
               </p>
             </div>
           </div>
@@ -363,14 +438,20 @@ export default function VaultClubV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="V" label="FAQ" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Silver questions.
           </h2>
 
           <div className="space-y-10">
             {FAQS.map((item) => (
               <div key={item.q}>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.q}
                 </h3>
                 <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -386,35 +467,51 @@ export default function VaultClubV2() {
       <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
           <SectionEyebrow numeral="VI" label="Subscribe" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6"
+            style={{ color: "#FFFFFF" }}
+          >
             Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
-            {poundsFromPence(SILVER.monthly_price_pence)}/month or {poundsFromPence(SILVER.annual_price_pence)}/year. Cancel anytime.
+            {poundsFromPence(SILVER.monthly_price_pence)}/month or {poundsFromPence(SILVER.annual_price_pence)}/year.
+            Cancel anytime.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-            <button
+            <GradientButton
+              as="button"
               type="button"
               onClick={() => checkoutMutation.mutate({ interval: "month" })}
               disabled={checkoutMutation.isPending}
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              className="gradient-btn-filled"
             >
-              {checkoutMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                : <>Subscribe monthly <ArrowRight size={14} /></>}
-            </button>
-            <button
+              {checkoutMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Loading…
+                </>
+              ) : (
+                <>
+                  Subscribe monthly <ArrowRight size={14} />
+                </>
+              )}
+            </GradientButton>
+            <GradientButton
+              as="button"
               type="button"
               onClick={() => checkoutMutation.mutate({ interval: "year" })}
               disabled={checkoutMutation.isPending}
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+              className="gradient-btn-filled"
             >
-              {checkoutMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin" /> Loading…</>
-                : <>Subscribe annual <ArrowRight size={14} /></>}
-            </button>
+              {checkoutMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Loading…
+                </>
+              ) : (
+                <>
+                  Subscribe annual <ArrowRight size={14} />
+                </>
+              )}
+            </GradientButton>
           </div>
         </div>
       </section>

@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { CheckCircle, XCircle, Loader2, RefreshCw } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 export default function VerifyEmailPage() {
   const queryClient = useQueryClient();
@@ -73,12 +74,9 @@ export default function VerifyEmailPage() {
                 Your email address has been confirmed. Your account is fully active.
               </p>
               <Link href="/dashboard">
-                <button
-                  className="px-8 py-3 rounded-xl font-bold text-sm text-[#1A1400] transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-                >
+                <GradientButton className="gradient-btn-filled" height="48px">
                   Go to Dashboard
-                </button>
+                </GradientButton>
               </Link>
             </>
           )}
@@ -104,11 +102,13 @@ export default function VerifyEmailPage() {
                       {resendError}
                     </p>
                   )}
-                  <button
+                  <GradientButton
+                    as="button"
+                    type="button"
                     onClick={() => resendMutation.mutate()}
                     disabled={resendMutation.isPending}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-[#1A1400] disabled:opacity-60 transition-all mb-4"
-                    style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                    className="gradient-btn-filled mb-4"
+                    height="48px"
                   >
                     {resendMutation.isPending ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -116,7 +116,7 @@ export default function VerifyEmailPage() {
                       <RefreshCw size={14} />
                     )}
                     Resend Verification Email
-                  </button>
+                  </GradientButton>
                 </>
               )}
 

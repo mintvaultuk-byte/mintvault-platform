@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Upload, Loader2, ArrowRight, AlertTriangle } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
+import GradientButton from "@/components/ui/gradient-button";
 
 // ── Types (mirror v1 response shape) ───────────────────────────────────────
 
@@ -415,22 +416,24 @@ export default function ToolsEstimateV2() {
                   style={{ backgroundColor: "var(--v2-paper)" }}
                 />
                 <div className="mt-6 flex flex-wrap justify-center gap-3">
-                  <button
+                  <GradientButton
+                    as="button"
                     type="button"
                     onClick={handleReset}
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
-                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                    height="44px"
+                    className="gradient-btn-filled"
                   >
                     Replace photo
-                  </button>
-                  <button
+                  </GradientButton>
+                  <GradientButton
+                    as="button"
                     type="button"
                     onClick={handleGetEstimate}
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.03]"
-                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                    height="44px"
+                    className="gradient-btn-filled"
                   >
                     Get estimate <ArrowRight size={14} />
-                  </button>
+                  </GradientButton>
                 </div>
                 <p
                   className="font-mono-v2 text-[10px] uppercase tracking-widest mt-4 text-center"
@@ -628,20 +631,19 @@ export default function ToolsEstimateV2() {
 
                 {/* Actions */}
                 <div className="mt-8 flex flex-wrap gap-3 justify-between items-center">
-                  <button
+                  <GradientButton
+                    as="button"
                     type="button"
                     onClick={handleReset}
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
-                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                    height="44px"
+                    className="gradient-btn-filled"
                   >
                     Estimate another card
-                  </button>
-                  <Link
-                    href="/pricing"
-                    className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-5 py-2.5 rounded-full transition-all hover:scale-[1.03]"
-                    style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-                  >
-                    See full grading pricing <ArrowRight size={14} />
+                  </GradientButton>
+                  <Link href="/pricing" className="no-underline">
+                    <GradientButton height="44px" className="gradient-btn-filled">
+                      See full grading pricing <ArrowRight size={14} />
+                    </GradientButton>
                   </Link>
                 </div>
               </div>
@@ -748,19 +750,19 @@ export default function ToolsEstimateV2() {
                   </p>
                 </div>
 
-                <button
+                <GradientButton
+                  as="button"
                   type="button"
                   onClick={handlePurchasePack}
                   disabled={!selectedPack || !isValidEmail(email) || checkoutLoading}
-                  className="mt-4 inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-6 py-3 rounded-full w-full md:w-auto transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                  className="gradient-btn-filled mt-4 w-full md:w-auto"
                 >
                   {checkoutLoading && <Loader2 size={14} className="animate-spin" />}
                   {selectedPack
                     ? `Continue with ${PACKS.find((p) => p.id === selectedPack)?.credits} pack`
                     : "Select a pack"}
                   {!checkoutLoading && selectedPack && <ArrowRight size={14} />}
-                </button>
+                </GradientButton>
 
                 <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
                   <p className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
@@ -790,16 +792,17 @@ export default function ToolsEstimateV2() {
                           color: "var(--v2-ink)",
                         }}
                       />
-                      <button
+                      <GradientButton
+                        as="button"
                         type="button"
                         onClick={handleRestoreCredits}
                         disabled={restoreLoading || !isValidEmail(restoreEmail)}
-                        className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all disabled:opacity-50"
-                        style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                        height="44px"
+                        className="gradient-btn-filled"
                       >
                         {restoreLoading && <Loader2 size={14} className="animate-spin" />}
                         Check
-                      </button>
+                      </GradientButton>
                     </div>
                   )}
                   {restoreError && (
@@ -825,14 +828,15 @@ export default function ToolsEstimateV2() {
                 <p className="font-body text-sm mt-2" style={{ color: "var(--v2-ink-soft)" }}>
                   {error}
                 </p>
-                <button
+                <GradientButton
+                  as="button"
                   type="button"
                   onClick={() => setError(null)}
-                  className="mt-4 inline-flex items-center gap-2 font-body text-sm font-semibold px-5 py-2.5 rounded-full transition-all hover:scale-[1.02]"
-                  style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+                  height="44px"
+                  className="gradient-btn-filled mt-4"
                 >
                   Try again
-                </button>
+                </GradientButton>
               </div>
             )}
           </div>

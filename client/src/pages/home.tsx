@@ -122,18 +122,15 @@ function FoundingMembersStrip() {
             maxLength={254}
             required
           />
-          <button
+          <GradientButton
+            as="button"
             type="submit"
             disabled={submitting || !email.trim()}
             data-testid="button-waitlist-submit"
-            className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] disabled:opacity-60"
-            style={{
-              backgroundColor: "var(--v2-gold)",
-              color: "var(--v2-panel-dark)",
-            }}
+            className="gradient-btn-filled"
           >
             {submitting ? "Joining…" : "Join the waitlist"}
-          </button>
+          </GradientButton>
         </form>
         {status.kind === "success" && (
           <p className="mt-3 font-body text-sm" style={{ color: "var(--v2-gold)" }} data-testid="text-waitlist-success">
@@ -458,16 +455,10 @@ export default function HomeV2() {
                     </ul>
 
                     {/* CTA button */}
-                    <Link
-                      href="/submit"
-                      className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] w-full"
-                      style={
-                        tier.featured
-                          ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
-                          : { border: "1px solid var(--v2-gold)", color: "var(--v2-gold)" }
-                      }
-                    >
-                      Start a submission <ArrowRight size={14} />
+                    <Link href="/submit" className="no-underline w-full">
+                      <GradientButton className={tier.featured ? "gradient-btn-filled w-full" : "w-full"}>
+                        Start a submission <ArrowRight size={14} />
+                      </GradientButton>
                     </Link>
                   </div>
                 ))}
@@ -784,12 +775,10 @@ export default function HomeV2() {
             )}
 
             <div className="mt-8 text-center">
-              <Link
-                href="/registry"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
-                Browse the full registry <ArrowRight size={14} />
+              <Link href="/registry" className="no-underline">
+                <GradientButton className="gradient-btn-filled">
+                  Browse the full registry <ArrowRight size={14} />
+                </GradientButton>
               </Link>
             </div>
           </div>

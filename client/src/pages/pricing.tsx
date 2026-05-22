@@ -1,16 +1,13 @@
 import { useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Check } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
-import {
-  pricingTiers,
-  insuranceTiers,
-  insuranceSurchargeBands,
-} from "@shared/schema";
+import { pricingTiers, insuranceTiers, insuranceSurchargeBands } from "@shared/schema";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 
 // Silver Vault Club perk values — mirrors server/vault-club-tiers.ts Silver
@@ -29,12 +26,14 @@ const SILVER = {
 // shared config. Tier display order: VAULT_QUEUE → STANDARD (featured) → EXPRESS.
 
 const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured: boolean }> = {
-  standard: { // schema id "standard" = Vault Queue
+  standard: {
+    // schema id "standard" = Vault Queue
     shortName: "Vault Queue",
     blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
     featured: false,
   },
-  priority: { // schema id "priority" = Standard
+  priority: {
+    // schema id "priority" = Standard
     shortName: "Standard",
     blurb: "The balanced option: fair turnaround, full report, priority you can feel.",
     featured: true,
@@ -78,47 +77,45 @@ export default function PricingV2() {
       {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
       <section className="relative">
         <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
-            <p
-              className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
-              style={{ color: "#D4AF37" }}
-            >
-              Est. Kent &middot; Pricing
-            </p>
-            <h1
-              className="font-display italic font-medium leading-[0.95] mb-6"
-              style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
-            >
-              Grade it once.<br />Get it right.
-            </h1>
-            <p
-              className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
-              style={{ color: "var(--v2-ink-soft)" }}
-            >
-              Three tiers, 5 to 40 working day turnaround, same four-point inspection on every
-              card. Pristine 10P upgrade when your card earns it &mdash; free, never sold.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
-              <Link
-                href="/submit"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+          <p
+            className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
+            style={{ color: "#D4AF37" }}
+          >
+            Est. Kent &middot; Pricing
+          </p>
+          <h1
+            className="font-display italic font-medium leading-[0.95] mb-6"
+            style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
+          >
+            Grade it once.
+            <br />
+            Get it right.
+          </h1>
+          <p
+            className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
+            style={{ color: "var(--v2-ink-soft)" }}
+          >
+            Three tiers, 5 to 40 working day turnaround, same four-point inspection on every card. Pristine 10P upgrade
+            when your card earns it &mdash; free, never sold.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
+            <Link href="/submit" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
                 Submit a card <ArrowRight size={14} />
-              </Link>
-              <Link
-                href="/tools/estimate"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
+              </GradientButton>
+            </Link>
+            <Link href="/tools/estimate" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
                 Try AI Pre-Grade <ArrowRight size={14} />
-              </Link>
-            </div>
-            <p
-              className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
-              style={{ color: "var(--v2-ink-mute)" }}
-            >
-              From &pound;19 &middot; 3 tiers &middot; Free Pristine 10P upgrade
-            </p>
+              </GradientButton>
+            </Link>
+          </div>
+          <p
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
+            style={{ color: "var(--v2-ink-mute)" }}
+          >
+            From &pound;19 &middot; 3 tiers &middot; Free Pristine 10P upgrade
+          </p>
         </div>
       </section>
 
@@ -128,14 +125,19 @@ export default function PricingV2() {
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="I" label="Grading Tiers" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-              Three tiers.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One standard.</span>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "#FFFFFF" }}
+            >
+              Three tiers.
+              <br />
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
+                One standard.
+              </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Every card passes the same four-point inspection: centering, corners, edges,
-              surface. Tier only changes how quickly the work comes back.
-              {" "}
+              Every card passes the same four-point inspection: centering, corners, edges, surface. Tier only changes
+              how quickly the work comes back.{" "}
               <Link
                 href="/standard"
                 className="underline underline-offset-2"
@@ -161,9 +163,7 @@ export default function PricingV2() {
                     style={{
                       padding: "48px 40px",
                       backgroundColor: "var(--v2-paper)",
-                      border: d.featured
-                        ? "1px solid rgba(212, 175, 55, 0.6)"
-                        : "1px solid rgba(212, 175, 55, 0.25)",
+                      border: d.featured ? "1px solid rgba(212, 175, 55, 0.6)" : "1px solid rgba(212, 175, 55, 0.25)",
                     }}
                   >
                     {d.featured && (
@@ -220,23 +220,23 @@ export default function PricingV2() {
 
                     <ul className="mb-10 flex-1" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                       {tier.features.slice(0, 5).map((f) => (
-                        <li key={f} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
-                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>&mdash;</span>
+                        <li
+                          key={f}
+                          className="flex items-start gap-3 font-body text-sm"
+                          style={{ color: "var(--v2-ink-soft)" }}
+                        >
+                          <span className="shrink-0" style={{ color: "var(--v2-gold)" }}>
+                            &mdash;
+                          </span>
                           {f}
                         </li>
                       ))}
                     </ul>
 
-                    <Link
-                      href="/submit"
-                      className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-5 py-3 rounded-full transition-all hover:scale-[1.03] w-full"
-                      style={
-                        d.featured
-                          ? { backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }
-                          : { border: "1px solid var(--v2-gold)", color: "var(--v2-gold)" }
-                      }
-                    >
-                      Start a submission <ArrowRight size={14} />
+                    <Link href="/submit" className="no-underline w-full">
+                      <GradientButton className={d.featured ? "gradient-btn-filled w-full" : "w-full"}>
+                        Start a submission <ArrowRight size={14} />
+                      </GradientButton>
                     </Link>
                   </div>
                 );
@@ -252,13 +252,16 @@ export default function PricingV2() {
             >
               Pristine 10P &middot; Earned, not sold
             </p>
-            <p className="font-display italic font-medium text-2xl md:text-3xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
+            <p
+              className="font-display italic font-medium text-2xl md:text-3xl leading-snug mb-3"
+              style={{ color: "#FFFFFF" }}
+            >
               When every subgrade scores a 10, the slab upgrades automatically.
             </p>
             <p className="font-body text-sm md:text-base" style={{ color: "#ffffff" }}>
-              Pristine 10P is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit
-              perfect across centering, corners, edges, and surface. There&rsquo;s no separate fee,
-              no form to tick. If it earns it, you get it.
+              Pristine 10P is MintVault&rsquo;s top-tier finish &mdash; a visual signal that a card hit perfect across
+              centering, corners, edges, and surface. There&rsquo;s no separate fee, no form to tick. If it earns it,
+              you get it.
             </p>
           </div>
         </div>
@@ -269,12 +272,18 @@ export default function PricingV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="Value Protection" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               Declare what it&rsquo;s worth.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              Declared value is what your card is worth if lost or damaged in our custody.
-              Higher tiers raise our insurance cover with a small per-card surcharge.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Declared value is what your card is worth if lost or damaged in our custody. Higher tiers raise our
+              insurance cover with a small per-card surcharge.
             </p>
           </div>
 
@@ -282,10 +291,30 @@ export default function PricingV2() {
             <table className="w-full text-left">
               <thead>
                 <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Tier</th>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Declared value</th>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Per-card surcharge</th>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>Notes</th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Tier
+                  </th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Declared value
+                  </th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Per-card surcharge
+                  </th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4 hidden md:table-cell"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Notes
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -294,16 +323,40 @@ export default function PricingV2() {
                   const ceiling = gbp(band.maxValue);
                   const fee = band.surchargePence === 0 ? "Included" : `+${poundsFromPence(band.surchargePence)}`;
                   const note =
-                    i === 0 ? "Built into every submission" :
-                    i === 1 ? "Mid-value cards" :
-                    i === 2 ? "High-value grails" :
-                              "Cap — contact us above £7.5k";
+                    i === 0
+                      ? "Built into every submission"
+                      : i === 1
+                        ? "Mid-value cards"
+                        : i === 2
+                          ? "High-value grails"
+                          : "Cap — contact us above £7.5k";
                   return (
-                    <tr key={band.maxValue} style={{ borderBottom: i < insuranceSurchargeBands.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
-                      <td className="font-body text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{tierName}</td>
-                      <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>Up to {ceiling}</td>
-                      <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: band.surchargePence === 0 ? "var(--v2-gold)" : "var(--v2-ink)" }}>{fee}</td>
-                      <td className="font-body text-xs py-3 px-4 hidden md:table-cell" style={{ color: "var(--v2-ink-mute)" }}>{note}</td>
+                    <tr
+                      key={band.maxValue}
+                      style={{
+                        borderBottom:
+                          i < insuranceSurchargeBands.length - 1 ? "1px solid var(--v2-line-soft)" : undefined,
+                        backgroundColor: "var(--v2-paper-raised)",
+                      }}
+                    >
+                      <td className="font-body text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                        {tierName}
+                      </td>
+                      <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                        Up to {ceiling}
+                      </td>
+                      <td
+                        className="font-mono-v2 text-sm py-3 px-4"
+                        style={{ color: band.surchargePence === 0 ? "var(--v2-gold)" : "var(--v2-ink)" }}
+                      >
+                        {fee}
+                      </td>
+                      <td
+                        className="font-body text-xs py-3 px-4 hidden md:table-cell"
+                        style={{ color: "var(--v2-ink-mute)" }}
+                      >
+                        {note}
+                      </td>
                     </tr>
                   );
                 })}
@@ -318,12 +371,18 @@ export default function PricingV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="Add-ons" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               Optional extras.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              Three services you can stack onto a submission. Add only what you need &mdash;
-              nothing hidden, nothing default-on.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Three services you can stack onto a submission. Add only what you need &mdash; nothing hidden, nothing
+              default-on.
             </p>
           </div>
 
@@ -332,8 +391,14 @@ export default function PricingV2() {
               const addon = ADDON_PRICES[id];
               return (
                 <div key={id} className="addon-item-v2">
-                  <div className="flex items-baseline justify-between mb-3" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "10px" }}>
-                    <h3 className="font-display italic font-medium text-xl md:text-2xl" style={{ color: "var(--v2-ink)" }}>
+                  <div
+                    className="flex items-baseline justify-between mb-3"
+                    style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "10px" }}
+                  >
+                    <h3
+                      className="font-display italic font-medium text-xl md:text-2xl"
+                      style={{ color: "var(--v2-ink)" }}
+                    >
                       {addon.name}
                     </h3>
                     <span className="font-mono-v2 text-lg font-semibold" style={{ color: "var(--v2-gold)" }}>
@@ -355,12 +420,17 @@ export default function PricingV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="Return Shipping" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               Insured, tracked, UK only.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              Every slab returns via Royal Mail Special Delivery with insurance matched to
-              your declared value tier.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Every slab returns via Royal Mail Special Delivery with insurance matched to your declared value tier.
             </p>
           </div>
 
@@ -368,15 +438,35 @@ export default function PricingV2() {
             <table className="w-full text-left">
               <thead>
                 <tr style={{ backgroundColor: "var(--v2-paper-raised)", borderBottom: "1px solid var(--v2-line)" }}>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Declared value</th>
-                  <th className="font-body text-[10px] uppercase tracking-widest py-3 px-4" style={{ color: "var(--v2-ink-mute)" }}>Return shipping</th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Declared value
+                  </th>
+                  <th
+                    className="font-body text-[10px] uppercase tracking-widest py-3 px-4"
+                    style={{ color: "var(--v2-ink-mute)" }}
+                  >
+                    Return shipping
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {insuranceTiers.map((tier, i) => (
-                  <tr key={tier.maxValue} style={{ borderBottom: i < insuranceTiers.length - 1 ? "1px solid var(--v2-line-soft)" : undefined, backgroundColor: "var(--v2-paper-raised)" }}>
-                    <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>Up to {gbp(tier.maxValue)}</td>
-                    <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>{poundsFromPence(tier.shippingPence)}</td>
+                  <tr
+                    key={tier.maxValue}
+                    style={{
+                      borderBottom: i < insuranceTiers.length - 1 ? "1px solid var(--v2-line-soft)" : undefined,
+                      backgroundColor: "var(--v2-paper-raised)",
+                    }}
+                  >
+                    <td className="font-mono-v2 text-sm py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                      Up to {gbp(tier.maxValue)}
+                    </td>
+                    <td className="font-mono-v2 text-sm font-semibold py-3 px-4" style={{ color: "var(--v2-ink)" }}>
+                      {poundsFromPence(tier.shippingPence)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -384,8 +474,8 @@ export default function PricingV2() {
           </div>
 
           <p className="font-body text-xs mt-6" style={{ color: "var(--v2-ink-mute)" }}>
-            Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value,
-            please contact us for bespoke carriage.
+            Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value, please contact us for
+            bespoke carriage.
           </p>
         </div>
       </section>
@@ -395,19 +485,34 @@ export default function PricingV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="V" label="Vault Club" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-10">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               Silver membership.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              A perks-and-credits membership for collectors who submit regularly. No
-              percentage discount &mdash; tangible perks that cover real costs.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              A perks-and-credits membership for collectors who submit regularly. No percentage discount &mdash;
+              tangible perks that cover real costs.
             </p>
           </div>
 
-          <div className="silver-vault-card rounded-xl p-8 md:p-10" style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-gold-soft)" }}>
-            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4 mb-8" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "20px" }}>
+          <div
+            className="silver-vault-card rounded-xl p-8 md:p-10"
+            style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-gold-soft)" }}
+          >
+            <div
+              className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-4 mb-8"
+              style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "20px" }}
+            >
               <div>
-                <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: "var(--v2-gold)" }}>
+                <p
+                  className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2"
+                  style={{ color: "var(--v2-gold)" }}
+                >
                   {SILVER.label}
                 </p>
                 <h3 className="font-display italic font-medium text-2xl md:text-3xl" style={{ color: "var(--v2-ink)" }}>
@@ -431,7 +536,11 @@ export default function PricingV2() {
                 "Your own public Showroom at mintvaultuk.com/showroom/[your-name]",
                 "Silver Vault badge on every cert",
               ].map((perk) => (
-                <li key={perk} className="flex items-start gap-3 font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                <li
+                  key={perk}
+                  className="flex items-start gap-3 font-body text-sm"
+                  style={{ color: "var(--v2-ink-soft)" }}
+                >
                   <Check size={14} style={{ color: "var(--v2-gold)" }} className="mt-1 shrink-0" />
                   <span>{perk}</span>
                 </li>
@@ -439,12 +548,10 @@ export default function PricingV2() {
             </ul>
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <Link
-                href="/vault-club"
-                className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03] self-start"
-                style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-              >
-                See Vault Club <ArrowRight size={14} />
+              <Link href="/vault-club" className="no-underline self-start">
+                <GradientButton className="gradient-btn-filled">
+                  See Vault Club <ArrowRight size={14} />
+                </GradientButton>
               </Link>
               <p className="font-mono-v2 text-[10px] uppercase tracking-wider" style={{ color: "var(--v2-ink-mute)" }}>
                 Subscriptions temporarily paused &mdash; relaunching with full perks system.
@@ -458,32 +565,53 @@ export default function PricingV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="VI" label="Bulk Discounts" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-8" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-8"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Save more when you submit more.
           </h2>
           <p className="font-body text-base md:text-lg leading-relaxed mb-6" style={{ color: "var(--v2-ink-soft)" }}>
-            Bulk discounts apply automatically at checkout based on your card count.
-            The more cards you submit, the more you save per card.
+            Bulk discounts apply automatically at checkout based on your card count. The more cards you submit, the more
+            you save per card.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+            <div
+              className="rounded-lg p-6"
+              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
+            >
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 10–24 cards
               </p>
               <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                 <strong style={{ color: "var(--v2-ink)" }}>5% off</strong> the per-card grading fee.
               </p>
             </div>
-            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+            <div
+              className="rounded-lg p-6"
+              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
+            >
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 25–49 cards
               </p>
               <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                 <strong style={{ color: "var(--v2-ink)" }}>10% off</strong> the per-card grading fee.
               </p>
             </div>
-            <div className="rounded-lg p-6" style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}>
-              <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3" style={{ color: "var(--v2-gold)" }}>
+            <div
+              className="rounded-lg p-6"
+              style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
+            >
+              <p
+                className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
+                style={{ color: "var(--v2-gold)" }}
+              >
                 50+ cards
               </p>
               <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -498,7 +626,10 @@ export default function PricingV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="VII" label="FAQ" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Pricing questions.
           </h2>
 
@@ -523,10 +654,15 @@ export default function PricingV2() {
             ].map((item, i) => (
               <div
                 key={item.q}
-                ref={(el) => { faqRefs.current[i] = el; }}
+                ref={(el) => {
+                  faqRefs.current[i] = el;
+                }}
                 className="faq-item-accent"
               >
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.q}
                 </h3>
                 <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -543,19 +679,20 @@ export default function PricingV2() {
         <DarkSectionGlow />
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center" style={{ position: "relative", zIndex: 1 }}>
           <SectionEyebrow numeral="VIII" label="Submit" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6"
+            style={{ color: "#FFFFFF" }}
+          >
             Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             From &pound;19. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-            <Link
-              href="/submit"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Submit a card <ArrowRight size={14} />
+            <Link href="/submit" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Submit a card <ArrowRight size={14} />
+              </GradientButton>
             </Link>
             <Link
               href="/tools/estimate"

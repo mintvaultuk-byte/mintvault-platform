@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, CheckCircle } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
@@ -39,10 +40,7 @@ function titleCase(s: string | null): string {
   if (!s) return "—";
   return s
     .split(" ")
-    .map((w) =>
-      SPECIALS[w.toLowerCase()] ||
-      (w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    )
+    .map((w) => SPECIALS[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
 }
 
@@ -93,15 +91,17 @@ export default function RegistryV2() {
             className="font-display italic font-medium leading-[0.95] mb-6"
             style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
           >
-            A public ledger of<br />every graded card.
+            A public ledger of
+            <br />
+            every graded card.
           </h1>
           <p
             className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-6"
             style={{ color: "var(--v2-ink-soft)" }}
           >
-            Every card that passes through MintVault is logged permanently in our public
-            registry &mdash; with its grade, subgrades, scanned images, cert number, and
-            (when claimed) ownership history. The registry is open to everyone.
+            Every card that passes through MintVault is logged permanently in our public registry &mdash; with its
+            grade, subgrades, scanned images, cert number, and (when claimed) ownership history. The registry is open to
+            everyone.
           </p>
           <p
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider no-text-shadow"
@@ -137,15 +137,9 @@ export default function RegistryV2() {
                     border: "1px solid var(--v2-line)",
                   }}
                 >
-                  <div
-                    className="aspect-[3/4] animate-pulse"
-                    style={{ backgroundColor: "var(--v2-line-soft)" }}
-                  />
+                  <div className="aspect-[3/4] animate-pulse" style={{ backgroundColor: "var(--v2-line-soft)" }} />
                   <div className="p-4 space-y-2">
-                    <div
-                      className="h-3 rounded animate-pulse"
-                      style={{ backgroundColor: "var(--v2-line-soft)" }}
-                    />
+                    <div className="h-3 rounded animate-pulse" style={{ backgroundColor: "var(--v2-line-soft)" }} />
                     <div
                       className="h-2 rounded w-2/3 animate-pulse"
                       style={{ backgroundColor: "var(--v2-line-soft)" }}
@@ -214,10 +208,7 @@ export default function RegistryV2() {
                       {titleCase(cert.card_name)}
                     </p>
                     {cert.card_set && (
-                      <p
-                        className="font-body text-xs mt-0.5 line-clamp-1"
-                        style={{ color: "var(--v2-ink-soft)" }}
-                      >
+                      <p className="font-body text-xs mt-0.5 line-clamp-1" style={{ color: "var(--v2-ink-soft)" }}>
                         {titleCase(cert.card_set)}
                       </p>
                     )}
@@ -248,14 +239,12 @@ export default function RegistryV2() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-10">
             <p className="font-body text-base md:text-lg leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-              Every cert is published the moment it passes final QC. Grade, subgrades,
-              scanned images, certificate number, and submission date are all visible on
-              the public cert page &mdash; with or without an account.
+              Every cert is published the moment it passes final QC. Grade, subgrades, scanned images, certificate
+              number, and submission date are all visible on the public cert page &mdash; with or without an account.
             </p>
             <p className="font-body text-base md:text-lg leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-              When a customer claims their card, the claim is recorded in the ownership
-              history. Future transfers between owners are recorded too, creating a chain
-              of provenance that survives the card itself.
+              When a customer claims their card, the claim is recorded in the ownership history. Future transfers
+              between owners are recorded too, creating a chain of provenance that survives the card itself.
             </p>
           </div>
 
@@ -282,18 +271,22 @@ export default function RegistryV2() {
           >
             Looking for a specific card?
           </h2>
-          <p className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8" style={{ color: "var(--v2-ink-soft)" }}>
-            The full registry is searchable by card, set, or game. Filter by grade, see
-            population counts per card, or follow a cert by number.
-          </p>
-          <Link
-            href="/population"
-            className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
+          <p
+            className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
+            style={{ color: "var(--v2-ink-soft)" }}
           >
-            Browse the full registry <ArrowRight size={14} />
+            The full registry is searchable by card, set, or game. Filter by grade, see population counts per card, or
+            follow a cert by number.
+          </p>
+          <Link href="/population" className="no-underline">
+            <GradientButton className="gradient-btn-filled">
+              Browse the full registry <ArrowRight size={14} />
+            </GradientButton>
           </Link>
-          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mt-5" style={{ color: "var(--v2-ink-mute)" }}>
+          <p
+            className="font-mono-v2 text-[10px] uppercase tracking-widest mt-5"
+            style={{ color: "var(--v2-ink-mute)" }}
+          >
             Opens the v1 registry. The v2 search experience is on the roadmap.
           </p>
         </div>
@@ -307,25 +300,23 @@ export default function RegistryV2() {
             className="font-display italic font-medium leading-tight mb-6"
             style={{ fontSize: "clamp(2rem, 4vw, 3rem)", color: "#FFFFFF" }}
           >
-            Add your card<br />to the registry.
+            Add your card
+            <br />
+            to the registry.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             Every cert joins the same public ledger. Submit once, stays forever.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link
-              href="/submit"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Submit a card <ArrowRight size={14} />
+            <Link href="/submit" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Submit a card <ArrowRight size={14} />
+              </GradientButton>
             </Link>
-            <Link
-              href="/pricing"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              See pricing <ArrowRight size={14} />
+            <Link href="/pricing" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                See pricing <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
         </div>

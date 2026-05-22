@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Loader2, Mail } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -53,20 +54,27 @@ export default function LoginPage() {
                 type="email"
                 required
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 className="w-full px-4 py-2.5 bg-[#1A1A1A] border border-[#333333] rounded-lg text-sm text-white placeholder:text-[#555555] focus:outline-none focus:border-[#D4AF37] transition-colors"
               />
             </div>
             {error && <p className="text-xs text-red-400">{error}</p>}
-            <button
+            <GradientButton
+              as="button"
               type="submit"
               disabled={magicMutation.isPending}
-              className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-60 transition-all flex items-center justify-center gap-2"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+              className="gradient-btn-filled w-full"
+              height="48px"
             >
-              {magicMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : "Send Login Link"}
-            </button>
+              {magicMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Sending…
+                </>
+              ) : (
+                "Send Login Link"
+              )}
+            </GradientButton>
           </form>
         )}
 

@@ -5,6 +5,7 @@ import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import CertIdInput from "@/components/cert-id-input";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
+import GradientButton from "@/components/ui/gradient-button";
 
 // ── API types ──────────────────────────────────────────────────────────────
 
@@ -64,8 +65,14 @@ const METHODS = [
 
 const RETURNS_ITEMS = [
   { title: "Card identity", body: "Card name, set, year, card number, and language." },
-  { title: "Grade and subgrades", body: "Overall grade plus centering, corners, edges, surface breakdown where applicable." },
-  { title: "Ownership status", body: "Claimed (with keeper count) or unclaimed. Current owner shown only if they\u2019ve made their profile public." },
+  {
+    title: "Grade and subgrades",
+    body: "Overall grade plus centering, corners, edges, surface breakdown where applicable.",
+  },
+  {
+    title: "Ownership status",
+    body: "Claimed (with keeper count) or unclaimed. Current owner shown only if they\u2019ve made their profile public.",
+  },
   { title: "Graded date", body: "The exact date MintVault issued the slab." },
   { title: "Cross-grade estimate", body: "How the card might score at PSA, BGS, or other graders. Advisory only." },
 ];
@@ -98,11 +105,11 @@ const FAQS = [
 // ── Result card (inline) ───────────────────────────────────────────────────
 
 function ResultCard({ result }: { result: VerifyResult }) {
-  const identityParts = [result.cardSet, result.cardYear, result.cardNumber ? `#${result.cardNumber}` : null].filter(Boolean);
+  const identityParts = [result.cardSet, result.cardYear, result.cardNumber ? `#${result.cardNumber}` : null].filter(
+    Boolean
+  );
   const identityLine = identityParts.length ? identityParts.join(" \u00b7 ") : null;
-  const gradeDisplay = result.gradeNumeric > 0
-    ? result.gradeNumeric.toString()
-    : result.grade || "\u2014";
+  const gradeDisplay = result.gradeNumeric > 0 ? result.gradeNumeric.toString() : result.grade || "\u2014";
   const claimed = result.ownershipStatus === "claimed";
   const isStolen = result.stolenStatus === "reported_stolen";
 
@@ -114,16 +121,26 @@ function ResultCard({ result }: { result: VerifyResult }) {
         border: isStolen ? "2px solid #DC2626" : "1px solid var(--v2-gold-soft)",
       }}
     >
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-6" style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "16px" }}>
+      <div
+        className="flex items-start justify-between gap-4 flex-wrap mb-6"
+        style={{ borderBottom: "1px solid var(--v2-line)", paddingBottom: "16px" }}
+      >
         <div>
-          <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: isStolen ? "#DC2626" : "var(--v2-gold)" }}>
+          <p
+            className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2"
+            style={{ color: isStolen ? "#DC2626" : "var(--v2-gold)" }}
+          >
             {isStolen ? "Reported Stolen" : <>Verified &middot; {result.status}</>}
           </p>
           <p className="font-mono-v2 text-2xl md:text-3xl font-semibold" style={{ color: "var(--v2-ink)" }}>
             {result.certId}
           </p>
           {isStolen && (
-            <p className="font-body text-xs md:text-sm font-semibold mt-2 max-w-md" style={{ color: "#DC2626" }} role="alert">
+            <p
+              className="font-body text-xs md:text-sm font-semibold mt-2 max-w-md"
+              style={{ color: "#DC2626" }}
+              role="alert"
+            >
               \u26a0 This card has been reported stolen. Do not purchase. Contact support@mintvaultuk.com
             </p>
           )}
@@ -148,7 +165,10 @@ function ResultCard({ result }: { result: VerifyResult }) {
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end">
         <div>
-          <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-2" style={{ color: "var(--v2-ink)" }}>
+          <h3
+            className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-2"
+            style={{ color: "var(--v2-ink)" }}
+          >
             {result.cardName ?? "Card details unavailable"}
           </h3>
           {identityLine && (
@@ -178,7 +198,10 @@ function ResultCard({ result }: { result: VerifyResult }) {
               </span>
             )}
             {result.gradedDate && (
-              <span className="font-mono-v2 text-[10px] uppercase tracking-widest" style={{ color: "var(--v2-ink-mute)" }}>
+              <span
+                className="font-mono-v2 text-[10px] uppercase tracking-widest"
+                style={{ color: "var(--v2-ink-mute)" }}
+              >
                 Graded {result.gradedDate}
               </span>
             )}
@@ -260,14 +283,16 @@ export default function VerifyV2() {
               className="font-display italic font-medium leading-[0.95] mb-6"
               style={{ fontSize: "clamp(2.75rem, 6vw, 5rem)", color: "var(--v2-ink)" }}
             >
-              Every slab,<br />provably real.
+              Every slab,
+              <br />
+              provably real.
             </h1>
             <p
               className="font-body text-base md:text-lg leading-relaxed max-w-xl mb-8"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              Tap, scan, or type the certificate number. We return the grade, the card
-              details, and whether ownership is claimed. No login, no account.
+              Tap, scan, or type the certificate number. We return the grade, the card details, and whether ownership is
+              claimed. No login, no account.
             </p>
 
             {/* Verify form */}
@@ -307,7 +332,10 @@ export default function VerifyV2() {
                   {formatError}
                 </p>
               )}
-              <p className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider mt-3 ml-1" style={{ color: "var(--v2-ink-mute)" }}>
+              <p
+                className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider mt-3 ml-1"
+                style={{ color: "var(--v2-ink-mute)" }}
+              >
                 Tip: NFC-enabled phone? Tap the slab to skip the search.
               </p>
             </form>
@@ -316,8 +344,8 @@ export default function VerifyV2() {
             {status.kind === "verified" && <ResultCard result={status.result} />}
             {status.kind === "not-found" && (
               <p className="mt-6 font-body text-sm max-w-md" style={{ color: "var(--v2-ink-soft)" }}>
-                Certificate {status.certId} not recognised. Check the number and try again.
-                If the slab is physical, the NFC tag works without typing.
+                Certificate {status.certId} not recognised. Check the number and try again. If the slab is physical, the
+                NFC tag works without typing.
               </p>
             )}
             {status.kind === "rate-limited" && (
@@ -339,15 +367,20 @@ export default function VerifyV2() {
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="I" label="How It Works" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-16">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "#FFFFFF" }}>
-              Three layers.<br />
-              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>One truth.</span>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "#FFFFFF" }}
+            >
+              Three layers.
+              <br />
+              <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
+                One truth.
+              </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Every MintVault slab has three ways into the registry: the NFC chip, the
-              printed cert number, and the visible ownership chain. Any one opens the
-              same record — the tamper-evident slab is what ties that record to the
-              card in your hand.
+              Every MintVault slab has three ways into the registry: the NFC chip, the printed cert number, and the
+              visible ownership chain. Any one opens the same record — the tamper-evident slab is what ties that record
+              to the card in your hand.
             </p>
           </div>
 
@@ -368,7 +401,10 @@ export default function VerifyV2() {
                   {m.number}
                 </p>
                 <div>
-                  <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "#FFFFFF" }}>
+                  <h3
+                    className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                    style={{ color: "#FFFFFF" }}
+                  >
                     {m.title}
                   </h3>
                   <p className="font-body text-sm md:text-base leading-relaxed max-w-xl" style={{ color: "#ffffff" }}>
@@ -386,12 +422,18 @@ export default function VerifyV2() {
         <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="II" label="What You See" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
-            <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight" style={{ color: "var(--v2-ink)" }}>
+            <h2
+              className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
+              style={{ color: "var(--v2-ink)" }}
+            >
               The full record.
             </h2>
-            <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "var(--v2-ink-soft)" }}>
-              Every verification surfaces the same data a serious collector needs &mdash;
-              nothing paywalled, nothing hidden.
+            <p
+              className="font-body text-sm md:text-base leading-relaxed self-end"
+              style={{ color: "var(--v2-ink-soft)" }}
+            >
+              Every verification surfaces the same data a serious collector needs &mdash; nothing paywalled, nothing
+              hidden.
             </p>
           </div>
 
@@ -406,7 +448,10 @@ export default function VerifyV2() {
                   paddingBottom: "20px",
                 }}
               >
-                <h3 className="font-display italic font-medium text-lg md:text-xl mb-2" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-lg md:text-xl mb-2"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.title}
                 </h3>
                 <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -422,23 +467,30 @@ export default function VerifyV2() {
       <section className="frost-paper-raised">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="III" label="For Buyers" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-10" style={{ color: "var(--v2-ink)" }}>
-            Before you buy.<br />Verify first.
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-10"
+            style={{ color: "var(--v2-ink)" }}
+          >
+            Before you buy.
+            <br />
+            Verify first.
           </h2>
-          <div className="space-y-5 max-w-2xl font-body text-base md:text-lg leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+          <div
+            className="space-y-5 max-w-2xl font-body text-base md:text-lg leading-relaxed"
+            style={{ color: "var(--v2-ink-soft)" }}
+          >
             <p>
-              Graded cards are expensive. Counterfeit slabs exist. Use this tool before you
-              send money &mdash; it takes three seconds and costs nothing.
+              Graded cards are expensive. Counterfeit slabs exist. Use this tool before you send money &mdash; it takes
+              three seconds and costs nothing.
             </p>
             <p>
-              If you&rsquo;re buying from a marketplace, vault, or private seller, ask for
-              the cert number in advance. Verify it matches the card you&rsquo;re being
-              shown. A seller refusing to share the cert number before payment is the
-              biggest red flag you&rsquo;ll find.
+              If you&rsquo;re buying from a marketplace, vault, or private seller, ask for the cert number in advance.
+              Verify it matches the card you&rsquo;re being shown. A seller refusing to share the cert number before
+              payment is the biggest red flag you&rsquo;ll find.
             </p>
             <p>
-              MintVault verification is free, unlimited, and doesn&rsquo;t require an
-              account. We never notify sellers when their cert is looked up.
+              MintVault verification is free, unlimited, and doesn&rsquo;t require an account. We never notify sellers
+              when their cert is looked up.
             </p>
           </div>
         </div>
@@ -448,13 +500,19 @@ export default function VerifyV2() {
       <section className="frost-paper">
         <div className="mx-auto max-w-4xl px-6 py-24 md:py-32">
           <SectionEyebrow numeral="IV" label="FAQ" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12" style={{ color: "var(--v2-ink)" }}>
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-12"
+            style={{ color: "var(--v2-ink)" }}
+          >
             Verification questions.
           </h2>
           <div className="space-y-10">
             {FAQS.map((item) => (
               <div key={item.q}>
-                <h3 className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3" style={{ color: "var(--v2-ink)" }}>
+                <h3
+                  className="font-display italic font-medium text-xl md:text-2xl leading-snug mb-3"
+                  style={{ color: "var(--v2-ink)" }}
+                >
                   {item.q}
                 </h3>
                 <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
@@ -470,26 +528,27 @@ export default function VerifyV2() {
       <section className="frost-panel-dark">
         <div className="mx-auto max-w-3xl px-6 py-24 md:py-32 text-center">
           <SectionEyebrow numeral="V" label="Verify" className="mb-4" />
-          <h2 className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6" style={{ color: "#FFFFFF" }}>
-            Scan. Tap. Type.<br />Know.
+          <h2
+            className="font-display italic font-medium text-3xl md:text-5xl leading-tight mb-6"
+            style={{ color: "#FFFFFF" }}
+          >
+            Scan. Tap. Type.
+            <br />
+            Know.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
             Free, unlimited, no account. Before you buy, before you sell, before you trust.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-            <a
-              href="#verify"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Verify a certificate <ArrowRight size={14} />
+            <a href="#verify" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Verify a certificate <ArrowRight size={14} />
+              </GradientButton>
             </a>
-            <Link
-              href="/registry"
-              className="inline-flex items-center gap-2 font-body text-sm font-semibold no-underline px-7 py-3 rounded-full transition-all hover:scale-[1.03]"
-              style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-            >
-              Browse the registry <ArrowRight size={14} />
+            <Link href="/registry" className="no-underline">
+              <GradientButton className="gradient-btn-filled">
+                Browse the registry <ArrowRight size={14} />
+              </GradientButton>
             </Link>
           </div>
         </div>

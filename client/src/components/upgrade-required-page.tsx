@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { Shield, ArrowLeft } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
   minTier?: "bronze" | "silver" | "gold";
@@ -27,18 +28,18 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
           <Shield size={28} className="text-[#1A1400]" />
         </div>
 
-        <h1
-          className="text-2xl font-black text-[#1A1A1A] mb-3"
-         
-        >
+        <h1 className="text-2xl font-black text-[#1A1A1A] mb-3">
           {isUpgrade ? "Upgrade Required" : "Vault Club Required"}
         </h1>
 
         <p className="text-sm text-[#666666] mb-2">
-          {featureName
-            ? <><strong className="text-[#1A1A1A]">{featureName}</strong> requires</>
-            : "This feature requires"
-          }{" "}
+          {featureName ? (
+            <>
+              <strong className="text-[#1A1A1A]">{featureName}</strong> requires
+            </>
+          ) : (
+            "This feature requires"
+          )}{" "}
           a <strong className="text-[#B8960C]">{needed}</strong> membership{isUpgrade ? " or higher" : ""}.
         </p>
 
@@ -54,15 +55,15 @@ export default function UpgradeRequiredPage({ minTier = "bronze", currentTier, f
         )}
 
         <Link href="/vault-club">
-          <button
-            className="w-full py-3 rounded-xl font-bold text-sm text-[#1A1400] mb-4 transition-all active:scale-95"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-          >
+          <GradientButton className="gradient-btn-filled w-full mb-4">
             {isUpgrade ? "Upgrade Vault Club →" : "View Vault Club →"}
-          </button>
+          </GradientButton>
         </Link>
 
-        <Link href="/" className="flex items-center justify-center gap-1.5 text-xs text-[#AAAAAA] hover:text-[#666666] transition-colors">
+        <Link
+          href="/"
+          className="flex items-center justify-center gap-1.5 text-xs text-[#AAAAAA] hover:text-[#666666] transition-colors"
+        >
           <ArrowLeft size={12} />
           Back to home
         </Link>

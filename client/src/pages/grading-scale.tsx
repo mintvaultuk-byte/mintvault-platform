@@ -1,31 +1,72 @@
 import { Link } from "wouter";
 import SeoHead from "@/components/seo-head";
 import { Shield, Target, CheckCircle, ArrowRight } from "lucide-react";
+import GradientButton from "@/components/ui/gradient-button";
 
 const grades = [
-  { grade: "10",  label: "GEM MINT",           desc: "Virtually perfect. Flawless corners, edges, and surface. Centering within 55/45 on front, 75/25 on back." },
-  { grade: "9",   label: "MINT",                desc: "Outstanding condition. Minor imperfection visible only under close inspection." },
-  { grade: "8",   label: "NEAR MINT-MINT",      desc: "Minor wear on corners or edges. Slight surface marks or a small print defect." },
-  { grade: "7",   label: "NEAR MINT",           desc: "Visible minor wear. Light scratching or minor edge wear with small surface marks." },
-  { grade: "6",   label: "EXCELLENT-NEAR MINT", desc: "Noticeable wear but still presentable. Minor creasing possible. Light loss of gloss." },
-  { grade: "5",   label: "EXCELLENT",           desc: "Moderate wear including corner and edge wear, surface scratches, and possible print defects." },
-  { grade: "4",   label: "VERY GOOD-EXCELLENT", desc: "Heavier wear. Visible creasing or surface damage. Card is still intact." },
-  { grade: "3",   label: "VERY GOOD",           desc: "Significant wear. Creasing, staining, or heavy edge wear visible without magnification." },
-  { grade: "2",   label: "GOOD",                desc: "Heavy damage. Major creasing, tears, or significant staining throughout." },
-  { grade: "1",   label: "POOR",                desc: "Extensive damage. Card is heavily worn but still identifiable as a trading card." },
-  { grade: "AA",  label: "AUTHENTIC ALTERED",   desc: "Genuine card that has been trimmed, recoloured, or otherwise altered from its original state." },
-  { grade: "NO",  label: "NOT ORIGINAL",        desc: "Card is a counterfeit or reproduction and does not originate from an official print run." },
+  {
+    grade: "10",
+    label: "GEM MINT",
+    desc: "Virtually perfect. Flawless corners, edges, and surface. Centering within 55/45 on front, 75/25 on back.",
+  },
+  { grade: "9", label: "MINT", desc: "Outstanding condition. Minor imperfection visible only under close inspection." },
+  {
+    grade: "8",
+    label: "NEAR MINT-MINT",
+    desc: "Minor wear on corners or edges. Slight surface marks or a small print defect.",
+  },
+  {
+    grade: "7",
+    label: "NEAR MINT",
+    desc: "Visible minor wear. Light scratching or minor edge wear with small surface marks.",
+  },
+  {
+    grade: "6",
+    label: "EXCELLENT-NEAR MINT",
+    desc: "Noticeable wear but still presentable. Minor creasing possible. Light loss of gloss.",
+  },
+  {
+    grade: "5",
+    label: "EXCELLENT",
+    desc: "Moderate wear including corner and edge wear, surface scratches, and possible print defects.",
+  },
+  {
+    grade: "4",
+    label: "VERY GOOD-EXCELLENT",
+    desc: "Heavier wear. Visible creasing or surface damage. Card is still intact.",
+  },
+  {
+    grade: "3",
+    label: "VERY GOOD",
+    desc: "Significant wear. Creasing, staining, or heavy edge wear visible without magnification.",
+  },
+  { grade: "2", label: "GOOD", desc: "Heavy damage. Major creasing, tears, or significant staining throughout." },
+  {
+    grade: "1",
+    label: "POOR",
+    desc: "Extensive damage. Card is heavily worn but still identifiable as a trading card.",
+  },
+  {
+    grade: "AA",
+    label: "AUTHENTIC ALTERED",
+    desc: "Genuine card that has been trimmed, recoloured, or otherwise altered from its original state.",
+  },
+  {
+    grade: "NO",
+    label: "NOT ORIGINAL",
+    desc: "Card is a counterfeit or reproduction and does not originate from an official print run.",
+  },
 ];
 
 function gradeBarColor(g: string): string {
   const n = parseFloat(g);
   if (isNaN(n)) return "#888888";
   if (n >= 10) return "#D4AF37";
-  if (n >= 9)  return "#B8960C";
-  if (n >= 8)  return "#2563EB";
-  if (n >= 7)  return "#16A34A";
-  if (n >= 6)  return "#CA8A04";
-  if (n >= 5)  return "#EA580C";
+  if (n >= 9) return "#B8960C";
+  if (n >= 8) return "#2563EB";
+  if (n >= 7) return "#16A34A";
+  if (n >= 6) return "#CA8A04";
+  if (n >= 5) return "#EA580C";
   return "#DC2626";
 }
 
@@ -36,10 +77,22 @@ function gradeBarPct(g: string): number {
 }
 
 const criteria = [
-  { title: "Centering",  desc: "How well the printed image is positioned within the card borders. Evaluated front and back. Tolerances tighten at higher grades — a 10 requires 55/45 or better." },
-  { title: "Corners",    desc: "The sharpness and integrity of all four corners. Any rounding, fraying, or tip wear lowers the grade. Corners must be razor-sharp for a 9 or above." },
-  { title: "Edges",      desc: "The condition along all four edges. Whitening, chipping, or roughness is assessed under magnification. Clean edges are essential for top grades." },
-  { title: "Surface",    desc: "Front and back surface quality — scratches, print lines, ink spots, haze, indentations, and loss of gloss are all considered. Surface damage is the most common grade limiter." },
+  {
+    title: "Centering",
+    desc: "How well the printed image is positioned within the card borders. Evaluated front and back. Tolerances tighten at higher grades — a 10 requires 55/45 or better.",
+  },
+  {
+    title: "Corners",
+    desc: "The sharpness and integrity of all four corners. Any rounding, fraying, or tip wear lowers the grade. Corners must be razor-sharp for a 9 or above.",
+  },
+  {
+    title: "Edges",
+    desc: "The condition along all four edges. Whitening, chipping, or roughness is assessed under magnification. Clean edges are essential for top grades.",
+  },
+  {
+    title: "Surface",
+    desc: "Front and back surface quality — scratches, print lines, ink spots, haze, indentations, and loss of gloss are all considered. Surface damage is the most common grade limiter.",
+  },
 ];
 
 export default function GradingScalePage() {
@@ -55,7 +108,8 @@ export default function GradingScalePage() {
         MintVault Grading Scale
       </h1>
       <p className="text-white text-base leading-relaxed mb-10">
-        Every card graded by MintVault is assessed on our professional 1&ndash;10 scale. Grades are whole numbers only &mdash; no half-point grades. Grades reflect the overall condition of the card at the time of grading.
+        Every card graded by MintVault is assessed on our professional 1&ndash;10 scale. Grades are whole numbers only
+        &mdash; no half-point grades. Grades reflect the overall condition of the card at the time of grading.
       </p>
 
       {/* Grade table */}
@@ -73,7 +127,9 @@ export default function GradingScalePage() {
                 <div
                   className="flex-shrink-0 w-12 h-12 rounded-lg flex items-center justify-center font-black text-sm font-mono"
                   style={{
-                    background: isSpecial ? "#F5F5F5" : `linear-gradient(135deg, ${gradeBarColor(row.grade)}22, ${gradeBarColor(row.grade)}11)`,
+                    background: isSpecial
+                      ? "#F5F5F5"
+                      : `linear-gradient(135deg, ${gradeBarColor(row.grade)}22, ${gradeBarColor(row.grade)}11)`,
                     border: `2px solid ${isSpecial ? "#E0E0E0" : gradeBarColor(row.grade)}`,
                     color: isSpecial ? "#666666" : gradeBarColor(row.grade),
                   }}
@@ -103,7 +159,10 @@ export default function GradingScalePage() {
       {/* What we examine */}
       <section className="mb-12 reveal-on-scroll" data-testid="section-what-we-examine">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}>
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: "linear-gradient(135deg,#D4AF37,#B8960C)" }}
+          >
             <Target size={16} className="text-[#1A1400]" />
           </div>
           <h2 className="text-xl font-bold text-white tracking-wide">What We Examine</h2>
@@ -129,7 +188,9 @@ export default function GradingScalePage() {
             <h2 className="text-white font-bold text-sm uppercase tracking-widest">Our Grading Promise</h2>
           </div>
           <p className="text-white text-sm leading-relaxed">
-            Every card is graded by trained professionals using consistent, documented standards. MintVault does not buy or sell cards &mdash; eliminating any conflict of interest in the grading process. Our goal is to give you an honest, accurate grade every time.
+            Every card is graded by trained professionals using consistent, documented standards. MintVault does not buy
+            or sell cards &mdash; eliminating any conflict of interest in the grading process. Our goal is to give you
+            an honest, accurate grade every time.
           </p>
         </div>
       </section>
@@ -138,21 +199,19 @@ export default function GradingScalePage() {
       <div className="border border-[#D4AF37]/30 rounded-xl p-6 bg-[#FFF9E6] text-center reveal-on-scroll">
         <CheckCircle size={24} className="text-[#D4AF37] mx-auto mb-3" />
         <h3 className="text-[#1A1A1A] font-bold mb-2">Ready to grade your cards?</h3>
-        <p className="text-[#1a1a1a] text-sm mb-4">Submit online and receive expert grading with a verifiable certificate.</p>
+        <p className="text-[#1a1a1a] text-sm mb-4">
+          Submit online and receive expert grading with a verifiable certificate.
+        </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <Link
-            href="/submit"
-            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-          >
-            Submit Cards <ArrowRight size={14} />
+          <Link href="/submit" className="no-underline">
+            <GradientButton className="gradient-btn-filled">
+              Submit Cards <ArrowRight size={14} />
+            </GradientButton>
           </Link>
-          <Link
-            href="/grading-glossary"
-            className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold no-underline px-6 py-3 rounded-full transition-all hover:scale-[1.03]"
-            style={{ backgroundColor: "var(--v2-gold)", color: "var(--v2-panel-dark)" }}
-          >
-            Grading Glossary <ArrowRight size={14} />
+          <Link href="/grading-glossary" className="no-underline">
+            <GradientButton className="gradient-btn-filled">
+              Grading Glossary <ArrowRight size={14} />
+            </GradientButton>
           </Link>
         </div>
       </div>

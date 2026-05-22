@@ -344,11 +344,13 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                   placeholder="e.g. AB123456789GB"
                   className="flex-1 border border-[#E8E4DC] rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
                 />
-                <button
-                  onClick={() => trackingMutation.mutate(trackingInput.trim())}
+                <GradientButton
+                  as="button"
+                  type="button"
                   disabled={trackingMutation.isPending || !trackingInput.trim()}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-50 flex items-center gap-1 transition-all"
-                  style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+                  className="gradient-btn-filled"
+                  height="36px"
+                  onClick={() => trackingMutation.mutate(trackingInput.trim())}
                 >
                   {trackingMutation.isPending ? (
                     <Loader2 size={10} className="animate-spin" />
@@ -356,7 +358,7 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
                     <Check size={10} />
                   ) : null}
                   {trackingSaved ? "Saved" : "Save"}
-                </button>
+                </GradientButton>
               </div>
               <p className="text-[10px] text-[#AAAAAA] mt-1">Helps us look out for your cards arriving</p>
             </div>
@@ -606,12 +608,7 @@ function VaultClubSection({
           Get 10% off grading, monthly AI Pre-Grade credits, and your own activated Showroom.
         </p>
         <Link href="/vault-club">
-          <button
-            className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] transition-all active:scale-95"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-          >
-            View Vault Club Plans →
-          </button>
+          <GradientButton className="gradient-btn-filled">View Vault Club Plans →</GradientButton>
         </Link>
       </div>
     );
@@ -806,12 +803,7 @@ function ShowroomSection({
         {/* View + status */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <a href={`/showroom/${showroomMe!.username}`} target="_blank" rel="noopener noreferrer">
-            <button
-              className="px-4 py-2 rounded-lg text-xs font-bold text-[#1A1400] transition-all"
-              style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
-            >
-              View Showroom
-            </button>
+            <GradientButton className="gradient-btn-filled">View Showroom</GradientButton>
           </a>
           {showroomMe!.showroom_active ? (
             <span className="flex items-center gap-1 text-xs text-emerald-600">
@@ -846,11 +838,13 @@ function ShowroomSection({
             className="w-full border border-[#E8E4DC] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
           />
           {bioError && <p className="text-xs text-red-600 mt-1">{bioError}</p>}
-          <button
-            onClick={() => bioMutation.mutate()}
+          <GradientButton
+            as="button"
+            type="button"
             disabled={bioMutation.isPending}
-            className="mt-2 px-4 py-1.5 rounded-lg text-xs font-bold text-[#1A1400] disabled:opacity-60 flex items-center gap-1 transition-all"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            className="gradient-btn-filled mt-2"
+            height="36px"
+            onClick={() => bioMutation.mutate()}
           >
             {bioMutation.isPending ? (
               <Loader2 size={11} className="animate-spin" />
@@ -858,7 +852,7 @@ function ShowroomSection({
               <Check size={11} />
             ) : null}
             {bioSaved ? "Saved" : "Save Bio"}
-          </button>
+          </GradientButton>
         </div>
       </div>
     );
@@ -922,15 +916,16 @@ function ShowroomSection({
           3–20 characters · lowercase letters, numbers, hyphens · Cannot be changed once claimed.
         </p>
 
-        <button
-          onClick={() => claimMutation.mutate()}
+        <GradientButton
+          as="button"
+          type="button"
           disabled={claimMutation.isPending || !checkResult?.available}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
-          style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+          className="gradient-btn-filled"
+          onClick={() => claimMutation.mutate()}
         >
           {claimMutation.isPending && <Loader2 size={13} className="animate-spin" />}
           Claim Username
-        </button>
+        </GradientButton>
 
         {claimMutation.isError && (
           <p className="text-xs text-red-600">

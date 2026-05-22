@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Lock, CheckCircle } from "lucide-react";
 import SeoHead from "@/components/seo-head";
+import GradientButton from "@/components/ui/gradient-button";
 
 interface SetupResponse {
   ok?: boolean;
@@ -27,7 +28,8 @@ export default function PinSetupPage() {
     if (pin.length === 0) return null;
     if (!/^\d*$/.test(pin)) return { ok: false, msg: "PIN must be digits only." };
     if (pin.length < 6) return { ok: false, msg: `${6 - pin.length} more digit${pin.length === 5 ? "" : "s"}…` };
-    if (pin.length === 6 && pinConfirm.length === 6 && pin !== pinConfirm) return { ok: false, msg: "PINs don't match." };
+    if (pin.length === 6 && pinConfirm.length === 6 && pin !== pinConfirm)
+      return { ok: false, msg: "PINs don't match." };
     if (pin.length === 6 && pinConfirm.length < 6) return { ok: false, msg: "Confirm your PIN below." };
     if (pin.length === 6 && pin === pinConfirm) return { ok: true, msg: "PINs match." };
     return null;
@@ -90,7 +92,9 @@ export default function PinSetupPage() {
 
         <form onSubmit={handleSubmit} className="space-y-3" data-testid="pin-setup-form">
           <div>
-            <label htmlFor="pin" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">New PIN</label>
+            <label htmlFor="pin" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">
+              New PIN
+            </label>
             <input
               id="pin"
               type="password"
@@ -107,7 +111,12 @@ export default function PinSetupPage() {
             />
           </div>
           <div>
-            <label htmlFor="pinConfirm" className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5">Confirm PIN</label>
+            <label
+              htmlFor="pinConfirm"
+              className="block text-xs font-bold text-[#888888] uppercase tracking-wider mb-1.5"
+            >
+              Confirm PIN
+            </label>
             <input
               id="pinConfirm"
               type="password"
@@ -132,16 +141,27 @@ export default function PinSetupPage() {
               {localStatus.msg}
             </p>
           )}
-          {error && <p className="text-xs text-red-400" data-testid="setup-error">{error}</p>}
-          <button
+          {error && (
+            <p className="text-xs text-red-400" data-testid="setup-error">
+              {error}
+            </p>
+          )}
+          <GradientButton
+            as="button"
             type="submit"
             disabled={setupMutation.isPending || pin.length !== 6 || pin !== pinConfirm}
-            className="w-full py-3 rounded-xl text-sm font-bold text-[#1A1400] disabled:opacity-60 transition-all flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg,#B8960C,#D4AF37)" }}
+            className="gradient-btn-filled w-full"
+            height="48px"
             data-testid="button-set-pin"
           >
-            {setupMutation.isPending ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : "Set PIN"}
-          </button>
+            {setupMutation.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Saving…
+              </>
+            ) : (
+              "Set PIN"
+            )}
+          </GradientButton>
         </form>
 
         <div className="border-t border-[#333333] my-6" />
