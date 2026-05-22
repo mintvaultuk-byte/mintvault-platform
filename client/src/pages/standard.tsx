@@ -434,8 +434,9 @@ export default function StandardPage() {
             <ul className="space-y-2">
               {[
                 "UV/blacklight fluorescence analysis.",
-                "Dimension measurement (63mm × 88mm ±0.5mm for standard TCG cards).",
-                "Weight measurement where scales available.",
+                "Dimension measurement: standard TCG cards measure 63mm × 88mm (±0.5mm). Counterfeit cards are frequently 1-2mm off.",
+                "Weight measurement: genuine Pokémon cards weigh 1.69–1.80 grams. Holo and foil cards sit at the higher end. Fakes are measurably lighter or heavier.",
+                "Thickness measurement: genuine cards measure 0.305mm (±0.05mm). Fakes are often thinner or uneven.",
                 "Visual inspection for cut lines, layer separation, surface treatment.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
