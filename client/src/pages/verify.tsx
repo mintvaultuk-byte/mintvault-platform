@@ -107,8 +107,18 @@ function ResultCard({ result }: { result: VerifyResult }) {
   const isStolen = result.stolenStatus === "reported_stolen";
 
   return (
+    <>
+      {isStolen && (
+        <style>{`
+          @keyframes verify-stolen-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+            50%      { box-shadow: 0 0 16px 4px rgba(220,38,38,0.7); }
+          }
+          .verify-stolen-glow { animation: verify-stolen-glow 1.6s ease-in-out infinite; }
+        `}</style>
+      )}
     <div
-      className="mt-8 rounded-xl p-6 md:p-8 transition-opacity duration-300"
+      className={`mt-8 rounded-xl p-6 md:p-8 transition-opacity duration-300${isStolen ? " verify-stolen-glow" : ""}`}
       style={{
         backgroundColor: "var(--v2-paper-raised)",
         border: isStolen ? "2px solid #DC2626" : "1px solid var(--v2-gold-soft)",
@@ -124,7 +134,7 @@ function ResultCard({ result }: { result: VerifyResult }) {
           </p>
           {isStolen && (
             <p className="font-body text-xs md:text-sm font-semibold mt-2 max-w-md" style={{ color: "#DC2626" }} role="alert">
-              \u26a0 This card has been reported stolen. Do not purchase. Contact support@mintvaultuk.com
+              {"\u26a0"} This card has been reported stolen. Do not purchase. Contact support@mintvaultuk.com
             </p>
           )}
         </div>
@@ -193,6 +203,7 @@ function ResultCard({ result }: { result: VerifyResult }) {
         </Link>
       </div>
     </div>
+    </>
   );
 }
 
