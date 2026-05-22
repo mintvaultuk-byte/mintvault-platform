@@ -218,7 +218,7 @@ export default function StandardPage() {
               {[
                 "Measure card dimensions: standard Pokémon/TCG = 63mm × 88mm (±0.5mm).",
                 "Inspect under UV/blacklight — counterfeit cards fluoresce differently.",
-                "Check card weight if scales available: genuine Pokémon/TCG cards weigh 1.69–1.80g. Fakes are measurably lighter or heavier.",
+                "Weigh the card: genuine Pokémon/TCG cards weigh 1.69–1.80g. Scales required. Fakes are measurably lighter or heavier.",
                 "Visual inspection for trimming, re-backing, or alteration.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
@@ -367,9 +367,9 @@ export default function StandardPage() {
 
             <h3 className={subTitle}>Grade 9 (Mint)</h3>
             <p className={para}>
-              One corner with micro-whitening visible to naked eye (pin-dot
-              only). All other corners clean. Edges: sub-visible fray on up to
-              two edges under magnification only.
+              One corner with minor whitening visible to naked eye. Must not
+              extend beyond the corner tip. All other corners clean. Edges:
+              sub-visible fray on up to two edges under magnification only.
             </p>
 
             <h3 className={subTitle}>Grade 8.5 (NM-Mint+)</h3>
