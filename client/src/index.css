@@ -785,39 +785,10 @@
   opacity: 0.5;
 }
 
-/* ── Gradient border button (rotating gold conic gradient) ──────────── */
-@property --r {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes rotateGradient {
-  0% {
-    --r: 0deg;
-  }
-  100% {
-    --r: 360deg;
-  }
-}
-
+/* ── Gradient border button (static gold gradient, no animation) ───── */
 .gradient-btn-wrapper {
-  background: conic-gradient(from var(--r), #b8960c 0%, #d4af37 25%, #ffd700 50%, #d4af37 75%, #b8960c 100%);
-  animation: rotateGradient 3s linear infinite;
+  background: linear-gradient(135deg, #b8960c 0%, #d4af37 40%, #ffd700 70%, #d4af37 100%);
   --gradient-btn-bg: #0a0e1a;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  backface-visibility: hidden;
-}
-
-.gradient-btn-wrapper > span {
-  transform: translateZ(0);
-}
-
-.gradient-btn-wrapper:hover:not([aria-disabled="true"]) {
-  box-shadow:
-    0 0 20px rgba(212, 175, 55, 0.4),
-    0 0 60px rgba(212, 175, 55, 0.15);
 }
 
 /* Filled variant — gold bg, dark text */

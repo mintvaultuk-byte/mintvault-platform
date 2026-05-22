@@ -31,14 +31,13 @@ const GradientButton = (props: GradientButtonProps) => {
     "after:inset-[2px] after:rounded-[48px] after:z-[1]",
     "after:transition-opacity after:duration-300 after:ease-linear",
     "flex items-center justify-center text-center",
-    "transition-transform duration-200",
-    "hover:scale-[1.03] active:scale-[0.98]",
+    "transition-opacity duration-200",
+    "hover:opacity-90 active:opacity-80",
     disabled && "opacity-50 cursor-not-allowed",
     className
   );
 
   const sharedStyle = {
-    "--r": "0deg",
     minWidth: width,
     height: height,
   } as React.CSSProperties;
