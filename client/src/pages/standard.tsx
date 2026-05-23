@@ -38,21 +38,21 @@ const DEFECT_CODES: Array<{ code: string; label: string }> = [
 ];
 
 const CENTERING_FRONT: Array<{ ratio: string; deduction: string }> = [
-  { ratio: "≤ 55/45",        deduction: "0" },
-  { ratio: "56-60 / 40-44",  deduction: "-2" },
-  { ratio: "61-65 / 35-39",  deduction: "-5" },
-  { ratio: "66-70 / 30-34",  deduction: "-8" },
-  { ratio: "71-75 / 25-29",  deduction: "-12" },
-  { ratio: "76-80 / 20-24",  deduction: "-15" },
-  { ratio: "81-85 / 15-19",  deduction: "-18" },
-  { ratio: "> 85/15",        deduction: "-20" },
+  { ratio: "≤ 55/45", deduction: "0" },
+  { ratio: "56-60 / 40-44", deduction: "-2" },
+  { ratio: "61-65 / 35-39", deduction: "-5" },
+  { ratio: "66-70 / 30-34", deduction: "-8" },
+  { ratio: "71-75 / 25-29", deduction: "-12" },
+  { ratio: "76-80 / 20-24", deduction: "-15" },
+  { ratio: "81-85 / 15-19", deduction: "-18" },
+  { ratio: "> 85/15", deduction: "-20" },
 ];
 
 const CENTERING_BACK: Array<{ ratio: string; deduction: string }> = [
-  { ratio: "≤ 75/25",        deduction: "0" },
-  { ratio: "76-85 / 15-24",  deduction: "-1" },
-  { ratio: "86-90 / 10-14",  deduction: "-3" },
-  { ratio: "> 90/10",        deduction: "-5" },
+  { ratio: "≤ 75/25", deduction: "0" },
+  { ratio: "76-85 / 15-24", deduction: "-1" },
+  { ratio: "86-90 / 10-14", deduction: "-3" },
+  { ratio: "> 90/10", deduction: "-5" },
 ];
 
 // ── Reusable styling helpers ──────────────────────────────────────────────
@@ -64,7 +64,8 @@ const bullet = "flex items-start gap-2";
 const bulletDot = <span className="text-[#D4AF37] mt-0.5">•</span>;
 const tableWrap = "overflow-x-auto -mx-4 sm:mx-0";
 const tableCls = "w-full text-sm";
-const thCls = "text-[#D4AF37] text-[10px] uppercase tracking-widest font-bold text-left py-2 px-4 border-b border-[#D4AF37]/30";
+const thCls =
+  "text-[#D4AF37] text-[10px] uppercase tracking-widest font-bold text-left py-2 px-4 border-b border-[#D4AF37]/30";
 const tdCls = "text-[#ccc] py-2 px-4 border-b border-[#222]";
 const codeCls = "font-mono text-[#D4AF37] py-2 px-4 border-b border-[#222]";
 
@@ -97,33 +98,26 @@ export default function StandardPage() {
         <p className="text-[#888] text-sm text-center mb-2 italic">
           The open, transparent standard for trading card grading.
         </p>
-        <p className="text-[#888] text-xs text-center mb-12">
-          Published by MintVault UK Ltd.
-        </p>
+        <p className="text-[#888] text-xs text-center mb-12">Published by MintVault UK Ltd.</p>
 
         <div className="space-y-10">
           {/* ── 1. Intro ──────────────────────────────────────────────── */}
           <section>
             <p className={`${para} mb-3`}>
-              MVGS is a free, openly licensed grading specification. Any
-              grading company can self-certify MVGS compliance and display the
-              "MVGS Compliant" mark. MintVault is the reference implementation
-              and founding body — every card we grade ships with a full MVGS
-              score, a published defect report, and a 1200 DPI scan.
+              MVGS is a free, openly licensed grading specification. Any grading company can self-certify MVGS
+              compliance and display the "MVGS Compliant" mark. MintVault is the reference implementation and founding
+              body — every card we grade ships with a full MVGS score, a published defect report, and a 1200 DPI scan.
             </p>
             <p className={`${para} text-xs italic`}>
-              All MintVault submissions are deionized before imaging. Cards are
-              graded as-received — deionization removes loose surface dust only
-              and does not constitute cleaning or alteration.
+              All MintVault submissions are deionized before imaging. Cards are graded as-received — deionization
+              removes loose surface dust only and does not constitute cleaning or alteration.
             </p>
           </section>
 
           {/* ── 2. Compliance Requirements ────────────────────────────── */}
           <section id="compliance">
             <h2 className={sectionTitle}>1. MVGS Compliance Requirements</h2>
-            <p className={`${para} mb-4`}>
-              To display the "MVGS Compliant" mark, a grading service must:
-            </p>
+            <p className={`${para} mb-4`}>To display the "MVGS Compliant" mark, a grading service must:</p>
             <ul className="space-y-2.5">
               {[
                 "Scan every card at a minimum of 1200 DPI front and back before grading.",
@@ -145,8 +139,7 @@ export default function StandardPage() {
           <section id="scoring">
             <h2 className={sectionTitle}>2. The 100-Point Scoring System</h2>
             <p className={`${para} mb-3`}>
-              Every card starts at 100 points. Deductions are applied per
-              defect across four categories:
+              Every card starts at 100 points. Deductions are applied per defect across four categories:
             </p>
             <ul className="space-y-1.5 mb-4 ml-1">
               {[
@@ -164,9 +157,8 @@ export default function StandardPage() {
               ))}
             </ul>
             <p className={`${para} mb-3`}>
-              The score maps to the familiar 1–10 grade. Within a grade, the
-              score shows strength — a 94/100 and a 91/100 are both Gem
-              Mint 10, but the score differentiates them:
+              The score maps to the familiar 1–10 grade. Within a grade, the score shows strength — a 94/100 and a
+              91/100 are both Gem Mint 10, but the score differentiates them:
             </p>
             <div className={tableWrap}>
               <table className={tableCls}>
@@ -179,19 +171,19 @@ export default function StandardPage() {
                 <tbody>
                   {[
                     ["96-100", "Pristine 10P"],
-                    ["91-95",  "Gem Mint 10"],
-                    ["86-90",  "Mint+ 9.5"],
-                    ["81-85",  "Mint 9"],
-                    ["76-80",  "NM-Mint+ 8.5"],
-                    ["71-75",  "NM-Mint 8"],
-                    ["66-70",  "NM+ 7.5"],
-                    ["61-65",  "Near Mint 7"],
-                    ["51-60",  "Excellent-Mint 6"],
-                    ["41-50",  "Excellent 5"],
-                    ["31-40",  "Very Good-Excellent 4"],
-                    ["21-30",  "Good 3"],
-                    ["11-20",  "Fair 2"],
-                    ["1-10",   "Poor 1"],
+                    ["91-95", "Gem Mint 10"],
+                    ["86-90", "Mint+ 9.5"],
+                    ["81-85", "Mint 9"],
+                    ["76-80", "NM-Mint+ 8.5"],
+                    ["71-75", "NM-Mint 8"],
+                    ["66-70", "NM+ 7.5"],
+                    ["61-65", "Near Mint 7"],
+                    ["51-60", "Excellent-Mint 6"],
+                    ["41-50", "Excellent 5"],
+                    ["31-40", "Very Good-Excellent 4"],
+                    ["21-30", "Good 3"],
+                    ["11-20", "Fair 2"],
+                    ["1-10", "Poor 1"],
                   ].map(([score, grade]) => (
                     <tr key={score}>
                       <td className={codeCls}>{score}</td>
@@ -202,8 +194,7 @@ export default function StandardPage() {
               </table>
             </div>
             <p className={`${para} mt-4`}>
-              The 0–100 score is shown on every MintVault certificate beside
-              the headline grade.
+              The 0–100 score is shown on every MintVault certificate beside the headline grade.
             </p>
           </section>
 
@@ -211,14 +202,11 @@ export default function StandardPage() {
           <section id="process">
             <h2 className={sectionTitle}>3. The Grading Process (Mandatory Steps)</h2>
             <p className={`${para} mb-4`}>
-              Every card graded under MVGS must follow these steps in order.
-              No step may be skipped.
+              Every card graded under MVGS must follow these steps in order. No step may be skipped.
             </p>
 
             <h3 className={subTitle}>Step 1 — Authentication Pre-Check</h3>
-            <p className={`${para} mb-2`}>
-              Before grading begins, verify the card is genuine:
-            </p>
+            <p className={`${para} mb-2`}>Before grading begins, verify the card is genuine:</p>
             <ul className="space-y-2 mb-3">
               {[
                 "Measure card dimensions: standard Pokémon/TCG = 63mm × 88mm (±0.5mm).",
@@ -314,9 +302,7 @@ export default function StandardPage() {
                 </li>
               ))}
             </ul>
-            <p className={`${para} text-xs italic`}>
-              D3 defects are documented but carry zero deduction.
-            </p>
+            <p className={`${para} text-xs italic`}>D3 defects are documented but carry zero deduction.</p>
 
             <h3 className={subTitle}>Step 6 — MVGS Score Calculation</h3>
             <ul className="space-y-2">
@@ -354,63 +340,53 @@ export default function StandardPage() {
           <section id="whitening">
             <h2 className={sectionTitle}>4. Whitening Standards by Grade</h2>
             <p className={`${para} mb-4`}>
-              Whitening is the most common defect on vintage cards. These are
-              the maximum whitening thresholds for each grade:
+              Whitening is the most common defect on vintage cards. These are the maximum whitening thresholds for each
+              grade:
             </p>
 
             <h3 className={subTitle}>Grade 10 / Pristine 10P</h3>
             <p className={para}>
-              Zero whitening visible to the naked eye. Under 10× magnification:
-              zero ink/coating loss permitted.
+              Zero whitening visible to the naked eye. Under 10× magnification: zero ink/coating loss permitted.
             </p>
 
             <h3 className={subTitle}>Grade 9.5 (Mint+)</h3>
             <p className={para}>
-              Zero whitening visible naked eye. Under magnification: trace
-              micro-fuzz at corner tips permitted on one corner only.
+              Zero whitening visible naked eye. Under magnification: trace micro-fuzz at corner tips permitted on one
+              corner only.
             </p>
 
             <h3 className={subTitle}>Grade 9 (Mint)</h3>
             <p className={para}>
-              One corner with minor whitening visible to naked eye. Must not
-              extend beyond the corner tip. All other corners clean. Edges:
-              sub-visible fray on up to two edges under magnification only.
+              One corner with minor whitening visible to naked eye. Must not extend beyond the corner tip. All other
+              corners clean. Edges: sub-visible fray on up to two edges under magnification only.
             </p>
 
             <h3 className={subTitle}>Grade 8.5 (NM-Mint+)</h3>
-            <p className={para}>
-              Light visible whitening on one corner or one edge. Must not
-              extend more than 1mm.
-            </p>
+            <p className={para}>Light visible whitening on one corner or one edge. Must not extend more than 1mm.</p>
 
             <h3 className={subTitle}>Grade 8 (NM-Mint)</h3>
             <p className={para}>
-              Visible whitening on up to two corners, or one corner plus one
-              edge. Whitening visible naked eye but not from arm's length.
+              Visible whitening on up to two corners, or one corner plus one edge. Whitening visible naked eye but not
+              from arm's length.
             </p>
 
             <h3 className={subTitle}>Grade 7.5 (NM+)</h3>
-            <p className={para}>
-              Visible whitening on two to three corners. Noticeable on close
-              inspection.
-            </p>
+            <p className={para}>Visible whitening on two to three corners. Noticeable on close inspection.</p>
 
             <h3 className={subTitle}>Grade 7 (Near Mint)</h3>
             <p className={para}>
-              Multiple corners with visible whitening. Visible from normal
-              viewing distance but card retains eye appeal.
+              Multiple corners with visible whitening. Visible from normal viewing distance but card retains eye appeal.
             </p>
 
             <h3 className={subTitle}>Grade 6 and below</h3>
             <p className={para}>
-              Whitening is widespread across corners and/or edges. The card's
-              structural integrity begins to be affected at grade 4 and below.
+              Whitening is widespread across corners and/or edges. The card's structural integrity begins to be affected
+              at grade 4 and below.
             </p>
 
             <p className={`${para} mt-4 text-xs italic`}>
-              <strong className="text-[#D4AF37]/80 not-italic">Dark-bordered cards:</strong>{" "}
-              apply the ×1.25 dark border multiplier. Whitening that would be
-              grade 9 on a white-border card is grade 8.5 on a dark-bordered card.
+              <strong className="text-[#D4AF37]/80 not-italic">Dark-bordered cards:</strong> apply the ×1.25 dark border
+              multiplier. Whitening that would be grade 9 on a white-border card is grade 8.5 on a dark-bordered card.
             </p>
           </section>
 
@@ -418,22 +394,19 @@ export default function StandardPage() {
           <section id="auth">
             <h2 className={sectionTitle}>5. Authentication: NQ and AA Designations</h2>
             <p className={`${para} mb-4`}>
-              Two non-numeric designations are issued when a card cannot
-              receive a standard grade:
+              Two non-numeric designations are issued when a card cannot receive a standard grade:
             </p>
 
             <h3 className={subTitle}>NQ — Not Qualified</h3>
             <p className={para}>
-              Card is counterfeit, altered beyond verification, or cannot be
-              confirmed as genuine. No grade issued. The card is returned
-              unslabbed.
+              Card is counterfeit, altered beyond verification, or cannot be confirmed as genuine. No grade issued. The
+              card is returned unslabbed.
             </p>
 
             <h3 className={subTitle}>AA — Authentic, Altered</h3>
             <p className={para}>
-              Card is genuine but has been physically altered — trimmed edges,
-              re-backing, surface cleaning, press/crease removal. Authenticated
-              as the correct card, but altered condition noted on the cert.
+              Card is genuine but has been physically altered — trimmed edges, re-backing, surface cleaning,
+              press/crease removal. Authenticated as the correct card, but altered condition noted on the cert.
             </p>
 
             <h3 className={subTitle}>Detection methods</h3>
@@ -456,19 +429,22 @@ export default function StandardPage() {
           {/* ── 6. Defect Classification (D1/D2/D3) ──────────────────── */}
           <section id="tiers">
             <h2 className={sectionTitle}>6. Defect Classification</h2>
-            <p className={`${para} mb-4`}>
-              Every defect is classified into one of three tiers:
-            </p>
+            <p className={`${para} mb-4`}>Every defect is classified into one of three tiers:</p>
             <div className="space-y-3">
               {[
-                { tier: "D1", label: "Grade-Significant", desc: "Directly caused a point deduction and influenced the final grade." },
-                { tier: "D2", label: "Observable",        desc: "Documented for the record; minor contribution to the score." },
-                { tier: "D3", label: "Factory",           desc: "Manufacturing defect — recorded, but minimised in scoring." },
+                {
+                  tier: "D1",
+                  label: "Grade-Significant",
+                  desc: "Directly caused a point deduction and influenced the final grade.",
+                },
+                {
+                  tier: "D2",
+                  label: "Observable",
+                  desc: "Documented for the record; minor contribution to the score.",
+                },
+                { tier: "D3", label: "Factory", desc: "Manufacturing defect — recorded, but minimised in scoring." },
               ].map((t) => (
-                <div
-                  key={t.tier}
-                  className="border border-[#D4AF37]/20 rounded-lg p-3 flex items-baseline gap-3"
-                >
+                <div key={t.tier} className="border border-[#D4AF37]/20 rounded-lg p-3 flex items-baseline gap-3">
                   <span className="font-mono text-[#D4AF37] text-sm font-bold">{t.tier}</span>
                   <div className="min-w-0">
                     <div className="text-[#ccc] text-sm font-semibold">{t.label}</div>
@@ -483,8 +459,7 @@ export default function StandardPage() {
           <section id="codes">
             <h2 className={sectionTitle}>7. Defect Type Codes</h2>
             <p className={`${para} mb-4`}>
-              Each defect on a certificate is recorded with a two-letter code
-              for fast, language-neutral reference:
+              Each defect on a certificate is recorded with a two-letter code for fast, language-neutral reference:
             </p>
             <div className={tableWrap}>
               <table className={tableCls}>
@@ -510,10 +485,9 @@ export default function StandardPage() {
           <section id="centering">
             <h2 className={sectionTitle}>8. Centering Deduction Tables</h2>
             <p className={`${para} mb-4`}>
-              Centering is measured as the wider side of the off-centre axis
-              (e.g. "55/45" = 55 on the wider side). The worse of left/right
-              vs top/bottom is applied to each side of the card. Front and
-              back are scored separately.
+              Centering is measured as the wider side of the off-centre axis (e.g. "55/45" = 55 on the wider side). The
+              worse of left/right vs top/bottom is applied to each side of the card. Front and back are scored
+              separately.
             </p>
 
             <h3 className={subTitle}>Front centering — up to -20 points</h3>
@@ -564,9 +538,8 @@ export default function StandardPage() {
           <section id="defects-scoring">
             <h2 className={sectionTitle}>9. Corner, Edge &amp; Surface Deductions</h2>
             <p className={`${para} mb-4`}>
-              Each defect on the card is classified by code and tier, then
-              its location decides which deduction table applies. Deductions
-              are cumulative within each category and capped at -25 points.
+              Each defect on the card is classified by code and tier, then its location decides which deduction table
+              applies. Deductions are cumulative within each category and capped at -25 points.
             </p>
 
             <h3 className={subTitle}>Corners — per pin, max -25 total</h3>
@@ -626,11 +599,9 @@ export default function StandardPage() {
             </div>
             <p className={`${para} mt-3 text-xs italic`}>
               <strong className="text-[#D4AF37]/80 not-italic">Dark-border note:</strong>{" "}
-              <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered
-              edges apply a ×1.25 multiplier. Tick Dark Border Front for cards
-              with dark front borders (e.g. Darkness-type). Tick Dark Border
-              Back for cards with dark back borders (e.g. standard Pokémon
-              blue back).
+              <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered edges apply a ×1.25
+              multiplier. Tick Dark Border Front for cards with dark front borders (e.g. Darkness-type). Tick Dark
+              Border Back for cards with dark back borders (e.g. standard Pokémon blue back).
             </p>
 
             <h3 className={subTitle}>Surface — per pin, max -25 total</h3>
@@ -649,11 +620,11 @@ export default function StandardPage() {
                 <tbody>
                   {[
                     { c: "SP", l: "Scratch (gloss-penetrating)", v: "-4 pts (×1.5 in art/holo zone)" },
-                    { c: "CR", l: "Crease",                       v: "-10 pts + hard cap: final score ≤ 74" },
-                    { c: "SC", l: "Scratch (surface)",            v: "-2 pts" },
-                    { c: "SV", l: "Silvering (holo)",             v: "-3 pts" },
-                    { c: "ST", l: "Stain",                        v: "-2 pts" },
-                    { c: "GL", l: "Gloss Loss",                   v: "-4 pts" },
+                    { c: "CR", l: "Crease", v: "-10 pts + hard cap: final score ≤ 74" },
+                    { c: "SC", l: "Scratch (surface)", v: "-2 pts" },
+                    { c: "SV", l: "Silvering (holo)", v: "-3 pts" },
+                    { c: "ST", l: "Stain", v: "-2 pts" },
+                    { c: "GL", l: "Gloss Loss", v: "-4 pts" },
                   ].map(({ c, l, v }) => (
                     <tr key={c}>
                       <td className={codeCls}>{c}</td>
@@ -679,11 +650,11 @@ export default function StandardPage() {
                 </thead>
                 <tbody>
                   {[
-                    { c: "PL", l: "Print Line",          v: "-0.50 pts" },
-                    { c: "PS", l: "Print Spot",          v: "-0.25 pts" },
-                    { c: "PI", l: "Pit / Dent",          v: "-0.50 pts" },
-                    { c: "SC", l: "Scratch (surface)",   v: "-0.50 pts" },
-                    { c: "WH", l: "Whitening",           v: "-0.50 pts" },
+                    { c: "PL", l: "Print Line", v: "-0.50 pts" },
+                    { c: "PS", l: "Print Spot", v: "-0.25 pts" },
+                    { c: "PI", l: "Pit / Dent", v: "-0.50 pts" },
+                    { c: "SC", l: "Scratch (surface)", v: "-0.50 pts" },
+                    { c: "WH", l: "Whitening", v: "-0.50 pts" },
                   ].map(({ c, l, v }) => (
                     <tr key={c}>
                       <td className={codeCls}>{c}</td>
@@ -696,46 +667,36 @@ export default function StandardPage() {
             </div>
 
             <p className={`${para} mt-4 text-xs`}>
-              <strong className="text-[#ccc]">D3 defects:</strong> 0 pts (factory origin,
-              documented only).
+              <strong className="text-[#ccc]">D3 defects:</strong> 0 pts (factory origin, documented only).
             </p>
             <p className={`${para} mt-2 text-xs italic`}>
-              <strong className="text-[#D4AF37]/80 not-italic">Back surface:</strong>{" "}
-              all surface deductions × 0.5.
+              <strong className="text-[#D4AF37]/80 not-italic">Back surface:</strong> all surface deductions × 0.5.
             </p>
 
             <h3 className={subTitle}>Overall Grade Floor Rule</h3>
             <p className={`${para} mb-3`}>
-              The overall grade cannot exceed the lowest MVGS category subgrade
-              plus 0.5. If the gap between the lowest and all other subgrades
-              is less than 4 aggregate points, the overall equals the lowest
-              subgrade exactly — no bump.
+              The overall grade cannot exceed the lowest MVGS category subgrade plus 0.5. If the gap between the lowest
+              and all other subgrades is less than 4 aggregate points, the overall equals the lowest subgrade exactly —
+              no bump.
             </p>
             <p className={`${para} mb-3`}>
-              Example: a card with Centering 10, Corners 10, Edges 2,
-              Surface 10 cannot grade overall higher than 2.5. A single
-              destroyed category is never hidden by strong scores elsewhere.
+              Example: a card with Centering 10, Corners 10, Edges 2, Surface 10 cannot grade overall higher than 2.5. A
+              single destroyed category is never hidden by strong scores elsewhere.
             </p>
-            <p className={para}>
-              This mirrors the BGS published algorithm — the most trusted
-              formula in the industry.
-            </p>
+            <p className={para}>This mirrors the BGS published algorithm — the most trusted formula in the industry.</p>
           </section>
 
           {/* ── 10. Anti-fraud fingerprint ───────────────────────────── */}
           <section id="fingerprint">
             <h2 className={sectionTitle}>10. Anti-Fraud: MVGS Authenticity Fingerprint</h2>
             <p className={`${para} mb-3`}>
-              The defect map published on every certificate is unique to that
-              card. The combination of defect codes, zone placements, and pin
-              positions — captured at 1200 DPI — cannot be replicated by
-              another physical card.
+              The defect map published on every certificate is unique to that card. The combination of defect codes,
+              zone placements, and pin positions — captured at 1200 DPI — cannot be replicated by another physical card.
             </p>
             <p className={para}>
-              This makes card swapping inside a slab detectable. If the card
-              presented for verification does not match the published defect
-              map, the certificate is no longer authentic. The fingerprint
-              is the standard's tamper-evidence layer.
+              This makes card swapping inside a slab detectable. If the card presented for verification does not match
+              the published defect map, the certificate is no longer authentic. The fingerprint is the standard's
+              tamper-evidence layer.
             </p>
           </section>
 
@@ -755,9 +716,8 @@ export default function StandardPage() {
           {/* ── 8b. Footer CTA ───────────────────────────────────────── */}
           <section>
             <p className={`${para} text-center mb-5`}>
-              MintVault is the reference implementation of MVGS. Every card
-              graded by MintVault receives a full MVGS score, a defect
-              report, and a 1200 DPI scan.
+              MintVault is the reference implementation of MVGS. Every card graded by MintVault receives a full MVGS
+              score, a defect report, and a 1200 DPI scan.
             </p>
             <div className="flex justify-center">
               <Link
@@ -777,13 +737,11 @@ export default function StandardPage() {
         <div className="text-center mt-12 space-y-1.5 text-[10px] text-[#666] leading-relaxed">
           <p>MVGS v1.1 · Published 22 May 2026 · MintVault UK Ltd.</p>
           <p>
-            v1.1 additions: mandatory grading process, whitening grade
-            thresholds, NQ/AA authentication designations.
+            v1.1 additions: mandatory grading process, whitening grade thresholds, NQ/AA authentication designations.
           </p>
           <p>
-            Grades issued under MVGS v1.1 are certified to this specification.
-            Future revisions carry a new version number and do not retroactively
-            alter issued certificates.
+            Grades issued under MVGS v1.1 are certified to this specification. Future revisions carry a new version
+            number and do not retroactively alter issued certificates.
           </p>
         </div>
       </div>

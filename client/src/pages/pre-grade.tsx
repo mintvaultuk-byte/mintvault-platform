@@ -15,16 +15,16 @@ type Confidence = "high" | "medium" | "low";
 
 interface GradingResponse {
   centering: { subgrade: number };
-  corners:   { subgrade: number };
-  edges:     { subgrade: number };
-  surface:   { subgrade: number };
+  corners: { subgrade: number };
+  edges: { subgrade: number };
+  surface: { subgrade: number };
   overall_grade: number;
   confidence: {
     centering: Confidence;
-    corners:   Confidence;
-    edges:     Confidence;
-    surface:   Confidence;
-    overall:   Confidence;
+    corners: Confidence;
+    edges: Confidence;
+    surface: Confidence;
+    overall: Confidence;
   };
 }
 
@@ -82,7 +82,10 @@ function FilePicker({
     const nativeUrl = URL.createObjectURL(file);
     const probe = new Image();
     probe.onload = () => {
-      if (canceled) { URL.revokeObjectURL(nativeUrl); return; }
+      if (canceled) {
+        URL.revokeObjectURL(nativeUrl);
+        return;
+      }
       setUrl(nativeUrl);
       setPreviewLoading(false);
     };
@@ -133,7 +136,10 @@ function FilePicker({
     <div className="flex-1 min-w-0">
       <label
         htmlFor={id}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         className={`slab-scanner${dragging ? " scanner-beam--dragover" : ""}`}
@@ -146,7 +152,7 @@ function FilePicker({
           accept={ACCEPT}
           className="sr-only"
           aria-label={`Upload ${label.toLowerCase()} card image`}
-          onChange={e => onChange(e.target.files?.[0] ?? null)}
+          onChange={(e) => onChange(e.target.files?.[0] ?? null)}
           data-testid={`input-${testId}`}
         />
 
@@ -189,9 +195,15 @@ function FilePicker({
           )}
           <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
           <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
-          <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">REFL &middot; 1200DPI</span>
-          <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">SIDE &middot; {label.toUpperCase()}</span>
-          <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">MODE &middot; PRE-GRADE</span>
+          <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">
+            REFL &middot; 1200DPI
+          </span>
+          <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">
+            SIDE &middot; {label.toUpperCase()}
+          </span>
+          <span className="slab-scanner__readout slab-scanner__readout--bl" aria-hidden="true">
+            MODE &middot; PRE-GRADE
+          </span>
 
           {previewLoading ? (
             // Stage 2: server transcoding (TIFF → JPEG). Native decode
@@ -200,7 +212,7 @@ function FilePicker({
             <div className="slab-scanner__content">
               <Loader2 size={52} strokeWidth={1.5} color="#c9a96e" className="animate-spin" />
               <p className="slab-scanner__title">Generating preview…</p>
-              <p className="slab-scanner__subtitle">{isTiff ? "TIFF" : (file?.type || "image")} · server transcoding</p>
+              <p className="slab-scanner__subtitle">{isTiff ? "TIFF" : file?.type || "image"} · server transcoding</p>
             </div>
           ) : showImagePreview ? (
             // Image preview: hover-only overlay at bottom with replace
@@ -235,7 +247,9 @@ function FilePicker({
           <span className="slab-scanner__footer-left">CERT &middot; PENDING</span>
           <span className="slab-scanner__footer-center">{file ? "Loaded" : "Awaiting"}</span>
           <span className="slab-scanner__qr" aria-hidden="true">
-            {Array.from({ length: 25 }).map((_, i) => <span key={i} />)}
+            {Array.from({ length: 25 }).map((_, i) => (
+              <span key={i} />
+            ))}
           </span>
         </footer>
       </label>
@@ -263,27 +277,21 @@ function FilePicker({
 
 function gradeBarColor(grade: number): string {
   if (grade >= 10) return "bg-emerald-500";
-  if (grade >= 9)  return "bg-[#D4AF37]";
-  if (grade >= 8)  return "bg-blue-500";
-  if (grade >= 6)  return "bg-amber-500";
+  if (grade >= 9) return "bg-[#D4AF37]";
+  if (grade >= 8) return "bg-blue-500";
+  if (grade >= 6) return "bg-amber-500";
   return "bg-red-500";
 }
 
 function confidenceChip(c: Confidence): string {
-  return c === "high"  ? "bg-emerald-100 text-emerald-800 border-emerald-300" :
-         c === "low"   ? "bg-red-100    text-red-800    border-red-300" :
-                         "bg-amber-100  text-amber-800  border-amber-300";
+  return c === "high"
+    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+    : c === "low"
+      ? "bg-red-100    text-red-800    border-red-300"
+      : "bg-amber-100  text-amber-800  border-amber-300";
 }
 
-function SubgradeBar({
-  label,
-  value,
-  confidence,
-}: {
-  label: string;
-  value: number;
-  confidence: Confidence;
-}) {
+function SubgradeBar({ label, value, confidence }: { label: string; value: number; confidence: Confidence }) {
   const pct = Math.max(0, Math.min(100, (value / 10) * 100));
   return (
     <div data-testid={`subgrade-${label.toLowerCase()}`}>
@@ -291,7 +299,9 @@ function SubgradeBar({
         <span className="text-xs uppercase tracking-[0.15em] text-[#555555] font-medium">{label}</span>
         <div className="flex items-center gap-2">
           <span className="text-lg font-black text-[#1A1A1A]">{value}</span>
-          <span className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${confidenceChip(confidence)}`}>
+          <span
+            className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${confidenceChip(confidence)}`}
+          >
             {confidence}
           </span>
         </div>
@@ -308,32 +318,85 @@ function SubgradeBar({
 // the rubric Cornelius supplied; 1–4 follow the same MV ↔ BGS/CGC half-grade
 // shift (BGS/CGC ≈ MV × 0.5 + 5) with industry-standard labels.
 
-const CROSSOVER: Record<number, {
-  mv:  { grade: string; label: string };
-  psa: { grade: string; label: string };
-  bgs: { grade: string; label: string };
-  cgc: { grade: string; label: string };
-}> = {
-  10: { mv: { grade: "10",  label: "GEM MT" }, psa: { grade: "10",  label: "GEM MT" }, bgs: { grade: "10",  label: "Pristine" }, cgc: { grade: "10",  label: "Pristine" } },
-  9:  { mv: { grade: "9",   label: "MINT" },   psa: { grade: "9",   label: "MINT" },   bgs: { grade: "9.5", label: "GEM MT" },   cgc: { grade: "9.5", label: "GEM MT" } },
-  8:  { mv: { grade: "8",   label: "NM-MT" },  psa: { grade: "8",   label: "NM-MT" },  bgs: { grade: "9",   label: "MINT" },     cgc: { grade: "9",   label: "MINT" } },
-  7:  { mv: { grade: "7",   label: "NM" },     psa: { grade: "7",   label: "NM" },     bgs: { grade: "8.5", label: "NM-MT+" },   cgc: { grade: "8.5", label: "NM-MT+" } },
-  6:  { mv: { grade: "6",   label: "EX-MT" },  psa: { grade: "6",   label: "EX-MT" },  bgs: { grade: "8",   label: "NM-MT" },    cgc: { grade: "8",   label: "NM-MT" } },
-  5:  { mv: { grade: "5",   label: "EX" },     psa: { grade: "5",   label: "EX" },     bgs: { grade: "7.5", label: "NM" },       cgc: { grade: "7.5", label: "NM" } },
-  4:  { mv: { grade: "4",   label: "VG-EX" },  psa: { grade: "4",   label: "VG-EX" },  bgs: { grade: "7",   label: "EX" },       cgc: { grade: "7",   label: "EX" } },
-  3:  { mv: { grade: "3",   label: "VG" },     psa: { grade: "3",   label: "VG" },     bgs: { grade: "6.5", label: "EX" },       cgc: { grade: "6.5", label: "EX" } },
-  2:  { mv: { grade: "2",   label: "GOOD" },   psa: { grade: "2",   label: "GOOD" },   bgs: { grade: "6",   label: "VG-EX" },    cgc: { grade: "6",   label: "VG-EX" } },
-  1:  { mv: { grade: "1",   label: "PR" },     psa: { grade: "1",   label: "PR" },     bgs: { grade: "5.5", label: "VG" },       cgc: { grade: "5.5", label: "VG" } },
+const CROSSOVER: Record<
+  number,
+  {
+    mv: { grade: string; label: string };
+    psa: { grade: string; label: string };
+    bgs: { grade: string; label: string };
+    cgc: { grade: string; label: string };
+  }
+> = {
+  10: {
+    mv: { grade: "10", label: "GEM MT" },
+    psa: { grade: "10", label: "GEM MT" },
+    bgs: { grade: "10", label: "Pristine" },
+    cgc: { grade: "10", label: "Pristine" },
+  },
+  9: {
+    mv: { grade: "9", label: "MINT" },
+    psa: { grade: "9", label: "MINT" },
+    bgs: { grade: "9.5", label: "GEM MT" },
+    cgc: { grade: "9.5", label: "GEM MT" },
+  },
+  8: {
+    mv: { grade: "8", label: "NM-MT" },
+    psa: { grade: "8", label: "NM-MT" },
+    bgs: { grade: "9", label: "MINT" },
+    cgc: { grade: "9", label: "MINT" },
+  },
+  7: {
+    mv: { grade: "7", label: "NM" },
+    psa: { grade: "7", label: "NM" },
+    bgs: { grade: "8.5", label: "NM-MT+" },
+    cgc: { grade: "8.5", label: "NM-MT+" },
+  },
+  6: {
+    mv: { grade: "6", label: "EX-MT" },
+    psa: { grade: "6", label: "EX-MT" },
+    bgs: { grade: "8", label: "NM-MT" },
+    cgc: { grade: "8", label: "NM-MT" },
+  },
+  5: {
+    mv: { grade: "5", label: "EX" },
+    psa: { grade: "5", label: "EX" },
+    bgs: { grade: "7.5", label: "NM" },
+    cgc: { grade: "7.5", label: "NM" },
+  },
+  4: {
+    mv: { grade: "4", label: "VG-EX" },
+    psa: { grade: "4", label: "VG-EX" },
+    bgs: { grade: "7", label: "EX" },
+    cgc: { grade: "7", label: "EX" },
+  },
+  3: {
+    mv: { grade: "3", label: "VG" },
+    psa: { grade: "3", label: "VG" },
+    bgs: { grade: "6.5", label: "EX" },
+    cgc: { grade: "6.5", label: "EX" },
+  },
+  2: {
+    mv: { grade: "2", label: "GOOD" },
+    psa: { grade: "2", label: "GOOD" },
+    bgs: { grade: "6", label: "VG-EX" },
+    cgc: { grade: "6", label: "VG-EX" },
+  },
+  1: {
+    mv: { grade: "1", label: "PR" },
+    psa: { grade: "1", label: "PR" },
+    bgs: { grade: "5.5", label: "VG" },
+    cgc: { grade: "5.5", label: "VG" },
+  },
 };
 
 function CrossoverTable({ grade }: { grade: number }) {
   const key = Math.max(1, Math.min(10, Math.round(grade)));
   const row = CROSSOVER[key];
   const companies: Array<{ key: string; name: string; data: { grade: string; label: string }; highlight: boolean }> = [
-    { key: "mv",  name: "MintVault", data: row.mv,  highlight: true  },
-    { key: "psa", name: "PSA",       data: row.psa, highlight: false },
-    { key: "bgs", name: "BGS",       data: row.bgs, highlight: false },
-    { key: "cgc", name: "CGC",       data: row.cgc, highlight: false },
+    { key: "mv", name: "MintVault", data: row.mv, highlight: true },
+    { key: "psa", name: "PSA", data: row.psa, highlight: false },
+    { key: "bgs", name: "BGS", data: row.bgs, highlight: false },
+    { key: "cgc", name: "CGC", data: row.cgc, highlight: false },
   ];
   return (
     <div className="px-6 sm:px-8 py-8 border-t border-[#E8E4DC]" data-testid="section-crossover">
@@ -349,15 +412,19 @@ function CrossoverTable({ grade }: { grade: number }) {
             </tr>
           </thead>
           <tbody>
-            {companies.map(c => (
+            {companies.map((c) => (
               <tr
                 key={c.key}
                 className={`border-b border-[#F0EDE5] ${c.highlight ? "bg-gradient-to-r from-[#D4AF37]/15 to-transparent" : ""}`}
                 data-testid={`crossover-row-${c.key}`}
               >
                 <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]"}`}>{c.name}</td>
-                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]"}`}>{c.data.grade}</td>
-                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#555555]"}`}>{c.data.label}</td>
+                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]"}`}>
+                  {c.data.grade}
+                </td>
+                <td className={`py-2 px-3 ${c.highlight ? "text-[#B8960C] font-bold" : "text-[#555555]"}`}>
+                  {c.data.label}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -380,9 +447,9 @@ type Service = keyof typeof GRADING_FEES;
 
 function gradeMultiplier(grade: number): number {
   if (grade >= 10) return 3;
-  if (grade >= 9)  return 2;
-  if (grade >= 8)  return 1.4;
-  if (grade >= 7)  return 1.1;
+  if (grade >= 9) return 2;
+  if (grade >= 8) return 1.4;
+  if (grade >= 7) return 1.1;
   return 1;
 }
 
@@ -392,7 +459,9 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
   const [grade, setGrade] = useState<number>(initialGrade);
 
   // Reset grade if a new AI result comes in with a different overall.
-  useEffect(() => { setGrade(initialGrade); }, [initialGrade]);
+  useEffect(() => {
+    setGrade(initialGrade);
+  }, [initialGrade]);
 
   const rawNum = parseFloat(rawValue);
   const hasRaw = Number.isFinite(rawNum) && rawNum > 0;
@@ -407,9 +476,7 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
   return (
     <div className="px-6 sm:px-8 py-8 border-t border-[#E8E4DC] bg-[#FAFAF7]" data-testid="section-value-calc">
       <h3 className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] font-bold mb-1">Is it worth grading?</h3>
-      <p className="text-xs text-[#888888] mb-5">
-        Enter your raw card value below. Calculation updates live.
-      </p>
+      <p className="text-xs text-[#888888] mb-5">Enter your raw card value below. Calculation updates live.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <label className="block">
@@ -421,7 +488,7 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
               min="0"
               step="0.01"
               value={rawValue}
-              onChange={e => setRawValue(e.target.value)}
+              onChange={(e) => setRawValue(e.target.value)}
               placeholder="0.00"
               className="w-full px-3 py-2 text-sm focus:outline-none"
               data-testid="input-raw-value"
@@ -433,7 +500,7 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
           <span className="text-[10px] uppercase tracking-[0.15em] text-[#888888] block mb-1.5">Grading service</span>
           <select
             value={service}
-            onChange={e => setService(e.target.value as Service)}
+            onChange={(e) => setService(e.target.value as Service)}
             className="w-full px-3 py-2 text-sm border border-[#E8E4DC] rounded-lg focus:outline-none focus:border-[#D4AF37] bg-white"
             data-testid="select-service"
           >
@@ -447,12 +514,14 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
           <span className="text-[10px] uppercase tracking-[0.15em] text-[#888888] block mb-1.5">Grade</span>
           <select
             value={grade}
-            onChange={e => setGrade(parseInt(e.target.value, 10))}
+            onChange={(e) => setGrade(parseInt(e.target.value, 10))}
             className="w-full px-3 py-2 text-sm border border-[#E8E4DC] rounded-lg focus:outline-none focus:border-[#D4AF37] bg-white"
             data-testid="select-grade"
           >
-            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map(g => (
-              <option key={g} value={g}>{g}</option>
+            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
             ))}
           </select>
         </label>
@@ -462,11 +531,15 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
         <dl className="divide-y divide-[#F0EDE5]">
           <div className="flex justify-between items-baseline px-4 py-2.5">
             <dt className="text-xs text-[#888888]">Grading fee</dt>
-            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-fee">{fmt(fee)}</dd>
+            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-fee">
+              {fmt(fee)}
+            </dd>
           </div>
           <div className="flex justify-between items-baseline px-4 py-2.5">
             <dt className="text-xs text-[#888888]">Grade premium multiplier</dt>
-            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-mult">{mult}×</dd>
+            <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-mult">
+              {mult}×
+            </dd>
           </div>
           <div className="flex justify-between items-baseline px-4 py-2.5">
             <dt className="text-xs text-[#888888]">Expected graded value</dt>
@@ -519,7 +592,10 @@ export default function PreGradePage() {
   // Mirroring them here gives faster feedback for the common cases.
   function validateClient(): string | null {
     if (!front || !back) return "Both front and back images are required.";
-    for (const [f, name] of [[front, "front"], [back, "back"]] as const) {
+    for (const [f, name] of [
+      [front, "front"],
+      [back, "back"],
+    ] as const) {
       if (f.size > MAX_BYTES) return `${name} image is over 20 MB.`;
       if (!ACCEPT.split(",").includes(f.type)) {
         return `${name} must be JPEG, PNG, or TIFF (got ${f.type || "unknown"}).`;
@@ -534,7 +610,10 @@ export default function PreGradePage() {
     setResult(null);
 
     const vErr = validateClient();
-    if (vErr) { setError(vErr); return; }
+    if (vErr) {
+      setError(vErr);
+      return;
+    }
 
     const fd = new FormData();
     fd.append("front", front!);
@@ -590,8 +669,8 @@ export default function PreGradePage() {
             className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto"
             style={{ color: "rgba(255,255,255,0.7)" }}
           >
-            Upload front and back card images for an instant AI grade estimate. No account, no storage —
-            images are analysed in memory and discarded.
+            Upload front and back card images for an instant AI grade estimate. No account, no storage — images are
+            analysed in memory and discarded.
           </p>
         </header>
 
@@ -612,16 +691,26 @@ export default function PreGradePage() {
               style={{ backgroundColor: "#D4AF37", color: "#1A1400" }}
               data-testid="btn-submit"
             >
-              {loading
-                ? <><Loader2 size={14} className="animate-spin" /> Analysing…</>
-                : <>Run AI Pre-Grade <ArrowRight size={14} /></>}
+              {loading ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Analysing…
+                </>
+              ) : (
+                <>
+                  Run AI Pre-Grade <ArrowRight size={14} />
+                </>
+              )}
             </button>
           </div>
 
           {error && (
             <div
               className="flex items-start gap-2 rounded-lg p-4"
-              style={{ backgroundColor: "rgba(220,38,38,0.15)", border: "1px solid rgba(220,38,38,0.4)", color: "#fecaca" }}
+              style={{
+                backgroundColor: "rgba(220,38,38,0.15)",
+                border: "1px solid rgba(220,38,38,0.4)",
+                color: "#fecaca",
+              }}
               role="alert"
               data-testid="text-error"
             >
@@ -639,7 +728,10 @@ export default function PreGradePage() {
           >
             <div className="bg-gradient-to-br from-[#D4AF37]/10 to-transparent p-8 text-center border-b border-[#E8E4DC]">
               <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-3">Predicted Overall Grade</p>
-              <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}>
+              <div
+                className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2"
+                style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}
+              >
                 <span className="text-5xl font-black text-[#1A1A1A]" data-testid="text-overall-grade">
                   {result.overall_grade}
                 </span>
@@ -650,10 +742,14 @@ export default function PreGradePage() {
             </div>
 
             <div className="p-8 space-y-5">
-              <SubgradeBar label="Centering" value={result.centering.subgrade} confidence={result.confidence.centering} />
-              <SubgradeBar label="Corners"   value={result.corners.subgrade}   confidence={result.confidence.corners} />
-              <SubgradeBar label="Edges"     value={result.edges.subgrade}     confidence={result.confidence.edges} />
-              <SubgradeBar label="Surface"   value={result.surface.subgrade}   confidence={result.confidence.surface} />
+              <SubgradeBar
+                label="Centering"
+                value={result.centering.subgrade}
+                confidence={result.confidence.centering}
+              />
+              <SubgradeBar label="Corners" value={result.corners.subgrade} confidence={result.confidence.corners} />
+              <SubgradeBar label="Edges" value={result.edges.subgrade} confidence={result.confidence.edges} />
+              <SubgradeBar label="Surface" value={result.surface.subgrade} confidence={result.confidence.surface} />
             </div>
 
             <CrossoverTable grade={result.overall_grade} />
@@ -679,8 +775,8 @@ export default function PreGradePage() {
           className="text-center text-[10px] mt-12 max-w-md mx-auto leading-relaxed"
           style={{ color: "rgba(255,255,255,0.6)" }}
         >
-          Limit 3 pre-grades per hour per IP. Single-photo AI grading is a sense-check, not a calibrated
-          prediction — treat subgrades as directional. Images are not stored.
+          Limit 3 pre-grades per hour per IP. Single-photo AI grading is a sense-check, not a calibrated prediction —
+          treat subgrades as directional. Images are not stored.
         </p>
       </main>
 
