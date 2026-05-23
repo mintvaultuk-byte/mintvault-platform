@@ -202,6 +202,7 @@ function FoundingMembersStrip() {
           <GradientButton
             as="button"
             type="submit"
+            height="44px"
             disabled={submitting || !email.trim()}
             data-testid="button-waitlist-submit"
             className="gradient-btn-filled"
