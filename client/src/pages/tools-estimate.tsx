@@ -366,7 +366,7 @@ export default function ToolsEstimateV2() {
                     <span className="slab-scanner__bracket slab-scanner__bracket--tl" aria-hidden="true" />
                     <span className="slab-scanner__bracket slab-scanner__bracket--br" aria-hidden="true" />
                     <span className="slab-scanner__readout slab-scanner__readout--tl" aria-hidden="true">
-                      REFL &middot; 600DPI
+                      REFL &middot; 1200DPI
                     </span>
                     <span className="slab-scanner__readout slab-scanner__readout--tr" aria-hidden="true">
                       Z &middot; 1.0&times;

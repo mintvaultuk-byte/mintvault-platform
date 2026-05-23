@@ -2067,7 +2067,7 @@ export default function CertificateForm({
             )}
 
             <p className="text-[#AAAAAA] text-[10px] leading-relaxed">
-              Upload high-res scans (600+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
+              Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
               lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
             </p>
           </fieldset>
