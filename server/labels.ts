@@ -514,57 +514,36 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     const gradeStr  = String(grade);
     const gradeAbbr = gradeLabel(grade);
 
-    // ── Top-down stack ────────────────────────────────────────────────
-    // Fixed top pad + fixed gap between elements. Card number and abbr
-    // use textBaseline="alphabetic" so their Y arg is the glyph baseline
-    // (cardNumY/abbrY = top-of-row + font size). The digit uses
-    // textBaseline="middle" centred in whatever vertical room remains
-    // between the abbr and the bottom-strip top.
-    const TOP_PAD = -8;
-    const ELEM_GAP = 4;             // gap between card number → abbreviation
-    const ABBR_TO_DIGIT_GAP = 16;   // gap between abbreviation → digit
-                                    //   = ELEM_GAP_PREV(6) + (TOP_PAD shift 8 + ELEM_GAP shift 2)
-                                    //   chosen to keep digitTop pinned at y=90 so the digit
-                                    //   position + size stay identical to the previous render.
+    // ── Three equal 52-px zones inside the panel ─────────────────────
+    // Panel y=18 → y=174 (panelH=156); each zone centre is the middle
+    // of its third. New layout (rearranged): card number TOP, digit
+    // MIDDLE, abbreviation BOTTOM. Hard-coded so a future panel resize
+    // doesn't silently shift the rows.
+    const cardNumCY = 44;    // zone 1 centre — top third
+    const digitCY   = 96;    // zone 2 centre — middle third
+    const abbrCY    = 148;   // zone 3 centre — bottom third
 
-    // Element 1 — card number (#4)
+    // Element 1 — card number (#4) in zone 1
     const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
     const cardNumFontSize = 30;
-    const cardNumY = panelY + TOP_PAD + cardNumFontSize;
     if (cardNumPanelText) {
       ctx.font         = `bold ${cardNumFontSize}px Arial, Helvetica, sans-serif`;
       ctx.fillStyle    = "#1A1A1A";
       ctx.textAlign    = "center";
-      ctx.textBaseline = "alphabetic";
+      ctx.textBaseline = "middle";
       try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-      ctx.fillText(cardNumPanelText, panelCX, cardNumY);
+      ctx.fillText(cardNumPanelText, panelCX, cardNumCY);
       try { (ctx as any).letterSpacing = "0px"; } catch {}
     }
 
-    // Element 2 — grade abbreviation (GEM MT)
-    const abbrFontSize = 30;
-    const abbrY = cardNumY + ELEM_GAP + abbrFontSize;
-    try { (ctx as any).letterSpacing = "5px"; } catch {}
-    ctx.font         = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle    = "#1A1A1A";
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillText(gradeAbbr, panelCX, abbrY);
-    try { (ctx as any).letterSpacing = "0px"; } catch {}
-
-    // Element 3 — grade digit, fills the remaining space below the abbr
-    const digitTop    = abbrY + ABBR_TO_DIGIT_GAP;
-    const digitBottom = stripY - 12;
-    const digitAvailH = digitBottom - digitTop;
-    const gradeFontSize = fitFontSize(
-      ctx,
-      gradeStr,
-      PANEL_W - 8,
-      Math.floor(digitAvailH * 1.20),
-      36,
-    );
-    const digitY = digitTop + digitAvailH / 2;
-
+    // Element 2 — grade digit in zone 2 (middle)
+    // Hard 80-px cap; fitFontSize shrinks only when width can't accommodate.
+    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 72, 36);
+    // Optical-centre adjustment: textBaseline="middle" places the em-box
+    // middle at Y, but a numeral's visual centre sits slightly above the
+    // em-box middle (digits are top-heavy). 0.04*em shift pushes the
+    // digit down so it reads visually centred on digitCY.
+    const digitY = digitCY - gradeFontSize * 0.04;
     ctx.shadowOffsetX = 1;
     ctx.shadowOffsetY = 1;
     ctx.shadowBlur    = 1;
@@ -578,6 +557,16 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.shadowOffsetY = 0;
     ctx.shadowBlur    = 0;
     ctx.shadowColor   = "transparent";
+
+    // Element 3 — grade abbreviation (GEM MT) in zone 3 (bottom)
+    const abbrFontSize = 30;
+    try { (ctx as any).letterSpacing = "5px"; } catch {}
+    ctx.font         = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
+    ctx.fillStyle    = "#1A1A1A";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(gradeAbbr, panelCX, abbrCY);
+    try { (ctx as any).letterSpacing = "0px"; } catch {}
 
   } else {
     // Non-numeric (AUTHENTIC / AUTHENTIC ALTERED)
