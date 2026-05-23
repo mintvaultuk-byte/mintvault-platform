@@ -1948,8 +1948,8 @@ export default function AdminWeeklyReelPage() {
         </div>
 
         <div className="space-y-6">
-          <PipelineControls paused={paused} />
           <AiIngestSettings />
+          <PipelineControls paused={paused} />
           <SelectionRules />
           <VideoStyle />
           <ContentEnhancement />
