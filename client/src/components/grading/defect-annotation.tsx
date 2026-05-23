@@ -148,7 +148,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[#1A1A1A] text-[10px] font-bold">{d.type}</span>
-                  {d.tier && (
+                  {d.mvgsCode && d.tier && (
                     <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
                       {d.tier}
                     </span>
@@ -185,7 +185,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[#1A1A1A] text-[10px] font-bold">{c.type}</span>
-                  {c.tier && (
+                  {c.mvgsCode && c.tier && (
                     <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
                       {c.tier}
                     </span>
