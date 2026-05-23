@@ -11666,7 +11666,7 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
+      const { createCertForScan, uploadImagesToCert, runAiOnCert, isAutoAiIngestEnabled } = await import("./scan-ingest-service");
       let certInfo: { id: number; certId: string } | null = null;
 
       try {
@@ -11695,10 +11695,23 @@ Defects (admin-confirmed): ${defectLines}`;
           await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
         }
 
-        // Step 3: Run AI — sync if client_source is scanner_app, async otherwise
+        // Step 3: Run AI — sync if client_source is scanner_app, async otherwise.
+        // Master kill-switch: AI_AUTO_INGEST_ENABLED off → skip both paths;
+        // cert is still created and images processed, admin triggers AI
+        // manually from the grading panel.
+        const autoAiOn = isAutoAiIngestEnabled();
         const isSync = clientSource === "scanner_app";
 
-        if (isSync) {
+        if (!autoAiOn) {
+          console.log(`[scan-ingest] auto-AI disabled — skipping AI for ${certInfo.certId}`);
+          res.json({
+            certId: certInfo.certId,
+            dbId: certInfo.id,
+            workstationUrl: `/admin#grading-${certInfo.id}`,
+            aiStatus: "skipped",
+            message: `Certificate ${certInfo.certId} created. Auto-AI disabled — trigger from grading panel.`,
+          });
+        } else if (isSync) {
           // Scanner desktop app needs result inline for display
           try {
             const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
