@@ -610,7 +610,7 @@ export async function analyzeCardFromBuffers(
 
   let text: string;
   try {
-    text = await callClaude(content, 4096, "claude-opus-4-7", {
+    text = await callClaude(content, 4096, "claude-haiku-4-5-20251001", {
       thinking: true,
       systemPrompt,
       label: "grade",
@@ -626,7 +626,7 @@ export async function analyzeCardFromBuffers(
   } catch {
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-opus-4-7", { label: "json-fix", certId, callType: "json_fix" });
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-haiku-4-5-20251001", { label: "json-fix", certId, callType: "json_fix" });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -741,7 +741,7 @@ type AiCallType =
 async function callClaude(
   content: object[],
   maxTokens: number,
-  model = "claude-opus-4-7",
+  model = "claude-haiku-4-5-20251001",
   options?: {
     thinking?: boolean;
     systemPrompt?: string;
@@ -1557,7 +1557,7 @@ export async function analyzeCard(
 
   let text: string;
   try {
-    text = await callClaude(content, 4096, "claude-opus-4-7", {
+    text = await callClaude(content, 4096, "claude-haiku-4-5-20251001", {
       thinking: true,
       systemPrompt,
       label: "grade-r2",
@@ -1575,7 +1575,7 @@ export async function analyzeCard(
       const fixedText = await callClaude(
         [{ type: "text", text: fixPrompt }],
         4096,
-        "claude-opus-4-7",
+        "claude-haiku-4-5-20251001",
         { label: "json-fix-r2" }
       );
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));

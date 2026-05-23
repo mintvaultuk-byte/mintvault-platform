@@ -3159,7 +3159,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       try {
         anthropicRes = await anthropicFetch(
           {
-            model: "claude-opus-4-7",
+            model: "claude-haiku-4-5-20251001",
             max_tokens: 4096,
             messages: [{ role: "user", content: contentParts }],
           },
@@ -9768,7 +9768,7 @@ Defects (admin-confirmed): ${defectLines}`;
             ${gradeNum},
             ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
             ${b.private_notes || null},
-            'claude-opus-4-7',
+            'claude-haiku-4-5-20251001',
             ${clampedTime}
           )
         `);
@@ -10339,7 +10339,7 @@ Defects (admin-confirmed): ${defectLines}`;
       let response;
       try {
         response = await anthropicFetch(
-          { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
+          { model: "claude-haiku-4-5-20251001", max_tokens: 2048, messages: [{ role: "user", content }] },
           { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
@@ -10503,7 +10503,7 @@ Defects (admin-confirmed): ${defectLines}`;
       let response;
       try {
         response = await anthropicFetch(
-          { model: "claude-opus-4-7", max_tokens: 4096, messages: [{ role: "user", content }] },
+          { model: "claude-haiku-4-5-20251001", max_tokens: 4096, messages: [{ role: "user", content }] },
           { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
@@ -10618,7 +10618,7 @@ Defects (admin-confirmed): ${defectLines}`;
       let response;
       try {
         response = await anthropicFetch(
-          { model: "claude-opus-4-7", max_tokens: 2048, messages: [{ role: "user", content }] },
+          { model: "claude-haiku-4-5-20251001", max_tokens: 2048, messages: [{ role: "user", content }] },
           { apiKey, timeoutMs: 30_000 }
         );
       } catch (err: any) {
@@ -10941,7 +10941,7 @@ Defects (admin-confirmed): ${defectLines}`;
         await db.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, details)
           VALUES ('certificate', ${String(id)}, 'ai_grade',
-            ${JSON.stringify({ subgrades: { centering: cents, corners, edges, surface }, overall, model_used: "claude-opus-4-7", source: "manual_button" })}::jsonb)
+            ${JSON.stringify({ subgrades: { centering: cents, corners, edges, surface }, overall, model_used: "claude-haiku-4-5-20251001", source: "manual_button" })}::jsonb)
         `);
       } catch (e: any) {
         console.warn("[ai/grade] audit failed:", e.message);
