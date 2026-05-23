@@ -514,52 +514,56 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     const gradeStr  = String(grade);
     const gradeAbbr = gradeLabel(grade);
 
-    // ── Row 1: Card number (#112) ─────────────────────────────────────
+    // ── Top-down stack ────────────────────────────────────────────────
+    // Fixed top pad + fixed gap between elements. Card number and abbr
+    // use textBaseline="alphabetic" so their Y arg is the glyph baseline
+    // (cardNumY/abbrY = top-of-row + font size). The digit uses
+    // textBaseline="middle" centred in whatever vertical room remains
+    // between the abbr and the bottom-strip top.
+    const TOP_PAD = -8;
+    const ELEM_GAP = 4;             // gap between card number → abbreviation
+    const ABBR_TO_DIGIT_GAP = 16;   // gap between abbreviation → digit
+                                    //   = ELEM_GAP_PREV(6) + (TOP_PAD shift 8 + ELEM_GAP shift 2)
+                                    //   chosen to keep digitTop pinned at y=90 so the digit
+                                    //   position + size stay identical to the previous render.
+
+    // Element 1 — card number (#4)
     const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
-    const CN_TOP_PAD  = 4;
-    const cnFontSize  = 29;   // +16% — bold, prominent top-right anchor
-    let   cardNumBot  = panelY + CN_TOP_PAD;
+    const cardNumFontSize = 30;
+    const cardNumY = panelY + TOP_PAD + cardNumFontSize;
     if (cardNumPanelText) {
-      ctx.font         = `bold ${cnFontSize}px Arial, Helvetica, sans-serif`;
+      ctx.font         = `bold ${cardNumFontSize}px Arial, Helvetica, sans-serif`;
       ctx.fillStyle    = "#1A1A1A";
       ctx.textAlign    = "center";
-      ctx.textBaseline = "top";
+      ctx.textBaseline = "alphabetic";
       try { (ctx as any).letterSpacing = "0.5px"; } catch {}
-      ctx.fillText(cardNumPanelText, panelCX, panelY + CN_TOP_PAD);
+      ctx.fillText(cardNumPanelText, panelCX, cardNumY);
       try { (ctx as any).letterSpacing = "0px"; } catch {}
-      cardNumBot = panelY + CN_TOP_PAD + cnFontSize;
     }
 
-    // ── Row 2: Grade abbreviation (GEM MT) ───────────────────────────
-    const ABBR_TOP_PAD = cardNumPanelText ? 7 : 4;   // breathing room below card#
-    const abbrFontSize = fitFontSize(ctx, gradeAbbr, PANEL_W - 10, 35, 12);
+    // Element 2 — grade abbreviation (GEM MT)
+    const abbrFontSize = 30;
+    const abbrY = cardNumY + ELEM_GAP + abbrFontSize;
     try { (ctx as any).letterSpacing = "5px"; } catch {}
     ctx.font         = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
     ctx.fillStyle    = "#1A1A1A";
     ctx.textAlign    = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(gradeAbbr, panelCX, cardNumBot + ABBR_TOP_PAD);
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(gradeAbbr, panelCX, abbrY);
     try { (ctx as any).letterSpacing = "0px"; } catch {}
 
-    // Grade number — dark, large, subtle drop shadow.
-    // Sizing zone keeps small safety margins so the digit doesn't kiss the
-    // abbr line above or the panel bottom edge during fitFontSize. Centring
-    // however ignores those margins and uses descBot ↔ stripY directly so
-    // the digit sits visually centred in the full lower panel zone.
-    const descBot      = cardNumBot + ABBR_TOP_PAD + abbrFontSize;
-    const ABBR_NUM_GAP = 6;
-    const NUM_BOT_PAD  = 7;
-    const numZoneTop   = descBot + ABBR_NUM_GAP;
-    const numZoneBot   = stripY - NUM_BOT_PAD;
-    const numZoneH     = numZoneBot - numZoneTop;
-    const maxByH       = Math.floor(numZoneH / 0.754);
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, Math.min(133, maxByH), 48);
-    // Optical-centre adjustment: textBaseline="middle" places the em-box
-    // middle at Y, but a numeral's visual centre sits ~15% of em ABOVE the
-    // em-box middle (digits have no descender; visual mass is top-heavy).
-    // 0.08*em pushes the digit down so it reads visually centred rather
-    // than mathematically centred.
-    const gradeNumCY   = (descBot + stripY) / 2 - gradeFontSize * 0.04;
+    // Element 3 — grade digit, fills the remaining space below the abbr
+    const digitTop    = abbrY + ABBR_TO_DIGIT_GAP;
+    const digitBottom = stripY - 12;
+    const digitAvailH = digitBottom - digitTop;
+    const gradeFontSize = fitFontSize(
+      ctx,
+      gradeStr,
+      PANEL_W - 8,
+      Math.floor(digitAvailH * 1.20),
+      36,
+    );
+    const digitY = digitTop + digitAvailH / 2;
 
     ctx.shadowOffsetX = 1;
     ctx.shadowOffsetY = 1;
@@ -569,7 +573,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.fillStyle    = "#1A1A1A";
     ctx.textAlign    = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(gradeStr, panelCX, gradeNumCY);
+    ctx.fillText(gradeStr, panelCX, digitY);
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
     ctx.shadowBlur    = 0;
@@ -643,8 +647,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   //   2. Add the letter-spacing contribution manually (n-1 gaps × LS px)
   //   3. Use textAlign="left" with an explicit x so the text lands exactly
   //      in the centre of the correctly-sized border box.
-  const MV_HDR_SZ    = 32;                           // v429: 42→32 (~24% smaller) — wordmark is no longer the dominant element; the 3-line text block below is.
-  const MV_HDR_PAD   = 19;                           // v5: 8→19 — gives the wordmark box breathing room below the top gold frame (was 3px, now 14px).
+  const MV_HDR_SZ    = 44;                           // sized to fill the 56-px black top banner; glyph centre lands on banner midY=46.
+  const MV_HDR_PAD   = 6;                            // tuned so MV_HDR_Y − BOX_PY lands on I_TOP=18 → BOX_Y aligns with banner top.
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
   const MV_BELOW_GAP = 2;                            // v429: 4→2 — every pixel matters for the expanded text zone.
@@ -663,8 +667,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // Step 2 — derive box geometry centred in left panel
   const BOX_PX   = 12;   // horizontal padding inside box (each side)
-  const BOX_PY   = 5;    // vertical padding inside box (each side)
-  const BOX_LW   = 3;    // border line width
+  const BOX_PY   = 6;    // vertical padding (banner = 44 + 6*2 = 56 → matches the black banner height exactly)
+  const BOX_LW   = 3;    // border line width (unused now — box border removed; kept for symmetry)
   const BOX_W    = mvTextW + BOX_PX * 2;
   const BOX_H    = MV_HDR_SZ + BOX_PY * 2;
   const leftPanelCX = (I_LEFT + panelX) / 2;                // exact centre of left panel
@@ -672,12 +676,13 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const BOX_Y    = MV_HDR_Y - BOX_PY;
   const BOX_CY   = BOX_Y + BOX_H / 2;                       // vertical centre of box
 
-  // Step 3 — draw gold border box
-  ctx.strokeStyle = GOLD_LIGHT;
-  ctx.lineWidth   = BOX_LW;
-  ctx.shadowBlur  = 0;
-  ctx.shadowColor = "transparent";
-  ctx.strokeRect(BOX_X, BOX_Y, BOX_W, BOX_H);
+  // Step 3 — black top banner. Spans the inner area from the left gold
+  // frame to the grade panel's left edge, vertically from the inner top
+  // down to the bottom of the wordmark box so the gold MINTVAULT glyphs
+  // sit on a pure black plate. Drawn before the wordmark text so the
+  // fillText below renders on top of the banner.
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(I_LEFT, I_TOP, panelX - I_LEFT, BOX_Y + BOX_H - I_TOP);
 
   // Step 4 — v424 — solid GOLD_LIGHT fill replaces the 5-stop gradient and
   // glow shadow. The gradient was washing out the centre of each letter on
@@ -687,9 +692,10 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.textBaseline = "middle";
   const mvTextX    = BOX_X + Math.round((BOX_W - mvBaseW) / 2);
 
-  // White label: black wordmark on the gold-bordered white box (high contrast).
-  // Black Label: gold wordmark on the gold-bordered black box (premium look).
-  ctx.fillStyle   = (labelBg === WHITE) ? "#000000" : GOLD_LIGHT;
+  // Always gold — the wordmark sits on the black top banner regardless
+  // of label variant, so the previous white-vs-black conditional has been
+  // removed.
+  ctx.fillStyle   = GOLD_LIGHT;
   ctx.shadowBlur  = 0;
   ctx.shadowColor = "transparent";
   ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
@@ -793,36 +799,53 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   ctx.fillRect(PANEL_RIGHT, I_TOP, I_RIGHT - PANEL_RIGHT, BANNER_H);
 
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
-  // Left — "GRADED UNDER".
-  ctx.save();
-  ctx.font = "900 12px Arial, Helvetica, sans-serif";
-  (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle    = "#FFFFFF";
-  ctx.textAlign    = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("GRADED UNDER", PANEL_RIGHT + (centreX - PANEL_RIGHT) / 2, bannerMidY);
-  ctx.restore();
-
-  // Centre — MVGS mark (rectangle + text). Hard-clamped so the rect's
-  // left edge cannot encroach on the gold panel. Every coordinate is
-  // integer-rounded and imageSmoothingEnabled is off so the rect edges
-  // and glyph baselines hit whole pixels (no AA fuzz).
-  ctx.save();
-  (ctx as any).imageSmoothingEnabled = false;
+  // Pre-compute the MVGS mark geometry so the two side texts can centre
+  // themselves against the mark's left and right edges (PANEL_RIGHT ↔
+  // markRectX for "GRADED UNDER", markRight ↔ qrX for "GRADING STANDARD").
   const markFontSize = 22;
+  const markPadX     = 20;
+  const markPadY     = 8;
+  ctx.save();
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
-  const markPadX  = 20;
-  const markPadY  = 8;
+  ctx.restore();
   const markRectW = Math.round(markTextW + markPadX * 2);
   const markRectH = Math.round(markFontSize + markPadY * 2);
   let markRectX   = Math.round(centreX - markRectW / 2);
   const minMarkX  = Math.round(PANEL_RIGHT + 10);
   if (markRectX < minMarkX) markRectX = minMarkX;
   const markRectY = Math.round(bannerMidY - markRectH / 2);
+  const markRight = markRectX + markRectW;
   const markTextX = Math.round(markRectX + markRectW / 2);
   const markTextY = Math.round(markRectY + markPadY + markFontSize * 0.85);
+
+  // Left — "GRADED UNDER" centred between the gold left panel and the
+  // MVGS box.
+  ctx.save();
+  ctx.font = "900 12px Arial, Helvetica, sans-serif";
+  (ctx as any).letterSpacing = "1.5px";
+  ctx.fillStyle    = "#FFFFFF";
+  ctx.textAlign    = "center";
+  ctx.textBaseline = "middle";
+  // Defensive min clamp: if the MVGS box ever sits flush against the
+  // gold panel (markRectX hits the PANEL_RIGHT+10 floor), the corridor
+  // midpoint would slide left of the band itself. Force minimum
+  // PANEL_RIGHT + 40 so the text always reads inside the band.
+  const gradedUnderX = Math.max(
+    PANEL_RIGHT + 40,
+    Math.round((PANEL_RIGHT + markRectX) / 2),
+  );
+  ctx.fillText("GRADED UNDER", gradedUnderX, bannerMidY);
+  ctx.restore();
+
+  // Centre — MVGS gold-bordered mark. Coordinates are integer-rounded and
+  // imageSmoothingEnabled is off so the rect edges and glyph baselines
+  // hit whole pixels (no AA fuzz).
+  ctx.save();
+  (ctx as any).imageSmoothingEnabled = false;
+  ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
+  (ctx as any).letterSpacing = "2px";
   ctx.strokeStyle = GOLD_MARK;
   ctx.lineWidth   = 3;
   ctx.strokeRect(markRectX, markRectY, markRectW, markRectH);
@@ -832,14 +855,15 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   ctx.fillText("MVGS", markTextX, markTextY);
   ctx.restore();
 
-  // Right — "MINTVAULT GRADING STANDARD".
+  // Right — "GRADING STANDARD" centred between the MVGS box right edge
+  // and the QR's left edge.
   ctx.save();
   ctx.font = "900 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
-  ctx.textAlign    = "right";
+  ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("MINTVAULT GRADING STANDARD", qrX - 14, bannerMidY);
+  ctx.fillText("GRADING STANDARD", Math.round((markRight + qrX) / 2), bannerMidY);
   ctx.restore();
 
   // ── 4. GOLD PANEL fillRect ───────────────────────────────────────────────
