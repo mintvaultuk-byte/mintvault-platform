@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, CheckCheck, Clock, Zap } from "lucide-react";
+import { motion } from "framer-motion";
 import NumberFlow from "@number-flow/react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,60 @@ const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React
     icon: <Zap size={20} />,
   },
 };
+
+const BULK_DISCOUNT = 0.8;
+
+function PricingSwitch({ onSwitch, className }: { onSwitch: (value: string) => void; className?: string }) {
+  const [selected, setSelected] = useState("0");
+
+  const handleSwitch = (value: string) => {
+    setSelected(value);
+    onSwitch(value);
+  };
+
+  return (
+    <div className={cn("flex justify-center", className)}>
+      <div className="relative z-10 mx-auto flex w-fit rounded-xl bg-[#1a1a1a] border border-[#333] p-1">
+        <button
+          onClick={() => handleSwitch("0")}
+          className={cn(
+            "relative z-10 w-fit cursor-pointer h-12 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
+            selected === "0" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
+          )}
+        >
+          {selected === "0" && (
+            <motion.span
+              layoutId="home-pricing-switch"
+              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            />
+          )}
+          <span className="relative">Per Card</span>
+        </button>
+
+        <button
+          onClick={() => handleSwitch("1")}
+          className={cn(
+            "relative z-10 w-fit cursor-pointer h-12 flex-shrink-0 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
+            selected === "1" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
+          )}
+        >
+          {selected === "1" && (
+            <motion.span
+              layoutId="home-pricing-switch"
+              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
+              transition={{ type: "spring", stiffness: 500, damping: 30 }}
+            />
+          )}
+          <span className="relative flex items-center gap-2">
+            Bulk (10+)
+            <span className="rounded-full bg-[#1a1400] px-2 py-0.5 text-xs font-medium text-[#D4AF37]">Save 20%</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -236,6 +291,8 @@ export default function HomeV2() {
   // totalGraded + avgGrade removed with the stats trio (2026-04-27).
   // uniqueSets stays — still consumed below in the AI-grade copy line.
   const uniqueSets = stats?.unique_sets ?? 71;
+  const [isBulk, setIsBulk] = useState(false);
+  const togglePricingPeriod = (value: string) => setIsBulk(Number.parseInt(value) === 1);
   const recentCerts = stats?.recent_certs ?? [];
 
   return (
@@ -352,11 +409,14 @@ export default function HomeV2() {
               </p>
             </div>
 
+            <PricingSwitch onSwitch={togglePricingPeriod} className="mb-10" />
+
             <div className="flex justify-center">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
                 {pricingTiers.map((tier) => {
                   const d = TIER_ICONS[tier.id];
                   const price = tier.pricePerCard / 100;
+                  const bulkPrice = Math.round(price * BULK_DISCOUNT);
                   const days = tier.turnaroundDays ?? 0;
                   const featured = tier.id === "priority";
 
@@ -388,7 +448,7 @@ export default function HomeV2() {
                         <div className="flex items-baseline gap-1">
                           <span className="text-4xl font-semibold text-white">
                             £
-                            <NumberFlow value={price} className="text-4xl font-semibold" />
+                            <NumberFlow value={isBulk ? bulkPrice : price} className="text-4xl font-semibold" />
                           </span>
                           <span className="text-[#888] ml-1">/ card</span>
                         </div>
