@@ -129,7 +129,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
   return (
     <div className="space-y-3">
       {/* Defect list — admin-placed only. Click body to highlight on image,
-          click severity chip to cycle minor → moderate → significant, X to remove. */}
+          MVGS tier badge shown if set, X to remove. */}
       {defects.length > 0 && (
         <div className="space-y-1.5">
           {defects.map(d => (
@@ -148,14 +148,11 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[#1A1A1A] text-[10px] font-bold">{d.type}</span>
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); cycleSeverity(d.id); }}
-                    title="Click to cycle severity"
-                    className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border cursor-pointer hover:opacity-80 ${SEV_COLOR[d.severity]}`}
-                  >
-                    {d.severity}
-                  </button>
+                  {d.tier && (
+                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
+                      {d.tier}
+                    </span>
+                  )}
                   <span className="text-[#555555] text-[9px]">{d.location}</span>
                 </div>
               </div>
@@ -188,9 +185,11 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[#1A1A1A] text-[10px] font-bold">{c.type}</span>
-                  <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_COLOR[c.severity]}`}>
-                    {c.severity}
-                  </span>
+                  {c.tier && (
+                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
+                      {c.tier}
+                    </span>
+                  )}
                   <span className="text-[#555555] text-[9px]">{c.location}</span>
                 </div>
               </div>

@@ -797,8 +797,8 @@ export default function ImageViewer({
                                 setEditingDefectId(d.id);
                               }
                             }}
-                            title={`Defect ${badge}: ${d.type}, ${d.severity}`}
-                            aria-label={`Defect ${badge}: ${d.type}, ${d.severity}. Click to edit or delete.`}
+                            title={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}`}
+                            aria-label={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}. Click to edit or delete.`}
                             className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
                             style={{
                               border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
