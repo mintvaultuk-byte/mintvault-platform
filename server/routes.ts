@@ -11666,7 +11666,7 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
+      const { createCertForScan, uploadRawScansToR2, setScanStatus, processScanInBackground } = await import("./scan-ingest-service");
       const { getSetting } = await import("./lib/pipeline-settings");
       let certInfo: { id: number; certId: string } | null = null;
 
@@ -11674,90 +11674,71 @@ Defects (admin-confirmed): ${defectLines}`;
         const files = req.files as Record<string, Express.Multer.File[]>;
         if (!files?.front?.[0]) return res.status(400).json({ error: "Front image is required" });
 
-        const frontBuf = files.front[0].buffer;
-        const backBuf = files.back?.[0]?.buffer || null;
+        const frontFile = files.front[0];
+        const backFile = files.back?.[0] || null;
+        const frontBuf = frontFile.buffer;
+        const backBuf = backFile?.buffer || null;
         const notes = (req.body?.notes || "").trim();
         const clientSource = (req.body?.client_source || "admin_ui").trim();
+
+        // Pull a usable file extension from the multipart filename so the
+        // raw R2 key keeps the original format (.tif / .tiff / .png / .jpg).
+        const extFromName = (name?: string) => {
+          if (!name) return "bin";
+          const m = String(name).toLowerCase().match(/\.([a-z0-9]{1,5})$/);
+          return m ? m[1] : "bin";
+        };
+        const frontExt = extFromName(frontFile.originalname);
+        const backExt  = backFile ? extFromName(backFile.originalname) : "bin";
 
         console.log(
           `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`
         );
 
-        // Step 1: Create cert
+        // Step 1 (sync): Create cert.
         certInfo = await createCertForScan();
         console.log(`[scan-ingest] cert created: ${certInfo.certId} (id=${certInfo.id})`);
 
-        // Step 2: Upload + process images
-        const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
-        console.log(`[scan-ingest] images processed for cert ${certInfo.certId}`);
-
-        // Save notes if provided
+        // Step 2 (sync): Upload RAW scanner buffers to R2 for durability,
+        // and mark the cert as processing. The heavy deskew+crop+variants
+        // pipeline + AI runs in the background closure below.
+        await uploadRawScansToR2(
+          certInfo.id,
+          { buffer: frontBuf, mimeType: frontFile.mimetype, ext: frontExt },
+          backBuf && backFile ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt } : null,
+        );
+        await setScanStatus(certInfo.id, "processing");
         if (notes) {
           await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
         }
 
-        // Step 3: Run AI — sync if client_source is scanner_app, async otherwise.
-        // Master kill-switch: ai_auto_ingest_enabled off → skip both paths;
-        // cert is still created and images processed, admin triggers AI
-        // manually from the grading panel. Toggle lives in /admin/weekly-reel.
+        // Step 3 (async): kick off the background pipeline. Buffers are
+        // passed by reference; node-canvas/sharp release the event loop
+        // during native work so the response is sent first.
         const autoAiOn = await getSetting("ai_auto_ingest_enabled", true);
-        const isSync = clientSource === "scanner_app";
-
-        if (!autoAiOn) {
-          console.log(`[scan-ingest] auto-AI disabled — skipping AI for ${certInfo.certId}`);
-          res.json({
-            certId: certInfo.certId,
-            dbId: certInfo.id,
-            workstationUrl: `/admin#grading-${certInfo.id}`,
-            aiStatus: "skipped",
-            message: `Certificate ${certInfo.certId} created. Auto-AI disabled — trigger from grading panel.`,
-          });
-        } else if (isSync) {
-          // Scanner desktop app needs result inline for display
-          try {
-            const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
-            console.log(`[scan-ingest] AI done for ${certInfo.certId}: grade=${aiResult.grade}`);
-            res.json({
-              certId: certInfo.certId,
-              dbId: certInfo.id,
-              workstationUrl: `/admin#grading-${certInfo.id}`,
-              aiStatus: "complete",
-              aiResult,
-              message: `Certificate ${certInfo.certId} graded.`,
-            });
-          } catch (aiErr: any) {
-            console.error(
-              `[scan-ingest] AI failed for ${certInfo.certId} (sync): ${aiErr?.message || aiErr}\n${aiErr?.stack || "(no stack)"}`
-            );
-            res.json({
-              certId: certInfo.certId,
-              dbId: certInfo.id,
-              workstationUrl: `/admin#grading-${certInfo.id}`,
-              aiStatus: "failed",
-              aiError: aiErr?.message || String(aiErr),
-              message: `Certificate ${certInfo.certId} created but AI grading failed. Retry from workstation.`,
-            });
-          }
-        } else {
-          // Watcher script / admin UI — respond immediately, AI runs in background
-          const aiPromise = runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null)
-            .then((r) => console.log(`[scan-ingest] AI done for ${certInfo!.certId}: grade=${r.grade}`))
+        const captured = certInfo;
+        setImmediate(() => {
+          processScanInBackground(captured, frontBuf, backBuf, { skipAi: !autoAiOn })
             .catch((e) =>
               console.error(
-                `[scan-ingest] AI failed for ${certInfo!.certId} (async): ${e?.message || e}\n${e?.stack || "(no stack)"}`
-              )
+                `[scan-ingest] background runner crashed cert=${captured.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`,
+              ),
             );
+        });
 
-          res.json({
-            certId: certInfo.certId,
-            dbId: certInfo.id,
-            workstationUrl: `/admin#grading-${certInfo.id}`,
-            aiStatus: "processing",
-            message: `Certificate ${certInfo.certId} created. AI grading in progress.`,
-          });
-
-          await aiPromise;
-        }
+        // Step 4 (sync return): tell the watcher the cert exists and is
+        // being processed. All client_source variants (scanner_app /
+        // watcher / admin_ui) get the same shape — the previous sync
+        // scanner_app path was dead code after the scanner-app refactor
+        // to display-only mode.
+        res.json({
+          certId: certInfo.certId,
+          dbId: certInfo.id,
+          workstationUrl: `/admin#grading-${certInfo.id}`,
+          status: "processing",
+          aiStatus: autoAiOn ? "queued" : "skipped",
+          message: `Certificate ${certInfo.certId} created. Image processing${autoAiOn ? " + AI" : ""} in background.`,
+        });
       } catch (err: any) {
         console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
         res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });

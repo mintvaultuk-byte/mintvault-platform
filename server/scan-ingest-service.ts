@@ -35,6 +35,105 @@ export async function createCertForScan(): Promise<{ id: number; certId: string;
 }
 
 /**
+ * Persist the raw scanner buffers to R2 as a durability backup BEFORE
+ * the full processing pipeline runs. Stored under deterministic paths
+ * (raw_front.{ext}, raw_back.{ext}) keyed off the cert ID so a recovery
+ * path can locate them.
+ *
+ * Kept separate from uploadImagesToCert because raw upload happens
+ * synchronously inside POST /api/admin/scan-ingest (durability before
+ * returning to the watcher), while the heavy pipeline runs async.
+ */
+export async function uploadRawScansToR2(
+  certId: number,
+  front: { buffer: Buffer; mimeType: string; ext: string },
+  back: { buffer: Buffer; mimeType: string; ext: string } | null,
+): Promise<{ frontKey: string; backKey: string | null }> {
+  const safeExt = (ext: string) => (ext.replace(/[^a-z0-9]/gi, "") || "bin").toLowerCase();
+  const frontKey = `images/grading/${certId}/raw_front.${safeExt(front.ext)}`;
+  const backKey  = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
+  await Promise.all([
+    uploadToR2(frontKey, front.buffer, front.mimeType || "application/octet-stream"),
+    back && backKey
+      ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream")
+      : Promise.resolve(),
+  ]);
+  return { frontKey, backKey };
+}
+
+/**
+ * Write the cert's scan_status column. null = ready (no special state).
+ * Defensive: missing column (pre-migration) → no-op, swallowed.
+ */
+export async function setScanStatus(
+  certId: number,
+  status: "processing" | "failed" | null,
+): Promise<void> {
+  try {
+    await db.execute(sql`UPDATE certificates SET scan_status = ${status}, updated_at = NOW() WHERE id = ${certId}`);
+  } catch (err: any) {
+    console.warn(`[scan-status] write failed for cert ${certId}: ${err?.message ?? err}`);
+  }
+}
+
+/**
+ * Run the heavy image processing + AI pipeline as a background job.
+ * Called from inside setImmediate by the scan-ingest endpoint AFTER the
+ * synchronous reply has been sent. Buffers are passed by reference from
+ * the multipart upload — no re-fetch from R2 in the success path.
+ *
+ * Failure handling: scan_status flips to "failed" and an audit_log row
+ * is written so admin can see the cert needs reprocessing. The raw R2
+ * keys persisted by uploadRawScansToR2 stay around for recovery.
+ */
+export async function processScanInBackground(
+  certInfo: { id: number; certId: string },
+  frontBuf: Buffer,
+  backBuf: Buffer | null,
+  opts: { skipAi?: boolean } = {},
+): Promise<void> {
+  try {
+    console.log(`[process-scan] start cert=${certInfo.certId} (id=${certInfo.id})`);
+    const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
+    console.log(`[process-scan] images processed cert=${certInfo.certId}`);
+
+    if (!opts.skipAi) {
+      try {
+        const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
+        console.log(`[process-scan] AI done cert=${certInfo.certId} grade=${aiResult.grade}`);
+      } catch (aiErr: any) {
+        // AI failure doesn't fail the whole job — images are processed,
+        // admin can manually trigger AI from the grading panel.
+        console.error(
+          `[process-scan] AI failed cert=${certInfo.certId}: ${aiErr?.message ?? aiErr}\n${aiErr?.stack ?? "(no stack)"}`,
+        );
+      }
+    }
+
+    await setScanStatus(certInfo.id, null);
+    console.log(`[process-scan] ready cert=${certInfo.certId}`);
+  } catch (err: any) {
+    console.error(
+      `[process-scan] failed cert=${certInfo.certId}: ${err?.message ?? err}\n${err?.stack ?? "(no stack)"}`,
+    );
+    await setScanStatus(certInfo.id, "failed");
+    try {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES (
+          'certificate',
+          ${String(certInfo.id)},
+          'scan_processing_failed',
+          'system',
+          ${JSON.stringify({ certId: certInfo.certId, error: String(err?.message ?? err) })}::jsonb,
+          NOW()
+        )
+      `);
+    } catch { /* audit write best-effort */ }
+  }
+}
+
+/**
  * Upload front + back images to R2 and save paths to the certificate.
  * Runs the unified image-processing pipeline (deskew, tight crop,
  * deterministic re-centre, rounded-corner mask) — Phase Y convergence
