@@ -759,7 +759,16 @@ export default function ImageViewer({
                     const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
                     if (!isAi) humanIdx++;
                     const isHL = highlightId === d.id;
-                    const col = isAi ? "#DC2626" : "#D4AF37";
+                    // Tier-coloured ring: D1=red, D2=orange, D3=green.
+                    // AI pins (no tier yet) keep red as a "needs review" cue.
+                    // Legacy admin pins with no tier fall back to gold.
+                    const col = (() => {
+                      if (d.tier === "D1") return "#DC2626"; // red-600
+                      if (d.tier === "D2") return "#EA580C"; // orange-600
+                      if (d.tier === "D3") return "#16A34A"; // green-600
+                      if (isAi) return "#DC2626";
+                      return "#D4AF37";                       // gold (legacy)
+                    })();
                     const badge = isAi ? "AI" : String(humanIdx);
                     const isEditing = editingDefectId === d.id;
                     // Popover above marker when marker is in lower half; below
@@ -779,7 +788,9 @@ export default function ImageViewer({
                       >
                         {/* Marker ring — a button when clickable so keyboard nav
                         + role + aria-label come for free. Falls back to a
-                        decorative div when read-only / handler missing. */}
+                        decorative div when read-only / handler missing.
+                        Light fill so the centre dot (drawn separately below)
+                        reads clearly against any background image. */}
                         {clickable ? (
                           <button
                             type="button"
@@ -802,7 +813,7 @@ export default function ImageViewer({
                             className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
                             style={{
                               border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
-                              background: "transparent",
+                              background: "rgba(255,255,255,0.92)",
                               boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none",
                             }}
                           />
@@ -812,11 +823,27 @@ export default function ImageViewer({
                             title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
                             style={{
                               border: `${isHL ? 3 : 2}px solid ${col}`,
-                              background: "transparent",
+                              background: "rgba(255,255,255,0.92)",
                               boxShadow: isHL ? `0 0 8px ${col}80` : "none",
                             }}
                           />
                         )}
+                        {/* Centre dot — 4 px filled circle in the tier colour.
+                            Sits at the exact centre of the 32 px container.
+                            Pointer-events off so the underlying button still
+                            receives clicks anywhere inside the ring. */}
+                        <span
+                          aria-hidden="true"
+                          className="absolute pointer-events-none rounded-full"
+                          style={{
+                            left: "50%",
+                            top: "50%",
+                            transform: "translate(-50%, -50%)",
+                            width: 4,
+                            height: 4,
+                            background: col,
+                          }}
+                        />
                         <span
                           className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
                           style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}
