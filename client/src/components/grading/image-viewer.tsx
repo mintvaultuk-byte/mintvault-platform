@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
-import { DEFECT_TYPES, MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
+import { MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
 import type { Defect, MvgsCode } from "./defect-annotation";
 
 type Side = "front" | "back" | "angled" | "closeup";
@@ -88,7 +88,27 @@ interface Props {
   omitSideTabs?: boolean;
 }
 
-const SEVERITY_VALUES: Defect["severity"][] = ["minor", "moderate", "significant"];
+// Auto-map legacy `type` strings (from DEFECT_TYPES list or AI-defect
+// shapes) to MVGS codes. Used when an existing pin lacks an mvgsCode at
+// edit-popover open time. Falls through to null for unmapped types — the
+// popover then defaults to WH so something is always selected.
+function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCode | null {
+  if (!type) return null;
+  const t = String(type).toLowerCase().trim();
+  if (t === "whitening") return "WH";
+  if (t === "scratch" || t === "scratch (surface)") return "SC";
+  if (t === "scratch (gloss)" || t === "scratch (gloss-penetrating)" || t === "holo_scratch" || t === "holo scratch") return "SP";
+  if (t === "stain") return "ST";
+  if (t === "chip" || t === "edge chip") return "CH";
+  if (t === "fray" || t === "edge roughness") return "FR";
+  if (t === "print line" || t === "print_line") return "PL";
+  if (t === "print spot") return "PS";
+  if (t === "crease") return "CR";
+  if (t === "corner rounding" || t === "corner softness") return "RD";
+  if (t === "corner ding" || t === "indentation") return "DG";
+  if (t === "silvering" || t === "silvering (holo)") return "SV";
+  return null;
+}
 
 const SIDES: Side[] = ["front", "back"];
 const VARIANTS: { key: Variant; label: string }[] = [
@@ -1248,6 +1268,39 @@ function DefectEditPopover({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+
+  // MVGS picker local state — seeded from the pin's existing MVGS fields,
+  // falling back to a best-guess mapping of the legacy `type` string (or
+  // WH as a last resort so a value is always selected). Default tier D2
+  // matches the batch picker's default for new pins.
+  const initialCode: MvgsCode =
+    defect.mvgsCode ?? mapLegacyTypeToMvgsCode(defect.type) ?? "WH";
+  const initialTier: "D1" | "D2" | "D3" = defect.tier ?? "D2";
+  const [localCode, setLocalCode] = useState<MvgsCode>(initialCode);
+  const [localTier, setLocalTier] = useState<"D1" | "D2" | "D3">(initialTier);
+
+  function handleDone() {
+    // Persist MVGS fields first — these drive the scoring engine.
+    onChangeField("mvgsCode", localCode);
+    onChangeField("tier", localTier);
+    // Derive zone if missing (legacy pins predating MVGS zones won't have it).
+    if (!defect.zone) {
+      onChangeField(
+        "zone",
+        deriveZone({
+          xPercent: defect.x_percent,
+          yPercent: defect.y_percent,
+          imageSide: defect.image_side,
+        }),
+      );
+    }
+    // Sync the legacy `type` field to the MVGS label so the side-list
+    // display + aria-labels show the new label. The legacy `severity`
+    // field is left as-is — it no longer affects MVGS scoring.
+    const label = MVGS_DEFECT_TYPES.find((t) => t.code === localCode)?.label ?? "";
+    if (label) onChangeField("type", label);
+    onClose();
+  }
   // Click outside closes. mousedown (not click) on capture phase so we beat
   // any synthetic React click that would re-open / interfere.
   useEffect(() => {
@@ -1300,32 +1353,44 @@ function DefectEditPopover({
         </button>
       </div>
 
+      {/* MVGS picker — replaces the old Type + Severity selects. On open we
+          seed local state from the pin's existing mvgsCode/tier, falling
+          back to a best-guess mapping of the legacy `type` string. Done
+          writes mvgsCode + tier + zone (+ syncs the legacy `type` field
+          to the MVGS label so the side list keeps a readable label). */}
       <div className="space-y-1.5">
-        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Type</label>
-        <select
-          value={defect.type}
-          onChange={(e) => onChangeField("type", e.target.value)}
-          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
-          autoFocus
-        >
-          {DEFECT_TYPES.map((t) => (
-            <option key={t} value={t}>
+        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Tier</label>
+        <div className="flex gap-1">
+          {(["D1", "D2", "D3"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setLocalTier(t)}
+              data-testid={`edit-tier-${t}`}
+              className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
+                localTier === t
+                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
+                  : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+              }`}
+            >
               {t}
-            </option>
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Severity</label>
+        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Type (MVGS)</label>
         <select
-          value={defect.severity}
-          onChange={(e) => onChangeField("severity", e.target.value as Defect["severity"])}
+          value={localCode}
+          onChange={(e) => setLocalCode(e.target.value as MvgsCode)}
+          data-testid="edit-mvgs-code"
           className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+          autoFocus
         >
-          {SEVERITY_VALUES.map((s) => (
-            <option key={s} value={s}>
-              {s}
+          {MVGS_DEFECT_TYPES.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.label} ({t.code})
             </option>
           ))}
         </select>
@@ -1352,7 +1417,7 @@ function DefectEditPopover({
         </button>
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleDone}
           className="bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded hover:opacity-90 transition-opacity"
         >
           Done
