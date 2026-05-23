@@ -242,6 +242,18 @@ export async function runAiOnCert(
   frontCropped: Buffer,
   backCropped: Buffer | null,
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
+  // Master kill-switch (admin-facing) — DB-backed pipeline setting that
+  // admins flip from /admin/weekly-reel. Defaults to true so default
+  // deploy behaviour is "auto-AI on", matching the pre-flag era. Setting
+  // it false in the UI skips all auto-AI work; admin triggers AI manually
+  // from the grading panel.
+  const { getSetting } = await import("./lib/pipeline-settings");
+  const autoOn = await getSetting("ai_auto_ingest_enabled", true);
+  if (!autoOn) {
+    console.log(`[ai] skip auto-trigger: ai_auto_ingest_enabled is off for cert ${certId}`);
+    return { cardName: null, grade: null, strengthScore: null };
+  }
+
   // Resolve the MV-number for diagnostic context (retry logs, error traces).
   let certTag: string | number = certId;
   try {
@@ -420,35 +432,17 @@ export async function runAiOnCert(
 const inFlightAutoAi = new Map<number, Promise<unknown>>();
 
 /**
- * Master kill-switch for auto-triggered AI on scan ingest. When the env
- * var AI_AUTO_INGEST_ENABLED is "true" or "1", auto-AI runs after upload
- * as before. Anything else (including unset) → auto-AI skipped; admin
- * must trigger AI manually from the grading panel.
- *
- * Note: defaults to DISABLED if the env var is missing. After this
- * change ships, set AI_AUTO_INGEST_ENABLED=true in Fly secrets to
- * restore the previous behaviour.
- */
-export function isAutoAiIngestEnabled(): boolean {
-  const v = String(process.env.AI_AUTO_INGEST_ENABLED ?? "").trim().toLowerCase();
-  return v === "true" || v === "1";
-}
-
-/**
  * Fire runAiOnCert only if no auto-triggered AI call is currently in flight
- * for this cert AND the auto-ingest flag is enabled. Returns the promise
- * if fired, or null if skipped (in-flight collision OR flag off).
- * Use this from automatic trigger paths only.
+ * for this cert. The DB-backed `ai_auto_ingest_enabled` kill-switch is
+ * checked inside runAiOnCert itself (returns an empty result when off),
+ * so this wrapper stays synchronous and the caller's `if (promise) {…}`
+ * pattern doesn't need to change.
  */
 export function runAiOnCertIfIdle(
   certId: number,
   frontCropped: Buffer,
   backCropped: Buffer | null,
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> | null {
-  if (!isAutoAiIngestEnabled()) {
-    console.log(`[ai] skip auto-trigger: AI_AUTO_INGEST_ENABLED is off for cert ${certId}`);
-    return null;
-  }
   if (inFlightAutoAi.has(certId)) {
     console.log(`[ai] skip auto-trigger: already in-flight for cert ${certId}`);
     return null;

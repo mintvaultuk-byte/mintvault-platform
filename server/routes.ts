@@ -11666,7 +11666,8 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadImagesToCert, runAiOnCert, isAutoAiIngestEnabled } = await import("./scan-ingest-service");
+      const { createCertForScan, uploadImagesToCert, runAiOnCert } = await import("./scan-ingest-service");
+      const { getSetting } = await import("./lib/pipeline-settings");
       let certInfo: { id: number; certId: string } | null = null;
 
       try {
@@ -11696,10 +11697,10 @@ Defects (admin-confirmed): ${defectLines}`;
         }
 
         // Step 3: Run AI — sync if client_source is scanner_app, async otherwise.
-        // Master kill-switch: AI_AUTO_INGEST_ENABLED off → skip both paths;
+        // Master kill-switch: ai_auto_ingest_enabled off → skip both paths;
         // cert is still created and images processed, admin triggers AI
-        // manually from the grading panel.
-        const autoAiOn = isAutoAiIngestEnabled();
+        // manually from the grading panel. Toggle lives in /admin/weekly-reel.
+        const autoAiOn = await getSetting("ai_auto_ingest_enabled", true);
         const isSync = clientSource === "scanner_app";
 
         if (!autoAiOn) {
@@ -14992,6 +14993,8 @@ Defects (admin-confirmed): ${defectLines}`;
         case "auto_generate_thumbnail":
         case "notify_card_owners":
         case "smart_schedule":
+        case "ai_auto_ingest_enabled":
+        case "ai_ingest_identify_only":
           value = raw === true || raw === "true";
           break;
         case "post_delay_minutes":

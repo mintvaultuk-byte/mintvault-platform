@@ -92,6 +92,8 @@ interface PipelineSettings {
   notify_card_owners: boolean;
   notify_email: string;
   notify_webhook_url: string;
+  ai_auto_ingest_enabled: boolean;
+  ai_ingest_identify_only: boolean;
 }
 
 interface MetaStatus {
@@ -466,6 +468,74 @@ function PauseToggleRow() {
       >
         {paused ? "Resume" : "Pause Pipeline"}
       </button>
+    </div>
+  );
+}
+
+// ── Section 1b: AI Ingest — admin kill-switches for auto-AI on scan ────────
+// Both toggles map to pipeline_settings rows; the master switch
+// (ai_auto_ingest_enabled) is read by runAiOnCert in
+// server/scan-ingest-service.ts on every fresh scan.
+function AiIngestSettings() {
+  const { settings, update, updating } = useSettings();
+  if (!settings) return null;
+  const autoOn = settings.ai_auto_ingest_enabled !== false;
+  const identifyOnly = settings.ai_ingest_identify_only !== false;
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">AI Ingest</h2>
+
+      {/* Toggle 1 — master kill-switch */}
+      <div className="flex items-start justify-between gap-4 py-3 border-b border-[#F0EEE8]">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[#1A1A1A]">Auto AI on scan upload</p>
+          <p className="text-xs text-[#666] mt-0.5 leading-relaxed">
+            Automatically run identify + centering AI when a card is scanned. Turn off to speed up scanning sessions.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => update({ key: "ai_auto_ingest_enabled", value: !autoOn })}
+          disabled={updating}
+          className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            autoOn ? "bg-[#D4AF37]" : "bg-[#D4D0C8]"
+          } disabled:opacity-50`}
+          aria-pressed={autoOn}
+          data-testid="toggle-ai-auto-ingest"
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+              autoOn ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Toggle 2 — identify+centering only (documentation toggle) */}
+      <div className={`flex items-start justify-between gap-4 py-3 ${!autoOn ? "opacity-50" : ""}`}>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[#1A1A1A]">Identify + centering only</p>
+          <p className="text-xs text-[#666] mt-0.5 leading-relaxed">
+            When auto AI is on, run identify and centering only. Full grade and defect detection are always manual.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => update({ key: "ai_ingest_identify_only", value: !identifyOnly })}
+          disabled={updating || !autoOn}
+          className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            identifyOnly ? "bg-[#D4AF37]" : "bg-[#D4D0C8]"
+          } disabled:cursor-not-allowed`}
+          aria-pressed={identifyOnly}
+          data-testid="toggle-ai-identify-only"
+        >
+          <span
+            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+              identifyOnly ? "translate-x-5" : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1879,6 +1949,7 @@ export default function AdminWeeklyReelPage() {
 
         <div className="space-y-6">
           <PipelineControls paused={paused} />
+          <AiIngestSettings />
           <SelectionRules />
           <VideoStyle />
           <ContentEnhancement />

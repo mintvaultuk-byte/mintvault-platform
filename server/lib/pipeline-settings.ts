@@ -64,6 +64,11 @@ export interface PipelineSettings {
   // Notifications
   notify_email: string;            // empty string = disabled
   notify_webhook_url: string;      // empty string = disabled
+  // Scan-ingest AI — admin-facing kill switches for the auto-AI that fires
+  // after a fresh scan upload. Both default to true (auto-AI on, identify+
+  // centering only). Surfaced in /admin/weekly-reel's AI Ingest panel.
+  ai_auto_ingest_enabled: boolean;       // default true
+  ai_ingest_identify_only: boolean;      // default true (documentation toggle)
 }
 
 export const PIPELINE_DEFAULTS: PipelineSettings = {
@@ -103,6 +108,8 @@ export const PIPELINE_DEFAULTS: PipelineSettings = {
   notify_card_owners: false,
   notify_email: "",
   notify_webhook_url: "",
+  ai_auto_ingest_enabled: true,
+  ai_ingest_identify_only: true,
 };
 
 export type SettingKey = keyof PipelineSettings;
