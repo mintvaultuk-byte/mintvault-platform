@@ -1438,7 +1438,27 @@ export default function GradingPanel({
               })()}
           </div>
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
-            <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+              {defects.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+                    // setDefects is in the debounced-autosave useEffect dep
+                    // array (L622+), so the empty array auto-saves to the
+                    // /grade endpoint ~500 ms after this state change.
+                    setDefects([]);
+                  }}
+                  className="flex items-center gap-1 text-[#888888] hover:text-red-600 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                  data-testid="btn-clear-defects"
+                  title="Delete all defect pins"
+                >
+                  <Trash2 size={10} />
+                  Clear Defects
+                </button>
+              )}
+            </div>
 
             <DefectAnnotation
               defects={defects}
