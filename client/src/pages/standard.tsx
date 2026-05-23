@@ -109,7 +109,7 @@ export default function StandardPage() {
               grading company can self-certify MVGS compliance and display the
               "MVGS Compliant" mark. MintVault is the reference implementation
               and founding body — every card we grade ships with a full MVGS
-              score, a published defect report, and a 600 DPI scan.
+              score, a published defect report, and a 1200 DPI scan.
             </p>
             <p className={`${para} text-xs italic`}>
               All MintVault submissions are deionized before imaging. Cards are
@@ -126,7 +126,7 @@ export default function StandardPage() {
             </p>
             <ul className="space-y-2.5">
               {[
-                "Scan every card at a minimum of 600 DPI front and back before grading.",
+                "Scan every card at a minimum of 1200 DPI front and back before grading.",
                 "Inspect each card under a minimum of 10× magnification.",
                 "Apply the published MVGS deduction tables when scoring.",
                 "Publish a defect report with every certificate — D1 defects annotated on the scan image with their location codes.",
@@ -236,10 +236,10 @@ export default function StandardPage() {
               If any authentication check fails: card receives NQ (Not Qualified) — no grade issued.
             </p>
 
-            <h3 className={subTitle}>Step 2 — 600 DPI Scan</h3>
+            <h3 className={subTitle}>Step 2 — 1200 DPI Scan</h3>
             <ul className="space-y-2">
               {[
-                "Equipment: flatbed scanner capable of 600 DPI minimum.",
+                "Equipment: flatbed scanner capable of 1200 DPI minimum.",
                 "Background: white mat only (black mats are not permitted).",
                 "Card must lie completely flat — no bowing or lifting.",
                 "Scan front and back separately.",
@@ -289,7 +289,7 @@ export default function StandardPage() {
             <h3 className={subTitle}>Step 5 — Defect Classification and Marking</h3>
             <ul className="space-y-2 mb-3">
               {[
-                "Every defect observed must be marked on the 600 DPI scan.",
+                "Every defect observed must be marked on the 1200 DPI scan.",
                 "Each pin requires: MVGS type code + D1/D2/D3 tier + zone location.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
@@ -305,7 +305,7 @@ export default function StandardPage() {
               {[
                 "Q1 — Visible clearly at arm's length? → D1",
                 "Q2 — Visible on close inspection but not arm's length? → D2",
-                "Q3 — Only visible at 600 DPI or under magnification? → D3",
+                "Q3 — Only visible at 1200 DPI or under magnification? → D3",
                 "Factory origin (print lines, mold, roller marks)? → D3",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
@@ -337,7 +337,7 @@ export default function StandardPage() {
             <h3 className={subTitle}>Step 7 — Certificate Issuance</h3>
             <ul className="space-y-2">
               {[
-                "MVGS score, grade, defect map, and 600 DPI scan all published together.",
+                "MVGS score, grade, defect map, and 1200 DPI scan all published together.",
                 "Every D1 defect must be annotated on the scan image.",
                 "Certificate is permanent — the defect fingerprint cannot be altered.",
                 "Cert number is retired if the cert is voided — never reissued.",
@@ -728,7 +728,7 @@ export default function StandardPage() {
             <p className={`${para} mb-3`}>
               The defect map published on every certificate is unique to that
               card. The combination of defect codes, zone placements, and pin
-              positions — captured at 600 DPI — cannot be replicated by
+              positions — captured at 1200 DPI — cannot be replicated by
               another physical card.
             </p>
             <p className={para}>
@@ -757,7 +757,7 @@ export default function StandardPage() {
             <p className={`${para} text-center mb-5`}>
               MintVault is the reference implementation of MVGS. Every card
               graded by MintVault receives a full MVGS score, a defect
-              report, and a 600 DPI scan.
+              report, and a 1200 DPI scan.
             </p>
             <div className="flex justify-center">
               <Link
