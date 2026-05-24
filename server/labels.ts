@@ -749,7 +749,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const totalLineHeight = lines.length * fitSize;
   const totalGapSpace   = mainBlockZoneH - totalLineHeight;
-  const gapSize         = totalGapSpace / (lines.length - 0.8);
+  const gapSize         = totalGapSpace / (lines.length + 1);
 
   for (let i = 0; i < lines.length; i++) {
     const baseline = textZoneT + gapSize * (i + 1) + fitSize * i + fitSize * 0.5;
