@@ -460,7 +460,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const stripY  = I_BOTTOM - STRIP_H;         // 179
 
   // Left text insets
-  const TXT_PAD  = 16;
+  const TXT_PAD  = 28;
   const textLeft = I_LEFT + TXT_PAD;          // 47
   const textMaxW = panelX - textLeft - 6;     // 495
 
@@ -491,8 +491,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   }
 
   // ── 2. GRADE PANEL (right, above bottom strip) ────────────────────────────
-  const panelY  = contentT + 56;
-  const panelH  = stripY - panelY + 11;            // full inner height above strip
+  const panelY  = contentT;
+  const panelH  = stripY - panelY;            // full inner height above strip
   const panelCX = panelX + PANEL_W / 2;
   const DARK    = "#1A1000";
 
@@ -501,7 +501,6 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // overlay). Solid gold prints reliably and the grade digit sits on a
     // uniform background instead of competing with a fade.
     ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillRect(panelX, contentT, PANEL_W, 56);
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
     // Subtle vertical separator on the left edge of the panel
@@ -520,9 +519,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // of its third. New layout (rearranged): card number TOP, digit
     // MIDDLE, abbreviation BOTTOM. Hard-coded so a future panel resize
     // doesn't silently shift the rows.
-    const cardNumCY = 34;    // zone 1 centre — top third
-    const digitCY   = 104;    // zone 2 centre — middle third
-    const abbrCY    = 165;   // zone 3 centre — bottom third
+    const cardNumCY = 29;    // zone 1 centre — top third
+    const digitCY   = 99;    // zone 2 centre — middle third
+    const abbrCY    = 158;   // zone 3 centre — bottom third
 
     // Element 1 — card number (#4) in zone 1
     const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
@@ -539,7 +538,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
     // Element 2 — grade digit in zone 2 (middle)
     // Hard 80-px cap; fitFontSize shrinks only when width can't accommodate.
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 126, 36);
+    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 120, 36);
     // Optical-centre adjustment: textBaseline="middle" places the em-box
     // middle at Y, but a numeral's visual centre sits slightly above the
     // em-box middle (digits are top-heavy). 0.04*em shift pushes the
@@ -607,7 +606,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // +3 optical down-shift: top-heavy mass distribution (digits/caps) reads
     // high when em-box-middle centred. Pattern matches grade-digit optical
     // adjustment (PR #26).
-    ctx.fillText(cert.certId.replace(/^MV/, ""), I_RIGHT - 8, Math.round(stripY + STRIP_H / 2) + 4);
+    ctx.fillText(cert.certId.replace(/^MV/, ""), I_RIGHT - 8, stripY + Math.round(STRIP_H / 2) + 3);
   }
 
   // v433 — rarity left-aligned at the same X as the main text block above
@@ -615,13 +614,13 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
   // left-to-right and top-to-bottom.
   {
-    const rarityVariantStrip = [cert.rarity ? buildRarityText(cert) : ""]
+    const rarityVariantStrip = [buildVariantLine(cert), cert.rarity ? buildRarityText(cert) : ""]
       .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
-      const rarityFamily = 'Arial, Helvetica, sans-serif';
+      const rarityFamily = '"Arial Black", Arial, Helvetica, sans-serif';
       const rarityFit    = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 28, 16, "700", rarityFamily);
-      ctx.font           = `600 ${rarityFit}px ${rarityFamily}`;
+      ctx.font           = `700 ${rarityFit}px ${rarityFamily}`;
       ctx.fillStyle      = labelFg;
       ctx.textAlign      = "left";
       ctx.textBaseline   = "middle";
@@ -637,7 +636,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   //   2. Add the letter-spacing contribution manually (n-1 gaps × LS px)
   //   3. Use textAlign="left" with an explicit x so the text lands exactly
   //      in the centre of the correctly-sized border box.
-  const MV_HDR_SZ    = 50;                           // sized to fill the 56-px black top banner; glyph centre lands on banner midY=46.
+  const MV_HDR_SZ    = 44;                           // sized to fill the 56-px black top banner; glyph centre lands on banner midY=46.
   const MV_HDR_PAD   = 6;                            // tuned so MV_HDR_Y − BOX_PY lands on I_TOP=18 → BOX_Y aligns with banner top.
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
@@ -711,16 +710,15 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   // v432 — rarity moves OUT of the white panel and into the bottom strip,
   // so the main block uses the full textZoneH (no RARITY_ZONE_H reservation).
-  const mainBlockZoneH = stripY - textZoneT;
+  const mainBlockZoneH = textZoneH;
 
   // v432 — main block has TWO lines (card name + year+set). Rarity moved
   // into the bottom strip alongside the cert ID (rendered earlier).
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
-  const yearText = cert.year || "";
-  const setNameText  = cert.setName ? cert.setName.toUpperCase() : "";
-  const variantText  = cert.variant ? cert.variant.toUpperCase() : "";
+  const yearSetText  = [cert.year, cert.setName ? cert.setName.toUpperCase() : ""]
+    .filter(Boolean).join(" ");
 
-  const lines = [cardNameText, (yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText), variantText, cert.rarity ? buildRarityText(cert).toUpperCase() : ""]
+  const lines = [cardNameText, yearSetText]
     .filter(s => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.
@@ -743,14 +741,14 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   ctx.font          = `${TXT_WEIGHT} ${fitSize}px ${TXT_FAMILY}`;
   ctx.fillStyle     = labelFg;
   ctx.textAlign     = "left";
-  ctx.textBaseline  = "middle";
+  ctx.textBaseline  = "alphabetic";
 
   const totalLineHeight = lines.length * fitSize;
   const totalGapSpace   = mainBlockZoneH - totalLineHeight;
   const gapSize         = totalGapSpace / (lines.length + 1);
 
   for (let i = 0; i < lines.length; i++) {
-    const baseline = textZoneT + gapSize * (i + 1) + fitSize * i + fitSize * 0.5;
+    const baseline = textZoneT + gapSize * (i + 1) + fitSize * (i + 1);
     ctx.fillText(lines[i], textLeft, baseline);
   }
 
@@ -814,7 +812,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // Left — "GRADED UNDER" centred between the gold left panel and the
   // MVGS box.
   ctx.save();
-  ctx.font = "900 14px Arial, Helvetica, sans-serif";
+  ctx.font = "900 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "center";
@@ -849,7 +847,7 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
   // Right — "GRADING STANDARD" centred between the MVGS box right edge
   // and the QR's left edge.
   ctx.save();
-  ctx.font = "900 14px Arial, Helvetica, sans-serif";
+  ctx.font = "900 12px Arial, Helvetica, sans-serif";
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle    = "#FFFFFF";
   ctx.textAlign    = "center";
@@ -866,10 +864,10 @@ async function drawBack(ctx: any, cert: CertificateRecord, _logo: any, loadImage
 
   // ── 5. MINTVAULT ROTATED TEXT ────────────────────────────────────────────
   ctx.save();
-  ctx.translate(39, 118);
+  ctx.translate(PANEL_X + PANEL_W / 2, (I_TOP + I_BOTTOM) / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
-  (ctx as any).letterSpacing = "3px";
+  ctx.font = "bold 24px Georgia, 'Times New Roman', serif";
+  (ctx as any).letterSpacing = "4px";
   ctx.fillStyle    = INK;
   ctx.textAlign    = "center";
   ctx.textBaseline = "middle";
