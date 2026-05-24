@@ -523,7 +523,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // MIDDLE, abbreviation BOTTOM. Hard-coded so a future panel resize
     // doesn't silently shift the rows.
     const cardNumCY = 34;    // zone 1 centre — top third
-    const digitCY   = 104;    // zone 2 centre — middle third
+    const digitCY   = 102;    // zone 2 centre — middle third
     const abbrCY    = 165;   // zone 3 centre — bottom third
 
     // Element 1 — card number (#4) in zone 1
@@ -541,7 +541,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
     // Element 2 — grade digit in zone 2 (middle)
     // Hard 80-px cap; fitFontSize shrinks only when width can't accommodate.
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 126, 36);
+    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 128, 36);
     // Optical-centre adjustment: textBaseline="middle" places the em-box
     // middle at Y, but a numeral's visual centre sits slightly above the
     // em-box middle (digits are top-heavy). 0.04*em shift pushes the
@@ -617,7 +617,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
   // left-to-right and top-to-bottom.
   {
-    const rarityVariantStrip = [""]
+    const rarityVariantStrip = [cert.rarity ? buildRarityText(cert).toUpperCase() : ""]
       .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
@@ -722,7 +722,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const setNameText  = cert.setName ? cert.setName.toUpperCase() : "";
   const variantText  = cert.variant ? cert.variant.toUpperCase() : "";
 
-  const lines = [cardNameText, (yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText), variantText, cert.rarity ? buildRarityText(cert).toUpperCase() : ""]
+  const lines = [cardNameText, (yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText), variantText]
     .filter(s => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.
@@ -749,7 +749,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
   const totalLineHeight = lines.length * fitSize;
   const totalGapSpace   = mainBlockZoneH - totalLineHeight;
-  const gapSize         = totalGapSpace / (lines.length + 1);
+  const gapSize         = totalGapSpace / (lines.length - 0.8);
 
   for (let i = 0; i < lines.length; i++) {
     const baseline = textZoneT + gapSize * (i + 1) + fitSize * i + fitSize * 0.5;
