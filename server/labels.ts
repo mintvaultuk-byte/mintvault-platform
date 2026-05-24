@@ -642,7 +642,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const MV_HDR_PAD   = 6;                            // tuned so MV_HDR_Y − BOX_PY lands on I_TOP=18 → BOX_Y aligns with banner top.
   const MV_HDR_Y     = contentT + MV_HDR_PAD;        // text baseline anchor (top mode)
   const MV_HDR_BOT   = MV_HDR_Y + MV_HDR_SZ;         // bottom of text zone
-  const MV_BELOW_GAP = 2;                            // v429: 4→2 — every pixel matters for the expanded text zone.
+  const MV_BELOW_GAP = 8;                            // v429: 4→2 — every pixel matters for the expanded text zone.
   const MV_LS        = 2;                            // letter-spacing px
   const MV_TEXT      = "MINTVAULT";
 
