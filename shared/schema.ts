@@ -1056,10 +1056,10 @@ export interface BulkDiscountTier {
 }
 
 export const bulkDiscountTiers: BulkDiscountTier[] = [
-  { minQty: 1,  maxQty: 9,    percent: 0,  label: "1–9 cards" },
-  { minQty: 10, maxQty: 24,   percent: 5,  label: "10–24 cards" },
-  { minQty: 25, maxQty: 49,   percent: 10, label: "25–49 cards" },
-  { minQty: 50, maxQty: null, percent: 15, label: "50+ cards" },
+  { minQty: 1,  maxQty: 9,    percent: 0,    label: "1–9 cards" },
+  { minQty: 10, maxQty: 24,   percent: 5,    label: "10–24 cards" },
+  { minQty: 25, maxQty: 49,   percent: 7.5,  label: "25–49 cards" },
+  { minQty: 50, maxQty: null, percent: 10,   label: "50+ cards" },
 ];
 
 export function getBulkDiscountPercent(quantity: number): number {

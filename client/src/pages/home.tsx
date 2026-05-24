@@ -31,7 +31,9 @@ const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React
   },
 };
 
-const BULK_DISCOUNT = 0.8;
+// Bulk discount entry tier (10+ cards = 5% off). Full 10+/25+/50+ ladder
+// surfaced on /pricing. Source of truth: bulkDiscountTiers in shared/schema.ts.
+const BULK_ENTRY_MULTIPLIER = 0.95;
 
 function PricingSwitch({ onSwitch, className }: { onSwitch: (value: string) => void; className?: string }) {
   const [selected, setSelected] = useState("0");
@@ -75,10 +77,7 @@ function PricingSwitch({ onSwitch, className }: { onSwitch: (value: string) => v
               transition={{ type: "spring", stiffness: 500, damping: 30 }}
             />
           )}
-          <span className="relative flex items-center gap-2">
-            Bulk (10+)
-            <span className="rounded-full bg-[#1a1400] px-2 py-0.5 text-xs font-medium text-[#D4AF37]">Save 20%</span>
-          </span>
+          <span className="relative">Bulk</span>
         </button>
       </div>
     </div>
@@ -417,7 +416,7 @@ export default function HomeV2() {
                 {pricingTiers.map((tier) => {
                   const d = TIER_ICONS[tier.id];
                   const price = tier.pricePerCard / 100;
-                  const bulkPrice = Math.round(price * BULK_DISCOUNT);
+                  const bulkPrice = Math.round(price * BULK_ENTRY_MULTIPLIER * 100) / 100;
                   const days = tier.turnaroundDays ?? 0;
                   const featured = tier.id === "priority";
 

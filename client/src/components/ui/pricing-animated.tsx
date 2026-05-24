@@ -16,7 +16,7 @@ const plans = [
     name: "Vault Queue",
     description: "Our most affordable option with a 40-day turnaround for collectors who aren't in a rush.",
     price: 19,
-    bulkPrice: 15,
+    bulkPrice: 18.05,
     turnaround: "40 working days",
     buttonText: "Start a submission",
     icon: <Shield size={20} />,
@@ -33,7 +33,7 @@ const plans = [
     name: "Standard",
     description: "The most popular tier — same quality grading with a faster 15-day turnaround.",
     price: 25,
-    bulkPrice: 20,
+    bulkPrice: 23.75,
     turnaround: "15 working days",
     buttonText: "Start a submission",
     popular: true,
@@ -51,7 +51,7 @@ const plans = [
     name: "Express",
     description: "Priority handling with a 5-day turnaround for high-value cards and urgent submissions.",
     price: 45,
-    bulkPrice: 36,
+    bulkPrice: 42.75,
     turnaround: "5 working days",
     buttonText: "Start a submission",
     icon: <Zap size={20} />,
@@ -108,10 +108,7 @@ const PricingSwitch = ({ onSwitch, className }: { onSwitch: (value: string) => v
               transition={{ type: "spring", stiffness: 500, damping: 30 }}
             />
           )}
-          <span className="relative flex items-center gap-2">
-            Bulk (10+)
-            <span className="rounded-full bg-[#1a1400] px-2 py-0.5 text-xs font-medium text-[#D4AF37]">Save 20%</span>
-          </span>
+          <span className="relative">Bulk</span>
         </button>
       </div>
     </div>
