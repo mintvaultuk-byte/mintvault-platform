@@ -493,8 +493,8 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   }
 
   // ── 2. GRADE PANEL (right, above bottom strip) ────────────────────────────
-  const panelY  = contentT + 56;
-  const panelH  = stripY - panelY + 11;            // full inner height above strip
+  const panelY  = contentT;
+  const panelH  = stripY - panelY;            // full inner height above strip
   const panelCX = panelX + PANEL_W / 2;
   const DARK    = "#1A1000";
 
@@ -503,7 +503,6 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // overlay). Solid gold prints reliably and the grade digit sits on a
     // uniform background instead of competing with a fade.
     ctx.fillStyle = GOLD_LIGHT;
-    ctx.fillRect(panelX, contentT, PANEL_W, 56);
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
     // Subtle vertical separator on the left edge of the panel
