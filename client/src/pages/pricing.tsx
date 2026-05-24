@@ -246,19 +246,17 @@ export default function PricingV2() {
                           : "bg-[#0f0e0b] border-[#333]"
                       )}
                     >
+                      {d.featured && (
+                        <span className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider whitespace-nowrap no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
+                          Most chosen
+                        </span>
+                      )}
                       <CardHeader className="text-left">
-                        <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-3 mb-2">
-                            <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
-                              {d.icon}
-                            </div>
-                            <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
+                            {d.icon}
                           </div>
-                          {d.featured && (
-                            <span className="bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
-                              Most chosen
-                            </span>
-                          )}
+                          <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
                         <div className="flex items-baseline gap-1">
@@ -299,59 +297,59 @@ export default function PricingV2() {
                 );
               })}
             </div>
+          </div>
 
-            {/* Bulk-discount tiers table — explains the 10+/25+/50+ ladder.
-                Vault Club and bulk are mutually exclusive (higher wins);
-                Black Label / Pristine 10P £75 is excluded from bulk. */}
-            <div className="mt-12 max-w-3xl mx-auto">
-              <p
-                className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.3em] no-text-shadow mb-3 text-center"
-                style={{ color: "#D4AF37" }}
-              >
-                Bulk discount tiers
-              </p>
-              <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#333]">
-                      <th className="text-left py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Cards
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Vault Queue
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Standard
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Express
-                      </th>
+          {/* Bulk-discount tiers table — full-width row beneath the cards.
+              Lives outside the flex/grid wrapper so it doesn't sit next to
+              the Express card. */}
+          <div className="mt-12 max-w-3xl mx-auto">
+            <p
+              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.3em] no-text-shadow mb-3 text-center"
+              style={{ color: "#D4AF37" }}
+            >
+              Bulk discount tiers
+            </p>
+            <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[#333]">
+                    <th className="text-left py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                      Cards
+                    </th>
+                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                      Vault Queue
+                    </th>
+                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                      Standard
+                    </th>
+                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                      Express
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { qty: "10+", off: "5% off",   vq: "£18.05", st: "£23.75", ex: "£42.75" },
+                    { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
+                    { qty: "50+", off: "10% off",  vq: "£17.10", st: "£22.50", ex: "£40.50" },
+                  ].map((row) => (
+                    <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
+                      <td className="py-3 px-4">
+                        <div className="text-white font-semibold">{row.qty}</div>
+                        <div className="text-[#666] text-[10px] uppercase tracking-wider">{row.off}</div>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.vq}</td>
+                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.st}</td>
+                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.ex}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { qty: "10+", off: "5% off",   vq: "£18.05", st: "£23.75", ex: "£42.75" },
-                      { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
-                      { qty: "50+", off: "10% off",  vq: "£17.10", st: "£22.50", ex: "£40.50" },
-                    ].map((row) => (
-                      <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
-                        <td className="py-3 px-4">
-                          <div className="text-white font-semibold">{row.qty}</div>
-                          <div className="text-[#666] text-[10px] uppercase tracking-wider">{row.off}</div>
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.vq}</td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.st}</td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.ex}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-                Vault Club and bulk discounts are mutually exclusive — the higher discount applies.
-                Pristine 10P upgrade is excluded from bulk pricing.
-              </p>
+                  ))}
+                </tbody>
+              </table>
             </div>
+            <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
+              Vault Club and bulk discounts are mutually exclusive — the higher discount applies.
+              Pristine 10P upgrade is excluded from bulk pricing.
+            </p>
           </div>
 
           <div className="mt-16 max-w-3xl mx-auto text-center">
