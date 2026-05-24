@@ -252,7 +252,13 @@ export function registerSubmissionRoutes(app: Express): void {
         }
       }
 
-      const totals = calculateOrderTotals(tierData.pricePerCard, quantity, totalDeclaredValue);
+      const authoritativeQuantity =
+        Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
+      if (authoritativeQuantity !== quantity) {
+        return res.status(400).json({ error: "Quantity mismatch" });
+      }
+
+      const totals = calculateOrderTotals(tierData.pricePerCard, authoritativeQuantity, totalDeclaredValue);
 
       // Vault Club Silver discount (10%) vs bulk discount — apply max(vc, bulk).
       let vcTier: string | null = null;
@@ -273,10 +279,12 @@ export function registerSubmissionRoutes(app: Express): void {
 
       const bulkPercent = totals.discountPercent;
       const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent);
-      const effectiveDiscountAmount = Math.round((tierData.pricePerCard * quantity * effectiveDiscountPercent) / 100);
+      const effectiveDiscountAmount = Math.round(
+        (tierData.pricePerCard * authoritativeQuantity * effectiveDiscountPercent) / 100
+      );
       const discountType: string | null =
         vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
-      const discountedSubtotal = tierData.pricePerCard * quantity - effectiveDiscountAmount;
+      const discountedSubtotal = tierData.pricePerCard * authoritativeQuantity - effectiveDiscountAmount;
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
       let creditApplied = false;
@@ -294,7 +302,8 @@ export function registerSubmissionRoutes(app: Express): void {
 
       const total = Math.max(0, discountedSubtotal - creditAmountPence + totals.shipping + totals.totalInsuranceFee);
 
-      const declaredValuePerCard = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
+      const declaredValuePerCard =
+        authoritativeQuantity > 0 ? Math.ceil(totalDeclaredValue / authoritativeQuantity) : 0;
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
       const requiresManualApproval = totalDeclaredValue > 7500;
 
@@ -309,7 +318,7 @@ export function registerSubmissionRoutes(app: Express): void {
         submissionId,
         type: serviceType,
         tier,
-        quantity,
+        quantity: authoritativeQuantity,
         submissionName: submissionName || null,
         notes: notes || null,
         amountTotal: total,
@@ -396,7 +405,7 @@ export function registerSubmissionRoutes(app: Express): void {
               applied_type: discountType,
               applied_percent: effectiveDiscountPercent,
               amount_pence: effectiveDiscountAmount,
-              card_count: quantity,
+              card_count: authoritativeQuantity,
               vc_alternative_percent: vcPercent,
               bulk_alternative_percent: bulkPercent,
             },
@@ -414,7 +423,7 @@ export function registerSubmissionRoutes(app: Express): void {
           submissionDbId: submission.id,
           serviceType,
           tier,
-          quantity: String(quantity),
+          quantity: String(authoritativeQuantity),
           discountPercent: String(effectiveDiscountPercent),
           discountAmount: String(effectiveDiscountAmount),
           discountType: discountType || "none",
@@ -461,7 +470,8 @@ export function registerSubmissionRoutes(app: Express): void {
       });
 
       const submissionDbId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
-      const perCardDeclaredValue = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
+      const perCardDeclaredValue =
+        authoritativeQuantity > 0 ? Math.ceil(totalDeclaredValue / authoritativeQuantity) : 0;
       const itemRows = [];
 
       if (Array.isArray(cardItems) && cardItems.length > 0) {
@@ -480,7 +490,7 @@ export function registerSubmissionRoutes(app: Express): void {
           });
         }
       } else {
-        for (let i = 1; i <= quantity; i++) {
+        for (let i = 1; i <= authoritativeQuantity; i++) {
           itemRows.push({
             game: null,
             cardSet: null,
