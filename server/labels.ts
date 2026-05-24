@@ -540,7 +540,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
     // Element 2 — grade digit in zone 2 (middle)
     // Hard 80-px cap; fitFontSize shrinks only when width can't accommodate.
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 128, 36);
+    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 100, 36);
     // Optical-centre adjustment: textBaseline="middle" places the em-box
     // middle at Y, but a numeral's visual centre sits slightly above the
     // em-box middle (digits are top-heavy). 0.04*em shift pushes the
@@ -616,7 +616,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
   // left-to-right and top-to-bottom.
   {
-    const rarityVariantStrip = [cert.rarity ? buildRarityText(cert).toUpperCase() : ""]
+    const rarityVariantStrip = [buildVariantLine(cert)]
       .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
