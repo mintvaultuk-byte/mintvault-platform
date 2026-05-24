@@ -482,9 +482,66 @@ export default function HomeV2() {
               </div>
             </div>
 
-            <p className="font-body text-xs text-center mt-8" style={{ color: "#ffffff" }}>
-              Bulk discounts from 10 cards.
-            </p>
+            {/* Bulk-discount tiers table — mirrors /pricing. Only visible
+                when the toggle is in Bulk mode (same isBulk state that
+                drives the per-card prices on the cards). */}
+            {isBulk && (
+              <div className="mt-12 max-w-3xl mx-auto">
+                <p
+                  className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.3em] no-text-shadow mb-3 text-center"
+                  style={{ color: "#D4AF37" }}
+                >
+                  Bulk discount tiers
+                </p>
+                <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#333]">
+                        <th className="text-left py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                          Cards
+                        </th>
+                        <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                          Vault Queue
+                        </th>
+                        <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                          Standard
+                        </th>
+                        <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
+                          Express
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { qty: "10+", off: "5% off",   vq: "£18.05", st: "£23.75", ex: "£42.75" },
+                        { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
+                        { qty: "50+", off: "10% off",  vq: "£17.10", st: "£22.50", ex: "£40.50" },
+                      ].map((row) => (
+                        <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
+                          <td className="py-3 px-4">
+                            <div className="text-white font-semibold">{row.qty}</div>
+                            <div className="text-[#666] text-[10px] uppercase tracking-wider">{row.off}</div>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.vq}</td>
+                          <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.st}</td>
+                          <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.ex}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
+                  Vault Club and bulk discounts are mutually exclusive — the higher discount applies.
+                  Pristine 10P upgrade is excluded from bulk pricing.
+                </p>
+              </div>
+            )}
+
+            {!isBulk && (
+              <p className="font-body text-xs text-center mt-8" style={{ color: "#ffffff" }}>
+                Bulk discounts from 10 cards.
+              </p>
+            )}
           </div>
         </section>
       </FadeIn>
