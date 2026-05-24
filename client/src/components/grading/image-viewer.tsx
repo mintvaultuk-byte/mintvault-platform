@@ -828,26 +828,23 @@ export default function ImageViewer({
                             }}
                           />
                         )}
-                        {/* Centre dot — 4 px filled circle in the tier colour.
-                            Sits at the exact centre of the 32 px container.
+                        {/* Centre dot — 4 px filled circle in the tier
+                            colour (gold for ungraded pins). Always rendered
+                            so the exact click point is visible on every pin.
                             Pointer-events off so the underlying button still
-                            receives clicks anywhere inside the ring.
-                            Rendered ONLY when the pin has an MVGS tier; legacy
-                            no-tier pins (gold ring) get no dot. */}
-                        {(d.tier === "D1" || d.tier === "D2" || d.tier === "D3") && (
-                          <span
-                            aria-hidden="true"
-                            className="absolute pointer-events-none rounded-full"
-                            style={{
-                              left: "50%",
-                              top: "50%",
-                              transform: "translate(-50%, -50%)",
-                              width: 4,
-                              height: 4,
-                              background: col,
-                            }}
-                          />
-                        )}
+                            receives clicks anywhere inside the ring. */}
+                        <span
+                          aria-hidden="true"
+                          className="absolute pointer-events-none rounded-full"
+                          style={{
+                            left: "50%",
+                            top: "50%",
+                            transform: "translate(-50%, -50%)",
+                            width: 4,
+                            height: 4,
+                            background: col,
+                          }}
+                        />
                         <span
                           className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
                           style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}

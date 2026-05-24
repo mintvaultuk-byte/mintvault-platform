@@ -58,10 +58,14 @@ export function deriveZone(opts: { xPercent: number; yPercent: number; imageSide
   const isFront = String(opts.imageSide).toLowerCase() !== "back";
   const x = opts.xPercent;
   const y = opts.yPercent;
-  const leftBand = x < 15;
-  const rightBand = x > 85;
-  const topBand = y < 15;
-  const bottomBand = y > 85;
+  // Tighter bands match a real Pokémon-card border (~3-4 mm out of
+  // 63 mm width / 88 mm height). A pin must land inside the actual
+  // printed border to register as an edge/corner; anything further
+  // in is treated as art/surface.
+  const leftBand = x < 7;
+  const rightBand = x > 93;
+  const topBand = y < 5;
+  const bottomBand = y > 95;
   // Corners — two bands meet.
   if (topBand && leftBand)  return isFront ? "FC1" : "BC1";
   if (topBand && rightBand) return isFront ? "FC2" : "BC2";
