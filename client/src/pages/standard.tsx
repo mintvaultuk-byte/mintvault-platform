@@ -390,11 +390,12 @@ export default function StandardPage() {
             </p>
           </section>
 
-          {/* ── 5. Authentication: NQ and AA Designations ────────────── */}
+          {/* ── 5. Authentication: Non-Numeric Designations ──────────── */}
           <section id="auth">
-            <h2 className={sectionTitle}>5. Authentication: NQ and AA Designations</h2>
+            <h2 className={sectionTitle}>5. Authentication: Non-Numeric Designations</h2>
             <p className={`${para} mb-4`}>
-              Two non-numeric designations are issued when a card cannot receive a standard grade:
+              Non-numeric designations are issued when a card cannot receive a standard grade, or to flag a notable
+              condition or factory variant alongside a numeric grade:
             </p>
 
             <h3 className={subTitle}>NQ — Not Qualified</h3>
@@ -407,6 +408,43 @@ export default function StandardPage() {
             <p className={para}>
               Card is genuine but has been physically altered — trimmed edges, re-backing, surface cleaning,
               press/crease removal. Authenticated as the correct card, but altered condition noted on the cert.
+            </p>
+
+            <h3 className={subTitle}>MC — Miscut</h3>
+            <p className={para}>
+              Card has a manufacturing cut fault. The cut deviates so severely that artwork is partially cut off or a
+              border from an adjacent card is visible. Distinguished from standard off-centre (which receives a
+              centering deduction) by the threshold: one border exceeds 40% of the opposite border, or printed artwork
+              is physically cut off. Card receives MC designation and a centering deduction. Not the same as trimming —
+              MC is factory origin.
+            </p>
+
+            <h3 className={subTitle}>MK — Marked</h3>
+            <p className={para}>
+              Card has writing, ink, stamps, or other marks not part of the original printing. Includes pen, pencil,
+              marker, or official stamps. Card receives MK designation. Marks are assessed as surface defects under the
+              standard deduction table.
+            </p>
+
+            <h3 className={subTitle}>ST — Stain</h3>
+            <p className={para}>
+              Card has foreign substances present — water spots, tape residue, adhesive, or other contaminants. Card
+              receives ST designation. Staining is assessed as a surface defect under the standard deduction table.
+            </p>
+
+            <h3 className={subTitle}>PD — Print Defect</h3>
+            <p className={para}>
+              Card has a factory printing issue — ink misregistration, colour shift, focus issues, or other
+              manufacturing print variance. Card receives PD designation. Print defects are classified D3 (zero
+              deduction) unless they constitute a structural flaw.
+            </p>
+
+            <h3 className={subTitle}>FE — Factory Error</h3>
+            <p className={para}>
+              Card has a documented manufacturing variant — for example a No Rarity Symbol card, inverted back, or
+              known misprint. Card receives FE designation and is graded on its physical condition using standard MVGS
+              criteria. The factory error does not inflate or reduce the grade — condition only. FE is noted on the
+              certificate for collector reference.
             </p>
 
             <h3 className={subTitle}>Detection methods</h3>
@@ -621,10 +659,14 @@ export default function StandardPage() {
               </table>
             </div>
             <p className={`${para} mt-3 text-xs italic`}>
-              <strong className="text-[#D4AF37]/80 not-italic">Dark-border note:</strong>{" "}
+              <strong className="text-[#D4AF37]/80 not-italic">Dark Border Definition:</strong>{" "}
+              Dark border applies to any card where the printed border colour is not off-white, cream, or yellow. This
+              includes: the standard Pokémon blue card back (all sets and eras), Darkness-type card frames, and any
+              card with black or dark grey borders. The yellow/tan front border on Base Set Pokémon cards is not
+              considered dark border.{" "}
               <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered edges apply a ×1.25
-              multiplier. Tick Dark Border Front for cards with dark front borders (e.g. Darkness-type). Tick Dark
-              Border Back for cards with dark back borders (e.g. standard Pokémon blue back).
+              multiplier. When in doubt, tick Dark Border Back for any standard Pokémon card — the blue back qualifies
+              on every card. Tick Dark Border Front only for cards with dark front borders.
             </p>
 
             <h3 className={subTitle}>Surface — per pin, max -25 total</h3>
@@ -696,11 +738,26 @@ export default function StandardPage() {
               <strong className="text-[#D4AF37]/80 not-italic">Back surface:</strong> all surface deductions × 0.5.
             </p>
 
+            <p className={`${para} mt-2 text-xs italic`}>
+              <strong className="text-[#D4AF37]/80 not-italic">Holo zone definition:</strong>{" "}
+              For traditional holo cards (Base Set through ex era), the holo zone is the artwork box — the illustrated
+              image area bounded by the inner frame line. For full-art, alternate-art, and modern V/VMAX/ex cards where
+              the entire card face is illustrated, the holo zone covers the full front surface. The ×1.5 multiplier
+              applies to{" "}
+              <code className="text-[#D4AF37]">SP</code> defects anywhere within the defined holo zone.
+            </p>
+
             <h3 className={subTitle}>Overall Grade Floor Rule</h3>
             <p className={`${para} mb-3`}>
               The overall grade cannot exceed the lowest MVGS category subgrade plus 0.5. If the gap between the lowest
               and all other subgrades is less than 4 aggregate points, the overall equals the lowest subgrade exactly —
               no bump.
+            </p>
+            <p className={`${para} mb-3`}>
+              <strong className="text-[#ccc]">Crease cap and floor rule priority:</strong> When a D1 crease (CR) cap
+              and the floor rule produce different maximum grades, the stricter cap always applies. Example: a card
+              with a crease (cap ≤74, grade 6) and a surface subgrade of 4 (floor rule cap ≤4.5) receives an overall
+              grade of 4 or 4.5 — the floor rule is stricter and wins.
             </p>
             <p className={`${para} mb-3`}>
               Example: a card with Centering 10, Corners 10, Edges 2, Surface 10 cannot grade overall higher than 2.5. A
@@ -761,7 +818,7 @@ export default function StandardPage() {
             future revision changes weights / rules. Issued certificates
             stay bound to the version active at grading time. */}
         <div className="text-center mt-12 space-y-1.5 text-[10px] text-[#666] leading-relaxed">
-          <p>MVGS v1.2 · Published 24 May 2026 · MintVault UK Ltd.</p>
+          <p>MVGS v1.3 · Published 24 May 2026 · MintVault UK Ltd.</p>
           <p>
             v1.1 additions: mandatory grading process, whitening grade thresholds, NQ/AA authentication designations.
           </p>
@@ -770,7 +827,11 @@ export default function StandardPage() {
             tightened.
           </p>
           <p>
-            Grades issued under MVGS v1.2 are certified to this specification. Future revisions carry a new version
+            v1.3 additions: MC/MK/ST/PD/FE qualifier codes, dark border formal definition, miscut threshold, crease cap
+            priority rule, holo zone boundary definition.
+          </p>
+          <p>
+            Grades issued under MVGS v1.3 are certified to this specification. Future revisions carry a new version
             number and do not retroactively alter issued certificates.
           </p>
         </div>
