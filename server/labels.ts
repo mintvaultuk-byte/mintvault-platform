@@ -617,7 +617,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   // hierarchy reads NAME / SET (large) → RARITY (smaller) → CERT ID (small)
   // left-to-right and top-to-bottom.
   {
-    const rarityVariantStrip = [cert.rarity ? buildRarityText(cert) : ""]
+    const rarityVariantStrip = [""]
       .filter(Boolean).map(s => s.toUpperCase()).join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW   = panelX - textLeft - 8;   // right edge stops 8px short of the grade panel column
