@@ -348,10 +348,8 @@ export async function generateLabelPNG(
   // Label is unaffected (black on white).
   const labelFg = isBlack ? GOLD_LIGHT : "#000000";
 
-  const SCALE = 2;
-  const canvas = createCanvas(PX_W * SCALE, PX_H * SCALE);
+  const canvas = createCanvas(PX_W, PX_H);
   const ctx = canvas.getContext("2d");
-  ctx.scale(SCALE, SCALE);
 
   // ── 1. CANVAS BASE ────────────────────────────────────────────────────────
   ctx.shadowBlur  = 0;
