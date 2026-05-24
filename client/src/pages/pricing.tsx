@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Check, CheckCheck, Shield, Clock, Zap } from "lucide-react";
-import { motion } from "framer-motion";
 import NumberFlow from "@number-flow/react";
 import GradientButton from "@/components/ui/gradient-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -14,7 +13,6 @@ import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import { pricingTiers, insuranceTiers, insuranceSurchargeBands } from "@shared/schema";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
 
 const SILVER = {
   label: "Silver Vault",
@@ -44,62 +42,8 @@ const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured:
   },
 };
 
-// Bulk discount entry tier (10+ cards = 5% off). The toggle on this page
-// shows the entry-tier price; the discount-tier table below the tier
-// cards shows the full 10+/25+/50+ ladder (5% / 7.5% / 10%).
-// Source of truth: bulkDiscountTiers in shared/schema.ts.
-const BULK_ENTRY_MULTIPLIER = 0.95;
 const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
 const gbp = (n: number) => `£${n.toLocaleString("en-GB")}`;
-
-function PricingSwitch({ onSwitch, className }: { onSwitch: (value: string) => void; className?: string }) {
-  const [selected, setSelected] = useState("0");
-
-  const handleSwitch = (value: string) => {
-    setSelected(value);
-    onSwitch(value);
-  };
-
-  return (
-    <div className={cn("flex justify-center", className)}>
-      <div className="relative z-10 mx-auto flex w-fit rounded-xl bg-[#1a1a1a] border border-[#333] p-1">
-        <button
-          onClick={() => handleSwitch("0")}
-          className={cn(
-            "relative z-10 w-fit cursor-pointer h-12 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
-            selected === "0" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
-          )}
-        >
-          {selected === "0" && (
-            <motion.span
-              layoutId="pricing-switch"
-              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
-              transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            />
-          )}
-          <span className="relative">Per Card</span>
-        </button>
-
-        <button
-          onClick={() => handleSwitch("1")}
-          className={cn(
-            "relative z-10 w-fit cursor-pointer h-12 flex-shrink-0 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
-            selected === "1" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
-          )}
-        >
-          {selected === "1" && (
-            <motion.span
-              layoutId="pricing-switch"
-              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
-              transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            />
-          )}
-          <span className="relative">Bulk</span>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 const revealVariants = {
   visible: (i: number) => ({
@@ -112,7 +56,6 @@ const revealVariants = {
 };
 
 export default function PricingV2() {
-  const [isBulk, setIsBulk] = useState(false);
   const pricingRef = useRef<HTMLDivElement>(null);
 
   const faqRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -131,8 +74,6 @@ export default function PricingV2() {
     faqRefs.current.forEach((el) => el && observer.observe(el));
     return () => observer.disconnect();
   }, []);
-
-  const togglePricingPeriod = (value: string) => setIsBulk(Number.parseInt(value) === 1);
 
   return (
     <div className="min-h-screen flex flex-col relative vault-page" ref={pricingRef}>
@@ -214,8 +155,6 @@ export default function PricingV2() {
             </p>
           </div>
 
-          <PricingSwitch onSwitch={togglePricingPeriod} className="mb-10" />
-
           <div className="flex justify-center">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
               {pricingTiers.map((tier, index) => {
@@ -226,8 +165,6 @@ export default function PricingV2() {
                   icon: <Shield size={20} />,
                 };
                 const price = tier.pricePerCard / 100;
-                // 2dp precision so £19 × 0.95 renders as 18.05 not 18.
-                const bulkPrice = Math.round(price * BULK_ENTRY_MULTIPLIER * 100) / 100;
                 const days = tier.turnaroundDays ?? 0;
 
                 return (
@@ -262,7 +199,7 @@ export default function PricingV2() {
                         <div className="flex items-baseline gap-1">
                           <span className="text-4xl font-semibold text-white">
                             £
-                            <NumberFlow value={isBulk ? bulkPrice : price} className="text-4xl font-semibold" />
+                            <NumberFlow value={price} className="text-4xl font-semibold" />
                           </span>
                           <span className="text-[#888] ml-1">/ card</span>
                         </div>

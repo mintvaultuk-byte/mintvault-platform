@@ -6,8 +6,7 @@ import { VerticalCutReveal } from "@/components/ui/vertical-cut-reveal";
 import { cn } from "@/lib/utils";
 import NumberFlow from "@number-flow/react";
 import { CheckCheck, Clock, Shield, Zap } from "lucide-react";
-import { motion } from "framer-motion";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Link } from "wouter";
 import GradientButton from "@/components/ui/gradient-button";
 
@@ -16,7 +15,6 @@ const plans = [
     name: "Vault Queue",
     description: "Our most affordable option with a 40-day turnaround for collectors who aren't in a rush.",
     price: 19,
-    bulkPrice: 18.05,
     turnaround: "40 working days",
     buttonText: "Start a submission",
     icon: <Shield size={20} />,
@@ -33,7 +31,6 @@ const plans = [
     name: "Standard",
     description: "The most popular tier — same quality grading with a faster 15-day turnaround.",
     price: 25,
-    bulkPrice: 23.75,
     turnaround: "15 working days",
     buttonText: "Start a submission",
     popular: true,
@@ -51,7 +48,6 @@ const plans = [
     name: "Express",
     description: "Priority handling with a 5-day turnaround for high-value cards and urgent submissions.",
     price: 45,
-    bulkPrice: 42.75,
     turnaround: "5 working days",
     buttonText: "Start a submission",
     icon: <Zap size={20} />,
@@ -66,57 +62,7 @@ const plans = [
   },
 ];
 
-const PricingSwitch = ({ onSwitch, className }: { onSwitch: (value: string) => void; className?: string }) => {
-  const [selected, setSelected] = useState("0");
-
-  const handleSwitch = (value: string) => {
-    setSelected(value);
-    onSwitch(value);
-  };
-
-  return (
-    <div className={cn("flex justify-center", className)}>
-      <div className="relative z-10 mx-auto flex w-fit rounded-xl bg-[#1a1a1a] border border-[#333] p-1">
-        <button
-          onClick={() => handleSwitch("0")}
-          className={cn(
-            "relative z-10 w-fit cursor-pointer h-12 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
-            selected === "0" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
-          )}
-        >
-          {selected === "0" && (
-            <motion.span
-              layoutId="pricing-switch"
-              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
-              transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            />
-          )}
-          <span className="relative">Per Card</span>
-        </button>
-
-        <button
-          onClick={() => handleSwitch("1")}
-          className={cn(
-            "relative z-10 w-fit cursor-pointer h-12 flex-shrink-0 rounded-xl sm:px-6 px-3 sm:py-2 py-1 font-medium transition-colors sm:text-base text-sm",
-            selected === "1" ? "text-[#1a1400]" : "text-[#888] hover:text-white"
-          )}
-        >
-          {selected === "1" && (
-            <motion.span
-              layoutId="pricing-switch"
-              className="absolute top-0 left-0 h-12 w-full rounded-xl border-2 border-[#B8960C] bg-gradient-to-t from-[#B8960C] via-[#D4AF37] to-[#FFD700]"
-              transition={{ type: "spring", stiffness: 500, damping: 30 }}
-            />
-          )}
-          <span className="relative">Bulk</span>
-        </button>
-      </div>
-    </div>
-  );
-};
-
 export default function PricingAnimated() {
-  const [isBulk, setIsBulk] = useState(false);
   const pricingRef = useRef<HTMLDivElement>(null);
 
   const revealVariants = {
@@ -135,8 +81,6 @@ export default function PricingAnimated() {
       opacity: 0,
     },
   };
-
-  const togglePricingPeriod = (value: string) => setIsBulk(Number.parseInt(value) === 1);
 
   return (
     <div className="px-4 pt-20 pb-16 min-h-screen max-w-7xl mx-auto relative" ref={pricingRef}>
@@ -169,9 +113,6 @@ export default function PricingAnimated() {
           Every tier includes the same world-class grading. Choose your turnaround speed. Bulk discounts from 10 cards.
         </TimelineContent>
 
-        <TimelineContent as="div" animationNum={1} timelineRef={pricingRef} customVariants={revealVariants}>
-          <PricingSwitch onSwitch={togglePricingPeriod} className="w-fit" />
-        </TimelineContent>
       </article>
 
       <div className="grid md:grid-cols-3 gap-4 py-6">
@@ -207,7 +148,7 @@ export default function PricingAnimated() {
                 <div className="flex items-baseline gap-1">
                   <span className="text-4xl font-semibold text-white">
                     £
-                    <NumberFlow value={isBulk ? plan.bulkPrice : plan.price} className="text-4xl font-semibold" />
+                    <NumberFlow value={plan.price} className="text-4xl font-semibold" />
                   </span>
                   <span className="text-[#888] ml-1">/ card</span>
                 </div>
