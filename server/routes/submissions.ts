@@ -252,6 +252,9 @@ export function registerSubmissionRoutes(app: Express): void {
         }
       }
 
+      if (quantity > 1 && (!Array.isArray(cardItems) || cardItems.length === 0)) {
+        return res.status(400).json({ error: "Card details required for multi-card submissions" });
+      }
       const authoritativeQuantity =
         Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
       if (authoritativeQuantity !== quantity) {
