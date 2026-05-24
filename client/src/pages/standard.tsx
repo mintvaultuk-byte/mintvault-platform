@@ -414,8 +414,8 @@ export default function StandardPage() {
               {[
                 "UV/blacklight fluorescence analysis.",
                 "Dimension measurement: standard TCG cards measure 63mm × 88mm (±0.5mm). Counterfeit cards are frequently 1-2mm off.",
-                "Weight measurement: genuine Pokémon cards weigh 1.69–1.80 grams. Holo and foil cards sit at the higher end. Fakes are measurably lighter or heavier.",
-                "Thickness measurement: genuine cards measure 0.305mm (±0.05mm). Fakes are often thinner or uneven.",
+                "Weight measurement: genuine Pokémon/TCG cards typically weigh 1.69–1.80 grams for standard English cards. Holo, foil, textured and non-English cards vary by era and finish. Significant deviation from expected weight is a strong authentication signal.",
+                "Thickness measurement: standard English Pokémon cards measure approximately 0.305mm. This is a benchmark value — premium stock, textured finishes and older eras vary. Fakes are often measurably thinner or uneven across the card face.",
                 "Visual inspection for cut lines, layer separation, surface treatment.",
               ].map((item, i) => (
                 <li key={i} className={bullet}>
@@ -537,6 +537,29 @@ export default function StandardPage() {
                  the source of truth at runtime. */}
           <section id="defects-scoring">
             <h2 className={sectionTitle}>9. Corner, Edge &amp; Surface Deductions</h2>
+
+            <h3 className={subTitle}>Zone Definitions</h3>
+            <p className={`${para} mb-3`}>
+              Every defect is assigned to one of three physical zones based on where the pin lands on the 1200 DPI scan:
+            </p>
+            <p className={`${para} mb-3`}>
+              <strong className="text-[#ccc]">Corner zone:</strong> the rounded tip area at each of the four corners —
+              approximately 2mm in from the corner point in both directions. Defects: rounding, fraying, whitening at
+              the tip, dings, bending.
+            </p>
+            <p className={`${para} mb-3`}>
+              <strong className="text-[#ccc]">Edge zone:</strong> a 2mm band running along each of the four straight
+              sides of the card, measured inward from the physical cut edge. Defects: chipping, nicks, notching,
+              whitening, splitting, fraying along the cut. Note: whitening visible on the printed border face-on is an
+              edge defect if contiguous with the perimeter; a print mark, stain or scratch on the border face is a
+              surface defect.
+            </p>
+            <p className={`${para} mb-4`}>
+              <strong className="text-[#ccc]">Surface zone:</strong> the entire front or back face of the card outside
+              the corner and edge zones — including the printed border, artwork, text zones, and holo area. Defects:
+              scratches, print lines, stains, dents, holo scratches, gloss loss, roller marks, indentations.
+            </p>
+
             <p className={`${para} mb-4`}>
               Each defect on the card is classified by code and tier, then its location decides which deduction table
               applies. Deductions are cumulative within each category and capped at -25 points.
@@ -683,7 +706,10 @@ export default function StandardPage() {
               Example: a card with Centering 10, Corners 10, Edges 2, Surface 10 cannot grade overall higher than 2.5. A
               single destroyed category is never hidden by strong scores elsewhere.
             </p>
-            <p className={para}>This mirrors the BGS published algorithm — the most trusted formula in the industry.</p>
+            <p className={para}>
+              This is the MVGS floor rule — stricter than most published standards. It ensures a single weak category
+              can never be hidden by strong scores elsewhere.
+            </p>
           </section>
 
           {/* ── 10. Anti-fraud fingerprint ───────────────────────────── */}
@@ -735,12 +761,16 @@ export default function StandardPage() {
             future revision changes weights / rules. Issued certificates
             stay bound to the version active at grading time. */}
         <div className="text-center mt-12 space-y-1.5 text-[10px] text-[#666] leading-relaxed">
-          <p>MVGS v1.1 · Published 22 May 2026 · MintVault UK Ltd.</p>
+          <p>MVGS v1.2 · Published 24 May 2026 · MintVault UK Ltd.</p>
           <p>
             v1.1 additions: mandatory grading process, whitening grade thresholds, NQ/AA authentication designations.
           </p>
           <p>
-            Grades issued under MVGS v1.1 are certified to this specification. Future revisions carry a new version
+            v1.2 amendments: zone geometry definitions, floor rule clarification, authentication spec tolerances
+            tightened.
+          </p>
+          <p>
+            Grades issued under MVGS v1.2 are certified to this specification. Future revisions carry a new version
             number and do not retroactively alter issued certificates.
           </p>
         </div>
