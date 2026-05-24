@@ -153,6 +153,17 @@ const PULSE_CSS = `
 .defect-ring-pulse { animation: defect-pulse 2s ease-in-out infinite; }
 `;
 
+// Custom cursor for mark-defects mode — mirrors the pin marker so the
+// admin can preview placement before clicking. 24×24 SVG, hotspot at the
+// glyph centre (12, 12). Encoded once at module load.
+const PIN_CURSOR_SVG = encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">' +
+    '<circle cx="12" cy="12" r="10" fill="none" stroke="#D4AF37" stroke-width="2"/>' +
+    '<circle cx="12" cy="12" r="3" fill="#D4AF37"/>' +
+    "</svg>",
+);
+const PIN_CURSOR = `url("data:image/svg+xml,${PIN_CURSOR_SVG}") 12 12, crosshair`;
+
 export default function ImageViewer({
   urls,
   defects,
@@ -552,9 +563,15 @@ export default function ImageViewer({
         <div
           ref={containerRef}
           className={`relative overflow-hidden rounded-[5%] select-none ${
-            markMode ? "cursor-crosshair" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
+            markMode ? "" : zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"
           }`}
-          style={{ aspectRatio: "5/7", maxHeight: maxH }}
+          style={{
+            aspectRatio: "5/7",
+            maxHeight: maxH,
+            // Inline cursor only in mark mode — bypasses Tailwind so the
+            // SVG data URI lands intact (Tailwind has no cursor-url plugin).
+            ...(markMode ? { cursor: PIN_CURSOR } : {}),
+          }}
           onClick={handleContainerClick}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
