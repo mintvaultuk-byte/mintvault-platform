@@ -431,7 +431,7 @@ export default function HomeV2() {
                       )}
                     >
                       {featured && (
-                        <span className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider whitespace-nowrap no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
+                        <span className="absolute -top-5 left-1/2 -translate-x-1/2 z-20 bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider whitespace-nowrap no-text-shadow shadow-[0_0_12px_rgba(212,175,55,0.6),0_0_24px_rgba(212,175,55,0.3)]">
                           Most chosen
                         </span>
                       )}
