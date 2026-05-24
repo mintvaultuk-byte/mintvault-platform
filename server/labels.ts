@@ -721,7 +721,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
   const setNameText  = cert.setName ? cert.setName.toUpperCase() : "";
   const variantText  = cert.variant ? cert.variant.toUpperCase() : "";
 
-  const lines = [cardNameText, (yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText), variantText || (cert.rarity ? buildRarityText(cert).toUpperCase() : "")]
+  const lines = [cardNameText, (yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText), cert.rarity ? buildRarityText(cert).toUpperCase() : ""]
     .filter(s => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.
