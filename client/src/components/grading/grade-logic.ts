@@ -44,32 +44,36 @@ export function isBlackLabel(sub: SubGrades, overall: number): boolean {
     sub.surface   === 10;
 }
 
-// ── PSA-standard centering calculator ─────────────────────────────────────
+// ── MVGS centering calculator ─────────────────────────────────────────────
 // Distinct from getCenteringGrade() below (MintVault's lenient mapping —
-// kept for the auto subgrade displayed beside the inputs). The PSA chart
-// is stricter: any deviation from 50/50 demotes by one grade per 10 pts.
+// kept for the auto subgrade displayed beside the inputs). MVGS splits the
+// pool: front centering is worth 20pts (subgrade /10), back is worth 5pts
+// (subgrade /10). Front is graded strictly; back is graded leniently.
 //
-// Bands (deviation = |major - minor| after normalising to total = 100):
-//   0 pt   → 10 (only exact 50/50 gets a 10)
-//   1–10   → 9
-//   11–20  → 8
-//   21–30  → 7
-//   31–40  → 6
-//   41–50  → 5
-//   51–60  → 4
-//   61–70  → 3
-//   71–80  → 2
-//   81+    → 1
+// FRONT bands (deviation = |a - b| / (a + b) * 100):
+//   ≤10  (≤55/45) → subgrade 10
+//   11–20 (56–60) → 9
+//   21–30 (61–65) → 8
+//   31–40 (66–70) → 7
+//   41–50 (71–75) → 6
+//   51–60 (76–80) → 5
+//   61–70 (81–85) → 4
+//   >70  (>85)    → 1
 //
-// The card's centering subgrade is the WORST axis across all four
-// measurements (Front L/R, Front T/B, Back L/R, Back T/B). Returns null if
-// any input is malformed (parseRatio fails), the sum is zero, or any field
-// is empty — caller is expected to toast "all 4 ratios required".
+// BACK bands:
+//   ≤50  (≤75/25) → 10
+//   51–70 (76–85) → 8
+//   71–80 (86–90) → 5
+//   >80  (>90)    → 1
+//
+// Card centering subgrade = WORST axis across all four measurements
+// (Front L/R + Front T/B use front table; Back L/R + Back T/B use back
+// table). Returns null if any input is malformed or empty.
 
-export interface PsaCenteringResult {
+export interface MvgsCenteringResult {
   subgrade: number;          // 1-10
   worstAxisName: "Front L/R" | "Front T/B" | "Back L/R" | "Back T/B";
-  worstAxisValue: number;    // = subgrade (kept distinct in case future bands break the rule)
+  worstAxisValue: number;    // = subgrade
   worstAxisRatio: string;    // canonicalised "minor/major", e.g. "30/70"
 }
 
@@ -84,35 +88,51 @@ function parseRatio(raw: string): { minor: number; major: number } | null {
   return { minor: Math.min(a, b), major: Math.max(a, b) };
 }
 
-function psaAxisSubgrade(r: { minor: number; major: number }): number {
-  const total = r.minor + r.major;
-  const dev   = ((r.major - r.minor) / total) * 100;  // 0 = perfect, max 100
-  if (dev === 0)  return 10;
-  if (dev <= 10)  return 9;
-  if (dev <= 20)  return 8;
-  if (dev <= 30)  return 7;
-  if (dev <= 40)  return 6;
-  if (dev <= 50)  return 5;
-  if (dev <= 60)  return 4;
-  if (dev <= 70)  return 3;
-  if (dev <= 80)  return 2;
+function mvgsFrontAxisSubgrade(dev: number): number {
+  if (dev <= 10) return 10;
+  if (dev <= 20) return 9;
+  if (dev <= 30) return 8;
+  if (dev <= 40) return 7;
+  if (dev <= 50) return 6;
+  if (dev <= 60) return 5;
+  if (dev <= 70) return 4;
   return 1;
 }
 
-export function psaCenteringSubgrade(
+function mvgsBackAxisSubgrade(dev: number): number {
+  if (dev <= 50) return 10;
+  if (dev <= 70) return 8;
+  if (dev <= 80) return 5;
+  return 1;
+}
+
+/**
+ * Per-axis subgrade for an MVGS centering ratio. Returns null if the ratio
+ * is malformed (parseRatio fails) or empty.
+ */
+export function mvgsCenteringGradeFromRatio(ratio: string, side: "front" | "back"): number | null {
+  const r = parseRatio(ratio);
+  if (!r) return null;
+  const total = r.minor + r.major;
+  const dev = ((r.major - r.minor) / total) * 100;
+  return side === "front" ? mvgsFrontAxisSubgrade(dev) : mvgsBackAxisSubgrade(dev);
+}
+
+export function mvgsCenteringSubgrade(
   frontLR: string, frontTB: string, backLR: string, backTB: string,
-): PsaCenteringResult | null {
+): MvgsCenteringResult | null {
   const axes = [
-    { name: "Front L/R" as const, raw: frontLR },
-    { name: "Front T/B" as const, raw: frontTB },
-    { name: "Back L/R"  as const, raw: backLR },
-    { name: "Back T/B"  as const, raw: backTB },
+    { name: "Front L/R" as const, raw: frontLR, side: "front" as const },
+    { name: "Front T/B" as const, raw: frontTB, side: "front" as const },
+    { name: "Back L/R"  as const, raw: backLR,  side: "back"  as const },
+    { name: "Back T/B"  as const, raw: backTB,  side: "back"  as const },
   ];
-  let worst: PsaCenteringResult | null = null;
+  let worst: MvgsCenteringResult | null = null;
   for (const a of axes) {
     const r = parseRatio(a.raw);
-    if (!r) return null;  // any malformed / empty → null, caller toasts error
-    const sg = psaAxisSubgrade(r);
+    if (!r) return null;
+    const sg = mvgsCenteringGradeFromRatio(a.raw, a.side);
+    if (sg === null) return null;
     if (worst === null || sg < worst.subgrade) {
       worst = {
         subgrade:        sg,

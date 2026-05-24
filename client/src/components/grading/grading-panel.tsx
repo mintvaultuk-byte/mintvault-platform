@@ -23,7 +23,7 @@ import {
   getGradeLabel,
   isBlackLabel as checkBlackLabel,
   getCenteringGrade,
-  psaCenteringSubgrade,
+  mvgsCenteringSubgrade,
 } from "./grade-logic";
 import { computeMvgsScore, gradeFromMvgsScore } from "@shared/mvgs-scoring";
 
@@ -1773,11 +1773,81 @@ export default function GradingPanel({
                   setCenteringOverride(v);
                 }}
               />
-              {/* PSA-standard centering calculator — separate from MintVault's
-                lenient mapping (getCenteringGrade) shown alongside the inputs
-                above. Calls psaCenteringSubgrade and writes the result into
-                centeringOverride (same state path as the manual subgrade
-                stepper), which buildPayload() then ships via grade_centering. */}
+              {/* MVGS-standard centering threshold legend — two rows of chips
+                (front/back) showing the band each ratio falls into. Chips
+                matching the current input values are highlighted in gold.
+                Display only — no state changes, no saves. */}
+              {(() => {
+                const FRONT_CHIPS: { label: string; grade: string; devMax: number }[] = [
+                  { label: "≤55/45", grade: "10", devMax: 10 },
+                  { label: "56–60",  grade: "9",  devMax: 20 },
+                  { label: "61–65",  grade: "8",  devMax: 30 },
+                  { label: "66–70",  grade: "7",  devMax: 40 },
+                  { label: "71–75",  grade: "6",  devMax: 50 },
+                  { label: "76–80",  grade: "5",  devMax: 60 },
+                  { label: ">80",    grade: "≤4", devMax: Infinity },
+                ];
+                const BACK_CHIPS: { label: string; grade: string; devMax: number }[] = [
+                  { label: "≤75/25", grade: "10", devMax: 50 },
+                  { label: "76–85",  grade: "8",  devMax: 70 },
+                  { label: "86–90",  grade: "5",  devMax: 80 },
+                  { label: ">90",    grade: "1",  devMax: Infinity },
+                ];
+                const devFromRatio = (raw: string): number | null => {
+                  const m = raw.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+                  if (!m) return null;
+                  const a = parseInt(m[1], 10);
+                  const b = parseInt(m[2], 10);
+                  if (isNaN(a) || isNaN(b) || a + b === 0) return null;
+                  return (Math.abs(a - b) / (a + b)) * 100;
+                };
+                const matchIdx = (dev: number, chips: { devMax: number }[]): number => {
+                  for (let i = 0; i < chips.length; i++) if (dev <= chips[i].devMax) return i;
+                  return chips.length - 1;
+                };
+                const frontDevs = [devFromRatio(frontLR), devFromRatio(frontTB)].filter(
+                  (v): v is number => v !== null,
+                );
+                const backDevs = [devFromRatio(backLR), devFromRatio(backTB)].filter(
+                  (v): v is number => v !== null,
+                );
+                const frontHits = new Set(frontDevs.map((d) => matchIdx(d, FRONT_CHIPS)));
+                const backHits  = new Set(backDevs.map((d)  => matchIdx(d, BACK_CHIPS)));
+
+                const Chip = ({ label, grade, active }: { label: string; grade: string; active: boolean }) => (
+                  <span
+                    className={
+                      active
+                        ? "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#D4AF37] text-[#1A1400] font-bold"
+                        : "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded border border-[#D4D0C8] text-[#777777]"
+                    }
+                  >
+                    <span>{label}</span>
+                    <span className="opacity-70">= {grade}</span>
+                  </span>
+                );
+
+                return (
+                  <div className="space-y-1 pt-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Front</span>
+                      {FRONT_CHIPS.map((c, i) => (
+                        <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(i)} />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Back</span>
+                      {BACK_CHIPS.map((c, i) => (
+                        <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(i)} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* MVGS centering calculator — applies the MVGS front/back tables
+                to the four ratios and writes the result into centeringOverride
+                (same state path as the manual subgrade stepper), which
+                buildPayload() ships via grade_centering. */}
               {(() => {
                 const allFilled = !!(frontLR.trim() && frontTB.trim() && backLR.trim() && backTB.trim());
                 const ratioRe = /^\s*\d+\s*\/\s*\d+\s*$/;
@@ -1792,31 +1862,30 @@ export default function GradingPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      const result = psaCenteringSubgrade(frontLR, frontTB, backLR, backTB);
+                      const result = mvgsCenteringSubgrade(frontLR, frontTB, backLR, backTB);
                       if (!result) {
                         toast({
-                          title: "PSA calc unavailable",
-                          description: "PSA calc needs all 4 ratios in X/Y format (e.g. 53/47)",
+                          title: "MVGS calc unavailable",
+                          description: "MVGS calc needs all 4 ratios in X/Y format (e.g. 53/47)",
                           variant: "destructive",
                         });
                         return;
                       }
                       setCenteringOverride(result.subgrade);
                       toast({
-                        title: `Centering set to ${result.subgrade}/10`,
-                        description: `PSA chart — worst axis: ${result.worstAxisName} ${result.worstAxisRatio} → ${result.worstAxisValue}/10`,
+                        title: `Centering set to ${result.subgrade}/10 (MVGS — worst axis: ${result.worstAxisName} ${result.worstAxisValue}/10)`,
                       });
                     }}
                     disabled={isDisabled}
                     title={
                       isDisabled
                         ? "Fill all 4 ratios in X/Y format to enable"
-                        : "Compute centering subgrade from the four ratios using the PSA chart"
+                        : "Compute centering subgrade from the four ratios using MVGS standard"
                     }
-                    data-testid="btn-psa-calc"
+                    data-testid="btn-mvgs-calc"
                     className="text-[10px] font-bold uppercase tracking-widest border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
-                    PSA Calc
+                    MVGS Calc
                   </button>
                 );
               })()}
