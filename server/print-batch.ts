@@ -2,36 +2,40 @@
  * print-batch.ts
  * v525 — single-sheet print-and-cut batch generator.
  *
- * Produces THREE files for one A4 sheet of up to 4 cards. Each row contains
- * a front slab label + a claim insert. NFC back labels are not part of the
- * sheet — verification is encoded in the front-label QR + the claim insert
- * QR; a separate "back" print was redundant and wasted label stock.
+ * Sized to the Cricut Explore 4 Print Then Cut max printable area
+ * (165.9 × 234.7mm). A4 (210 × 297mm) forces Cricut Design Space's
+ * Auto-Resize, which distorts the label dimensions — so we render at
+ * Cricut's exact ceiling and let the home-printer PDF render small on
+ * the A4 paper (right and bottom whitespace, no functional impact).
  *
  * LAYOUT (mm, top-left origin):
- *   Page margins: 10mm top, 10mm left, no enforced bottom margin.
+ *   Page margins: 2mm on all sides (Cricut's printable area is tight —
+ *     content row width = 70 + 4 + 85.6 = 159.6mm, page width 165.9mm).
  *   Universal cut gap: 4mm between cells.
  *   Cards per sheet: up to 4 (MAX_CERTS_PER_BATCH).
  *
- *   Per row (left to right):
- *     - Front label 70×20mm (left, vertically centred in the row)
+ *   Per row (left column stacked, right column full row):
+ *     - Front label 70×20mm  (top of left column)
  *     - 4mm gap
+ *     - Back label  70×20mm  (below front in left column)
+ *     - 4mm gap (between columns)
  *     - Claim insert 85.6×54mm (right; row height = insert height)
  *
  *   Row pitch: 58mm (54mm row + 4mm inter-row gap).
- *   4 rows × 58mm + 10mm top = 242mm content height — fits both A4 PDF
- *   (297mm) and the 279.4mm PNG used for Cricut Print Then Cut.
+ *   4 rows × 54 + 3 × 4 inter-row gaps + 2 × 2mm margins = 232mm — fits
+ *   inside the 234.7mm PNG height with 2.7mm spare.
  *
  * THREE OUTPUT FILES (all share batchId in filename):
- *   A) generatePrintBatchPDF()    → A4 (210×297mm) PDF with artwork only.
- *      Home-printer fallback. No cut lines on the PDF — those live in the SVG.
- *   B) generatePrintBatchCutSVG() → A4 SVG with cut rectangles only.
+ *   A) generatePrintBatchPDF()    → 165.9×297mm PDF with artwork only.
+ *      Home-printer fallback prints small on A4 paper (right + bottom
+ *      whitespace), no cut lines on the PDF — those live in the SVG.
+ *   B) generatePrintBatchCutSVG() → 165.9×297mm SVG with cut rectangles only.
  *      Magenta hairline (#FF00FF) on a <g id="cut"> layer. ScanNCut Direct
  *      Cut and Cricut SVG cut path both consume this.
- *   C) generatePrintBatchPNG()    → 210×297mm (full A4) @ 600 DPI
- *      = 4961×7016px PNG composite. Doubled DPI vs the original 300 DPI
- *      output for sharper Cricut Print Then Cut artwork. The 4-row layout
- *      content height (242mm) still fits with 55mm of bottom whitespace
- *      for Cricut's registration marks.
+ *   C) generatePrintBatchPNG()    → 165.9×234.7mm Cricut canvas @ 600 DPI
+ *      = 3919×5544px PNG composite. Matches Cricut Explore 4's Print Then
+ *      Cut max area exactly so Auto-Resize doesn't fire and labels print
+ *      at their true 70×20mm and 85.6×54mm dimensions.
  *
  * Single source of truth: buildLayout() returns the cell array consumed by
  * all three renderers — PDF, SVG and PNG cannot drift from each other.
@@ -57,12 +61,18 @@ const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
 // ── Page dimensions ──────────────────────────────────────────────────────────
-const PAGE_W_MM = 210;
+// Width is Cricut Explore 4's Print Then Cut max (165.9mm) — shared by all
+// three outputs. PDF height stays full A4 (297mm) for home-printer use; PNG
+// height matches Cricut's vertical ceiling (234.7mm) to prevent Auto-Resize.
+const PAGE_W_MM = 165.9;
 const PDF_PAGE_H_MM = 297;
-const PNG_PAGE_H_MM = 297;
+const PNG_PAGE_H_MM = 234.7;
 
 // ── Layout (mm) ──────────────────────────────────────────────────────────────
-const MARGIN_MM = 10;
+// MARGIN_MM dropped from 10 → 2 because Cricut's 165.9mm width minus row
+// content (70 + 4 + 85.6 = 159.6mm) leaves only 6.3mm total horizontal
+// budget for margins. 2mm per side gives 2.3mm spare for cutter tolerance.
+const MARGIN_MM = 2;
 const GAP_MM = 4;
 const LABEL_W_MM = 70;
 const LABEL_H_MM = 20;
@@ -220,10 +230,10 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 
 // ── PNG composite — Cricut Print Then Cut ────────────────────────────────────
 //
-// 210×297mm (full A4) @ 600 DPI = 4961×7016px. 4-row layout (242mm content
-// height) fits inside the canvas with ~55mm of bottom whitespace — leaves
-// room for Cricut's registration marks (which it adds during print, outside
-// the content area).
+// 165.9×234.7mm (Cricut Explore 4 Print Then Cut max printable area) @ 600
+// DPI = 3919×5544px. 4 rows × 54mm + 3 × 4mm gaps + 2 × 2mm margins = 232mm
+// content height, 2.7mm spare at the bottom for Cricut's registration marks
+// (which it adds during print, outside the content area).
 
 export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
