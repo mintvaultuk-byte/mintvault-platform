@@ -465,9 +465,13 @@ function CertRow({
 function LatestSheetSection({
   onReprintSheet,
   generating,
+  onDownloadPng,
+  downloadingPng,
 }: {
   onReprintSheet: (certIds: string[]) => Promise<void>;
   generating: boolean;
+  onDownloadPng: (url: string, filename: string) => Promise<void>;
+  downloadingPng: boolean;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -515,6 +519,10 @@ function LatestSheetSection({
   if (!latest) return null;
 
   const isPending = reprintingRef === latest.sheetRef || generating;
+  // Newer sheets are stored as `print_batch_{batchId}` — strip the prefix to
+  // recover the batchId for the PNG endpoint. Legacy `SHEET-{timestamp}` refs
+  // don't have a corresponding R2 artefact; the PNG button is hidden for them.
+  const latestBatchId = latest.sheetRef.startsWith("print_batch_") ? latest.sheetRef.replace("print_batch_", "") : null;
 
   return (
     <div className="space-y-1" data-testid="latest-sheet-section">
@@ -546,6 +554,29 @@ function LatestSheetSection({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {latestBatchId && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={downloadingPng}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadPng(`/api/admin/print-batch/${latestBatchId}/png`, `mintvault-batch-${latestBatchId}.png`);
+                }}
+                className="h-7 text-[10px] px-2 border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+                data-testid="btn-download-latest-png"
+              >
+                {downloadingPng ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" /> PNG…
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="h-3 w-3 mr-1" /> PNG
+                  </>
+                )}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -915,6 +946,37 @@ function SheetPrintingPanel() {
   // "Download PNG" button — clicking it counts as its own user gesture so
   // it bypasses Chrome's multi-download permission gate.
   const [lastBatchPngUrl, setLastBatchPngUrl] = useState<string | null>(null);
+  // Loading state for any PNG download (main button + Latest Sheet button).
+  // Streams the bytes through fetch → Blob → anchor so we can show progress
+  // and surface real errors (404, 500) via toast instead of a silent failure.
+  const [downloadingPng, setDownloadingPng] = useState(false);
+  const handleDownloadPng = useCallback(
+    async (url: string, filename: string) => {
+      if (!url) return;
+      setDownloadingPng(true);
+      try {
+        const res = await fetch(url, { credentials: "same-origin" });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          throw new Error(detail.error || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objUrl);
+      } catch (err: any) {
+        toast({ title: "PNG download failed", description: err.message, variant: "destructive" });
+      } finally {
+        setDownloadingPng(false);
+      }
+    },
+    [toast]
+  );
   const downloadPrintBatch = useCallback(
     async (certIds: string[]) => {
       // CRITICAL: open the print window IMMEDIATELY, synchronously, while
@@ -1229,12 +1291,15 @@ function SheetPrintingPanel() {
         </Button>
         {/* Standalone PNG download — isolated user gesture so Chrome doesn't
             treat it as an unconfirmed multi-download. Activates once a batch
-            has been generated; window.open targets the same admin endpoint. */}
+            has been generated. Streams bytes through fetch → Blob → anchor so
+            we can show a loading state and surface real errors via toast. */}
         <Button
           onClick={() => {
-            if (lastBatchPngUrl) window.open(lastBatchPngUrl, "_blank");
+            if (!lastBatchPngUrl) return;
+            const batchId = lastBatchPngUrl.split("/")[4] || "batch";
+            handleDownloadPng(lastBatchPngUrl, `mintvault-batch-${batchId}.png`);
           }}
-          disabled={!lastBatchPngUrl}
+          disabled={!lastBatchPngUrl || downloadingPng}
           data-testid="btn-download-png"
           variant="outline"
           title={
@@ -1244,7 +1309,15 @@ function SheetPrintingPanel() {
           }
           className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
         >
-          <FileDown className="h-4 w-4 mr-2" /> Download PNG
+          {downloadingPng ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating PNG…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4 mr-2" /> Download PNG
+            </>
+          )}
         </Button>
         {selected.size > PRINT_BATCH_MAX && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">
@@ -1280,7 +1353,12 @@ function SheetPrintingPanel() {
       )}
 
       {/* Latest Sheet — reprint flows through /api/admin/print-batch. */}
-      <LatestSheetSection onReprintSheet={reprintFromHistory} generating={downloadingBatch} />
+      <LatestSheetSection
+        onReprintSheet={reprintFromHistory}
+        generating={downloadingBatch}
+        onDownloadPng={handleDownloadPng}
+        downloadingPng={downloadingPng}
+      />
 
       {/* Reprint with reason modal */}
       {reprintModal && (
