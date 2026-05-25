@@ -3791,7 +3791,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { generateLogbookPdf } = await import("./logbook-pdf");
       const certId = String(req.params.certId);
       const forceRegenerate = req.query.regenerate === "true";
-      const cacheKey = `logbooks/v2/${certId}.pdf`;
+      const cacheKey = `logbooks/v3/${certId}.pdf`;
 
       // ── Cert lookup FIRST ────────────────────────────────────────────────
       // Cache must NEVER be served for hard/soft-deleted certs, even if a
@@ -3993,7 +3993,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const certId = String(req.params.certId);
       const pdf = await generateLogbookPdf(certId, {});
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
-      const cacheKey = `logbooks/v2/${certId}.pdf`;
+      const cacheKey = `logbooks/v3/${certId}.pdf`;
       await uploadToR2(cacheKey, pdf, "application/pdf");
       res.json({ ok: true, key: cacheKey });
     } catch (err: any) {
