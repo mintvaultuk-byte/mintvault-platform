@@ -788,14 +788,18 @@ function SheetPrintingPanel() {
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       URL.revokeObjectURL(url);
     };
     const saveServerUrl = (url: string, filename: string) => {
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
     };
     saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
     saveServerUrl(data.pngUrl, `mintvault-batch-${data.batchId}.png`);
