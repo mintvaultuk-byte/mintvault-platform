@@ -11,6 +11,10 @@ const CARD_H_MM = 54;
 const PX_W = Math.round(CARD_W_MM * MM);
 const PX_H = Math.round(CARD_H_MM * MM);
 
+// Render at 2× for 600 DPI effective resolution (canvas pixels doubled,
+// all draw calls unchanged thanks to ctx.scale).
+const SCALE = 2;
+
 const MM_TO_PT = 2.83465;
 const PDF_W = CARD_W_MM * MM_TO_PT;
 const PDF_H = CARD_H_MM * MM_TO_PT;
@@ -18,13 +22,13 @@ const PDF_H = CARD_H_MM * MM_TO_PT;
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 
 // ── Colour palette (white background, matches certificate style) ──────────────
-const WHITE   = "#FFFFFF";
-const DARK    = "#1A1A1A";   // replaces BLACK text on white bg
-const GOLD    = "#D4AF37";
-const GOLD_DK = "#A07820";   // unified with labels.ts GOLD_DARK for cross-print consistency
-const GRAY    = "#555555";   // body text on white
-const GRAY_LT = "#888888";   // labels/captions on white
-const GRAY_BG = "#F5F0E8";   // alternating row bg (matches certificate)
+const WHITE = "#FFFFFF";
+const DARK = "#1A1A1A"; // replaces BLACK text on white bg
+const GOLD = "#D4AF37";
+const GOLD_DK = "#A07820"; // unified with labels.ts GOLD_DARK for cross-print consistency
+const GRAY = "#555555"; // body text on white
+const GRAY_LT = "#888888"; // labels/captions on white
+const GRAY_BG = "#F5F0E8"; // alternating row bg (matches certificate)
 
 const CLAIM_BASE_URL = `${APP_BASE_URL}/claim`;
 
@@ -52,14 +56,14 @@ async function generateQR(url: string, size: number): Promise<Buffer> {
 // Draw a solid gold border frame on the canvas (matches certificate style).
 // v6: inner vertical side bars removed; only outer border + corner ornaments.
 function drawBorderFrame(ctx: any, w: number, h: number) {
-  const bw = 8;    // outer bar width (px)
+  const bw = 8; // outer bar width (px)
 
   // Outer gold bars
   ctx.fillStyle = GOLD;
-  ctx.fillRect(0, 0, w, bw);           // top
-  ctx.fillRect(0, h - bw, w, bw);      // bottom
-  ctx.fillRect(0, 0, bw, h);           // left
-  ctx.fillRect(w - bw, 0, bw, h);      // right
+  ctx.fillRect(0, 0, w, bw); // top
+  ctx.fillRect(0, h - bw, w, bw); // bottom
+  ctx.fillRect(0, 0, bw, h); // left
+  ctx.fillRect(w - bw, 0, bw, h); // right
 
   // Corner ornaments
 }
@@ -78,14 +82,12 @@ function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: numb
   ctx.closePath();
 }
 
-export async function generateClaimInsertPNG(
-  certId: string,
-  claimCode: string,
-): Promise<Buffer> {
+export async function generateClaimInsertPNG(certId: string, claimCode: string): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
 
-  const canvas = createCanvas(PX_W, PX_H);
+  const canvas = createCanvas(PX_W * SCALE, PX_H * SCALE);
   const ctx = canvas.getContext("2d");
+  ctx.scale(SCALE, SCALE);
 
   const normalCertId = normalizeCertId(certId);
   const formattedCode = formatClaimCode(claimCode);
@@ -106,7 +108,9 @@ export async function generateClaimInsertPNG(
 
   // ── Logo: centered at top, up to 200px wide ───────────────────────────────────
   let logo: any = null;
-  try { logo = await loadImage(LOGO_PATH); } catch {}
+  try {
+    logo = await loadImage(LOGO_PATH);
+  } catch {}
 
   const logoMaxW = 280;
   const logoMaxH = 96;
@@ -115,12 +119,15 @@ export async function generateClaimInsertPNG(
     const aspect = logo.width / logo.height;
     let dw = Math.min(logoMaxW, Math.round(logoMaxH * aspect));
     let dh = Math.round(dw / aspect);
-    if (dh > logoMaxH) { dh = logoMaxH; dw = Math.round(dh * aspect); }
+    if (dh > logoMaxH) {
+      dh = logoMaxH;
+      dw = Math.round(dh * aspect);
+    }
     const dx = Math.round((PX_W - dw) / 2);
     ctx.drawImage(logo, dx, pad, dw, dh);
     logoBottom = pad + dh;
   } else {
-    ctx.font = "900 38px \"Arial Black\", Arial, sans-serif";
+    ctx.font = '900 38px "Arial Black", Arial, sans-serif';
     ctx.fillStyle = GOLD;
     ctx.textAlign = "center";
     ctx.fillText("MINTVAULT UK", PX_W / 2, pad + 6);
@@ -133,7 +140,7 @@ export async function generateClaimInsertPNG(
   // Subtitle is 14px tall → subtitle BOTTOM at logoBottom + 26.
   // 20px gap → header divider at logoBottom + 26 + 20 = logoBottom + 46.
   const subtitleY = logoBottom + 12;
-  ctx.font = "900 24px \"Arial Black\", Arial, sans-serif";
+  ctx.font = '900 24px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("PROFESSIONAL TRADING CARD GRADING", PX_W / 2, subtitleY);
@@ -162,7 +169,7 @@ export async function generateClaimInsertPNG(
   y += 28 + 20; // 20px gap before next section
 
   // "Certificate No." label (28px Arial Black, pure black)
-  ctx.font = "900 28px \"Arial Black\", Arial, sans-serif";
+  ctx.font = '900 28px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.fillText("Certificate No.", contentLeft, y);
   y += 28 + 10; // 10px gap between label and its value
@@ -174,7 +181,7 @@ export async function generateClaimInsertPNG(
   y += 44 + 14;
 
   // "Claim Code" label (28px Arial Black, pure black)
-  ctx.font = "900 28px \"Arial Black\", Arial, sans-serif";
+  ctx.font = '900 28px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.fillText("Claim Code", contentLeft, y);
   y += 28 + 10;
@@ -207,17 +214,17 @@ export async function generateClaimInsertPNG(
 
   // ── QR code — right column, vertically centred between header divider & footer ─
   const qrSize = 220;
-  const qrBuf = await generateQR(claimUrl, qrSize);
+  const qrBuf = await generateQR(claimUrl, qrSize * SCALE);
   const qrImg = await loadImage(qrBuf);
 
   const qrPad = 8;
   const qrBoxSize = qrSize + qrPad * 2;
-  const rightColW = (PX_W - pad) - rightColX;
+  const rightColW = PX_W - pad - rightColX;
   const qrX = rightColX + Math.round((rightColW - qrBoxSize) / 2);
 
   // Content zone: from just below the header divider to just above the footer
   const zoneTop = headerDivY + 2 + 22;
-  const zoneBot = PX_H - pad - 34;       // leaves room for footer line + 20px gap + text
+  const zoneBot = PX_H - pad - 34; // leaves room for footer line + 20px gap + text
   const qrY = Math.round((zoneTop + zoneBot - qrBoxSize) / 2);
 
   // Warm cream background tile behind QR
@@ -241,30 +248,25 @@ export async function generateClaimInsertPNG(
   // line drops below step 3 bottom (569) with ≥5px clearance, while keeping
   // text bottom at the safe edge (PX_H - pad = 606).
   const footerTextTop = PX_H - pad - 24;
-  const footerLineY   = footerTextTop - 8;
-  console.log(`[claim-insert] PX_H=${PX_H} pad=${pad} footerTextTop=${footerTextTop} footerLineY=${footerLineY} gap=${footerTextTop - footerLineY - 1}px`);
+  const footerLineY = footerTextTop - 8;
+  console.log(
+    `[claim-insert] PX_H=${PX_H} pad=${pad} footerTextTop=${footerTextTop} footerLineY=${footerLineY} gap=${footerTextTop - footerLineY - 1}px`
+  );
   ctx.fillStyle = GOLD_DK;
   ctx.globalAlpha = 0.3;
   ctx.fillRect(pad, footerLineY, PX_W - pad * 2, 1);
   ctx.globalAlpha = 1;
 
-  ctx.font = "900 24px \"Arial Black\", Arial, sans-serif";
+  ctx.font = '900 24px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
-  ctx.fillText(
-    "mintvaultuk.com",
-    PX_W / 2,
-    footerTextTop,
-  );
+  ctx.fillText("mintvaultuk.com", PX_W / 2, footerTextTop);
   ctx.textAlign = "left";
 
   return canvas.toBuffer("image/png");
 }
 
-export async function generateClaimInsertPDF(
-  certId: string,
-  claimCode: string,
-): Promise<Buffer> {
+export async function generateClaimInsertPDF(certId: string, claimCode: string): Promise<Buffer> {
   const png = await generateClaimInsertPNG(certId, claimCode);
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -279,9 +281,7 @@ export async function generateClaimInsertPDF(
   });
 }
 
-export async function generateClaimInsertSheet(
-  inserts: Array<{ certId: string; claimCode: string }>,
-): Promise<Buffer> {
+export async function generateClaimInsertSheet(inserts: Array<{ certId: string; claimCode: string }>): Promise<Buffer> {
   const A4_W = 595.28;
   const A4_H = 841.89;
 
