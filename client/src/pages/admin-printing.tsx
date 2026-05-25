@@ -996,45 +996,25 @@ function SheetPrintingPanel() {
           isRecentDuplicate?: boolean;
         };
 
-        // Step 2 — PNG anchor download. Same-origin URL + server's
-        // Content-Disposition: attachment header drives the actual save;
-        // the `download` attribute is just a filename hint.
-        // target="_self" makes this a same-tab navigation request — Chrome
-        // doesn't apply its post-await user-gesture popup rules to
-        // navigations of the current tab, so the request actually fires.
-        // The server's attachment header then converts the navigation into
-        // a download instead of a page change, so the user stays on this
-        // page and the file lands in Downloads.
-        const pngAnchor = document.createElement("a");
-        pngAnchor.href = data.pngUrl;
-        pngAnchor.download = `mintvault-batch-${data.batchId}.png`;
-        pngAnchor.target = "_self";
-        document.body.appendChild(pngAnchor);
-        pngAnchor.click();
-        pngAnchor.remove();
+        // Step 2 — PNG download via current-tab navigation. Anchor.click()
+        // (even with target="_self") is still gated by Chrome's post-await
+        // user-gesture rules; assigning window.location.href IS a navigation
+        // and bypasses those rules. The server responds with
+        // Content-Disposition: attachment so the browser treats the response
+        // as a download in flight and keeps the current page intact.
+        window.location.href = data.pngUrl;
 
-        // Step 3 — open print window pointed at the PDF endpoint. The PDF
-        // endpoint serves inline by default so the browser renders it for
-        // the print dialog rather than downloading.
-        const printWindow = window.open(data.pdfUrl, "mintvault-print-batch", "width=900,height=1200");
-        if (printWindow) {
-          let printed = false;
-          const tryPrint = () => {
-            if (printed || printWindow.closed) return;
-            printed = true;
-            try {
-              printWindow.focus();
-              printWindow.print();
-            } catch (err) {
-              console.warn("[print-batch] print() threw:", err);
-            }
-          };
-          printWindow.onload = tryPrint;
-          setTimeout(tryPrint, 1500);
-        } else {
+        // Step 3 — open the PDF in a new tab after a brief delay. The 1.5s
+        // window gives the PNG download response time to start (so the
+        // browser commits to "download, don't navigate") before we issue
+        // the second window.open call. The PDF endpoint serves inline so
+        // the new tab renders it; user prints from there.
+        await new Promise((r) => setTimeout(r, 1500));
+        const pdfTab = window.open(data.pdfUrl, "_blank");
+        if (!pdfTab) {
           toast({
             title: "Popup blocked — PNG downloaded",
-            description: "Allow popups for this site to also open the print dialog.",
+            description: `Allow popups for this site to auto-open the PDF, or open ${data.pdfUrl} manually.`,
             variant: "destructive",
           });
         }
@@ -1045,7 +1025,7 @@ function SheetPrintingPanel() {
           mintedCount > 0 ? ` — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}` : "";
         toast({
           title: "Batch generated",
-          description: `PNG downloaded, print dialog opening${mintedNote}${idempotentNote}.`,
+          description: `PNG downloading, PDF opening in new tab${mintedNote}${idempotentNote}.`,
         });
         invalidate();
       } catch (err: any) {
