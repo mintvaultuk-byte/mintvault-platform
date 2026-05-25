@@ -5742,6 +5742,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchPNG,
         deriveBatchId,
         uploadPrintBatchArtifacts,
+        r2KeyForPrintBatch,
       } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
@@ -5798,6 +5799,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         isRecentDuplicate = recent.rows.length > 0;
       } catch (e: any) {
         console.warn("[print-batch] idempotency check failed (continuing):", e.message);
+      }
+
+      // Fast-path: if this is a recent duplicate AND the R2 artefacts still
+      // exist at the current key version, skip the expensive PDF + PNG
+      // generation (~9s wall-time, ~500MB peak memory). The SVG is rebuilt
+      // here because it's a cheap static cell-template string and the
+      // client downloads it inline from this response.
+      // HEAD-checks the PDF object — if it's missing (R2 key version bumped
+      // mid-window, or object cleared), we fall through to full regeneration.
+      if (isRecentDuplicate) {
+        const pdfKey = r2KeyForPrintBatch(batchId, "pdf");
+        const head = await headR2(pdfKey).catch(() => null);
+        if (head) {
+          const svgStr = generatePrintBatchCutSVG(items.length);
+          console.log(`[print-batch] idempotent fast-path for batch ${batchId} — skipped generation`);
+          return res.json({
+            pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+            pngUrl: `/api/admin/print-batch/${batchId}/png`,
+            svg: Buffer.from(svgStr, "utf8").toString("base64"),
+            batchId,
+            certIds: ids,
+            mintedFor,
+            generatedAt,
+            isRecentDuplicate: true,
+            sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+          });
+        }
+        console.log(`[print-batch] duplicate batchId ${batchId} but R2 artefact missing — regenerating`);
       }
 
       const [pdfBuf, svgStr, pngBuf] = await Promise.all([
@@ -5873,9 +5902,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             console.warn("[print-batch] auto-code audit_log insert failed:", auditErr.message);
           }
         }
-      } else {
-        console.log(`[print-batch] idempotent return for batch ${batchId} (recent duplicate within 5min)`);
       }
+      // Note: reaching this point with isRecentDuplicate=true means the
+      // fast-path's R2 HEAD check came back empty and we regenerated. The
+      // audit log writes above were skipped (gated on !isRecentDuplicate) so
+      // we don't double-record the batch.
 
       res.json({
         pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
