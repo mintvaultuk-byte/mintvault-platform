@@ -848,17 +848,24 @@ export function isNonNumericGrade(gradeType: string): boolean {
 }
 
 export function gradeLabel(grade: number): string {
-  const g = Math.round(grade);
-  if (g >= 10) return "GEM MT";
-  if (g >= 9) return "MINT";
-  if (g >= 8) return "NM-MT";
-  if (g >= 7) return "NM";
-  if (g >= 6) return "EX-MT";
-  if (g >= 5) return "EX";
-  if (g >= 4) return "VG-EX";
-  if (g >= 3) return "VG";
-  if (g >= 2) return "GOOD";
-  if (g >= 1) return "PR";
+  if (grade >= 10) return "GEM MT";
+  if (grade >= 9.5) return "GEM MT";
+  if (grade >= 9) return "MINT";
+  if (grade >= 8.5) return "NM-MT";
+  if (grade >= 8) return "NM-MT";
+  if (grade >= 7.5) return "NM";
+  if (grade >= 7) return "NM";
+  if (grade >= 6.5) return "EX-MT";
+  if (grade >= 6) return "EX-MT";
+  if (grade >= 5.5) return "EX";
+  if (grade >= 5) return "EX";
+  if (grade >= 4.5) return "VG-EX";
+  if (grade >= 4) return "VG-EX";
+  if (grade >= 3.5) return "VG";
+  if (grade >= 3) return "VG";
+  if (grade >= 2.5) return "GOOD";
+  if (grade >= 2) return "GOOD";
+  if (grade >= 1) return "PR";
   return "";
 }
 

@@ -514,7 +514,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     ctx.stroke();
 
     const gradeStr  = String(grade);
-    const gradeAbbr = gradeLabel(grade);
+    const gradeAbbr = isBlack ? "PRISTINE" : gradeLabel(grade);
 
     // ── Three equal 52-px zones inside the panel ─────────────────────
     // Panel y=18 → y=174 (panelH=156); each zone centre is the middle
