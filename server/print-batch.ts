@@ -279,8 +279,12 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 // PDF and PNG buffers are written to R2 keyed by batchId so the client can
 // retrieve them via a stable URL instead of expiring blob URLs. SVG is small
 // enough to keep returning inline as base64 in the POST response.
+// Key version suffix — bump when the artwork changes in a way that
+// invalidates cached objects. v2 (2026-05-25): canvas resized from A4 to
+// Cricut Explore 4 max printable area (165.9×234.7mm) so Auto-Resize
+// doesn't distort labels.
 export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
-  return `print-batches/${batchId}.${ext}`;
+  return `print-batches/${batchId}-v2.${ext}`;
 }
 
 export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {
