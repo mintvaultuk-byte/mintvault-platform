@@ -436,6 +436,7 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
     gradeEdges: c.gradeEdges != null ? String(c.gradeEdges) : null,
     gradeSurface: c.gradeSurface != null ? String(c.gradeSurface) : null,
     gradeStrengthScore: c.gradeStrengthScore != null ? Number(c.gradeStrengthScore) : null,
+    labelType: c.labelType || "Standard",
     frontImageUrl: frontUrl,
     backImageUrl: backUrl,
     gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
@@ -2338,8 +2339,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (quantity > 1 && (!Array.isArray(cardItems) || cardItems.length === 0)) {
         return res.status(400).json({ error: "Card details required for multi-card submissions" });
       }
-      const authoritativeQuantity =
-        Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
+      const authoritativeQuantity = Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
       if (authoritativeQuantity !== quantity) {
         return res.status(400).json({ error: "Quantity mismatch" });
       }
@@ -4169,6 +4169,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           isBlackLabel: isBlack,
           isNonNumeric: isNonNum,
           gradeLabel: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
+          gradeStrengthScore: typeof c.gradeStrengthScore === "number" ? c.gradeStrengthScore : null,
         },
         centering: {
           leftRight: centeringLR,
@@ -11679,7 +11680,8 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadRawScansToR2, setScanStatus, processScanInBackground } = await import("./scan-ingest-service");
+      const { createCertForScan, uploadRawScansToR2, setScanStatus, processScanInBackground } =
+        await import("./scan-ingest-service");
       const { getSetting } = await import("./lib/pipeline-settings");
       let certInfo: { id: number; certId: string } | null = null;
 
@@ -11698,11 +11700,13 @@ Defects (admin-confirmed): ${defectLines}`;
         // raw R2 key keeps the original format (.tif / .tiff / .png / .jpg).
         const extFromName = (name?: string) => {
           if (!name) return "bin";
-          const m = String(name).toLowerCase().match(/\.([a-z0-9]{1,5})$/);
+          const m = String(name)
+            .toLowerCase()
+            .match(/\.([a-z0-9]{1,5})$/);
           return m ? m[1] : "bin";
         };
         const frontExt = extFromName(frontFile.originalname);
-        const backExt  = backFile ? extFromName(backFile.originalname) : "bin";
+        const backExt = backFile ? extFromName(backFile.originalname) : "bin";
 
         console.log(
           `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`
@@ -11718,7 +11722,7 @@ Defects (admin-confirmed): ${defectLines}`;
         await uploadRawScansToR2(
           certInfo.id,
           { buffer: frontBuf, mimeType: frontFile.mimetype, ext: frontExt },
-          backBuf && backFile ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt } : null,
+          backBuf && backFile ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt } : null
         );
         await setScanStatus(certInfo.id, "processing");
         if (notes) {
@@ -11731,12 +11735,11 @@ Defects (admin-confirmed): ${defectLines}`;
         const autoAiOn = await getSetting("ai_auto_ingest_enabled", true);
         const captured = certInfo;
         setImmediate(() => {
-          processScanInBackground(captured, frontBuf, backBuf, { skipAi: !autoAiOn })
-            .catch((e) =>
-              console.error(
-                `[scan-ingest] background runner crashed cert=${captured.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`,
-              ),
-            );
+          processScanInBackground(captured, frontBuf, backBuf, { skipAi: !autoAiOn }).catch((e) =>
+            console.error(
+              `[scan-ingest] background runner crashed cert=${captured.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`
+            )
+          );
         });
 
         // Step 4 (sync return): tell the watcher the cert exists and is

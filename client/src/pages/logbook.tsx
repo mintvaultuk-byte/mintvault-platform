@@ -1,7 +1,18 @@
 import { useParams, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Download, Lock, ExternalLink, Check, X, ChevronDown, ChevronUp, ArrowRightLeft, Loader2 } from "lucide-react";
+import {
+  Shield,
+  Download,
+  Lock,
+  ExternalLink,
+  Check,
+  X,
+  ChevronDown,
+  ChevronUp,
+  ArrowRightLeft,
+  Loader2,
+} from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
 
@@ -13,8 +24,30 @@ interface LogbookData {
   // is on AND owner has opted in AND owner.display_name is non-empty.
   // Field omitted otherwise (anonymous = no row rendered).
   ownerDisplayName?: string;
-  card: { name: string | null; set: string | null; number: string | null; year: string | null; game: string | null; variant: string | null; language: string; rarity: string | null; collection: string | null; designations: string[] };
-  grades: { overall: number | string; gradeLabel: string; centering: number | null; corners: number | null; edges: number | null; surface: number | null; isBlackLabel: boolean; isNonNumeric: boolean; gradeType: string; labelType: string };
+  card: {
+    name: string | null;
+    set: string | null;
+    number: string | null;
+    year: string | null;
+    game: string | null;
+    variant: string | null;
+    language: string;
+    rarity: string | null;
+    collection: string | null;
+    designations: string[];
+  };
+  grades: {
+    overall: number | string;
+    gradeLabel: string;
+    centering: number | null;
+    corners: number | null;
+    edges: number | null;
+    surface: number | null;
+    isBlackLabel: boolean;
+    isNonNumeric: boolean;
+    gradeType: string;
+    labelType: string;
+  };
   centering: { frontLR: string | null; frontTB: string | null; backLR: string | null; backTB: string | null };
   authentication: { status: string; notes: string | null };
   defects: Array<{
@@ -27,12 +60,37 @@ interface LogbookData {
     y_percent?: number | null;
     image_side?: "front" | "back";
   }>;
-  gradingReport: { centering: string | null; corners: string | null; edges: string | null; surface: string | null; overall: string | null };
+  gradingReport: {
+    centering: string | null;
+    corners: string | null;
+    edges: string | null;
+    surface: string | null;
+    overall: string | null;
+  };
   images: { front: string | null; back: string | null };
   population: any;
-  provenance: { issuedAt: string | null; gradedAt: string | null; ownershipStatus: string; nfcEnabled: boolean; nfcScanCount: number; stolenStatus: string | null };
+  provenance: {
+    issuedAt: string | null;
+    gradedAt: string | null;
+    ownershipStatus: string;
+    nfcEnabled: boolean;
+    nfcScanCount: number;
+    stolenStatus: string | null;
+  };
   verification: { signature: string | null; signedAt: string; verifyUrl: string };
-  ownership: { previousOwnersCount: number; currentOwnerNumber: number; chain: Array<{ ownerNumber: number; displayName: string | null; claimedAt: string; releasedAt: string | null; durationDays: number | null; isCurrent: boolean; claimMethod: string }> };
+  ownership: {
+    previousOwnersCount: number;
+    currentOwnerNumber: number;
+    chain: Array<{
+      ownerNumber: number;
+      displayName: string | null;
+      claimedAt: string;
+      releasedAt: string | null;
+      durationDays: number | null;
+      isCurrent: boolean;
+      claimMethod: string;
+    }>;
+  };
 }
 
 function safe(v: any, fallback = "\u2014"): string {
@@ -43,8 +101,11 @@ function safe(v: any, fallback = "\u2014"): string {
 function titleCase(s: string | null | undefined): string {
   if (!s) return "\u2014";
   // Special cases
-  const specials: Record<string, string> = { pokemon: "Pok\u00e9mon", "pokémon": "Pok\u00e9mon" };
-  return s.split(" ").map(w => specials[w.toLowerCase()] || (w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join(" ");
+  const specials: Record<string, string> = { pokemon: "Pok\u00e9mon", pokémon: "Pok\u00e9mon" };
+  return s
+    .split(" ")
+    .map((w) => specials[w.toLowerCase()] || w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function GoldDivider() {
@@ -54,7 +115,15 @@ function GoldDivider() {
 function SubgradeBox({ label, value }: { label: string; value: number | string | null }) {
   const v = value !== null && value !== undefined ? String(value) : "\u2014";
   const num = typeof value === "number" ? value : parseFloat(String(value));
-  const color = isNaN(num) ? "text-[#888888]" : num >= 10 ? "text-[#D4AF37]" : num >= 8 ? "text-[#16A34A]" : num >= 6 ? "text-[#CA8A04]" : "text-[#DC2626]";
+  const color = isNaN(num)
+    ? "text-[#888888]"
+    : num >= 10
+      ? "text-[#D4AF37]"
+      : num >= 8
+        ? "text-[#16A34A]"
+        : num >= 6
+          ? "text-[#CA8A04]"
+          : "text-[#DC2626]";
   return (
     <div className="text-center">
       <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-1">{label}</p>
@@ -88,21 +157,27 @@ function Field({ label, value }: { label: string; value: string }) {
 // section — never the hero card images at the top of the page. Sides
 // with no positioned defects render nothing for that side.
 type OverlayDefect = {
-  id: number; type: string; severity: string;
-  x_percent?: number | null; y_percent?: number | null;
+  id: number;
+  type: string;
+  severity: string;
+  x_percent?: number | null;
+  y_percent?: number | null;
   image_side?: "front" | "back";
 };
 function DefectOverlayPair({
-  defects, images, highlightId, onHighlight,
+  defects,
+  images,
+  highlightId,
+  onHighlight,
 }: {
   defects: OverlayDefect[];
   images: { front: string | null; back: string | null };
   highlightId: number | null;
   onHighlight: (id: number | null) => void;
 }) {
-  const positioned = defects.filter(d => typeof d.x_percent === "number" && typeof d.y_percent === "number");
-  const frontDefects = positioned.filter(d => d.image_side !== "back");
-  const backDefects  = positioned.filter(d => d.image_side === "back");
+  const positioned = defects.filter((d) => typeof d.x_percent === "number" && typeof d.y_percent === "number");
+  const frontDefects = positioned.filter((d) => d.image_side !== "back");
+  const backDefects = positioned.filter((d) => d.image_side === "back");
   // Always render both sides if their image URL exists, regardless of defect
   // presence on that side. Sides with no positioned defects render the image
   // bare. Defensive: if neither URL exists we render nothing — caller
@@ -110,9 +185,11 @@ function DefectOverlayPair({
   if (!images.front && !images.back) return null;
 
   const sevBorder = (s: string) =>
-    s === "significant" ? "border-red-600 text-red-600 bg-red-50" :
-    s === "moderate"    ? "border-orange-600 text-orange-600 bg-orange-50" :
-                          "border-amber-600 text-amber-600 bg-amber-50";
+    s === "significant"
+      ? "border-red-600 text-red-600 bg-red-50"
+      : s === "moderate"
+        ? "border-orange-600 text-orange-600 bg-orange-50"
+        : "border-amber-600 text-amber-600 bg-amber-50";
 
   function SidePanel({ url, label, defects }: { url: string; label: string; defects: OverlayDefect[] }) {
     return (
@@ -120,23 +197,27 @@ function DefectOverlayPair({
         <p className="text-[10px] uppercase tracking-[0.2em] text-[#888888] mb-2">{label}</p>
         <div className="relative inline-block">
           <img src={url} alt={label} className="h-64 rounded-lg shadow-lg" draggable={false} />
-          {defects.map(d => {
+          {defects.map((d) => {
             const isHi = highlightId === d.id;
             return (
               <button
                 key={d.id}
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onHighlight(isHi ? null : d.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onHighlight(isHi ? null : d.id);
+                }}
                 title={`#${d.id} ${d.type} (${d.severity})`}
                 aria-label={`Defect ${d.id} ${d.type} ${d.severity}`}
                 data-testid={`defect-circle-${d.id}`}
-                className={`absolute flex items-center justify-center font-bold text-[10px] rounded-full border-2 transition-transform ${
-                  sevBorder(d.severity)
-                } ${isHi ? "scale-125 ring-2 ring-[#D4AF37]" : "hover:scale-110"}`}
+                className={`absolute flex items-center justify-center font-bold text-[10px] rounded-full border-2 transition-transform ${sevBorder(
+                  d.severity
+                )} ${isHi ? "scale-125 ring-2 ring-[#D4AF37]" : "hover:scale-110"}`}
                 style={{
                   left: `${d.x_percent}%`,
                   top: `${d.y_percent}%`,
-                  width: 28, height: 28,
+                  width: 28,
+                  height: 28,
                   transform: `translate(-50%, -50%)${isHi ? " scale(1.25)" : ""}`,
                   backgroundColor: "rgba(255,255,255,0.85)",
                   cursor: "pointer",
@@ -154,7 +235,7 @@ function DefectOverlayPair({
   return (
     <div className="mt-4 flex justify-center gap-4">
       {images.front && <SidePanel url={images.front} label="Front" defects={frontDefects} />}
-      {images.back  && <SidePanel url={images.back}  label="Back"  defects={backDefects} />}
+      {images.back && <SidePanel url={images.back} label="Back" defects={backDefects} />}
     </div>
   );
 }
@@ -205,7 +286,13 @@ function AdminReprocessButton({ certId }: { certId: string }) {
       }`}
       data-testid="btn-reprocess-images"
     >
-      {loading ? <><Loader2 size={12} className="animate-spin" /> Reprocessing…</> : "Reprocess Images"}
+      {loading ? (
+        <>
+          <Loader2 size={12} className="animate-spin" /> Reprocessing…
+        </>
+      ) : (
+        "Reprocess Images"
+      )}
     </button>
   );
 }
@@ -253,7 +340,8 @@ function AdminPopReportPanel({ certId }: { certId: string }) {
     return (
       <Section title="Population Report (admin)">
         <p className="text-xs text-[#888888]">
-          {data.note ?? `No other active graded certs match ${data.card.name ?? "this card"}${data.card.set ? ` (${data.card.set}` : ""}${data.card.number ? ` #${data.card.number})` : data.card.set ? ")" : ""}.`}
+          {data.note ??
+            `No other active graded certs match ${data.card.name ?? "this card"}${data.card.set ? ` (${data.card.set}` : ""}${data.card.number ? ` #${data.card.number})` : data.card.set ? ")" : ""}.`}
         </p>
       </Section>
     );
@@ -266,11 +354,13 @@ function AdminPopReportPanel({ certId }: { certId: string }) {
             <tr className="text-left border-b border-[#E8E4DC]">
               <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888]">Grade</th>
               <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888] text-right">Count</th>
-              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888] text-right">% of total</th>
+              <th className="py-2 px-3 text-[10px] uppercase tracking-[0.15em] text-[#888888] text-right">
+                % of total
+              </th>
             </tr>
           </thead>
           <tbody>
-            {data.distribution.map(row => {
+            {data.distribution.map((row) => {
               const isCurrent = row.grade === data.current_grade;
               const rowCls = isCurrent ? "bg-gradient-to-r from-[#D4AF37]/15 to-transparent" : "";
               const txt = isCurrent ? "text-[#B8960C] font-bold" : "text-[#1A1A1A]";
@@ -279,7 +369,9 @@ function AdminPopReportPanel({ certId }: { certId: string }) {
                 <tr key={row.grade} className={`border-b border-[#F0EDE5] ${rowCls}`}>
                   <td className={`py-2 px-3 ${txt}`}>
                     {row.grade}
-                    {isCurrent && <span className="ml-2 text-[10px] uppercase tracking-[0.15em] text-[#D4AF37]">This cert</span>}
+                    {isCurrent && (
+                      <span className="ml-2 text-[10px] uppercase tracking-[0.15em] text-[#D4AF37]">This cert</span>
+                    )}
                   </td>
                   <td className={`py-2 px-3 text-right ${txt}`}>{row.count}</td>
                   <td className={`py-2 px-3 text-right ${muted}`}>{row.percent.toFixed(1)}%</td>
@@ -332,29 +424,33 @@ export default function LogbookPage() {
         const res = await fetch("/api/customer/me", { credentials: "include" });
         if (!res.ok) return null;
         return res.json();
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     },
   });
   const isOwner = !!(me?.email && data?.ownerEmail && me.email.toLowerCase() === data.ownerEmail.toLowerCase());
 
-  if (isLoading) return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-[#888888] text-sm">Loading logbook...</p>
+  if (isLoading)
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[#888888] text-sm">Loading logbook...</p>
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  if (error || !data) return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
-      <div className="text-center">
-        <Shield className="w-12 h-12 text-[#E8E4DC] mx-auto mb-4" />
-        <p className="text-[#555555] text-lg mb-2">Certificate Not Found</p>
-        <p className="text-[#888888] text-sm">The certificate {certId} could not be verified.</p>
+  if (error || !data)
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <Shield className="w-12 h-12 text-[#E8E4DC] mx-auto mb-4" />
+          <p className="text-[#555555] text-lg mb-2">Certificate Not Found</p>
+          <p className="text-[#888888] text-sm">The certificate {certId} could not be verified.</p>
+        </div>
       </div>
-    </div>
-  );
+    );
 
   const { card, grades, centering, authentication, defects, gradingReport, images, provenance, verification } = data;
 
@@ -381,10 +477,29 @@ export default function LogbookPage() {
               }
               .stolen-banner-pulse { animation: stolen-banner-pulse 1.6s ease-in-out infinite; }
             `}</style>
-            <div className="stolen-banner-pulse w-full text-white text-center py-3 px-4 flex items-center justify-center gap-3" role="alert">
-              <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div
+              className="stolen-banner-pulse w-full text-white text-center py-3 px-4 flex items-center justify-center gap-3"
+              role="alert"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="shrink-0"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
               <span className="text-sm font-bold tracking-wide">
-                ⚠ This card has been reported stolen. If you have seen it for sale, please contact us at support@mintvaultuk.com
+                ⚠ This card has been reported stolen. If you have seen it for sale, please contact us at
+                support@mintvaultuk.com
               </span>
             </div>
           </>
@@ -396,7 +511,7 @@ export default function LogbookPage() {
         {isAdminView && (
           <nav className="border-b border-[#E8E4DC] bg-white">
             <div className="max-w-3xl mx-auto px-4 flex flex-col sm:flex-row">
-              {(["images", "grading", "population", "actions"] as const).map(t => (
+              {(["images", "grading", "population", "actions"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -417,256 +532,380 @@ export default function LogbookPage() {
 
         {/* Cover Hero — IMAGES tab (admin) / always (public) */}
         {(!isAdminView || adminTab === "images") && (
-        <section className="pt-12 pb-8 px-4">
-          <div className="max-w-3xl mx-auto text-center">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-6">MintVault Ownership Logbook</p>
+          <section className="pt-12 pb-8 px-4">
+            <div className="max-w-3xl mx-auto text-center">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mb-6">MintVault Ownership Logbook</p>
 
-            {/* Card images */}
-            {(images.front || images.back) && (
-              <div className="flex justify-center gap-4 mb-8">
-                {images.front && <img src={images.front} alt="Front" className="h-64 rounded-lg shadow-lg" />}
-                {images.back && <img src={images.back} alt="Back" className="h-64 rounded-lg shadow-lg" />}
-              </div>
-            )}
+              {/* Card images */}
+              {(images.front || images.back) && (
+                <div className="flex justify-center gap-4 mb-8">
+                  {images.front && <img src={images.front} alt="Front" className="h-64 rounded-lg shadow-lg" />}
+                  {images.back && <img src={images.back} alt="Back" className="h-64 rounded-lg shadow-lg" />}
+                </div>
+              )}
 
-            {/* Grade badge */}
-            <div className="inline-block mb-4">
-              <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2" style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}>
-                <span className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-500" : "text-[#1A1A1A]"}`}>
-                  {safe(grades.overall)}
-                </span>
+              {/* Grade badge */}
+              <div className="inline-block mb-4">
+                <div
+                  className="inline-flex items-center justify-center w-28 h-28 rounded-full border-2 border-[#D4AF37]/40 bg-white mb-2"
+                  style={{ boxShadow: "0 0 24px rgba(212,175,55,0.12)" }}
+                >
+                  <span
+                    className={`text-5xl font-black ${grades.isBlackLabel ? "text-[#D4AF37]" : grades.isNonNumeric ? "text-amber-500" : "text-[#1A1A1A]"}`}
+                  >
+                    {safe(grades.overall)}
+                  </span>
+                </div>
+                <div
+                  className={`text-sm uppercase tracking-[0.2em] font-bold mt-1 ${grades.isBlackLabel ? "text-[#D4AF37]" : "text-[#888888]"}`}
+                >
+                  {grades.gradeLabel}
+                </div>
+                {grades.isBlackLabel && grades.gradeLabel !== "PRISTINE 10P" && (
+                  <div className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mt-2 animate-pulse">
+                    Pristine 10P
+                  </div>
+                )}
               </div>
-              <div className={`text-sm uppercase tracking-[0.2em] font-bold mt-1 ${grades.isBlackLabel ? "text-[#D4AF37]" : "text-[#888888]"}`}>
-                {grades.gradeLabel}
-              </div>
-              {grades.isBlackLabel && (
-                <div className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] mt-2 animate-pulse">Pristine 10P</div>
+
+              <h1 className="text-3xl md:text-4xl font-black text-[#1A1A1A] mt-4 mb-2">{titleCase(card.name)}</h1>
+              <p className="text-[#888888] text-sm">
+                {safe(card.set)} {card.number ? `#${card.number}` : ""} {card.year ? `(${card.year})` : ""}
+              </p>
+
+              <GoldDivider />
+
+              {/* Cert ID */}
+              <p className="font-mono text-lg text-[#D4AF37] tracking-wider">{data.certId}</p>
+              {provenance.issuedAt && (
+                <p className="text-[#888888] text-xs mt-1">
+                  Issued{" "}
+                  {new Date(provenance.issuedAt).toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </p>
               )}
             </div>
-
-            <h1 className="text-3xl md:text-4xl font-black text-[#1A1A1A] mt-4 mb-2">{titleCase(card.name)}</h1>
-            <p className="text-[#888888] text-sm">{safe(card.set)} {card.number ? `#${card.number}` : ""} {card.year ? `(${card.year})` : ""}</p>
-
-            <GoldDivider />
-
-            {/* Cert ID */}
-            <p className="font-mono text-lg text-[#D4AF37] tracking-wider">{data.certId}</p>
-            {provenance.issuedAt && (
-              <p className="text-[#888888] text-xs mt-1">Issued {new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
-            )}
-          </div>
-        </section>
+          </section>
         )}
 
         {/* Verification strip — IMAGES tab (admin) / always (public) */}
         {(!isAdminView || adminTab === "images") && (
-        <section className="bg-[#F7F7F5] border-y border-[#E8E4DC] py-4 px-4">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-[#D4AF37]" />
-              <span className="text-[10px] uppercase tracking-[0.15em] text-[#D4AF37] font-bold">VaultSeal Verified</span>
+          <section className="bg-[#F7F7F5] border-y border-[#E8E4DC] py-4 px-4">
+            <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-[#D4AF37]" />
+                <span className="text-[10px] uppercase tracking-[0.15em] text-[#D4AF37] font-bold">
+                  VaultSeal Verified
+                </span>
+              </div>
+              <span className="font-mono text-[10px] text-[#888888]">{verification.signature?.slice(0, 16)}...</span>
             </div>
-            <span className="font-mono text-[10px] text-[#888888]">{verification.signature?.slice(0, 16)}...</span>
-          </div>
-        </section>
+          </section>
         )}
 
         {/* Content sections */}
         <div className="max-w-3xl mx-auto px-4 py-12">
-
           {/* GRADING tab (admin) / always (public) — Card Identity through
               Ownership History stack together. */}
           {(!isAdminView || adminTab === "grading") && (
-          <>
-          {/* Card Identity */}
-          <Section title="Card Identity">
-            <div className="space-y-0">
-              {card.game && <Field label="Game" value={titleCase(card.game)} />}
-              <Field label="Card Name" value={titleCase(card.name)} />
-              {card.set && <Field label="Set" value={safe(card.set)} />}
-              {card.number && <Field label="Card Number" value={safe(card.number)} />}
-              {card.year && <Field label="Year" value={safe(card.year)} />}
-              {card.variant && <Field label="Variant" value={card.variant} />}
-              {card.rarity && <Field label="Rarity" value={safe(card.rarity)} />}
-              <Field label="Language" value={safe(card.language)} />
-              {card.designations.length > 0 && <Field label="Designations" value={card.designations.join(", ")} />}
-            </div>
-          </Section>
-
-          {/* Grade Breakdown — only show if at least one subgrade exists */}
-          {(grades.centering != null || grades.corners != null || grades.edges != null || grades.surface != null) && (
-          <Section title="Grade Analysis">
-            <div className="grid grid-cols-4 gap-6 mb-4">
-              <SubgradeBox label="Centering" value={grades.centering} />
-              <SubgradeBox label="Corners" value={grades.corners} />
-              <SubgradeBox label="Edges" value={grades.edges} />
-              <SubgradeBox label="Surface" value={grades.surface} />
-            </div>
-            <p className="text-[10px] text-[#888888] text-center mb-6">Surface 40% · Corners 25% · Edges 25% · Centering 10%</p>
-
-            {/* Centering ratios */}
-            {(centering.frontLR || centering.backLR) && (
-              <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4 mb-4">
-                <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-3">Centering Measurement</p>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  {centering.frontLR && <div><span className="text-[#888888] text-xs">Front L/R</span> <span className="text-[#1A1A1A] font-mono ml-2">{centering.frontLR}</span></div>}
-                  {centering.frontTB && <div><span className="text-[#888888] text-xs">Front T/B</span> <span className="text-[#1A1A1A] font-mono ml-2">{centering.frontTB}</span></div>}
-                  {centering.backLR && <div><span className="text-[#888888] text-xs">Back L/R</span> <span className="text-[#1A1A1A] font-mono ml-2">{centering.backLR}</span></div>}
-                  {centering.backTB && <div><span className="text-[#888888] text-xs">Back T/B</span> <span className="text-[#1A1A1A] font-mono ml-2">{centering.backTB}</span></div>}
+            <>
+              {/* Card Identity */}
+              <Section title="Card Identity">
+                <div className="space-y-0">
+                  {card.game && <Field label="Game" value={titleCase(card.game)} />}
+                  <Field label="Card Name" value={titleCase(card.name)} />
+                  {card.set && <Field label="Set" value={safe(card.set)} />}
+                  {card.number && <Field label="Card Number" value={safe(card.number)} />}
+                  {card.year && <Field label="Year" value={safe(card.year)} />}
+                  {card.variant && <Field label="Variant" value={card.variant} />}
+                  {card.rarity && <Field label="Rarity" value={safe(card.rarity)} />}
+                  <Field label="Language" value={safe(card.language)} />
+                  {card.designations.length > 0 && <Field label="Designations" value={card.designations.join(", ")} />}
                 </div>
-              </div>
-            )}
+              </Section>
 
-            {/* Grader notes */}
-            {(gradingReport.overall || gradingReport.centering) && (
-              <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4">
-                <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-3">Grader Notes</p>
-                <div className="text-sm text-[#555555] space-y-2 leading-relaxed">
-                  {gradingReport.centering && <p><span className="text-[#888888]">Centering:</span> {gradingReport.centering}</p>}
-                  {gradingReport.corners && <p><span className="text-[#888888]">Corners:</span> {gradingReport.corners}</p>}
-                  {gradingReport.edges && <p><span className="text-[#888888]">Edges:</span> {gradingReport.edges}</p>}
-                  {gradingReport.surface && <p><span className="text-[#888888]">Surface:</span> {gradingReport.surface}</p>}
-                  {gradingReport.overall && <p><span className="text-[#888888]">Overall:</span> {gradingReport.overall}</p>}
-                </div>
-              </div>
-            )}
-          </Section>
-          )}
+              {/* Grade Breakdown — only show if at least one subgrade exists */}
+              {(grades.centering != null ||
+                grades.corners != null ||
+                grades.edges != null ||
+                grades.surface != null) && (
+                <Section title="Grade Analysis">
+                  <div className="grid grid-cols-4 gap-6 mb-4">
+                    <SubgradeBox label="Centering" value={grades.centering} />
+                    <SubgradeBox label="Corners" value={grades.corners} />
+                    <SubgradeBox label="Edges" value={grades.edges} />
+                    <SubgradeBox label="Surface" value={grades.surface} />
+                  </div>
+                  <p className="text-[10px] text-[#888888] text-center mb-6">
+                    Surface 40% · Corners 25% · Edges 25% · Centering 10%
+                  </p>
 
-          {/* Authentication */}
-          <Section title="Authentication">
-            <div className="flex items-center gap-3">
-              {authentication.status === "genuine" ? (
-                <><Check className="w-5 h-5 text-[#16A34A]" /><span className="text-[#16A34A] font-bold text-sm">Genuine</span></>
-              ) : authentication.status === "authentic_altered" ? (
-                <><Shield className="w-5 h-5 text-amber-500" /><span className="text-amber-500 font-bold text-sm">Authentic Altered</span></>
-              ) : (
-                <><X className="w-5 h-5 text-[#DC2626]" /><span className="text-[#DC2626] font-bold text-sm">Not Original</span></>
+                  {/* Centering ratios */}
+                  {(centering.frontLR || centering.backLR) && (
+                    <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4 mb-4">
+                      <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-3">
+                        Centering Measurement
+                      </p>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        {centering.frontLR && (
+                          <div>
+                            <span className="text-[#888888] text-xs">Front L/R</span>{" "}
+                            <span className="text-[#1A1A1A] font-mono ml-2">{centering.frontLR}</span>
+                          </div>
+                        )}
+                        {centering.frontTB && (
+                          <div>
+                            <span className="text-[#888888] text-xs">Front T/B</span>{" "}
+                            <span className="text-[#1A1A1A] font-mono ml-2">{centering.frontTB}</span>
+                          </div>
+                        )}
+                        {centering.backLR && (
+                          <div>
+                            <span className="text-[#888888] text-xs">Back L/R</span>{" "}
+                            <span className="text-[#1A1A1A] font-mono ml-2">{centering.backLR}</span>
+                          </div>
+                        )}
+                        {centering.backTB && (
+                          <div>
+                            <span className="text-[#888888] text-xs">Back T/B</span>{" "}
+                            <span className="text-[#1A1A1A] font-mono ml-2">{centering.backTB}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Grader notes */}
+                  {(gradingReport.overall || gradingReport.centering) && (
+                    <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-4">
+                      <p className="text-[10px] uppercase tracking-[0.15em] text-[#888888] mb-3">Grader Notes</p>
+                      <div className="text-sm text-[#555555] space-y-2 leading-relaxed">
+                        {gradingReport.centering && (
+                          <p>
+                            <span className="text-[#888888]">Centering:</span> {gradingReport.centering}
+                          </p>
+                        )}
+                        {gradingReport.corners && (
+                          <p>
+                            <span className="text-[#888888]">Corners:</span> {gradingReport.corners}
+                          </p>
+                        )}
+                        {gradingReport.edges && (
+                          <p>
+                            <span className="text-[#888888]">Edges:</span> {gradingReport.edges}
+                          </p>
+                        )}
+                        {gradingReport.surface && (
+                          <p>
+                            <span className="text-[#888888]">Surface:</span> {gradingReport.surface}
+                          </p>
+                        )}
+                        {gradingReport.overall && (
+                          <p>
+                            <span className="text-[#888888]">Overall:</span> {gradingReport.overall}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Section>
               )}
-            </div>
-            {authentication.notes && <p className="text-[#555555] text-sm mt-3 leading-relaxed">{authentication.notes}</p>}
-          </Section>
 
-          {/* Condition / Defects */}
-          {defects.length > 0 && (
-            <Section title="Condition Report">
-              <button onClick={() => setShowDefects(!showDefects)} className="flex items-center gap-2 text-sm text-[#555555] hover:text-[#1A1A1A] transition-colors">
-                {defects.length} defect{defects.length !== 1 ? "s" : ""} detected
-                {showDefects ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </button>
-              {showDefects && (
-                <>
-                  {/* Overlay images — Condition Report only. Hero card images
+              {/* Authentication */}
+              <Section title="Authentication">
+                <div className="flex items-center gap-3">
+                  {authentication.status === "genuine" ? (
+                    <>
+                      <Check className="w-5 h-5 text-[#16A34A]" />
+                      <span className="text-[#16A34A] font-bold text-sm">Genuine</span>
+                    </>
+                  ) : authentication.status === "authentic_altered" ? (
+                    <>
+                      <Shield className="w-5 h-5 text-amber-500" />
+                      <span className="text-amber-500 font-bold text-sm">Authentic Altered</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="w-5 h-5 text-[#DC2626]" />
+                      <span className="text-[#DC2626] font-bold text-sm">Not Original</span>
+                    </>
+                  )}
+                </div>
+                {authentication.notes && (
+                  <p className="text-[#555555] text-sm mt-3 leading-relaxed">{authentication.notes}</p>
+                )}
+              </Section>
+
+              {/* Condition / Defects */}
+              {defects.length > 0 && (
+                <Section title="Condition Report">
+                  <button
+                    onClick={() => setShowDefects(!showDefects)}
+                    className="flex items-center gap-2 text-sm text-[#555555] hover:text-[#1A1A1A] transition-colors"
+                  >
+                    {defects.length} defect{defects.length !== 1 ? "s" : ""} detected
+                    {showDefects ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                  {showDefects && (
+                    <>
+                      {/* Overlay images — Condition Report only. Hero card images
                       at the top of the page stay clean. Each side renders
                       only if at least one defect on that side has coordinates;
                       sides with no positioned defects are skipped entirely. */}
-                  <DefectOverlayPair
-                    defects={defects}
-                    images={images}
-                    highlightId={highlightDefectId}
-                    onHighlight={setHighlightDefectId}
-                  />
-                  <div className="mt-4 space-y-2">
-                    {defects.map(d => {
-                      const isHighlighted = highlightDefectId === d.id;
-                      return (
-                        <div
-                          key={d.id}
-                          className={`flex items-start gap-3 py-2 border-b transition-colors cursor-pointer ${
-                            isHighlighted ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC]"
-                          }`}
-                          onClick={() => setHighlightDefectId(isHighlighted ? null : d.id)}
-                          data-testid={`defect-row-${d.id}`}
-                        >
-                          <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded border ${
-                            d.severity === "minor" ? "text-amber-600 border-amber-200 bg-amber-50" :
-                            d.severity === "moderate" ? "text-orange-600 border-orange-200 bg-orange-50" :
-                            "text-red-600 border-red-200 bg-red-50"
-                          }`}>{d.severity}</span>
+                      <DefectOverlayPair
+                        defects={defects}
+                        images={images}
+                        highlightId={highlightDefectId}
+                        onHighlight={setHighlightDefectId}
+                      />
+                      <div className="mt-4 space-y-2">
+                        {defects.map((d) => {
+                          const isHighlighted = highlightDefectId === d.id;
+                          return (
+                            <div
+                              key={d.id}
+                              className={`flex items-start gap-3 py-2 border-b transition-colors cursor-pointer ${
+                                isHighlighted ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC]"
+                              }`}
+                              onClick={() => setHighlightDefectId(isHighlighted ? null : d.id)}
+                              data-testid={`defect-row-${d.id}`}
+                            >
+                              <span
+                                className={`text-[9px] uppercase px-1.5 py-0.5 rounded border ${
+                                  d.severity === "minor"
+                                    ? "text-amber-600 border-amber-200 bg-amber-50"
+                                    : d.severity === "moderate"
+                                      ? "text-orange-600 border-orange-200 bg-orange-50"
+                                      : "text-red-600 border-red-200 bg-red-50"
+                                }`}
+                              >
+                                {d.severity}
+                              </span>
+                              <div>
+                                <p className="text-sm text-[#1A1A1A]">
+                                  #{d.id} · {d.type}
+                                </p>
+                                <p className="text-xs text-[#888888]">
+                                  {d.location}
+                                  {d.description ? ` — ${d.description}` : ""}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </Section>
+              )}
+
+              {/* Ownership Status */}
+              <Section title="Ownership">
+                {provenance.ownershipStatus === "unclaimed" ? (
+                  <div className="bg-[#FFF9E6] border border-[#D4AF37]/30 rounded-lg p-5 text-center">
+                    <p className="text-[#B8960C] text-sm font-bold uppercase tracking-wider mb-2">
+                      Unclaimed Certificate
+                    </p>
+                    <p className="text-[#888888] text-xs mb-4">
+                      This certificate has not been registered to an owner yet.
+                    </p>
+                    <a
+                      href={`/claim?certId=${encodeURIComponent(data.certId)}`}
+                      className="inline-flex items-center gap-2 bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-6 py-2.5 rounded-lg transition-colors"
+                    >
+                      Claim This Certificate
+                    </a>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-[#16A34A]" />
+                      <span className="text-[#16A34A] text-sm font-bold">Verified Ownership</span>
+                    </div>
+                    {data.ownerDisplayName && (
+                      <p className="text-xs text-[#888888] mt-2" data-testid="logbook-owner-display-name">
+                        Owned by {data.ownerDisplayName}
+                      </p>
+                    )}
+                  </>
+                )}
+              </Section>
+
+              {/* Provenance */}
+              <Section title="Provenance">
+                <div className="space-y-0">
+                  {provenance.issuedAt && (
+                    <Field
+                      label="Certificate Issued"
+                      value={new Date(provenance.issuedAt).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    />
+                  )}
+                  {provenance.gradedAt && (
+                    <Field
+                      label="Grade Approved"
+                      value={new Date(provenance.gradedAt).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    />
+                  )}
+                  {provenance.nfcEnabled && <Field label="NFC Enabled" value="Yes" />}
+                  {provenance.nfcScanCount > 0 && <Field label="NFC Scans" value={String(provenance.nfcScanCount)} />}
+                  {provenance.stolenStatus && <Field label="Stolen Flag" value="REPORTED STOLEN" />}
+                </div>
+              </Section>
+
+              {/* Ownership Chain */}
+              <Section title="Ownership History">
+                {!data.ownership || data.ownership.chain.length === 0 ? (
+                  <p className="text-sm text-[#888888]">
+                    Awaiting first owner — claim this card to begin its registry history
+                  </p>
+                ) : (
+                  <>
+                    {data.ownership.chain.length > 1 && (
+                      <p className="text-sm text-[#888888] mb-4">
+                        {data.ownership.chain.length - 1} previous owner
+                        {data.ownership.chain.length - 1 !== 1 ? "s" : ""}
+                      </p>
+                    )}
+                    <div className="space-y-3">
+                      {data.ownership.chain.map((owner) => (
+                        <div key={owner.ownerNumber} className="flex items-start gap-3">
+                          <div
+                            className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#E8E4DC]"}`}
+                          />
                           <div>
-                            <p className="text-sm text-[#1A1A1A]">#{d.id} · {d.type}</p>
-                            <p className="text-xs text-[#888888]">{d.location}{d.description ? ` — ${d.description}` : ""}</p>
+                            <p className="text-sm text-[#1A1A1A]">
+                              Owner {owner.ownerNumber}
+                              {owner.displayName && <span className="text-[#888888]"> — {owner.displayName}</span>}
+                            </p>
+                            <p className="text-xs text-[#888888]">
+                              {new Date(owner.claimedAt).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })}
+                              {owner.releasedAt
+                                ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
+                                : " (Current)"}
+                            </p>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </Section>
-          )}
-
-          {/* Ownership Status */}
-          <Section title="Ownership">
-            {provenance.ownershipStatus === "unclaimed" ? (
-              <div className="bg-[#FFF9E6] border border-[#D4AF37]/30 rounded-lg p-5 text-center">
-                <p className="text-[#B8960C] text-sm font-bold uppercase tracking-wider mb-2">Unclaimed Certificate</p>
-                <p className="text-[#888888] text-xs mb-4">This certificate has not been registered to an owner yet.</p>
-                <a href={`/claim?certId=${encodeURIComponent(data.certId)}`}
-                  className="inline-flex items-center gap-2 bg-[#D4AF37] hover:bg-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-6 py-2.5 rounded-lg transition-colors">
-                  Claim This Certificate
-                </a>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <Check className="w-4 h-4 text-[#16A34A]" />
-                  <span className="text-[#16A34A] text-sm font-bold">Verified Ownership</span>
-                </div>
-                {data.ownerDisplayName && (
-                  <p className="text-xs text-[#888888] mt-2" data-testid="logbook-owner-display-name">
-                    Owned by {data.ownerDisplayName}
-                  </p>
-                )}
-              </>
-            )}
-          </Section>
-
-          {/* Provenance */}
-          <Section title="Provenance">
-            <div className="space-y-0">
-              {provenance.issuedAt && <Field label="Certificate Issued" value={new Date(provenance.issuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
-              {provenance.gradedAt && <Field label="Grade Approved" value={new Date(provenance.gradedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} />}
-              {provenance.nfcEnabled && <Field label="NFC Enabled" value="Yes" />}
-              {provenance.nfcScanCount > 0 && <Field label="NFC Scans" value={String(provenance.nfcScanCount)} />}
-              {provenance.stolenStatus && <Field label="Stolen Flag" value="REPORTED STOLEN" />}
-            </div>
-          </Section>
-
-          {/* Ownership Chain */}
-          <Section title="Ownership History">
-            {!data.ownership || data.ownership.chain.length === 0 ? (
-              <p className="text-sm text-[#888888]">Awaiting first owner — claim this card to begin its registry history</p>
-            ) : (
-              <>
-                {data.ownership.chain.length > 1 && (
-                  <p className="text-sm text-[#888888] mb-4">
-                    {data.ownership.chain.length - 1} previous owner{data.ownership.chain.length - 1 !== 1 ? "s" : ""}
-                  </p>
-                )}
-                <div className="space-y-3">
-                  {data.ownership.chain.map(owner => (
-                    <div key={owner.ownerNumber} className="flex items-start gap-3">
-                      <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${owner.isCurrent ? "bg-[#D4AF37]" : "border border-[#E8E4DC]"}`} />
-                      <div>
-                        <p className="text-sm text-[#1A1A1A]">
-                          Owner {owner.ownerNumber}
-                          {owner.displayName && <span className="text-[#888888]"> — {owner.displayName}</span>}
-                        </p>
-                        <p className="text-xs text-[#888888]">
-                          {new Date(owner.claimedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                          {owner.releasedAt
-                            ? ` to ${new Date(owner.releasedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} (${owner.durationDays} days)`
-                            : " (Current)"}
-                        </p>
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </Section>
-          </>
+                  </>
+                )}
+              </Section>
+            </>
           )}
 
           {/* ACTIONS tab (admin only) — admin operations on this cert */}
@@ -674,9 +913,9 @@ export default function LogbookPage() {
             <Section title="Admin Actions">
               <AdminReprocessButton certId={data.certId} />
               <p className="mt-2 text-[10px] text-[#888888]">
-                Re-runs deskew → detect → recentre → tightenForDisplay → whitewash → rounded mask
-                on the R2 originals (grading_{`{front,back}`}_original.jpg) and overwrites the
-                display image keys. Refreshes the image viewer in place.
+                Re-runs deskew → detect → recentre → tightenForDisplay → whitewash → rounded mask on the R2 originals
+                (grading_{`{front,back}`}_original.jpg) and overwrites the display image keys. Refreshes the image
+                viewer in place.
               </p>
             </Section>
           )}
@@ -688,41 +927,58 @@ export default function LogbookPage() {
               download buttons + signature block read as "actions" the
               admin or owner can take. */}
           {(!isAdminView || adminTab === "actions") && (
-          <>
-          <GoldDivider />
+            <>
+              <GoldDivider />
 
-          {/* Footer — Verification + Download */}
-          <div className="text-center py-8">
-            <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-xl p-6 mb-6">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] mb-3">Digital Signature</p>
-              <p className="font-mono text-xs text-[#555555] break-all mb-2">{verification.signature || "\u2014"}</p>
-              <p className="text-[10px] text-[#888888]">Cryptographic hash covering certificate ID, card identity, and all grade data. Any modification invalidates this signature.</p>
-            </div>
+              {/* Footer — Verification + Download */}
+              <div className="text-center py-8">
+                <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-xl p-6 mb-6">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-[#D4AF37] mb-3">Digital Signature</p>
+                  <p className="font-mono text-xs text-[#555555] break-all mb-2">
+                    {verification.signature || "\u2014"}
+                  </p>
+                  <p className="text-[10px] text-[#888888]">
+                    Cryptographic hash covering certificate ID, card identity, and all grade data. Any modification
+                    invalidates this signature.
+                  </p>
+                </div>
 
-            <div className="flex flex-col items-center gap-3">
-              <a href={`/cert/${data.certId}.pdf`} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity">
-                <Download className="w-4 h-4" /> Download Logbook PDF
-              </a>
-              {isOwner && (
-                <>
-                  <a href={`/logbook/${data.certId}/owner.pdf`} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors">
-                    <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
+                <div className="flex flex-col items-center gap-3">
+                  <a
+                    href={`/cert/${data.certId}.pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-sm font-bold uppercase tracking-wider px-8 py-3 rounded-lg hover:opacity-90 transition-opacity"
+                  >
+                    <Download className="w-4 h-4" /> Download Logbook PDF
                   </a>
-                  <a href={`/transfer?certId=${encodeURIComponent(data.certId)}`}
-                    className="inline-flex items-center gap-2 border border-[#E8E4DC] text-[#888888] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:border-[#D4AF37]/40 hover:text-[#D4AF37] transition-colors">
-                    <ArrowRightLeft className="w-3 h-3" /> Transfer Keepership
-                  </a>
-                </>
-              )}
-            </div>
+                  {isOwner && (
+                    <>
+                      <a
+                        href={`/logbook/${data.certId}/owner.pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:bg-[#D4AF37]/10 transition-colors"
+                      >
+                        <Lock className="w-3 h-3" /> Download Owner Copy (with Reference Number)
+                      </a>
+                      <a
+                        href={`/transfer?certId=${encodeURIComponent(data.certId)}`}
+                        className="inline-flex items-center gap-2 border border-[#E8E4DC] text-[#888888] text-xs font-bold uppercase tracking-wider px-6 py-2 rounded-lg hover:border-[#D4AF37]/40 hover:text-[#D4AF37] transition-colors"
+                      >
+                        <ArrowRightLeft className="w-3 h-3" /> Transfer Keepership
+                      </a>
+                    </>
+                  )}
+                </div>
 
-            <p className="text-[#888888] text-[10px] mt-8 max-w-md mx-auto leading-relaxed">
-              This Ownership Logbook is an official record issued by Mint Vault UK Ltd. The cryptographic signature covers the certificate ID, card identity, and all grade data. Any modification to the underlying data will invalidate the signature.
-            </p>
-          </div>
-          </>
+                <p className="text-[#888888] text-[10px] mt-8 max-w-md mx-auto leading-relaxed">
+                  This Ownership Logbook is an official record issued by Mint Vault UK Ltd. The cryptographic signature
+                  covers the certificate ID, card identity, and all grade data. Any modification to the underlying data
+                  will invalidate the signature.
+                </p>
+              </div>
+            </>
           )}
         </div>
       </div>

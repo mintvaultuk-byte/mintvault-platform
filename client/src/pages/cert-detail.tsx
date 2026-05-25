@@ -1,7 +1,24 @@
 import { useRoute, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Shield, Award, Calendar, Layers, Hash, Globe, Tag, CheckCircle, XOctagon, FileText, Wifi, ChevronDown, ChevronUp, ClipboardList, ExternalLink } from "lucide-react";
+import {
+  ArrowLeft,
+  Shield,
+  Award,
+  Calendar,
+  Layers,
+  Hash,
+  Globe,
+  Tag,
+  CheckCircle,
+  XOctagon,
+  FileText,
+  Wifi,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  ExternalLink,
+} from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
 import { isNonNumericGrade } from "@shared/schema";
 import { mvgsGradeLabel } from "@shared/mvgs-scoring";
@@ -22,10 +39,8 @@ function gameGradient(game: string | null | undefined): string {
     return "radial-gradient(ellipse at top, rgba(227,53,13,0.07) 0%, transparent 70%)";
   if (g.includes("yu-gi-oh") || g.includes("yugioh"))
     return "radial-gradient(ellipse at top, rgba(123,45,139,0.08) 0%, transparent 70%)";
-  if (g.includes("magic"))
-    return "radial-gradient(ellipse at top, rgba(26,111,181,0.08) 0%, transparent 70%)";
-  if (g.includes("one piece"))
-    return "radial-gradient(ellipse at top, rgba(232,65,24,0.07) 0%, transparent 70%)";
+  if (g.includes("magic")) return "radial-gradient(ellipse at top, rgba(26,111,181,0.08) 0%, transparent 70%)";
+  if (g.includes("one piece")) return "radial-gradient(ellipse at top, rgba(232,65,24,0.07) 0%, transparent 70%)";
   return "radial-gradient(ellipse at top, rgba(212,175,55,0.07) 0%, transparent 70%)";
 }
 
@@ -59,7 +74,10 @@ function useGradeReveal(target: number | null): number | null {
     setRevealed(false);
     const timer = setTimeout(() => {
       setRevealed(true);
-      if (target <= 1) { setDisplayed(target); return; }
+      if (target <= 1) {
+        setDisplayed(target);
+        return;
+      }
       let current = 1;
       const step = () => {
         setDisplayed(current);
@@ -87,9 +105,13 @@ function useQrDataUrl(url: string): string | null {
         margin: 1,
         errorCorrectionLevel: "M",
         color: { dark: "#1a1100", light: "#ffffff" },
-      }).then((du) => { if (alive) setDataUrl(du); });
+      }).then((du) => {
+        if (alive) setDataUrl(du);
+      });
     });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [url]);
   return dataUrl;
 }
@@ -103,10 +125,10 @@ function GradingReportPanel({
   const [open, setOpen] = useState(false);
   const entries = [
     { key: "centering", label: "Centering", val: report.centering },
-    { key: "corners",   label: "Corners",   val: report.corners },
-    { key: "edges",     label: "Edges",     val: report.edges },
-    { key: "surface",   label: "Surface",   val: report.surface },
-    { key: "overall",   label: "Overall",   val: report.overall },
+    { key: "corners", label: "Corners", val: report.corners },
+    { key: "edges", label: "Edges", val: report.edges },
+    { key: "surface", label: "Surface", val: report.surface },
+    { key: "overall", label: "Overall", val: report.overall },
   ].filter((e) => e.val?.trim());
 
   return (
@@ -120,16 +142,20 @@ function GradingReportPanel({
           <ClipboardList size={14} className="text-[#D4AF37]/60 shrink-0" />
           <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grading Report</p>
         </div>
-        {open
-          ? <ChevronUp size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />
-          : <ChevronDown size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />}
+        {open ? (
+          <ChevronUp size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />
+        ) : (
+          <ChevronDown size={14} className="text-[#D4AF37]/40 group-hover:text-[#D4AF37]/70 transition-colors" />
+        )}
       </button>
       {open && (
         <div className="mt-3 space-y-3" data-testid="grading-report-body">
           {entries.map(({ key, label, val }) => (
             <div key={key}>
               <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-wider mb-0.5">{label}</p>
-              <p className="text-[#444444] text-sm leading-relaxed" data-testid={`text-report-${key}`}>{val}</p>
+              <p className="text-[#444444] text-sm leading-relaxed" data-testid={`text-report-${key}`}>
+                {val}
+              </p>
             </div>
           ))}
         </div>
@@ -143,7 +169,11 @@ export default function CertDetailPage() {
   const [, params] = useRoute("/cert/:id");
   const certId = params?.id || "";
 
-  const { data: cert, isLoading, error } = useQuery<PublicCertificate>({
+  const {
+    data: cert,
+    isLoading,
+    error,
+  } = useQuery<PublicCertificate>({
     queryKey: ["/api/cert", certId],
     enabled: !!certId,
   });
@@ -203,286 +233,404 @@ export default function CertDetailPage() {
   const certSchema = {
     "@context": "https://schema.org",
     "@type": "Product",
-    "name": cert.cardName,
-    "description": certDesc,
-    "url": certCanonical,
-    "brand": { "@type": "Brand", "name": "MintVault UK" },
-    "additionalProperty": [
-      { "@type": "PropertyValue", "name": "Certificate ID", "value": cert.certId },
-      { "@type": "PropertyValue", "name": "Grade", "value": cert.grade },
-      { "@type": "PropertyValue", "name": "Set", "value": cert.cardSet },
-      { "@type": "PropertyValue", "name": "Year", "value": cert.cardYear },
+    name: cert.cardName,
+    description: certDesc,
+    url: certCanonical,
+    brand: { "@type": "Brand", name: "MintVault UK" },
+    additionalProperty: [
+      { "@type": "PropertyValue", name: "Certificate ID", value: cert.certId },
+      { "@type": "PropertyValue", name: "Grade", value: cert.grade },
+      { "@type": "PropertyValue", name: "Set", value: cert.cardSet },
+      { "@type": "PropertyValue", name: "Year", value: cert.cardYear },
     ],
   };
 
   return (
     <div className="px-4 py-8 max-w-3xl mx-auto" style={{ background: gameGradient(cert.cardGame) }}>
-        {/* Stolen banner — parity with vault-report.tsx. Shown when a
+      {/* Stolen banner — parity with vault-report.tsx. Shown when a
             verified stolen report exists on this cert. */}
-        {cert.stolenStatus === "reported_stolen" && (
-          <div className="w-full bg-red-600 text-white text-center py-3 px-4 flex items-center justify-center gap-3 mb-4 -mx-4 rounded-none sm:rounded-lg sm:mx-0" role="alert">
-            <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <span className="text-sm font-bold tracking-wide">
-              ⚠ This card has been reported stolen. If you have seen it for sale, please contact us at support@mintvaultuk.com
+      {cert.stolenStatus === "reported_stolen" && (
+        <div
+          className="w-full bg-red-600 text-white text-center py-3 px-4 flex items-center justify-center gap-3 mb-4 -mx-4 rounded-none sm:rounded-lg sm:mx-0"
+          role="alert"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="shrink-0"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span className="text-sm font-bold tracking-wide">
+            ⚠ This card has been reported stolen. If you have seen it for sale, please contact us at
+            support@mintvaultuk.com
+          </span>
+        </div>
+      )}
+      <SeoHead
+        title={certTitle}
+        description={certDesc}
+        canonical={certCanonical}
+        ogType="product"
+        schema={certSchema}
+        ogImage={cert.frontImageUrl || undefined}
+      />
+
+      {/* Back link + action buttons row */}
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+        <Link
+          href="/verify"
+          className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm"
+          data-testid="link-back-lookup"
+        >
+          <ArrowLeft size={16} />
+          Back to Lookup
+        </Link>
+      </div>
+
+      {cert.status === "voided" && (
+        <div
+          className="border border-red-300 bg-red-50 rounded-lg p-4 mb-4 flex items-center gap-3"
+          data-testid="banner-voided"
+        >
+          <XOctagon className="text-red-400 shrink-0" size={24} />
+          <div>
+            <p className="text-red-400 font-bold tracking-wider text-sm uppercase">VOIDED</p>
+            <p className="text-red-400/70 text-xs">This certificate has been voided and is no longer valid.</p>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`border rounded-lg overflow-hidden ${cert.status === "voided" ? "border-red-500/20 opacity-70" : "border-[#D4AF37]/30"}`}
+      >
+        <div
+          className={`p-6 border-b ${cert.status === "voided" ? "bg-gradient-to-r from-red-500/10 to-transparent border-red-500/20" : "bg-gradient-to-r from-[#D4AF37]/10 to-transparent border-[#D4AF37]/20"}`}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <Shield className={cert.status === "voided" ? "text-red-400" : "text-[#D4AF37]"} size={20} />
+            <span
+              className={`text-xs uppercase tracking-widest ${cert.status === "voided" ? "text-red-400/60" : "text-[#D4AF37]/60"}`}
+            >
+              {cert.status === "voided" ? "Voided Certificate" : "Verified Certificate"}
             </span>
           </div>
-        )}
-        <SeoHead
-          title={certTitle}
-          description={certDesc}
-          canonical={certCanonical}
-          ogType="product"
-          schema={certSchema}
-          ogImage={cert.frontImageUrl || undefined}
-        />
-
-        {/* Back link + action buttons row */}
-        <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-          <Link href="/verify" className="inline-flex items-center gap-1.5 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors text-sm" data-testid="link-back-lookup">
-            <ArrowLeft size={16} />
-            Back to Lookup
-          </Link>
+          <h1
+            className={`font-mono text-xl font-bold tracking-wider ${cert.status === "voided" ? "text-red-400 line-through" : "text-[#D4AF37] glow-gold-sm"}`}
+            data-testid="text-cert-id"
+          >
+            {cert.certId}
+          </h1>
         </div>
 
-        {cert.status === "voided" && (
-          <div className="border border-red-300 bg-red-50 rounded-lg p-4 mb-4 flex items-center gap-3" data-testid="banner-voided">
-            <XOctagon className="text-red-400 shrink-0" size={24} />
-            <div>
-              <p className="text-red-400 font-bold tracking-wider text-sm uppercase">VOIDED</p>
-              <p className="text-red-400/70 text-xs">This certificate has been voided and is no longer valid.</p>
+        {(cert.frontImageUrl || cert.backImageUrl) && (
+          <div className="p-6 border-b border-[#D4AF37]/20">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {cert.frontImageUrl && (
+                <div className="text-center">
+                  <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Front</p>
+                  <img
+                    src={cert.frontImageUrl}
+                    alt={`${cert.cardName} front`}
+                    className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
+                    data-testid="img-card-front"
+                  />
+                </div>
+              )}
+              {cert.backImageUrl && (
+                <div className="text-center">
+                  <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Back</p>
+                  <img
+                    src={cert.backImageUrl}
+                    alt={`${cert.cardName} back`}
+                    className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
+                    data-testid="img-card-back"
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        <div className={`border rounded-lg overflow-hidden ${cert.status === "voided" ? "border-red-500/20 opacity-70" : "border-[#D4AF37]/30"}`}>
-          <div className={`p-6 border-b ${cert.status === "voided" ? "bg-gradient-to-r from-red-500/10 to-transparent border-red-500/20" : "bg-gradient-to-r from-[#D4AF37]/10 to-transparent border-[#D4AF37]/20"}`}>
-            <div className="flex items-center gap-2 mb-1">
-              <Shield className={cert.status === "voided" ? "text-red-400" : "text-[#D4AF37]"} size={20} />
-              <span className={`text-xs uppercase tracking-widest ${cert.status === "voided" ? "text-red-400/60" : "text-[#D4AF37]/60"}`}>
-                {cert.status === "voided" ? "Voided Certificate" : "Verified Certificate"}
-              </span>
-            </div>
-            <h1 className={`font-mono text-xl font-bold tracking-wider ${cert.status === "voided" ? "text-red-400 line-through" : "text-[#D4AF37] glow-gold-sm"}`} data-testid="text-cert-id">
-              {cert.certId}
-            </h1>
-          </div>
+        <div className="p-6 relative">
+          {/* Confetti container — absolutely positioned so particles fly over the card */}
+          <div
+            ref={confettiContainerRef}
+            className="absolute inset-0 pointer-events-none overflow-hidden rounded-b-lg"
+            aria-hidden="true"
+          />
 
-          {(cert.frontImageUrl || cert.backImageUrl) && (
-            <div className="p-6 border-b border-[#D4AF37]/20">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {cert.frontImageUrl && (
-                  <div className="text-center">
-                    <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Front</p>
-                    <img
-                      src={cert.frontImageUrl}
-                      alt={`${cert.cardName} front`}
-                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
-                      data-testid="img-card-front"
-                    />
-                  </div>
-                )}
-                {cert.backImageUrl && (
-                  <div className="text-center">
-                    <p className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mb-2">Back</p>
-                    <img
-                      src={cert.backImageUrl}
-                      alt={`${cert.cardName} back`}
-                      className="max-h-80 mx-auto rounded border border-[#D4AF37]/20 object-contain bg-[#FAFAF8]"
-                      data-testid="img-card-back"
-                    />
-                  </div>
-                )}
+          {isNonNum ? (
+            <div className="text-center mb-8">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <CheckCircle className="text-[#D4AF37]" size={28} />
               </div>
-            </div>
-          )}
-
-          <div className="p-6 relative">
-            {/* Confetti container — absolutely positioned so particles fly over the card */}
-            <div ref={confettiContainerRef} className="absolute inset-0 pointer-events-none overflow-hidden rounded-b-lg" aria-hidden="true" />
-
-            {isNonNum ? (
-              <div className="text-center mb-8">
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <CheckCircle className="text-[#D4AF37]" size={28} />
-                </div>
-                <div className="text-3xl font-bold text-[#D4AF37] mb-1" data-testid="text-grade-label">
-                  {cert.grade}
-                </div>
-                {cert.gradeType === "AA" && (
-                  <div className="text-amber-400/80 text-sm tracking-wider uppercase mt-1" data-testid="text-grade-status">
-                    Status: Altered
-                  </div>
-                )}
-                <p className="text-[#999999] text-xs mt-2">No Numerical Grade</p>
+              <div className="text-3xl font-bold text-[#D4AF37] mb-1" data-testid="text-grade-label">
+                {cert.grade}
               </div>
-            ) : (
-              <div className="text-center mb-8">
-                {/* Card name/set fades in immediately; grade counts up after 1s */}
-                <div className="mb-4 opacity-0 animate-[fadeIn_0.6s_ease_0.1s_forwards]"
-                  style={{ animation: "fadeIn 0.6s ease 0.1s forwards" }}>
-                  <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
-                  <p className="text-[#1A1A1A] font-semibold text-base">{cert.cardName}</p>
-                  <p className="text-[#999999] text-xs mt-0.5">{cert.cardSet} · {cert.cardYear}</p>
-                </div>
-                {displayedGrade == null ? (
-                  <div className="text-6xl font-bold text-[#D4AF37]/20 mb-1 select-none" aria-hidden="true">—</div>
-                ) : (
-                  <div
-                    key={displayedGrade}
-                    className={`text-6xl font-bold ${gradeColor(cert.gradeNumeric)} mb-1 grade-count-anim${displayedGrade === 10 ? " grade-gem-glow" : ""}`}
-                    data-testid="text-grade-numeric"
-                  >
-                    {displayedGrade}
-                  </div>
-                )}
-                <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
-                  {displayedGrade != null
-                    ? (
-                        // Pristine 10P override \u2014 a perfect-score 10 (MVGS \u2265 96)
-                        // is the highest MVGS bracket. Falls back to cert.grade
-                        // (e.g. "GEM MINT") for everything else, including 10s
-                        // that didn't make 96. Big number stays "10".
-                        cert.gradeType === "numeric"
-                          && cert.gradeNumeric === 10
-                          && cert.gradeStrengthScore != null
-                          && cert.gradeStrengthScore >= 96
-                          ? "PRISTINE 10P"
-                          : cert.grade
-                      )
-                    : "\u00a0"}
-                </div>
-
-                {/* Subgrades (screen) */}
-                {(cert.gradeCentering != null || cert.gradeCorners != null || cert.gradeEdges != null || cert.gradeSurface != null) && (
-                  <div className="mt-4 grid grid-cols-4 gap-2 max-w-xs mx-auto">
-                    {[
-                      { label: "Centering", val: cert.gradeCentering },
-                      { label: "Corners", val: cert.gradeCorners },
-                      { label: "Edges", val: cert.gradeEdges },
-                      { label: "Surface", val: cert.gradeSurface },
-                    ].map(({ label, val }) => val != null && (
-                      <div key={label} className="border border-[#D4AF37]/20 rounded p-2 text-center">
-                        <div className="text-[#D4AF37] text-sm font-bold" data-testid={`text-subgrade-${label.toLowerCase()}`}>{val}</div>
-                        <div className="text-[#999999] text-[10px] mt-0.5">{label}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* MVGS Score — admin-computed during grading approval. Only
-                    rendered for numeric grades when a score has been written
-                    (so legacy approved certs without MVGS data stay clean). */}
-                {cert.gradeType === "numeric" && cert.gradeStrengthScore != null && (
-                  <div
-                    className="mt-3 max-w-xs mx-auto border border-[#D4AF37]/30 rounded p-2 text-center flex items-center justify-center gap-1.5"
-                    data-testid="mvgs-score-panel"
-                  >
-                    <span
-                      className="text-[#D4AF37] text-sm font-bold"
-                      data-testid="text-mvgs-score"
-                    >
-                      MVGS Score: {cert.gradeStrengthScore}/100 · {mvgsGradeLabel(cert.gradeStrengthScore)}
-                    </span>
-                    <span
-                      className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] cursor-help"
-                      title="MVGS = MintVault Grading Standard. Score 0–100 derived from centering, defects, eye appeal, and dark-border modifier."
-                      data-testid="mvgs-tooltip"
-                    >
-                      ?
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-4">
-              <DetailRow icon={<Award size={16} />} label="Card" value={cert.cardName} testId="text-card-name" />
-              <DetailRow icon={<Layers size={16} />} label="Set" value={`${cert.cardSet} (${cert.cardYear})`} testId="text-card-set" />
-              {cert.collection && <DetailRow icon={<Layers size={16} />} label="Collection / Subset" value={cert.collection} testId="text-collection" />}
-              <DetailRow icon={<Hash size={16} />} label="Card Number" value={cert.cardNumber} testId="text-card-number" />
-              {(cert.rarityLabel || cert.rarity) && <DetailRow icon={<Tag size={16} />} label="Rarity" value={cert.rarityLabel || cert.rarity || ""} testId="text-rarity" />}
-              {cert.designations && cert.designations.length > 0 && (
-                <DetailRow icon={<Tag size={16} />} label="Designations" value={cert.designations.join(", ")} testId="text-designations" />
-              )}
-              {cert.variant && <DetailRow icon={<Tag size={16} />} label="Variant" value={cert.variant} testId="text-variant" />}
-              <DetailRow icon={<Globe size={16} />} label="Language" value={cert.language} testId="text-language" />
-              {cert.cardGame && <DetailRow icon={<Layers size={16} />} label="Game" value={cert.cardGame} testId="text-card-game" />}
-              <DetailRow icon={<Calendar size={16} />} label="Date Graded" value={cert.gradedDate ? new Date(cert.gradedDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : cert.gradedDate} testId="text-graded-date" />
-            </div>
-
-            {cert.notes && cert.notes.trim() && (
-              <div className="mt-5 pt-4 border-t border-[#D4AF37]/15" data-testid="section-grader-notes">
-                <div className="flex items-center gap-2 mb-3">
-                  <FileText size={14} className="text-[#D4AF37]/60 shrink-0" />
-                  <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grader Notes</p>
-                </div>
-                <div className="space-y-1.5">
-                  {cert.notes.split("\n").filter((l) => l.trim()).map((line, i) => (
-                    <p key={i} className="text-[#444444] text-sm leading-relaxed" data-testid={`text-grader-note-${i}`}>
-                      {line.trim()}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Grading Report — expandable, only shown when at least one field has content */}
-            {cert.gradingReport && Object.values(cert.gradingReport).some(Boolean) && (
-              <GradingReportPanel report={cert.gradingReport} />
-            )}
-
-            {/* View Full Grading Report — shown when certificate has a grade */}
-            {(cert.gradeNumeric > 0 || isNonNumericGrade(cert.gradeType)) && (
-              <div className="mt-5 pt-4 border-t border-[#D4AF37]/15">
-                <Link
-                  href={`/cert/${cert.certId}/report`}
-                  className="flex items-center justify-between w-full rounded-xl border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-4 py-3 hover:bg-[#D4AF37]/10 transition-all group"
-                  data-testid="link-view-report"
+              {cert.gradeType === "AA" && (
+                <div
+                  className="text-amber-400/80 text-sm tracking-wider uppercase mt-1"
+                  data-testid="text-grade-status"
                 >
-                  <div className="flex items-center gap-3">
-                    <FileText size={16} className="text-[#D4AF37]" />
-                    <div>
-                      <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">View Full Grading Report</p>
-                      <p className="text-[#999999] text-[10px] mt-0.5">Images, subgrades, defects & authentication</p>
-                    </div>
-                  </div>
-                  <ExternalLink size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37] transition-colors" />
-                </Link>
+                  Status: Altered
+                </div>
+              )}
+              <p className="text-[#999999] text-xs mt-2">No Numerical Grade</p>
+            </div>
+          ) : (
+            <div className="text-center mb-8">
+              {/* Card name/set fades in immediately; grade counts up after 1s */}
+              <div
+                className="mb-4 opacity-0 animate-[fadeIn_0.6s_ease_0.1s_forwards]"
+                style={{ animation: "fadeIn 0.6s ease 0.1s forwards" }}
+              >
+                <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}`}</style>
+                <p className="text-[#1A1A1A] font-semibold text-base">{cert.cardName}</p>
+                <p className="text-[#999999] text-xs mt-0.5">
+                  {cert.cardSet} · {cert.cardYear}
+                </p>
               </div>
-            )}
+              {displayedGrade == null ? (
+                <div className="text-6xl font-bold text-[#D4AF37]/20 mb-1 select-none" aria-hidden="true">
+                  —
+                </div>
+              ) : (
+                <div
+                  key={displayedGrade}
+                  className={`text-6xl font-bold ${gradeColor(cert.gradeNumeric)} mb-1 grade-count-anim${displayedGrade === 10 ? " grade-gem-glow" : ""}`}
+                  data-testid="text-grade-numeric"
+                >
+                  {displayedGrade}
+                </div>
+              )}
+              <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
+                {displayedGrade != null
+                  ? // Black Label short-circuit: any cert flagged as "black"
+                    // is PRISTINE 10P regardless of whether MVGS scoring ran
+                    // (covers pre-MVGS quad-10 legacy certs). Numeric grades
+                    // with a score get the full MVGS ladder; everything else
+                    // falls back to cert.grade ("GEM MINT" etc.).
+                    cert.labelType === "black"
+                    ? "PRISTINE 10P"
+                    : cert.gradeType === "numeric" &&
+                        typeof cert.gradeStrengthScore === "number" &&
+                        cert.gradeStrengthScore >= 1
+                      ? mvgsGradeLabel(cert.gradeStrengthScore).toUpperCase()
+                      : cert.grade
+                  : "\u00a0"}
+              </div>
 
-            {/* QR verification widget */}
-            <div className="mt-6 pt-5 border-t border-[#D4AF37]/15 flex flex-col items-center gap-3" data-testid="section-qr-verify">
-              <p className="text-[#D4AF37]/50 text-xs uppercase tracking-widest">Verify Online</p>
-              <div className="qr-wrapper">
-                <div className="qr-frame">
-                  {screenQrDataUrl ? (
-                    <div className="qr-box">
-                      <img src={screenQrDataUrl} alt={`QR code for certificate ${cert.certId}`} data-testid="img-qr-code" />
-                    </div>
-                  ) : (
-                    <div className="qr-box" style={{ width: 152, height: 152, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <div className="animate-pulse w-full h-full bg-gray-100 rounded" />
-                    </div>
+              {/* Subgrades (screen) */}
+              {(cert.gradeCentering != null ||
+                cert.gradeCorners != null ||
+                cert.gradeEdges != null ||
+                cert.gradeSurface != null) && (
+                <div className="mt-4 grid grid-cols-4 gap-2 max-w-xs mx-auto">
+                  {[
+                    { label: "Centering", val: cert.gradeCentering },
+                    { label: "Corners", val: cert.gradeCorners },
+                    { label: "Edges", val: cert.gradeEdges },
+                    { label: "Surface", val: cert.gradeSurface },
+                  ].map(
+                    ({ label, val }) =>
+                      val != null && (
+                        <div key={label} className="border border-[#D4AF37]/20 rounded p-2 text-center">
+                          <div
+                            className="text-[#D4AF37] text-sm font-bold"
+                            data-testid={`text-subgrade-${label.toLowerCase()}`}
+                          >
+                            {val}
+                          </div>
+                          <div className="text-[#999999] text-[10px] mt-0.5">{label}</div>
+                        </div>
+                      )
                   )}
                 </div>
-                <p className="qr-id font-mono tracking-widest" data-testid="text-qr-cert-id">{cert.certId}</p>
-              </div>
-              {cert.nfcEnabled && cert.nfcScanCount != null && (
-                <div className="flex items-center gap-1.5 text-[#D4AF37]/40 text-xs" data-testid="text-nfc-scan-count">
-                  <Wifi size={11} />
-                  <span>
-                    NFC scanned {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
+              )}
+
+              {/* MVGS Score — admin-computed during grading approval. Only
+                    rendered for numeric grades when a score has been written
+                    (so legacy approved certs without MVGS data stay clean). */}
+              {cert.gradeType === "numeric" && cert.gradeStrengthScore != null && (
+                <div
+                  className="mt-3 max-w-xs mx-auto border border-[#D4AF37]/30 rounded p-2 text-center flex items-center justify-center gap-1.5"
+                  data-testid="mvgs-score-panel"
+                >
+                  <span className="text-[#D4AF37] text-sm font-bold" data-testid="text-mvgs-score">
+                    MVGS Score: {cert.gradeStrengthScore}/100 · {mvgsGradeLabel(cert.gradeStrengthScore)}
+                  </span>
+                  <span
+                    className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] cursor-help"
+                    title="MVGS = MintVault Grading Standard. Score 0–100 derived from centering, defects, eye appeal, and dark-border modifier."
+                    data-testid="mvgs-tooltip"
+                  >
+                    ?
                   </span>
                 </div>
               )}
             </div>
+          )}
+
+          <div className="space-y-4">
+            <DetailRow icon={<Award size={16} />} label="Card" value={cert.cardName} testId="text-card-name" />
+            <DetailRow
+              icon={<Layers size={16} />}
+              label="Set"
+              value={`${cert.cardSet} (${cert.cardYear})`}
+              testId="text-card-set"
+            />
+            {cert.collection && (
+              <DetailRow
+                icon={<Layers size={16} />}
+                label="Collection / Subset"
+                value={cert.collection}
+                testId="text-collection"
+              />
+            )}
+            <DetailRow
+              icon={<Hash size={16} />}
+              label="Card Number"
+              value={cert.cardNumber}
+              testId="text-card-number"
+            />
+            {(cert.rarityLabel || cert.rarity) && (
+              <DetailRow
+                icon={<Tag size={16} />}
+                label="Rarity"
+                value={cert.rarityLabel || cert.rarity || ""}
+                testId="text-rarity"
+              />
+            )}
+            {cert.designations && cert.designations.length > 0 && (
+              <DetailRow
+                icon={<Tag size={16} />}
+                label="Designations"
+                value={cert.designations.join(", ")}
+                testId="text-designations"
+              />
+            )}
+            {cert.variant && (
+              <DetailRow icon={<Tag size={16} />} label="Variant" value={cert.variant} testId="text-variant" />
+            )}
+            <DetailRow icon={<Globe size={16} />} label="Language" value={cert.language} testId="text-language" />
+            {cert.cardGame && (
+              <DetailRow icon={<Layers size={16} />} label="Game" value={cert.cardGame} testId="text-card-game" />
+            )}
+            <DetailRow
+              icon={<Calendar size={16} />}
+              label="Date Graded"
+              value={
+                cert.gradedDate
+                  ? new Date(cert.gradedDate).toLocaleDateString("en-GB", {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })
+                  : cert.gradedDate
+              }
+              testId="text-graded-date"
+            />
+          </div>
+
+          {cert.notes && cert.notes.trim() && (
+            <div className="mt-5 pt-4 border-t border-[#D4AF37]/15" data-testid="section-grader-notes">
+              <div className="flex items-center gap-2 mb-3">
+                <FileText size={14} className="text-[#D4AF37]/60 shrink-0" />
+                <p className="text-[#D4AF37]/60 text-xs uppercase tracking-widest">Grader Notes</p>
+              </div>
+              <div className="space-y-1.5">
+                {cert.notes
+                  .split("\n")
+                  .filter((l) => l.trim())
+                  .map((line, i) => (
+                    <p key={i} className="text-[#444444] text-sm leading-relaxed" data-testid={`text-grader-note-${i}`}>
+                      {line.trim()}
+                    </p>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Grading Report — expandable, only shown when at least one field has content */}
+          {cert.gradingReport && Object.values(cert.gradingReport).some(Boolean) && (
+            <GradingReportPanel report={cert.gradingReport} />
+          )}
+
+          {/* View Full Grading Report — shown when certificate has a grade */}
+          {(cert.gradeNumeric > 0 || isNonNumericGrade(cert.gradeType)) && (
+            <div className="mt-5 pt-4 border-t border-[#D4AF37]/15">
+              <Link
+                href={`/cert/${cert.certId}/report`}
+                className="flex items-center justify-between w-full rounded-xl border border-[#D4AF37]/30 bg-[#D4AF37]/5 px-4 py-3 hover:bg-[#D4AF37]/10 transition-all group"
+                data-testid="link-view-report"
+              >
+                <div className="flex items-center gap-3">
+                  <FileText size={16} className="text-[#D4AF37]" />
+                  <div>
+                    <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">
+                      View Full Grading Report
+                    </p>
+                    <p className="text-[#999999] text-[10px] mt-0.5">Images, subgrades, defects & authentication</p>
+                  </div>
+                </div>
+                <ExternalLink size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37] transition-colors" />
+              </Link>
+            </div>
+          )}
+
+          {/* QR verification widget */}
+          <div
+            className="mt-6 pt-5 border-t border-[#D4AF37]/15 flex flex-col items-center gap-3"
+            data-testid="section-qr-verify"
+          >
+            <p className="text-[#D4AF37]/50 text-xs uppercase tracking-widest">Verify Online</p>
+            <div className="qr-wrapper">
+              <div className="qr-frame">
+                {screenQrDataUrl ? (
+                  <div className="qr-box">
+                    <img
+                      src={screenQrDataUrl}
+                      alt={`QR code for certificate ${cert.certId}`}
+                      data-testid="img-qr-code"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="qr-box"
+                    style={{ width: 152, height: 152, display: "flex", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <div className="animate-pulse w-full h-full bg-gray-100 rounded" />
+                  </div>
+                )}
+              </div>
+              <p className="qr-id font-mono tracking-widest" data-testid="text-qr-cert-id">
+                {cert.certId}
+              </p>
+            </div>
+            {cert.nfcEnabled && cert.nfcScanCount != null && (
+              <div className="flex items-center gap-1.5 text-[#D4AF37]/40 text-xs" data-testid="text-nfc-scan-count">
+                <Wifi size={11} />
+                <span>
+                  NFC scanned {cert.nfcScanCount} {cert.nfcScanCount === 1 ? "time" : "times"}
+                </span>
+              </div>
+            )}
           </div>
         </div>
-
-        <PopulationSection certId={cert.certId} />
-
       </div>
+
+      <PopulationSection certId={cert.certId} />
+    </div>
   );
 }
 
@@ -515,7 +663,9 @@ function PopulationSection({ certId }: { certId: string }) {
       <div className="bg-gradient-to-r from-[#D4AF37]/10 to-transparent p-4 border-b border-[#D4AF37]/20">
         <div className="flex items-center gap-2">
           <Layers size={18} className="text-[#D4AF37]" />
-          <h2 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-pop-title">POPULATION HIGHLIGHTS</h2>
+          <h2 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-pop-title">
+            POPULATION HIGHLIGHTS
+          </h2>
         </div>
       </div>
 
@@ -548,14 +698,16 @@ function PopulationSection({ certId }: { certId: string }) {
 function PopStat({ label, value, testId }: { label: string; value: number; testId: string }) {
   return (
     <div className="text-center border border-[#D4AF37]/15 rounded-lg p-3">
-      <p className="text-2xl font-bold text-[#D4AF37]" data-testid={testId}>{value}</p>
+      <p className="text-2xl font-bold text-[#D4AF37]" data-testid={testId}>
+        {value}
+      </p>
       <p className="text-[#999999] text-xs uppercase tracking-wider mt-1">{label}</p>
     </div>
   );
 }
 
 function PopGradeChart({ data }: { data: { grade: number; count: number }[] }) {
-  const maxCount = Math.max(...data.map(d => d.count), 1);
+  const maxCount = Math.max(...data.map((d) => d.count), 1);
 
   return (
     <div className="flex items-end gap-2 h-32" data-testid="chart-pop-grades">

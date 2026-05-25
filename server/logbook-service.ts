@@ -6,6 +6,7 @@ import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { mvgsGradeLabel } from "@shared/mvgs-scoring";
 import { getOwnerChain } from "./ownership-service";
 import { APP_BASE_URL } from "./app-url";
 import { db } from "./db";
@@ -19,7 +20,11 @@ function normalizeCertId(raw: string): string {
 
 async function signedOrNull(key: string | null | undefined): Promise<string | null> {
   if (!key) return null;
-  try { return await getR2SignedUrl(key, 3600); } catch { return null; }
+  try {
+    return await getR2SignedUrl(key, 3600);
+  } catch {
+    return null;
+  }
 }
 
 export async function buildLogbookData(certIdInput: string) {
@@ -62,7 +67,9 @@ export async function buildLogbookData(certIdInput: string) {
   // Signature
   const canonical = certToCanonical(c);
   let signature: string | null = null;
-  try { signature = signLogbook(canonical); } catch {}
+  try {
+    signature = signLogbook(canonical);
+  } catch {}
 
   // Defects
   const defects = Array.isArray(c.defects) ? c.defects : [];
@@ -119,7 +126,15 @@ export async function buildLogbookData(certIdInput: string) {
 
     grades: {
       overall: isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : gradeNum,
-      gradeLabel: isNonNum ? (gradeType === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : gradeLabelFull("numeric", String(gradeNum)),
+      gradeLabel: isNonNum
+        ? gradeType === "authentic_altered"
+          ? "AUTHENTIC ALTERED"
+          : "NOT ORIGINAL"
+        : isBlack
+          ? "PRISTINE 10P"
+          : typeof c.gradeStrengthScore === "number" && c.gradeStrengthScore >= 1
+            ? mvgsGradeLabel(c.gradeStrengthScore).toUpperCase()
+            : gradeLabelFull("numeric", String(gradeNum)),
       centering: c.gradeCentering ? parseFloat(c.gradeCentering) : null,
       corners: c.gradeCorners ? parseFloat(c.gradeCorners) : null,
       edges: c.gradeEdges ? parseFloat(c.gradeEdges) : null,
@@ -138,7 +153,12 @@ export async function buildLogbookData(certIdInput: string) {
     },
 
     authentication: {
-      status: c.gradeType === "authentic_altered" ? "authentic_altered" : c.gradeType === "not_original" ? "not_original" : "genuine",
+      status:
+        c.gradeType === "authentic_altered"
+          ? "authentic_altered"
+          : c.gradeType === "not_original"
+            ? "not_original"
+            : "genuine",
       notes: report.overall || null,
     },
 
@@ -193,7 +213,9 @@ export async function buildLogbookData(certIdInput: string) {
           currentOwnerNumber: chain.length || 0,
           chain,
         };
-      } catch { return { previousOwnersCount: 0, currentOwnerNumber: 0, chain: [] }; }
+      } catch {
+        return { previousOwnersCount: 0, currentOwnerNumber: 0, chain: [] };
+      }
     })(),
   };
 }
@@ -209,7 +231,10 @@ export function toPublicPayload(data: any) {
   return pub;
 }
 
-export async function verifyLogbookSignature(certIdInput: string, providedSignature: string): Promise<{ valid: boolean; certId: string }> {
+export async function verifyLogbookSignature(
+  certIdInput: string,
+  providedSignature: string
+): Promise<{ valid: boolean; certId: string }> {
   let cert = await storage.getCertificateByCertId(certIdInput);
   if (!cert) {
     const normalised = normalizeCertId(certIdInput);
