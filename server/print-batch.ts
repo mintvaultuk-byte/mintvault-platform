@@ -43,6 +43,7 @@
 
 import { createHash } from "crypto";
 import PDFDocument from "pdfkit";
+import sharp from "sharp";
 import { generateLabelPNG } from "./labels";
 import { generateClaimInsertPNG } from "./claim-insert";
 import { uploadToR2 } from "./r2";
@@ -248,7 +249,11 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
     ctx.drawImage(img, mmPx(cell.xMm), mmPx(cell.yMm), mmPx(cell.wMm), mmPx(cell.hMm));
   }
 
-  return canvas.toBuffer("image/png");
+  // Embed PNG pHYs chunk so Cricut Design Space treats this as a 600 DPI
+  // A4-sized print. Without the chunk Cricut defaults to 96 DPI, scaling
+  // the 4961×7016 canvas to ~87cm×123cm instead of A4.
+  const rawBuffer = canvas.toBuffer("image/png");
+  return sharp(rawBuffer).withMetadata({ density: DPI }).toBuffer();
 }
 
 // ── Deterministic batch ID for idempotency ───────────────────────────────────
