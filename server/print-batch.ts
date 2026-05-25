@@ -85,7 +85,7 @@ export interface PrintBatchItem {
 }
 
 interface CellSpec {
-  kind: "label" | "insert";
+  kind: "label" | "back" | "insert";
   itemIndex: number;
   xMm: number;
   yMm: number;
@@ -98,12 +98,23 @@ function buildLayout(itemCount: number): CellSpec[] {
   const cells: CellSpec[] = [];
   for (let i = 0; i < n; i++) {
     const rowTopY = MARGIN_MM + i * ROW_PITCH_MM;
-    // Front label — left column, vertically centred in row (insert is taller).
+    // Front label — left column, top-aligned. Stacked with the back label
+    // below (front + 4mm gap + back = 44mm, fits inside the 54mm row height).
     cells.push({
       kind: "label",
       itemIndex: i,
       xMm: MARGIN_MM,
-      yMm: rowTopY + (ROW_H_MM - LABEL_H_MM) / 2,
+      yMm: rowTopY,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
+    });
+    // Back label — left column, stacked below the front (4mm gap).
+    // Carries the NFC chip + QR code that must be printed on the physical slab.
+    cells.push({
+      kind: "back",
+      itemIndex: i,
+      xMm: MARGIN_MM,
+      yMm: rowTopY + LABEL_H_MM + GAP_MM,
       wMm: LABEL_W_MM,
       hMm: LABEL_H_MM,
     });
@@ -123,21 +134,23 @@ function buildLayout(itemCount: number): CellSpec[] {
 // Render the per-item PNGs in parallel. Used by both the PDF and PNG paths.
 async function renderItemBuffers(items: PrintBatchItem[]): Promise<{
   fronts: Buffer[];
+  backs: Buffer[];
   inserts: Buffer[];
 }> {
   const slice = items.slice(0, MAX_CERTS_PER_BATCH);
-  const [fronts, inserts] = await Promise.all([
+  const [fronts, backs, inserts] = await Promise.all([
     Promise.all(slice.map((it) => generateLabelPNG(it.cert, "front"))),
+    Promise.all(slice.map((it) => generateLabelPNG(it.cert, "back"))),
     Promise.all(slice.map((it) => generateClaimInsertPNG((it.cert as any).certId || "", it.claimCode))),
   ]);
-  return { fronts, inserts };
+  return { fronts, backs, inserts };
 }
 
 // ── PDF generator (A4 full page) ─────────────────────────────────────────────
 
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
   const layout = buildLayout(items.length);
-  const { fronts, inserts } = await renderItemBuffers(items);
+  const { fronts, backs, inserts } = await renderItemBuffers(items);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -157,7 +170,12 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
     try {
       doc.rect(0, 0, mm(PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
       for (const cell of layout) {
-        const buf = cell.kind === "label" ? fronts[cell.itemIndex] : inserts[cell.itemIndex];
+        const buf =
+          cell.kind === "label"
+            ? fronts[cell.itemIndex]
+            : cell.kind === "back"
+              ? backs[cell.itemIndex]
+              : inserts[cell.itemIndex];
         doc.image(buf, mm(cell.xMm), mm(cell.yMm), {
           width: mm(cell.wMm),
           height: mm(cell.hMm),
@@ -207,7 +225,7 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
   const layout = buildLayout(items.length);
-  const { fronts, inserts } = await renderItemBuffers(items);
+  const { fronts, backs, inserts } = await renderItemBuffers(items);
 
   const widthPx = mmPx(PAGE_W_MM);
   const heightPx = mmPx(PNG_PAGE_H_MM);
@@ -218,7 +236,12 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
   ctx.fillRect(0, 0, widthPx, heightPx);
 
   for (const cell of layout) {
-    const buf = cell.kind === "label" ? fronts[cell.itemIndex] : inserts[cell.itemIndex];
+    const buf =
+      cell.kind === "label"
+        ? fronts[cell.itemIndex]
+        : cell.kind === "back"
+          ? backs[cell.itemIndex]
+          : inserts[cell.itemIndex];
     const img = await loadImage(buf);
     ctx.drawImage(img, mmPx(cell.xMm), mmPx(cell.yMm), mmPx(cell.wMm), mmPx(cell.hMm));
   }
