@@ -833,11 +833,10 @@ function SheetPrintingPanel() {
       a.remove();
     };
     saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-    // PNG is intentionally NOT auto-downloaded here — Chrome's
-    // multi-download gate silently blocks the second/third file when
-    // multiple downloads fire from a single user-gesture stack. The PNG
-    // is exposed via a separate "Download PNG" button (lastBatchPngUrl
-    // state + window.open), which counts as its own user gesture.
+    // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
+    // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
+    // flows (this helper's only callers) skip the PNG; the primary Generate
+    // Batch flow downloads its PNG inline.
     // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
     // so this drops it to Downloads rather than opening inline in a tab.
     saveServerUrl(`${data.pdfUrl}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
@@ -858,7 +857,6 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
-        setLastBatchPngUrl(data.pngUrl);
         toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
         invalidate();
       } catch (err: any) {
@@ -916,7 +914,6 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
-        setLastBatchPngUrl(data.pngUrl);
         toast({
           title: "Sheet reprinted",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -942,11 +939,9 @@ function SheetPrintingPanel() {
   // shared batchId in the filename.
   const PRINT_BATCH_MAX = 4;
   const [downloadingBatch, setDownloadingBatch] = useState(false);
-  // Populated after every successful batch POST. Drives the standalone
-  // "Download PNG" button — clicking it counts as its own user gesture so
-  // it bypasses Chrome's multi-download permission gate.
-  const [lastBatchPngUrl, setLastBatchPngUrl] = useState<string | null>(null);
-  // Loading state for any PNG download (main button + Latest Sheet button).
+  // Loading state for the Latest Sheet row's PNG button (re-downloading
+  // a historical batch). The primary Generate Batch flow auto-downloads
+  // its PNG inline, so it doesn't go through this helper.
   // Streams the bytes through fetch → Blob → anchor so we can show progress
   // and surface real errors (404, 500) via toast instead of a silent failure.
   const [downloadingPng, setDownloadingPng] = useState(false);
@@ -979,30 +974,15 @@ function SheetPrintingPanel() {
   );
   const downloadPrintBatch = useCallback(
     async (certIds: string[]) => {
-      // CRITICAL: open the print window IMMEDIATELY, synchronously, while
-      // we are still inside the click's user-gesture stack. Chrome/Safari
-      // only honour window.print() if the window was opened during a
-      // gesture; the v421 iframe approach broke that because the await on
-      // the API call elapsed before print() ran, so Chrome silently
-      // no-op'd and the PDF just landed in Downloads.
-      const printWindow = window.open("", "mintvault-print-batch", "width=900,height=1200");
-      if (printWindow) {
-        printWindow.document.write(`
-        <!DOCTYPE html>
-        <html><head><title>Preparing print…</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; color:#666; background:#fafafa; }
-        </style></head>
-        <body>Preparing print batch…</body></html>
-      `);
-      } else {
-        toast({
-          title: "Popup blocked",
-          description: "Allow popups for this site to print directly. Falling back to PDF download.",
-          variant: "destructive",
-        });
-      }
-
+      // Single-click flow:
+      //   1. POST /api/admin/print-batch
+      //   2. Trigger PNG anchor download (Cricut file — the critical artefact)
+      //   3. Open print window pointed at the inline PDF endpoint
+      // All three steps run in one click handler. The PNG anchor click
+      // doesn't consume the user gesture for popup purposes; modern Chrome
+      // usually permits the post-await window.open if the page has popup
+      // permission granted. If it's blocked, the toast surfaces it and the
+      // PNG has already downloaded — so the Cricut workflow still works.
       setDownloadingBatch(true);
       try {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
@@ -1016,18 +996,22 @@ function SheetPrintingPanel() {
           isRecentDuplicate?: boolean;
         };
 
-        // Drops SVG + PDF to Downloads (shared batchId in name); the PNG is
-        // kept out of this auto-batch (Chrome silently blocks the 2nd/3rd
-        // download in a single gesture) and is available via the standalone
-        // "Download PNG" button driven by lastBatchPngUrl.
-        // The pre-opened print window is then navigated to the PDF endpoint
-        // (served inline) so Chrome's print dialog opens against the same
-        // artwork.
-        saveBatchFiles(data);
-        setLastBatchPngUrl(data.pngUrl);
+        // Step 2 — PNG anchor download. Same-origin URL + server's
+        // Content-Disposition: attachment header drives the actual save;
+        // the `download` attribute is just a filename hint. DOM-attached
+        // so Firefox/Safari honour click().
+        const pngAnchor = document.createElement("a");
+        pngAnchor.href = data.pngUrl;
+        pngAnchor.download = `mintvault-batch-${data.batchId}.png`;
+        document.body.appendChild(pngAnchor);
+        pngAnchor.click();
+        pngAnchor.remove();
 
-        if (printWindow && !printWindow.closed) {
-          printWindow.location.replace(data.pdfUrl);
+        // Step 3 — open print window pointed at the PDF endpoint. The PDF
+        // endpoint serves inline by default so the browser renders it for
+        // the print dialog rather than downloading.
+        const printWindow = window.open(data.pdfUrl, "mintvault-print-batch", "width=900,height=1200");
+        if (printWindow) {
           let printed = false;
           const tryPrint = () => {
             if (printed || printWindow.closed) return;
@@ -1036,40 +1020,42 @@ function SheetPrintingPanel() {
               printWindow.focus();
               printWindow.print();
             } catch (err) {
-              console.warn("[print-batch] print() threw, falling back to download:", err);
+              console.warn("[print-batch] print() threw:", err);
             }
           };
           printWindow.onload = tryPrint;
           setTimeout(tryPrint, 1500);
+        } else {
+          toast({
+            title: "Popup blocked — PNG downloaded",
+            description: "Allow popups for this site to also open the print dialog.",
+            variant: "destructive",
+          });
         }
 
         const mintedCount = data.mintedFor?.length ?? 0;
         const idempotentNote = data.isRecentDuplicate ? " (idempotent re-run)" : "";
-        const description =
-          printWindow && !printWindow.closed
-            ? mintedCount > 0
-              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}. Click Download PNG for Cricut.`
-              : `Pick printer in dialog. SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`
-            : mintedCount > 0
-              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`
-              : `PDF + SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`;
-        toast({ title: "Print batch ready", description });
+        const mintedNote =
+          mintedCount > 0 ? ` — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}` : "";
+        toast({
+          title: "Batch generated",
+          description: `PNG downloaded, print dialog opening${mintedNote}${idempotentNote}.`,
+        });
         invalidate();
       } catch (err: any) {
-        printWindow?.close();
         if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
           setReprintModal({
             claimedCertIds: err.body.claimedCertIds || [],
             allCertIds: certIds,
           });
         } else {
-          toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
+          toast({ title: "Batch failed", description: err.message || String(err), variant: "destructive" });
         }
       } finally {
         setDownloadingBatch(false);
       }
     },
-    [toast, invalidate, saveBatchFiles]
+    [toast, invalidate]
   );
 
   // v525 — submitted from the ReprintReasonModal. Reposts the original
@@ -1083,7 +1069,6 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
-        setLastBatchPngUrl(data.pngUrl);
         toast({
           title: "Reprint with reason recorded",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -1275,7 +1260,7 @@ function SheetPrintingPanel() {
               ? `Select up to ${PRINT_BATCH_MAX} unclaimed certs`
               : selected.size > PRINT_BATCH_MAX
                 ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
-                : "Drops PDF + SVG cut guide + Cricut Print Then Cut PNG to Downloads, opens print dialog for PDF"
+                : "Generates a batch, downloads the Cricut PNG, and opens the print dialog for the PDF"
           }
           className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
         >
@@ -1285,37 +1270,7 @@ function SheetPrintingPanel() {
             </>
           ) : (
             <>
-              <FileDown className="h-4 w-4 mr-2" /> Print Batch ({selected.size} / {PRINT_BATCH_MAX})
-            </>
-          )}
-        </Button>
-        {/* Standalone PNG download — isolated user gesture so Chrome doesn't
-            treat it as an unconfirmed multi-download. Activates once a batch
-            has been generated. Streams bytes through fetch → Blob → anchor so
-            we can show a loading state and surface real errors via toast. */}
-        <Button
-          onClick={() => {
-            if (!lastBatchPngUrl) return;
-            const batchId = lastBatchPngUrl.split("/")[4] || "batch";
-            handleDownloadPng(lastBatchPngUrl, `mintvault-batch-${batchId}.png`);
-          }}
-          disabled={!lastBatchPngUrl || downloadingPng}
-          data-testid="btn-download-png"
-          variant="outline"
-          title={
-            lastBatchPngUrl
-              ? "Download the Cricut Print Then Cut PNG from the most recent batch"
-              : "Generate a print batch first to enable PNG download"
-          }
-          className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
-        >
-          {downloadingPng ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating PNG…
-            </>
-          ) : (
-            <>
-              <FileDown className="h-4 w-4 mr-2" /> Download PNG
+              <FileDown className="h-4 w-4 mr-2" /> Generate Batch ({selected.size} / {PRINT_BATCH_MAX})
             </>
           )}
         </Button>
