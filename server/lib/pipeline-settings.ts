@@ -17,58 +17,66 @@ import { db } from "../db";
 export type SortOrder = "grade_desc" | "value_desc" | "newest_first";
 export type TiktokPrivacy = "PUBLIC_TO_EVERYONE" | "FOLLOWER_OF_CREATOR" | "SELF_ONLY";
 export type TransitionStyle = "cut" | "dissolve" | "zoom";
+export type AiCaptionStyle = "professional" | "casual" | "hype" | "educational";
+export type HashtagPreset = "pokemon" | "yugioh" | "mtg" | "onepiece" | "sports" | "custom";
 
 export interface PipelineSettings {
   // Schedule
-  schedule_day: number;            // 0=Sun … 6=Sat — default 5 (Fri)
-  schedule_hour_utc: number;       // 0–23 — default 18
-  pipeline_paused: boolean;        // default false
-  smart_schedule: boolean;         // default false — use IG insights peak hour
+  schedule_day: number; // 0=Sun … 6=Sat — default 5 (Fri)
+  schedule_hour_utc: number; // 0–23 — default 18
+  pipeline_paused: boolean; // default false
+  smart_schedule: boolean; // default false — use IG insights peak hour
   // Card selection
-  min_grade: number;               // 0–10, 0 = any — default 0
-  max_cards: number;               // 3–8 — default 8
-  sort_order: SortOrder;           // default "grade_desc"
+  min_grade: number; // 0–10, 0 = any — default 0
+  max_cards: number; // 3–8 — default 8
+  sort_order: SortOrder; // default "grade_desc"
   // Video style
   video_prompt: string;
-  video_model: string;             // segmind slug — default "hfai-dop-lite"
-  clip_length_seconds: 4 | 6 | 8;  // default 6
-  include_back: boolean;           // default false
+  video_model: string; // segmind slug — default "hfai-dop-lite"
+  clip_length_seconds: 4 | 6 | 8; // default 6
+  include_back: boolean; // default false
   // Output & publishing
-  auto_post_instagram: boolean;    // default false (legacy: kicks runIgDailyPost)
+  auto_post_instagram: boolean; // default false (legacy: kicks runIgDailyPost)
   caption_template: string;
-  output_resolution: 720 | 1080;   // default 1080
-  watermark_enabled: boolean;      // default false
+  output_resolution: 720 | 1080; // default 1080
+  watermark_enabled: boolean; // default false
   // Social publishing — Meta
-  auto_post_instagram_video: boolean;   // default false
-  auto_post_facebook: boolean;          // default false
-  instagram_draft_mode: boolean;        // default true — hold for manual approve
-  post_delay_minutes: number;           // default 0
+  auto_post_instagram_video: boolean; // default false
+  auto_post_facebook: boolean; // default false
+  instagram_draft_mode: boolean; // default true — hold for manual approve
+  post_delay_minutes: number; // default 0
   // Social publishing — TikTok
-  auto_post_tiktok: boolean;            // default false
-  tiktok_privacy: TiktokPrivacy;        // default "PUBLIC_TO_EVERYONE"
-  tiktok_disable_duet: boolean;         // default false
-  tiktok_disable_stitch: boolean;       // default false
+  auto_post_tiktok: boolean; // default false
+  tiktok_privacy: TiktokPrivacy; // default "PUBLIC_TO_EVERYONE"
+  tiktok_disable_duet: boolean; // default false
+  tiktok_disable_stitch: boolean; // default false
   // Content enhancement
-  intro_video_r2_key: string;           // default ""
-  outro_video_r2_key: string;           // default ""
-  background_music_r2_key: string;      // default ""
-  text_overlay_enabled: boolean;        // default true
+  intro_video_r2_key: string; // default ""
+  outro_video_r2_key: string; // default ""
+  background_music_r2_key: string; // default ""
+  text_overlay_enabled: boolean; // default true
   text_overlay_format: string;
-  transition_style: TransitionStyle;    // default "cut"
+  transition_style: TransitionStyle; // default "cut"
   // Approval workflow
-  require_card_approval: boolean;       // default false
+  require_card_approval: boolean; // default false
   // Thumbnail
-  auto_generate_thumbnail: boolean;     // default true
+  auto_generate_thumbnail: boolean; // default true
   // Owner notify
-  notify_card_owners: boolean;          // default false
+  notify_card_owners: boolean; // default false
   // Notifications
-  notify_email: string;            // empty string = disabled
-  notify_webhook_url: string;      // empty string = disabled
+  notify_email: string; // empty string = disabled
+  notify_webhook_url: string; // empty string = disabled
   // Scan-ingest AI — admin-facing kill switches for the auto-AI that fires
   // after a fresh scan upload. Both default to true (auto-AI on, identify+
   // centering only). Surfaced in /admin/weekly-reel's AI Ingest panel.
-  ai_auto_ingest_enabled: boolean;       // default true
-  ai_ingest_identify_only: boolean;      // default true (documentation toggle)
+  ai_auto_ingest_enabled: boolean; // default true
+  ai_ingest_identify_only: boolean; // default true (documentation toggle)
+  // AI caption generation
+  ai_caption_style: AiCaptionStyle; // default "professional"
+  ai_caption_include_hashtags: boolean; // default true
+  hashtag_preset: HashtagPreset; // default "pokemon"
+  custom_hashtags: string; // default ""
+  hashtag_count: number; // default 10
 }
 
 export const PIPELINE_DEFAULTS: PipelineSettings = {
@@ -110,6 +118,11 @@ export const PIPELINE_DEFAULTS: PipelineSettings = {
   notify_webhook_url: "",
   ai_auto_ingest_enabled: true,
   ai_ingest_identify_only: true,
+  ai_caption_style: "professional",
+  ai_caption_include_hashtags: true,
+  hashtag_preset: "pokemon",
+  custom_hashtags: "",
+  hashtag_count: 10,
 };
 
 export type SettingKey = keyof PipelineSettings;
@@ -119,7 +132,7 @@ export type SettingKey = keyof PipelineSettings;
  *  run yet in a dev environment). */
 export async function getSetting<K extends SettingKey>(
   key: K,
-  defaultValue: PipelineSettings[K],
+  defaultValue: PipelineSettings[K]
 ): Promise<PipelineSettings[K]> {
   try {
     const r = await db.execute(sql`
@@ -157,7 +170,7 @@ export async function getAllSettings(): Promise<PipelineSettings> {
 export async function setSetting<K extends SettingKey>(
   key: K,
   value: PipelineSettings[K],
-  updatedBy?: string,
+  updatedBy?: string
 ): Promise<void> {
   await db.execute(sql`
     INSERT INTO pipeline_settings (key, value, updated_at, updated_by)

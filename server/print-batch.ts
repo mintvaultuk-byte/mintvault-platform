@@ -40,6 +40,7 @@
  * the white paper outside it.
  */
 
+import { createHash } from "crypto";
 import PDFDocument from "pdfkit";
 import { generateLabelPNG } from "./labels";
 import { generateClaimInsertPNG } from "./claim-insert";
@@ -53,18 +54,18 @@ const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
 // ── Page dimensions ──────────────────────────────────────────────────────────
-const PAGE_W_MM       = 210;
-const PDF_PAGE_H_MM   = 297;
-const PNG_PAGE_H_MM   = 279.4;
+const PAGE_W_MM = 210;
+const PDF_PAGE_H_MM = 297;
+const PNG_PAGE_H_MM = 279.4;
 
 // ── Layout (mm) ──────────────────────────────────────────────────────────────
-const MARGIN_MM    = 10;
-const GAP_MM       = 4;
-const LABEL_W_MM   = 70;
-const LABEL_H_MM   = 20;
-const INSERT_W_MM  = 85.6;
-const INSERT_H_MM  = 54;
-const ROW_H_MM     = INSERT_H_MM;
+const MARGIN_MM = 10;
+const GAP_MM = 4;
+const LABEL_W_MM = 70;
+const LABEL_H_MM = 20;
+const INSERT_W_MM = 85.6;
+const INSERT_H_MM = 54;
+const ROW_H_MM = INSERT_H_MM;
 const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 
 export const MAX_CERTS_PER_BATCH = 4;
@@ -72,9 +73,9 @@ export const SHEET_LAYOUT_VERSION = "v2";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
-const CUT_INSET_MM    = 0.25;
-const CUT_STROKE_MM   = (0.5 * (1 / MM_TO_PT)).toFixed(4); // 0.5pt → mm
-const CUT_STROKE_HEX  = "#FF00FF";
+const CUT_INSET_MM = 0.25;
+const CUT_STROKE_MM = (0.5 * (1 / MM_TO_PT)).toFixed(4); // 0.5pt → mm
+const CUT_STROKE_HEX = "#FF00FF";
 
 // ── Layout spec — single source of truth ─────────────────────────────────────
 
@@ -126,8 +127,8 @@ async function renderItemBuffers(items: PrintBatchItem[]): Promise<{
 }> {
   const slice = items.slice(0, MAX_CERTS_PER_BATCH);
   const [fronts, inserts] = await Promise.all([
-    Promise.all(slice.map(it => generateLabelPNG(it.cert, "front"))),
-    Promise.all(slice.map(it => generateClaimInsertPNG((it.cert as any).certId || "", it.claimCode))),
+    Promise.all(slice.map((it) => generateLabelPNG(it.cert, "front"))),
+    Promise.all(slice.map((it) => generateClaimInsertPNG((it.cert as any).certId || "", it.claimCode))),
   ]);
   return { fronts, inserts };
 }
@@ -208,7 +209,7 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
   const layout = buildLayout(items.length);
   const { fronts, inserts } = await renderItemBuffers(items);
 
-  const widthPx  = mmPx(PAGE_W_MM);
+  const widthPx = mmPx(PAGE_W_MM);
   const heightPx = mmPx(PNG_PAGE_H_MM);
 
   const canvas = createCanvas(widthPx, heightPx);
@@ -219,13 +220,7 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
   for (const cell of layout) {
     const buf = cell.kind === "label" ? fronts[cell.itemIndex] : inserts[cell.itemIndex];
     const img = await loadImage(buf);
-    ctx.drawImage(
-      img,
-      mmPx(cell.xMm),
-      mmPx(cell.yMm),
-      mmPx(cell.wMm),
-      mmPx(cell.hMm),
-    );
+    ctx.drawImage(img, mmPx(cell.xMm), mmPx(cell.yMm), mmPx(cell.wMm), mmPx(cell.hMm));
   }
 
   return canvas.toBuffer("image/png");
@@ -240,7 +235,7 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 // double-clicks. Format keeps `print_batch_${batchId}` searchable.
 
 export function deriveBatchId(certIds: string[], adminUser: string): string {
-  const { createHash } = require("crypto") as typeof import("crypto");
+  // createHash imported at top level
   const sorted = [...certIds].sort();
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
   const input = `${adminUser}|${today}|${sorted.join(",")}`;
