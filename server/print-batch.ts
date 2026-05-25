@@ -27,10 +27,11 @@
  *   B) generatePrintBatchCutSVG() → A4 SVG with cut rectangles only.
  *      Magenta hairline (#FF00FF) on a <g id="cut"> layer. ScanNCut Direct
  *      Cut and Cricut SVG cut path both consume this.
- *   C) generatePrintBatchPNG()    → 210×279.4mm (8.27"×11") @ 300 DPI
- *      = 2480×3300px PNG composite. Cricut Design Space Print Then Cut max
- *      printable area is 215×285mm, so we size slightly under that so the
- *      registration marks Cricut adds during print fit on the page.
+ *   C) generatePrintBatchPNG()    → 210×297mm (full A4) @ 600 DPI
+ *      = 4961×7016px PNG composite. Doubled DPI vs the original 300 DPI
+ *      output for sharper Cricut Print Then Cut artwork. The 4-row layout
+ *      content height (242mm) still fits with 55mm of bottom whitespace
+ *      for Cricut's registration marks.
  *
  * Single source of truth: buildLayout() returns the cell array consumed by
  * all three renderers — PDF, SVG and PNG cannot drift from each other.
@@ -50,14 +51,14 @@ import type { CertificateRecord } from "@shared/schema";
 // ── Unit conversion ──────────────────────────────────────────────────────────
 const MM_TO_PT = 2.83464567;
 const mm = (v: number) => v * MM_TO_PT;
-const DPI = 300;
+const DPI = 600;
 const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
 // ── Page dimensions ──────────────────────────────────────────────────────────
 const PAGE_W_MM = 210;
 const PDF_PAGE_H_MM = 297;
-const PNG_PAGE_H_MM = 279.4;
+const PNG_PAGE_H_MM = 297;
 
 // ── Layout (mm) ──────────────────────────────────────────────────────────────
 const MARGIN_MM = 10;
@@ -218,10 +219,10 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 
 // ── PNG composite — Cricut Print Then Cut ────────────────────────────────────
 //
-// 210×279.4mm @ 300 DPI = 2480×3300px. 4-row layout (242mm content height)
-// fits inside the canvas with ~37mm of bottom whitespace — leaves room for
-// Cricut's registration marks (which it adds during print, outside the
-// content area).
+// 210×297mm (full A4) @ 600 DPI = 4961×7016px. 4-row layout (242mm content
+// height) fits inside the canvas with ~55mm of bottom whitespace — leaves
+// room for Cricut's registration marks (which it adds during print, outside
+// the content area).
 
 export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
