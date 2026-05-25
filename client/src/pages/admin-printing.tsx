@@ -8,13 +8,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Loader2, PrinterCheck, FileDown, CheckSquare, Square, RefreshCw,
-  LayoutGrid, BookOpen, Search, X, Printer, Eye, EyeOff, Pencil,
-  PlusCircle, AlertCircle, Clock, CheckCircle2, ChevronDown, ChevronUp,
+  Loader2,
+  PrinterCheck,
+  FileDown,
+  CheckSquare,
+  Square,
+  RefreshCw,
+  LayoutGrid,
+  BookOpen,
+  Search,
+  X,
+  Printer,
+  Eye,
+  EyeOff,
+  Pencil,
+  PlusCircle,
+  AlertCircle,
+  Clock,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import AdminCertBrowser from "./admin-cert-browser";
 
@@ -46,7 +61,9 @@ function fmtDate(d: Date | string | null | undefined): string {
 
 // ── Edit Label Modal ──────────────────────────────────────────────────────────
 function EditLabelModal({
-  certId, cert, onClose,
+  certId,
+  cert,
+  onClose,
 }: {
   certId: string;
   cert: CertificateRecord | null;
@@ -69,21 +86,27 @@ function EditLabelModal({
   const form = useForm<{ cardName: string; setName: string; variant: string; language: string; year: string }>({
     values: {
       cardName: existing?.cardNameOverride ?? cert?.cardName ?? "",
-      setName:  existing?.setOverride      ?? cert?.setName  ?? "",
-      variant:  existing?.variantOverride  ?? cert?.variant  ?? "",
+      setName: existing?.setOverride ?? cert?.setName ?? "",
+      variant: existing?.variantOverride ?? cert?.variant ?? "",
       language: existing?.languageOverride ?? cert?.language ?? "",
-      year:     existing?.yearOverride     ?? cert?.year     ?? "",
+      year: existing?.yearOverride ?? cert?.year ?? "",
     },
   });
 
   const saveMutation = useMutation({
-    mutationFn: async (data: { cardName: string; setName: string; variant: string; language: string; year: string }) => {
+    mutationFn: async (data: {
+      cardName: string;
+      setName: string;
+      variant: string;
+      language: string;
+      year: string;
+    }) => {
       const res = await apiRequest("POST", `/api/admin/printing/override/${certId}`, {
         cardNameOverride: data.cardName || null,
-        setOverride:      data.setName  || null,
-        variantOverride:  data.variant  || null,
+        setOverride: data.setName || null,
+        variantOverride: data.variant || null,
         languageOverride: data.language || null,
-        yearOverride:     data.year     || null,
+        yearOverride: data.year || null,
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
     },
@@ -92,16 +115,12 @@ function EditLabelModal({
       qc.invalidateQueries({ queryKey: ["/api/admin/printing/override", certId] });
       onClose();
     },
-    onError: (err: any) =>
-      toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+    onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
   });
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent
-        className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md"
-        data-testid="edit-label-modal"
-      >
+      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md" data-testid="edit-label-modal">
         <DialogHeader>
           <DialogTitle className="text-yellow-400 flex items-center gap-2">
             <Pencil className="h-4 w-4" /> Edit Label Data — {certId}
@@ -113,10 +132,7 @@ function EditLabelModal({
             <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
           </div>
         ) : (
-          <form
-            onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))}
-            className="space-y-4"
-          >
+          <form onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))} className="space-y-4">
             <div className="rounded-md bg-[#FFF9E6] border border-yellow-700/30 p-3 text-[11px] text-yellow-300 flex gap-2">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               Label display only — grade, cert number, QR code and schema are not changed.
@@ -124,10 +140,10 @@ function EditLabelModal({
 
             {[
               { id: "cardName", label: "Card Name" },
-              { id: "setName",  label: "Set Name" },
-              { id: "variant",  label: "Variant" },
+              { id: "setName", label: "Set Name" },
+              { id: "variant", label: "Variant" },
               { id: "language", label: "Language" },
-              { id: "year",     label: "Year" },
+              { id: "year", label: "Year" },
             ].map(({ id, label }) => (
               <div key={id} className="space-y-1">
                 <Label htmlFor={`edit-${id}`} className="text-xs text-[#666666]">
@@ -143,10 +159,7 @@ function EditLabelModal({
             ))}
 
             <DialogFooter>
-              <Button
-                type="button" variant="ghost" onClick={onClose}
-                className="text-[#999999]"
-              >
+              <Button type="button" variant="ghost" onClick={onClose} className="text-[#999999]">
                 Cancel
               </Button>
               <Button
@@ -155,9 +168,13 @@ function EditLabelModal({
                 className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold"
                 data-testid="btn-save-label-edit"
               >
-                {saveMutation.isPending
-                  ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Saving…</>
-                  : "Save Label Data"}
+                {saveMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Saving…
+                  </>
+                ) : (
+                  "Save Label Data"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -189,11 +206,13 @@ function ReprintReasonModal({
   const trimmed = reason.trim();
   const valid = trimmed.length >= 10 && trimmed.length <= 500;
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-      <DialogContent
-        className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md"
-        data-testid="reprint-reason-modal"
-      >
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md" data-testid="reprint-reason-modal">
         <DialogHeader>
           <DialogTitle className="text-yellow-400 flex items-center gap-2">
             <AlertCircle className="h-4 w-4" /> Reprint claimed cert(s)
@@ -208,8 +227,8 @@ function ReprintReasonModal({
               </p>
               <p className="font-mono text-[10px] break-all">{claimedCertIds.join(", ")}</p>
               <p className="mt-2">
-                Reprinting a claimed cert is recorded to audit_log with the reason below.
-                Use only for damaged-in-post, lost, or bad-cut reprints.
+                Reprinting a claimed cert is recorded to audit_log with the reason below. Use only for damaged-in-post,
+                lost, or bad-cut reprints.
               </p>
             </div>
           </div>
@@ -228,7 +247,8 @@ function ReprintReasonModal({
               data-testid="input-reprint-reason"
             />
             <p className="text-[10px] text-[#999999]">
-              {trimmed.length} / 500 chars {trimmed.length < 10 && trimmed.length > 0 ? `(${10 - trimmed.length} more required)` : ""}
+              {trimmed.length} / 500 chars{" "}
+              {trimmed.length < 10 && trimmed.length > 0 ? `(${10 - trimmed.length} more required)` : ""}
             </p>
           </div>
         </div>
@@ -243,9 +263,13 @@ function ReprintReasonModal({
             className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
             data-testid="btn-submit-reprint-reason"
           >
-            {submitting
-              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Reprinting…</>
-              : "Reprint with reason"}
+            {submitting ? (
+              <>
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Reprinting…
+              </>
+            ) : (
+              "Reprint with reason"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -255,7 +279,12 @@ function ReprintReasonModal({
 
 // ── Certificate Row ───────────────────────────────────────────────────────────
 function CertRow({
-  cert, selected, onToggle, onReprint, onEditLabel, reprintPending,
+  cert,
+  selected,
+  onToggle,
+  onReprint,
+  onEditLabel,
+  reprintPending,
 }: {
   cert: CertForPrinting;
   selected: boolean;
@@ -270,9 +299,7 @@ function CertRow({
   return (
     <div
       className={`rounded-lg border transition-colors ${
-        selected
-          ? "border-yellow-500/70 bg-[#FFF9E6]"
-          : "border-[#E8E4DC] hover:border-[#E8E4DC]"
+        selected ? "border-yellow-500/70 bg-[#FFF9E6]" : "border-[#E8E4DC] hover:border-[#E8E4DC]"
       }`}
       data-testid={`queue-row-${cert.certId}`}
     >
@@ -284,9 +311,7 @@ function CertRow({
           onClick={onToggle}
           data-testid={`checkbox-${cert.certId}`}
         >
-          {selected
-            ? <CheckSquare className="h-4 w-4" />
-            : <Square className="h-4 w-4 text-[#999999]" />}
+          {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4 text-[#999999]" />}
         </div>
 
         {/* Thumbnail */}
@@ -320,9 +345,7 @@ function CertRow({
           </div>
           <p className="text-xs text-[#666666] truncate leading-tight">{cert.cardName}</p>
           {cert.lastPrintedAt && (
-            <p className="text-[10px] text-[#999999]">
-              Last printed {fmtDate(cert.lastPrintedAt)}
-            </p>
+            <p className="text-[10px] text-[#999999]">Last printed {fmtDate(cert.lastPrintedAt)}</p>
           )}
         </div>
 
@@ -330,8 +353,12 @@ function CertRow({
         <div className="flex items-center gap-1.5 shrink-0">
           {/* Secondary actions: icon-only to save space */}
           <Button
-            size="sm" variant="ghost"
-            onClick={(e) => { e.stopPropagation(); setShowPreview((v) => !v); }}
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPreview((v) => !v);
+            }}
             className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-preview-${cert.certId}`}
             title="Preview label"
@@ -340,9 +367,13 @@ function CertRow({
           </Button>
 
           <Button
-            size="sm" variant="ghost"
+            size="sm"
+            variant="ghost"
             disabled={reprintPending}
-            onClick={(e) => { e.stopPropagation(); onReprint(cert.certId); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onReprint(cert.certId);
+            }}
             className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-reprint-${cert.certId}`}
             title="Reprint label"
@@ -351,8 +382,12 @@ function CertRow({
           </Button>
 
           <Button
-            size="sm" variant="ghost"
-            onClick={(e) => { e.stopPropagation(); onEditLabel(cert.certId, cert); }}
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditLabel(cert.certId, cert);
+            }}
             className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
             data-testid={`btn-edit-label-${cert.certId}`}
             title="Edit label display data"
@@ -391,12 +426,14 @@ function CertRow({
 
           {/* Add to sheet */}
           <Button
-            size="sm" variant="ghost"
-            onClick={(e) => { e.stopPropagation(); onToggle(); }}
+            size="sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
             className={`h-7 px-2 text-[10px] gap-1 whitespace-nowrap ${
-              selected
-                ? "text-yellow-400 hover:text-yellow-300"
-                : "text-emerald-500 hover:text-emerald-400"
+              selected ? "text-yellow-400 hover:text-yellow-300" : "text-emerald-500 hover:text-emerald-400"
             }`}
             data-testid={`btn-add-to-sheet-${cert.certId}`}
             title={selected ? "Remove from sheet" : "Add to sheet"}
@@ -432,18 +469,20 @@ function LatestSheetSection({
   onReprintSheet: (certIds: string[]) => Promise<void>;
   generating: boolean;
 }) {
-  const [detailOpen, setDetailOpen]     = useState(false);
-  const [historyOpen, setHistoryOpen]   = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [reprintingRef, setReprintingRef] = useState<string | null>(null);
 
   const { data: sheets = [], isLoading } = useQuery<SheetSummary[]>({
     queryKey: ["/api/admin/printing/sheets"],
   });
 
-  const latest  = sheets[0] ?? null;
-  const older   = sheets.slice(1);
+  const latest = sheets[0] ?? null;
+  const older = sheets.slice(1);
 
-  const { data: detailItems = [], isLoading: detailLoading } = useQuery<{ certId: string; cert: CertificateRecord | null }[]>({
+  const { data: detailItems = [], isLoading: detailLoading } = useQuery<
+    { certId: string; cert: CertificateRecord | null }[]
+  >({
     queryKey: ["/api/admin/printing/sheets", latest?.sheetRef],
     enabled: !!latest && detailOpen,
   });
@@ -451,9 +490,9 @@ function LatestSheetSection({
   const handleReprint = async (sheetRef: string) => {
     setReprintingRef(sheetRef);
     try {
-      const res   = await apiRequest("GET", `/api/admin/printing/sheets/${encodeURIComponent(sheetRef)}`);
+      const res = await apiRequest("GET", `/api/admin/printing/sheets/${encodeURIComponent(sheetRef)}`);
       const items: { certId: string }[] = await res.json();
-      const ids   = items.map((i) => i.certId).filter(Boolean);
+      const ids = items.map((i) => i.certId).filter(Boolean);
       if (ids.length) await onReprintSheet(ids);
     } finally {
       setReprintingRef(null);
@@ -462,9 +501,7 @@ function LatestSheetSection({
 
   const sheetLabel = (ref: string) => {
     const n = parseInt(ref.replace("SHEET-", ""), 10);
-    return isNaN(n)
-      ? ref
-      : new Date(n).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
+    return isNaN(n) ? ref : new Date(n).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
   };
 
   if (isLoading) {
@@ -490,22 +527,20 @@ function LatestSheetSection({
           data-testid="btn-toggle-latest-detail"
         >
           <div className="flex items-center gap-3 min-w-0">
-            {latest.printed
-              ? <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-              : <Clock className="h-4 w-4 text-yellow-500 shrink-0" />}
+            {latest.printed ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            ) : (
+              <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
+            )}
             <div className="min-w-0">
               <p className="text-sm font-semibold text-[#1A1A1A]">
                 Latest Sheet
-                <span className="ml-2 text-xs font-normal text-[#999999]">
-                  {sheetLabel(latest.sheetRef)}
-                </span>
+                <span className="ml-2 text-xs font-normal text-[#999999]">{sheetLabel(latest.sheetRef)}</span>
               </p>
               <p className="text-[11px] text-[#999999] mt-0.5">
                 {latest.total} cert{latest.total !== 1 ? "s" : ""}
                 {" · "}
-                {latest.printed
-                  ? `Printed ${fmtDate(latest.printedAt)}`
-                  : "Not yet marked printed"}
+                {latest.printed ? `Printed ${fmtDate(latest.printedAt)}` : "Not yet marked printed"}
               </p>
             </div>
           </div>
@@ -515,18 +550,25 @@ function LatestSheetSection({
               size="sm"
               variant="outline"
               disabled={isPending}
-              onClick={(e) => { e.stopPropagation(); handleReprint(latest.sheetRef); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleReprint(latest.sheetRef);
+              }}
               className="h-7 text-[10px] px-2 border-yellow-700/40 text-yellow-400 hover:bg-[#FFF9E6]"
               data-testid="btn-reprint-latest-sheet"
             >
-              {reprintingRef === latest.sheetRef
-                ? <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                : <Printer className="h-3 w-3 mr-1" />}
+              {reprintingRef === latest.sheetRef ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Printer className="h-3 w-3 mr-1" />
+              )}
               Reprint Sheet
             </Button>
-            {detailOpen
-              ? <ChevronUp className="h-4 w-4 text-[#999999]" />
-              : <ChevronDown className="h-4 w-4 text-[#999999]" />}
+            {detailOpen ? (
+              <ChevronUp className="h-4 w-4 text-[#999999]" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-[#999999]" />
+            )}
           </div>
         </button>
 
@@ -576,13 +618,20 @@ function LatestSheetSection({
                   data-testid={`full-history-row-${sheet.sheetRef}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    {sheet.printed
-                      ? <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
-                      : <Clock className="h-3 w-3 text-yellow-600 shrink-0" />}
+                    {sheet.printed ? (
+                      <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                    ) : (
+                      <Clock className="h-3 w-3 text-yellow-600 shrink-0" />
+                    )}
                     <span>{sheetLabel(sheet.sheetRef)}</span>
-                    <span className="text-[#AAAAAA]">· {sheet.total} cert{sheet.total !== 1 ? "s" : ""}</span>
+                    <span className="text-[#AAAAAA]">
+                      · {sheet.total} cert{sheet.total !== 1 ? "s" : ""}
+                    </span>
                     {idx === 0 && (
-                      <Badge variant="outline" className="text-[9px] border-yellow-700/40 text-yellow-600 py-0 px-1 ml-1">
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] border-yellow-700/40 text-yellow-600 py-0 px-1 ml-1"
+                      >
                         latest
                       </Badge>
                     )}
@@ -649,12 +698,12 @@ function SheetPrintingPanel() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [selected, setSelected]         = useState<Set<string>>(new Set());
-  const [pendingSheetRef, setPending]   = useState<string | null>(null);
-  const [filterMode, setFilterMode]     = useState<FilterMode>("all");
-  const [search, setSearch]             = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingSheetRef, setPending] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const [search, setSearch] = useState("");
   const [reprintingId, setReprintingId] = useState<string | null>(null);
-  const [editTarget, setEditTarget]     = useState<{ certId: string; cert: CertificateRecord } | null>(null);
+  const [editTarget, setEditTarget] = useState<{ certId: string; cert: CertificateRecord } | null>(null);
 
   // v525 — reprint-with-reason modal state. Populated when /api/admin/print-batch
   // returns 409 (some selected certs already claimed). Submitting the reason
@@ -665,32 +714,32 @@ function SheetPrintingPanel() {
   } | null>(null);
   const [reprintSubmitting, setReprintSubmitting] = useState(false);
 
-  const { data: allCerts = [], isLoading: certsLoading, refetch: refetchCerts } =
-    useQuery<CertForPrinting[]>({ queryKey: ["/api/admin/printing/queue"] });
+  const {
+    data: allCerts = [],
+    isLoading: certsLoading,
+    refetch: refetchCerts,
+  } = useQuery<CertForPrinting[]>({ queryKey: ["/api/admin/printing/queue"] });
 
   const visibleCerts = useMemo(() => {
     let list = allCerts;
-    if (filterMode === "printed")   list = list.filter((c) => c.lastPrintedAt !== null);
+    if (filterMode === "printed") list = list.filter((c) => c.lastPrintedAt !== null);
     if (filterMode === "unprinted") list = list.filter((c) => c.lastPrintedAt === null);
     const q = search.trim().toLowerCase();
     if (q) {
-      list = list.filter(
-        (c) =>
-          c.certId.toLowerCase().includes(q) ||
-          (c.cardName?.toLowerCase() ?? "").includes(q),
-      );
+      list = list.filter((c) => c.certId.toLowerCase().includes(q) || (c.cardName?.toLowerCase() ?? "").includes(q));
     }
     return list;
   }, [allCerts, filterMode, search]);
 
-  const countAll       = allCerts.length;
-  const countPrinted   = allCerts.filter((c) => c.lastPrintedAt !== null).length;
+  const countAll = allCerts.length;
+  const countPrinted = allCerts.filter((c) => c.lastPrintedAt !== null).length;
   const countUnprinted = allCerts.filter((c) => c.lastPrintedAt === null).length;
 
   const toggle = useCallback((certId: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(certId)) next.delete(certId); else next.add(certId);
+      if (next.has(certId)) next.delete(certId);
+      else next.add(certId);
       return next;
     });
   }, []);
@@ -713,7 +762,7 @@ function SheetPrintingPanel() {
 
   const selectFirstBatch = useCallback(
     () => setSelected(new Set(visibleCerts.slice(0, MAX_CERTS_PER_BATCH).map((c) => c.certId))),
-    [visibleCerts],
+    [visibleCerts]
   );
   const clearSelection = useCallback(() => setSelected(new Set()), []);
 
@@ -723,10 +772,11 @@ function SheetPrintingPanel() {
     qc.invalidateQueries({ queryKey: ["/api/admin/printing/sheets"] });
   }, [refetchCerts, qc]);
 
-  // v525 — shared helper for saving the 3-file batch output. Used by
-  // single-cert reprint, multi-cert batch, and reprint-with-reason. All
-  // three filenames share the batchId so the operator can pair them.
-  const saveBatchFiles = useCallback((data: { pdf: string; svg: string; png: string; batchId: string }) => {
+  // v525 — shared helper for saving the 3-file batch output. PDF + PNG are
+  // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
+  // still arrives as base64 in the POST response and uses a blob URL.
+  // All three filenames share the batchId so the operator can pair them.
+  const saveBatchFiles = useCallback((data: { pdfUrl: string; svg: string; pngUrl: string; batchId: string }) => {
     const decode = (b64: string, mime: string) => {
       const bin = atob(b64);
       const buf = new Uint8Array(bin.length);
@@ -741,9 +791,17 @@ function SheetPrintingPanel() {
       a.click();
       URL.revokeObjectURL(url);
     };
+    const saveServerUrl = (url: string, filename: string) => {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+    };
     saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-    saveBlob(decode(data.png, "image/png"), `mintvault-batch-${data.batchId}.png`);
-    saveBlob(decode(data.pdf, "application/pdf"), `mintvault-batch-${data.batchId}.pdf`);
+    saveServerUrl(data.pngUrl, `mintvault-batch-${data.batchId}.png`);
+    // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
+    // so this drops it to Downloads rather than opening inline in a tab.
+    saveServerUrl(`${data.pdfUrl}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
   }, []);
 
   // v525 — single-cert reprint routes through the same /api/admin/print-batch
@@ -754,73 +812,88 @@ function SheetPrintingPanel() {
   // If the cert is already claimed, the endpoint returns 409 with the
   // claimedCertIds list; we open the ReprintReasonModal which then submits
   // to /api/admin/print-batch/reprint with the operator's reason.
-  const handleReprint = useCallback(async (certId: string) => {
-    setReprintingId(certId);
-    try {
-      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
-      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
-      saveBatchFiles(data);
-      toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
-      invalidate();
-    } catch (err: any) {
-      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-        setReprintModal({
-          claimedCertIds: err.body.claimedCertIds || [certId],
-          allCertIds: [certId],
-        });
-      } else {
-        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+  const handleReprint = useCallback(
+    async (certId: string) => {
+      setReprintingId(certId);
+      try {
+        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
+        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        saveBatchFiles(data);
+        toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
+        invalidate();
+      } catch (err: any) {
+        if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+          setReprintModal({
+            claimedCertIds: err.body.claimedCertIds || [certId],
+            allCertIds: [certId],
+          });
+        } else {
+          toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+        }
+      } finally {
+        setReprintingId(null);
       }
-    } finally {
-      setReprintingId(null);
-    }
-  }, [toast, invalidate, saveBatchFiles]);
+    },
+    [toast, invalidate, saveBatchFiles]
+  );
 
   // Download claim insert sheet
   const [downloadingInserts, setDownloadingInserts] = useState(false);
-  const downloadClaimInserts = useCallback(async (certIds: string[]) => {
-    setDownloadingInserts(true);
-    try {
-      const res = await apiRequest("POST", "/api/admin/claim-insert-sheet", { certIds });
-      if (!res.ok) {
-        const { error } = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(error);
+  const downloadClaimInserts = useCallback(
+    async (certIds: string[]) => {
+      setDownloadingInserts(true);
+      try {
+        const res = await apiRequest("POST", "/api/admin/claim-insert-sheet", { certIds });
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: "Failed" }));
+          throw new Error(error);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `claim-inserts-${new Date().toISOString().split("T")[0]}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({
+          title: "Claim inserts downloaded",
+          description: `${certIds.length} insert${certIds.length !== 1 ? "s" : ""} generated`,
+        });
+      } catch (err: any) {
+        toast({ title: "Claim inserts failed", description: err.message, variant: "destructive" });
+      } finally {
+        setDownloadingInserts(false);
       }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `claim-inserts-${new Date().toISOString().split("T")[0]}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: "Claim inserts downloaded", description: `${certIds.length} insert${certIds.length !== 1 ? "s" : ""} generated` });
-    } catch (err: any) {
-      toast({ title: "Claim inserts failed", description: err.message, variant: "destructive" });
-    } finally {
-      setDownloadingInserts(false);
-    }
-  }, [toast]);
+    },
+    [toast]
+  );
 
   // LatestSheetSection's "reprint sheet" button hits this. If any cert in
   // the historical sheet has since been claimed, 409 surfaces the modal.
-  const reprintFromHistory = useCallback(async (certIds: string[]) => {
-    try {
-      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
-      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
-      saveBatchFiles(data);
-      toast({ title: "Sheet reprinted", description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}` });
-      invalidate();
-    } catch (err: any) {
-      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-        setReprintModal({
-          claimedCertIds: err.body.claimedCertIds || [],
-          allCertIds: certIds,
+  const reprintFromHistory = useCallback(
+    async (certIds: string[]) => {
+      try {
+        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
+        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        saveBatchFiles(data);
+        toast({
+          title: "Sheet reprinted",
+          description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
         });
-      } else {
-        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+        invalidate();
+      } catch (err: any) {
+        if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+          setReprintModal({
+            claimedCertIds: err.body.claimedCertIds || [],
+            allCertIds: certIds,
+          });
+        } else {
+          toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+        }
       }
-    }
-  }, [toast, invalidate, saveBatchFiles]);
+    },
+    [toast, invalidate, saveBatchFiles]
+  );
 
   // v525 — single-sheet print-and-cut batch (front + claim insert per row,
   // up to 4 cards per sheet). Returns a JSON envelope with PDF / SVG / PNG
@@ -828,16 +901,17 @@ function SheetPrintingPanel() {
   // shared batchId in the filename.
   const PRINT_BATCH_MAX = 4;
   const [downloadingBatch, setDownloadingBatch] = useState(false);
-  const downloadPrintBatch = useCallback(async (certIds: string[]) => {
-    // CRITICAL: open the print window IMMEDIATELY, synchronously, while
-    // we are still inside the click's user-gesture stack. Chrome/Safari
-    // only honour window.print() if the window was opened during a
-    // gesture; the v421 iframe approach broke that because the await on
-    // the API call elapsed before print() ran, so Chrome silently
-    // no-op'd and the PDF just landed in Downloads.
-    const printWindow = window.open("", "mintvault-print-batch", "width=900,height=1200");
-    if (printWindow) {
-      printWindow.document.write(`
+  const downloadPrintBatch = useCallback(
+    async (certIds: string[]) => {
+      // CRITICAL: open the print window IMMEDIATELY, synchronously, while
+      // we are still inside the click's user-gesture stack. Chrome/Safari
+      // only honour window.print() if the window was opened during a
+      // gesture; the v421 iframe approach broke that because the await on
+      // the API call elapsed before print() ran, so Chrome silently
+      // no-op'd and the PDF just landed in Downloads.
+      const printWindow = window.open("", "mintvault-print-batch", "width=900,height=1200");
+      if (printWindow) {
+        printWindow.document.write(`
         <!DOCTYPE html>
         <html><head><title>Preparing print…</title>
         <style>
@@ -845,109 +919,108 @@ function SheetPrintingPanel() {
         </style></head>
         <body>Preparing print batch…</body></html>
       `);
-    } else {
-      toast({
-        title: "Popup blocked",
-        description: "Allow popups for this site to print directly. Falling back to PDF download.",
-        variant: "destructive",
-      });
-    }
-
-    setDownloadingBatch(true);
-    try {
-      const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
-      const data = await res.json() as {
-        pdf: string; svg: string; png: string;
-        batchId: string; certIds: string[]; mintedFor?: string[];
-        isRecentDuplicate?: boolean;
-      };
-
-      // Always drop all three files to Downloads (shared batchId in name).
-      // The pre-opened print window is then navigated to the PDF blob URL
-      // so Chrome's print dialog opens against the same artwork.
-      saveBatchFiles(data);
-
-      const pdfBlob = (() => {
-        const bin = atob(data.pdf);
-        const buf = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        return new Blob([buf], { type: "application/pdf" });
-      })();
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-
-      if (printWindow && !printWindow.closed) {
-        printWindow.location.replace(pdfUrl);
-        let printed = false;
-        const tryPrint = () => {
-          if (printed || printWindow.closed) return;
-          printed = true;
-          try {
-            printWindow.focus();
-            printWindow.print();
-          } catch (err) {
-            console.warn("[print-batch] print() threw, falling back to download:", err);
-          }
-        };
-        printWindow.onload = tryPrint;
-        setTimeout(tryPrint, 1500);
-        setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
       } else {
-        URL.revokeObjectURL(pdfUrl);
-      }
-
-      const mintedCount = data.mintedFor?.length ?? 0;
-      const idempotentNote = data.isRecentDuplicate ? " (idempotent re-run)" : "";
-      const description = printWindow && !printWindow.closed
-        ? (mintedCount > 0
-            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}`
-            : `Pick printer in dialog. SVG + PNG downloaded${idempotentNote}.`)
-        : (mintedCount > 0
-            ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG + PNG downloaded${idempotentNote}`
-            : `PDF + SVG + PNG downloaded${idempotentNote}.`);
-      toast({ title: "Print batch ready", description });
-      invalidate();
-    } catch (err: any) {
-      printWindow?.close();
-      if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-        setReprintModal({
-          claimedCertIds: err.body.claimedCertIds || [],
-          allCertIds: certIds,
+        toast({
+          title: "Popup blocked",
+          description: "Allow popups for this site to print directly. Falling back to PDF download.",
+          variant: "destructive",
         });
-      } else {
-        toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
       }
-    } finally {
-      setDownloadingBatch(false);
-    }
-  }, [toast, invalidate, saveBatchFiles]);
+
+      setDownloadingBatch(true);
+      try {
+        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
+        const data = (await res.json()) as {
+          pdfUrl: string;
+          svg: string;
+          pngUrl: string;
+          batchId: string;
+          certIds: string[];
+          mintedFor?: string[];
+          isRecentDuplicate?: boolean;
+        };
+
+        // Always drop all three files to Downloads (shared batchId in name).
+        // The pre-opened print window is then navigated to the PDF endpoint
+        // (served inline) so Chrome's print dialog opens against the same
+        // artwork.
+        saveBatchFiles(data);
+
+        if (printWindow && !printWindow.closed) {
+          printWindow.location.replace(data.pdfUrl);
+          let printed = false;
+          const tryPrint = () => {
+            if (printed || printWindow.closed) return;
+            printed = true;
+            try {
+              printWindow.focus();
+              printWindow.print();
+            } catch (err) {
+              console.warn("[print-batch] print() threw, falling back to download:", err);
+            }
+          };
+          printWindow.onload = tryPrint;
+          setTimeout(tryPrint, 1500);
+        }
+
+        const mintedCount = data.mintedFor?.length ?? 0;
+        const idempotentNote = data.isRecentDuplicate ? " (idempotent re-run)" : "";
+        const description =
+          printWindow && !printWindow.closed
+            ? mintedCount > 0
+              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}`
+              : `Pick printer in dialog. SVG + PNG downloaded${idempotentNote}.`
+            : mintedCount > 0
+              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG + PNG downloaded${idempotentNote}`
+              : `PDF + SVG + PNG downloaded${idempotentNote}.`;
+        toast({ title: "Print batch ready", description });
+        invalidate();
+      } catch (err: any) {
+        printWindow?.close();
+        if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
+          setReprintModal({
+            claimedCertIds: err.body.claimedCertIds || [],
+            allCertIds: certIds,
+          });
+        } else {
+          toast({ title: "Print batch failed", description: err.message || String(err), variant: "destructive" });
+        }
+      } finally {
+        setDownloadingBatch(false);
+      }
+    },
+    [toast, invalidate, saveBatchFiles]
+  );
 
   // v525 — submitted from the ReprintReasonModal. Reposts the original
   // selection to /api/admin/print-batch/reprint with the operator's reason.
-  const submitReprintWithReason = useCallback(async (reason: string) => {
-    if (!reprintModal) return;
-    const certIds = reprintModal.allCertIds;
-    setReprintSubmitting(true);
-    try {
-      const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
-      const data = await res.json() as { pdf: string; svg: string; png: string; batchId: string };
-      saveBatchFiles(data);
-      toast({
-        title: "Reprint with reason recorded",
-        description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
-      });
-      setReprintModal(null);
-      invalidate();
-    } catch (err: any) {
-      toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
-    } finally {
-      setReprintSubmitting(false);
-    }
-  }, [reprintModal, toast, invalidate, saveBatchFiles]);
+  const submitReprintWithReason = useCallback(
+    async (reason: string) => {
+      if (!reprintModal) return;
+      const certIds = reprintModal.allCertIds;
+      setReprintSubmitting(true);
+      try {
+        const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
+        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        saveBatchFiles(data);
+        toast({
+          title: "Reprint with reason recorded",
+          description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
+        });
+        setReprintModal(null);
+        invalidate();
+      } catch (err: any) {
+        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
+      } finally {
+        setReprintSubmitting(false);
+      }
+    },
+    [reprintModal, toast, invalidate, saveBatchFiles]
+  );
 
   // Mark printed
   const markPrintedMutation = useMutation({
-    mutationFn: (sheetRef: string) =>
-      apiRequest("POST", "/api/admin/printing/mark-printed", { sheetRef }),
+    mutationFn: (sheetRef: string) => apiRequest("POST", "/api/admin/printing/mark-printed", { sheetRef }),
     onSuccess: () => {
       toast({ title: "Sheet marked as printed" });
       setPending(null);
@@ -960,7 +1033,6 @@ function SheetPrintingPanel() {
 
   return (
     <div className="space-y-5" data-testid="admin-printing">
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -968,11 +1040,13 @@ function SheetPrintingPanel() {
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
           <p className="text-xs text-[#999999] mt-0.5">
-            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 20 mm slab label + 85.6 × 54 mm claim insert · Cricut / ScanNCut compatible
+            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 20 mm slab label + 85.6 × 54 mm claim insert · Cricut /
+            ScanNCut compatible
           </p>
         </div>
         <Button
-          size="sm" variant="ghost"
+          size="sm"
+          variant="ghost"
           onClick={() => refetchCerts()}
           className="text-[#999999] hover:text-yellow-400"
           data-testid="btn-refresh-printing"
@@ -998,9 +1072,11 @@ function SheetPrintingPanel() {
               }`}
             >
               {label}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                filterMode === mode ? "bg-[#FFF9E6] text-yellow-400" : "bg-[#E8E4DC] text-[#999999]"
-              }`}>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                  filterMode === mode ? "bg-[#FFF9E6] text-yellow-400" : "bg-[#E8E4DC] text-[#999999]"
+                }`}
+              >
                 {count}
               </span>
             </button>
@@ -1072,9 +1148,7 @@ function SheetPrintingPanel() {
         </div>
       ) : visibleCerts.length === 0 ? (
         <div className="rounded-lg border border-[#E8E4DC] p-10 text-center text-[#999999] text-sm">
-          {search || filterMode !== "all"
-            ? "No certificates match your filter."
-            : "No certificates found."}
+          {search || filterMode !== "all" ? "No certificates match your filter." : "No certificates found."}
         </div>
       ) : (
         <div className="space-y-1.5 max-h-[600px] overflow-y-auto pr-1">
@@ -1101,9 +1175,15 @@ function SheetPrintingPanel() {
           variant="outline"
           className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
         >
-          {downloadingInserts
-            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-            : <><FileDown className="h-4 w-4 mr-2" /> Claim Inserts ({selected.size})</>}
+          {downloadingInserts ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4 mr-2" /> Claim Inserts ({selected.size})
+            </>
+          )}
         </Button>
         <Button
           onClick={() => downloadPrintBatch(Array.from(selected))}
@@ -1118,9 +1198,15 @@ function SheetPrintingPanel() {
           }
           className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
         >
-          {downloadingBatch
-            ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…</>
-            : <><FileDown className="h-4 w-4 mr-2" /> Print Batch ({selected.size} / {PRINT_BATCH_MAX})</>}
+          {downloadingBatch ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4 mr-2" /> Print Batch ({selected.size} / {PRINT_BATCH_MAX})
+            </>
+          )}
         </Button>
         {selected.size > PRINT_BATCH_MAX && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">
@@ -1142,18 +1228,21 @@ function SheetPrintingPanel() {
             data-testid="btn-mark-printed-inline"
             className="bg-emerald-700 hover:bg-emerald-600 text-[#1A1A1A] text-xs shrink-0"
           >
-            {markPrintedMutation.isPending
-              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Marking…</>
-              : <><PrinterCheck className="h-3 w-3 mr-1" /> Mark Sheet Printed</>}
+            {markPrintedMutation.isPending ? (
+              <>
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Marking…
+              </>
+            ) : (
+              <>
+                <PrinterCheck className="h-3 w-3 mr-1" /> Mark Sheet Printed
+              </>
+            )}
           </Button>
         </div>
       )}
 
       {/* Latest Sheet — reprint flows through /api/admin/print-batch. */}
-      <LatestSheetSection
-        onReprintSheet={reprintFromHistory}
-        generating={downloadingBatch}
-      />
+      <LatestSheetSection onReprintSheet={reprintFromHistory} generating={downloadingBatch} />
 
       {/* Reprint with reason modal */}
       {reprintModal && (
@@ -1168,11 +1257,7 @@ function SheetPrintingPanel() {
 
       {/* Edit label modal */}
       {editTarget && (
-        <EditLabelModal
-          certId={editTarget.certId}
-          cert={editTarget.cert}
-          onClose={() => setEditTarget(null)}
-        />
+        <EditLabelModal certId={editTarget.certId} cert={editTarget.cert} onClose={() => setEditTarget(null)} />
       )}
     </div>
   );

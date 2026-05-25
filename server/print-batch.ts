@@ -44,6 +44,7 @@ import { createHash } from "crypto";
 import PDFDocument from "pdfkit";
 import { generateLabelPNG } from "./labels";
 import { generateClaimInsertPNG } from "./claim-insert";
+import { uploadToR2 } from "./r2";
 import type { CertificateRecord } from "@shared/schema";
 
 // ── Unit conversion ──────────────────────────────────────────────────────────
@@ -256,6 +257,22 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 // batchId. Combined with a 5-minute window check in the route handler,
 // this prevents duplicate audit_log / labelPrints writes from fat-fingered
 // double-clicks. Format keeps `print_batch_${batchId}` searchable.
+
+// ── R2 storage for generated print-batch artifacts ───────────────────────────
+//
+// PDF and PNG buffers are written to R2 keyed by batchId so the client can
+// retrieve them via a stable URL instead of expiring blob URLs. SVG is small
+// enough to keep returning inline as base64 in the POST response.
+export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
+  return `print-batches/${batchId}.${ext}`;
+}
+
+export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {
+  await Promise.all([
+    uploadToR2(r2KeyForPrintBatch(batchId, "pdf"), pdfBuf, "application/pdf"),
+    uploadToR2(r2KeyForPrintBatch(batchId, "png"), pngBuf, "image/png"),
+  ]);
+}
 
 export function deriveBatchId(certIds: string[], adminUser: string): string {
   // createHash imported at top level

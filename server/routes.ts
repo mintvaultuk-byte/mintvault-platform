@@ -5741,6 +5741,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchCutSVG,
         generatePrintBatchPNG,
         deriveBatchId,
+        uploadPrintBatchArtifacts,
       } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
@@ -5805,6 +5806,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchPNG(items),
       ]);
 
+      // Persist PDF + PNG to R2 so the client can retrieve them via stable
+      // server URLs instead of expiring blob URLs. SVG stays inline as base64.
+      try {
+        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf);
+      } catch (uploadErr: any) {
+        console.error("[print-batch] R2 upload failed:", uploadErr.message);
+        return res.status(500).json({ error: "Failed to store print batch artefacts" });
+      }
+
       if (!isRecentDuplicate) {
         // Audit row — one per batch generated.
         try {
@@ -5868,9 +5878,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       res.json({
-        pdf: pdfBuf.toString("base64"),
+        pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+        pngUrl: `/api/admin/print-batch/${batchId}/png`,
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
-        png: pngBuf.toString("base64"),
         batchId,
         certIds: ids,
         mintedFor,
@@ -5928,6 +5938,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchCutSVG,
         generatePrintBatchPNG,
         deriveBatchId,
+        uploadPrintBatchArtifacts,
       } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
@@ -5975,6 +5986,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         Promise.resolve(generatePrintBatchCutSVG(items.length)),
         generatePrintBatchPNG(items),
       ]);
+
+      // Persist PDF + PNG to R2 so the client can retrieve them via stable
+      // server URLs instead of expiring blob URLs.
+      try {
+        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf);
+      } catch (uploadErr: any) {
+        console.error("[reprint] R2 upload failed:", uploadErr.message);
+        return res.status(500).json({ error: "Failed to store print batch artefacts" });
+      }
 
       // One audit_log row per cert. Best-effort: failure here is logged
       // but does not block the operator from getting the artifacts —
@@ -6045,9 +6065,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       res.json({
-        pdf: pdfBuf.toString("base64"),
+        pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+        pngUrl: `/api/admin/print-batch/${batchId}/png`,
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
-        png: pngBuf.toString("base64"),
         batchId,
         certIds: ids,
         mintedFor,
@@ -6058,6 +6078,65 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       console.error("[reprint] error:", err.message);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── PRINT BATCH ARTIFACT RETRIEVAL ───────────────────────────────────────
+  // GET endpoints serve the PDF and PNG artefacts previously written to R2
+  // by the POST handlers above. Admin auth required.
+  // PDF: inline by default (so the print-window flow can navigate to it and
+  // trigger window.print()), attachment when ?download=1 is set.
+  // PNG: always attachment (Cricut Design Space needs the file on disk).
+  app.get("/api/admin/print-batch/:batchId/pdf", requireAdmin, async (req, res) => {
+    try {
+      const batchId = String(req.params.batchId);
+      const download = req.query.download === "1";
+      const { r2KeyForPrintBatch } = await import("./print-batch");
+      const key = r2KeyForPrintBatch(batchId, "pdf");
+      const head = await headR2(key);
+      if (!head) return res.status(404).json({ error: "Print batch PDF not found" });
+      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getR2Client } = await import("./r2");
+      const client = getR2Client();
+      const result = await client.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }));
+      if (!result.Body) return res.status(404).json({ error: "Print batch PDF not found" });
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const filename = `MintVault-Batch-${batchId}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `${download ? "attachment" : "inline"}; filename="${filename}"`);
+      res.send(Buffer.concat(chunks));
+    } catch (err: any) {
+      console.error("[print-batch/pdf] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch print batch PDF" });
+    }
+  });
+
+  app.get("/api/admin/print-batch/:batchId/png", requireAdmin, async (req, res) => {
+    try {
+      const batchId = String(req.params.batchId);
+      const { r2KeyForPrintBatch } = await import("./print-batch");
+      const key = r2KeyForPrintBatch(batchId, "png");
+      const head = await headR2(key);
+      if (!head) return res.status(404).json({ error: "Print batch PNG not found" });
+      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getR2Client } = await import("./r2");
+      const client = getR2Client();
+      const result = await client.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }));
+      if (!result.Body) return res.status(404).json({ error: "Print batch PNG not found" });
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const filename = `MintVault-Batch-${batchId}.png`;
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(Buffer.concat(chunks));
+    } catch (err: any) {
+      console.error("[print-batch/png] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch print batch PNG" });
     }
   });
 
