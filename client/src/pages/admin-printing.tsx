@@ -998,11 +998,17 @@ function SheetPrintingPanel() {
 
         // Step 2 — PNG anchor download. Same-origin URL + server's
         // Content-Disposition: attachment header drives the actual save;
-        // the `download` attribute is just a filename hint. DOM-attached
-        // so Firefox/Safari honour click().
+        // the `download` attribute is just a filename hint.
+        // target="_self" makes this a same-tab navigation request — Chrome
+        // doesn't apply its post-await user-gesture popup rules to
+        // navigations of the current tab, so the request actually fires.
+        // The server's attachment header then converts the navigation into
+        // a download instead of a page change, so the user stays on this
+        // page and the file lands in Downloads.
         const pngAnchor = document.createElement("a");
         pngAnchor.href = data.pngUrl;
         pngAnchor.download = `mintvault-batch-${data.batchId}.png`;
+        pngAnchor.target = "_self";
         document.body.appendChild(pngAnchor);
         pngAnchor.click();
         pngAnchor.remove();
