@@ -521,9 +521,9 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // of its third. New layout (rearranged): card number TOP, digit
     // MIDDLE, abbreviation BOTTOM. Hard-coded so a future panel resize
     // doesn't silently shift the rows.
-    const cardNumCY = 44;    // zone 1 centre — top third
+    const cardNumCY = 34;    // zone 1 centre — top third
     const digitCY   = 98;    // zone 2 centre — middle third
-    const abbrCY    = 152;   // zone 3 centre — bottom third
+    const abbrCY    = 158;   // zone 3 centre — bottom third
 
     // Element 1 — card number (#4) in zone 1
     const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
@@ -540,7 +540,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
 
     // Element 2 — grade digit in zone 2 (middle)
     // Hard 80-px cap; fitFontSize shrinks only when width can't accommodate.
-    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 90, 36);
+    const gradeFontSize = fitFontSize(ctx, gradeStr, PANEL_W - 8, 105, 36);
     // Optical-centre adjustment: textBaseline="middle" places the em-box
     // middle at Y, but a numeral's visual centre sits slightly above the
     // em-box middle (digits are top-heavy). 0.04*em shift pushes the
