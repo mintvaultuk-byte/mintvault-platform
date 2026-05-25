@@ -802,7 +802,11 @@ function SheetPrintingPanel() {
       a.remove();
     };
     saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-    saveServerUrl(data.pngUrl, `mintvault-batch-${data.batchId}.png`);
+    // PNG is intentionally NOT auto-downloaded here — Chrome's
+    // multi-download gate silently blocks the second/third file when
+    // multiple downloads fire from a single user-gesture stack. The PNG
+    // is exposed via a separate "Download PNG" button (lastBatchPngUrl
+    // state + window.open), which counts as its own user gesture.
     // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
     // so this drops it to Downloads rather than opening inline in a tab.
     saveServerUrl(`${data.pdfUrl}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
@@ -823,6 +827,7 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
+        setLastBatchPngUrl(data.pngUrl);
         toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
         invalidate();
       } catch (err: any) {
@@ -880,6 +885,7 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
+        setLastBatchPngUrl(data.pngUrl);
         toast({
           title: "Sheet reprinted",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -905,6 +911,10 @@ function SheetPrintingPanel() {
   // shared batchId in the filename.
   const PRINT_BATCH_MAX = 4;
   const [downloadingBatch, setDownloadingBatch] = useState(false);
+  // Populated after every successful batch POST. Drives the standalone
+  // "Download PNG" button — clicking it counts as its own user gesture so
+  // it bypasses Chrome's multi-download permission gate.
+  const [lastBatchPngUrl, setLastBatchPngUrl] = useState<string | null>(null);
   const downloadPrintBatch = useCallback(
     async (certIds: string[]) => {
       // CRITICAL: open the print window IMMEDIATELY, synchronously, while
@@ -944,11 +954,15 @@ function SheetPrintingPanel() {
           isRecentDuplicate?: boolean;
         };
 
-        // Always drop all three files to Downloads (shared batchId in name).
+        // Drops SVG + PDF to Downloads (shared batchId in name); the PNG is
+        // kept out of this auto-batch (Chrome silently blocks the 2nd/3rd
+        // download in a single gesture) and is available via the standalone
+        // "Download PNG" button driven by lastBatchPngUrl.
         // The pre-opened print window is then navigated to the PDF endpoint
         // (served inline) so Chrome's print dialog opens against the same
         // artwork.
         saveBatchFiles(data);
+        setLastBatchPngUrl(data.pngUrl);
 
         if (printWindow && !printWindow.closed) {
           printWindow.location.replace(data.pdfUrl);
@@ -972,11 +986,11 @@ function SheetPrintingPanel() {
         const description =
           printWindow && !printWindow.closed
             ? mintedCount > 0
-              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}`
-              : `Pick printer in dialog. SVG + PNG downloaded${idempotentNote}.`
+              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — pick printer in dialog${idempotentNote}. Click Download PNG for Cricut.`
+              : `Pick printer in dialog. SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`
             : mintedCount > 0
-              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG + PNG downloaded${idempotentNote}`
-              : `PDF + SVG + PNG downloaded${idempotentNote}.`;
+              ? `Codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""} — PDF + SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`
+              : `PDF + SVG downloaded${idempotentNote}. Click Download PNG for Cricut.`;
         toast({ title: "Print batch ready", description });
         invalidate();
       } catch (err: any) {
@@ -1007,6 +1021,7 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
+        setLastBatchPngUrl(data.pngUrl);
         toast({
           title: "Reprint with reason recorded",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -1211,6 +1226,25 @@ function SheetPrintingPanel() {
               <FileDown className="h-4 w-4 mr-2" /> Print Batch ({selected.size} / {PRINT_BATCH_MAX})
             </>
           )}
+        </Button>
+        {/* Standalone PNG download — isolated user gesture so Chrome doesn't
+            treat it as an unconfirmed multi-download. Activates once a batch
+            has been generated; window.open targets the same admin endpoint. */}
+        <Button
+          onClick={() => {
+            if (lastBatchPngUrl) window.open(lastBatchPngUrl, "_blank");
+          }}
+          disabled={!lastBatchPngUrl}
+          data-testid="btn-download-png"
+          variant="outline"
+          title={
+            lastBatchPngUrl
+              ? "Download the Cricut Print Then Cut PNG from the most recent batch"
+              : "Generate a print batch first to enable PNG download"
+          }
+          className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
+        >
+          <FileDown className="h-4 w-4 mr-2" /> Download PNG
         </Button>
         {selected.size > PRINT_BATCH_MAX && (
           <span className="text-xs text-red-400" data-testid="text-over-limit">
