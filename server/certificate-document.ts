@@ -3,6 +3,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import type { CertificateRecord } from "@shared/schema";
 import { isNonNumericGrade, gradeLabelFull } from "@shared/schema";
+import { mvgsGradeLabel } from "@shared/mvgs-scoring";
 import { APP_BASE_URL } from "./app-url";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
@@ -12,13 +13,13 @@ const MARGIN = 40;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
 // ── Colour palette ────────────────────────────────────────────────────────────
-const GOLD       = "#D4AF37";
-const GOLD_DARK  = "#B8960C";
-const BLACK      = "#000000";
-const GRAY_DARK  = "#1a1a1a";
-const GRAY_MID   = "#555555";
+const GOLD = "#D4AF37";
+const GOLD_DARK = "#B8960C";
+const BLACK = "#000000";
+const GRAY_DARK = "#1a1a1a";
+const GRAY_MID = "#555555";
 const GRAY_LIGHT = "#888888";
-const GRAY_BG    = "#f5f0e8";
+const GRAY_BG = "#f5f0e8";
 
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 
@@ -40,9 +41,9 @@ async function generateQR(url: string, size: number): Promise<Buffer> {
 // Border frame: outer gold bars + corner ornaments + inner vertical lines only.
 // No inner horizontal lines — they would read as a second divider in the document.
 function drawBorderFrame(doc: PDFKit.PDFDocument) {
-  const bw = 7;   // outer bar width (pt)
+  const bw = 7; // outer bar width (pt)
   const inner = 3; // inner line thickness (pt)
-  const gap = 5;   // gap between outer bar and inner line
+  const gap = 5; // gap between outer bar and inner line
 
   // Outer gold bars (all four sides)
   doc.rect(0, 0, PAGE_W, bw).fill(GOLD);
@@ -59,8 +60,10 @@ function drawBorderFrame(doc: PDFKit.PDFDocument) {
   const cs = 16;
   const co = bw + 1;
   const corners: [number, number][] = [
-    [co, co], [PAGE_W - co - cs, co],
-    [co, PAGE_H - co - cs], [PAGE_W - co - cs, PAGE_H - co - cs],
+    [co, co],
+    [PAGE_W - co - cs, co],
+    [co, PAGE_H - co - cs],
+    [PAGE_W - co - cs, PAGE_H - co - cs],
   ];
   for (const [cx, cy] of corners) {
     doc.rect(cx, cy, cs, cs).fill(GOLD);
@@ -73,10 +76,7 @@ function goldDivider(doc: PDFKit.PDFDocument, y: number, opacity = 1) {
   doc.restore();
 }
 
-export async function generateCertificateDocument(
-  cert: CertificateRecord,
-  ownerName?: string | null,
-): Promise<Buffer> {
+export async function generateCertificateDocument(cert: CertificateRecord, ownerName?: string | null): Promise<Buffer> {
   return new Promise(async (resolve, reject) => {
     try {
       const certId = normalizeCertId(cert.certId);
@@ -141,15 +141,11 @@ export async function generateCertificateDocument(
       y += 16;
 
       // ── Certificate of Authenticity title ─────────────────────────────────────
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(22)
-        .fillColor(GOLD)
-        .text("CERTIFICATE OF AUTHENTICITY", MARGIN, y, {
-          width: CONTENT_W,
-          align: "center",
-          characterSpacing: 2,
-        });
+      doc.font("Helvetica-Bold").fontSize(22).fillColor(GOLD).text("CERTIFICATE OF AUTHENTICITY", MARGIN, y, {
+        width: CONTENT_W,
+        align: "center",
+        characterSpacing: 2,
+      });
       y += 34;
 
       // ── Cert ID ───────────────────────────────────────────────────────────────
@@ -184,15 +180,11 @@ export async function generateCertificateDocument(
       const displayName = ownerName || cert.ownerName;
       const isClaimed = cert.ownershipStatus === "claimed";
       if (displayName) {
-        doc
-          .font("Helvetica")
-          .fontSize(9)
-          .fillColor(GRAY_MID)
-          .text("REGISTERED OWNER", MARGIN, y, {
-            width: CONTENT_W,
-            align: "center",
-            characterSpacing: 1,
-          });
+        doc.font("Helvetica").fontSize(9).fillColor(GRAY_MID).text("REGISTERED OWNER", MARGIN, y, {
+          width: CONTENT_W,
+          align: "center",
+          characterSpacing: 1,
+        });
         y += 14;
         doc
           .font("Helvetica-Bold")
@@ -230,9 +222,10 @@ export async function generateCertificateDocument(
         ["Variant", cert.variant || null],
         ["Collection", cert.collection || null],
         ["Language", cert.language || "English"],
-        ["Designations", Array.isArray(cert.designations) && cert.designations.length > 0
-          ? cert.designations.join(", ")
-          : null],
+        [
+          "Designations",
+          Array.isArray(cert.designations) && cert.designations.length > 0 ? cert.designations.join(", ") : null,
+        ],
       ].filter(([, v]) => v != null && String(v).trim() !== "") as Row[];
 
       rows.forEach(([label, value], i) => {
@@ -257,25 +250,27 @@ export async function generateCertificateDocument(
       y += 16;
 
       // ── Grade section ─────────────────────────────────────────────────────────
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(9)
-        .fillColor(GOLD_DARK)
-        .text("GRADE", MARGIN, y, { characterSpacing: 1.5 });
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(GOLD_DARK).text("GRADE", MARGIN, y, { characterSpacing: 1.5 });
       y += 16;
 
       const isNonNumeric = isNonNumericGrade(cert.gradeType);
       const gradeText = isNonNumeric
         ? gradeLabelFull(cert.gradeType, String(cert.gradeOverall ?? ""))
         : cert.gradeOverall != null
-          ? String(parseFloat(String(cert.gradeOverall)) % 1 === 0
-              ? parseInt(String(cert.gradeOverall))
-              : parseFloat(String(cert.gradeOverall)).toFixed(1))
+          ? String(
+              parseFloat(String(cert.gradeOverall)) % 1 === 0
+                ? parseInt(String(cert.gradeOverall))
+                : parseFloat(String(cert.gradeOverall)).toFixed(1)
+            )
           : "—";
       const gradeName = isNonNumeric
         ? gradeLabelFull(cert.gradeType, String(cert.gradeOverall ?? ""))
         : cert.gradeOverall != null
-          ? gradeLabelFull(cert.gradeType, String(cert.gradeOverall))
+          ? cert.labelType === "black"
+            ? "PRISTINE 10P"
+            : typeof cert.gradeStrengthScore === "number" && cert.gradeStrengthScore >= 1
+              ? mvgsGradeLabel(cert.gradeStrengthScore).toUpperCase()
+              : gradeLabelFull(cert.gradeType, String(cert.gradeOverall))
           : "";
 
       if (isNonNumeric) {
@@ -312,9 +307,9 @@ export async function generateCertificateDocument(
 
         const subgrades: [string, string | null | undefined][] = [
           ["Centering", cert.gradeCentering != null ? String(parseFloat(String(cert.gradeCentering))) : null],
-          ["Corners",   cert.gradeCorners   != null ? String(parseFloat(String(cert.gradeCorners)))   : null],
-          ["Edges",     cert.gradeEdges     != null ? String(parseFloat(String(cert.gradeEdges)))     : null],
-          ["Surface",   cert.gradeSurface   != null ? String(parseFloat(String(cert.gradeSurface)))   : null],
+          ["Corners", cert.gradeCorners != null ? String(parseFloat(String(cert.gradeCorners))) : null],
+          ["Edges", cert.gradeEdges != null ? String(parseFloat(String(cert.gradeEdges))) : null],
+          ["Surface", cert.gradeSurface != null ? String(parseFloat(String(cert.gradeSurface))) : null],
         ].filter(([, v]) => v != null) as [string, string][];
 
         if (subgrades.length > 0) {
@@ -363,11 +358,19 @@ export async function generateCertificateDocument(
         .text("OWNERSHIP & REGISTRY", ownerX, y, { characterSpacing: 1 });
 
       const ownerRows: [string, string][] = [
-        ["Owner", isClaimed ? (displayName || "Claimed (name not provided)") : "Unregistered"],
+        ["Owner", isClaimed ? displayName || "Claimed (name not provided)" : "Unregistered"],
         ...(isClaimed && cert.ownerEmail ? [["Email", cert.ownerEmail] as [string, string]] : []),
-        ["Registry Status", isClaimed ? "Registered" : cert.ownershipStatus === "transfer_pending" ? "Transfer Pending" : "Unregistered"],
+        [
+          "Registry Status",
+          isClaimed ? "Registered" : cert.ownershipStatus === "transfer_pending" ? "Transfer Pending" : "Unregistered",
+        ],
         ["Certificate ID", certId],
-        ["Date Issued", cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }) : "—"],
+        [
+          "Date Issued",
+          cert.createdAt
+            ? new Date(cert.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })
+            : "—",
+        ],
         ["Card Status", cert.status === "active" ? "Active" : cert.status],
       ];
 
@@ -399,11 +402,11 @@ export async function generateCertificateDocument(
         .fillColor(GRAY_MID)
         .text(
           "MintVault UK applies a rigorous multi-point grading process to every card we evaluate. Each graded card is " +
-          "encapsulated in a tamper-evident slab fitted with an NFC chip and QR code for instant public verification. " +
-          "This certificate confirms the authenticity of the card and grade recorded above at the time of grading.",
+            "encapsulated in a tamper-evident slab fitted with an NFC chip and QR code for instant public verification. " +
+            "This certificate confirms the authenticity of the card and grade recorded above at the time of grading.",
           MARGIN,
           y,
-          { width: CONTENT_W, align: "justify", lineGap: 3 },
+          { width: CONTENT_W, align: "justify", lineGap: 3 }
         );
 
       // ── Footer — anchored at bottom ───────────────────────────────────────────
@@ -419,7 +422,7 @@ export async function generateCertificateDocument(
           "This certificate is valid only when verified at mintvaultuk.com  \u00b7  MintVault UK Ltd  \u00b7  Professional Trading Card Authentication",
           MARGIN,
           footerTextY,
-          { width: CONTENT_W, align: "center" },
+          { width: CONTENT_W, align: "center" }
         );
 
       doc.end();

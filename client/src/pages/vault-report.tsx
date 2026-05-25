@@ -30,6 +30,7 @@ interface VaultReport {
     isBlackLabel: boolean;
     isNonNumeric: boolean;
     gradeLabel: string;
+    gradeStrengthScore: number | null;
   };
   centering: {
     leftRight: string | null;
@@ -141,15 +142,38 @@ function GradeBar({ score }: { score: number | null }) {
 }
 
 // ── Grade condition label map ─────────────────────────────────────────────────
+//
+// Numeric grades with an MVGS score → full MVGS ladder (uppercase, kept
+// consistent with the rest of this page's pill styling). Score-less or
+// non-numeric certs fall back to the legacy PSA-style mapping.
 
 function conditionLabel(
   overall: number | string,
   isBlackLabel: boolean,
   isNonNumeric: boolean,
-  gradeLabel: string
+  gradeLabel: string,
+  gradeStrengthScore: number | null
 ): string {
   if (isNonNumeric) return gradeLabel.toUpperCase();
   if (isBlackLabel) return "PRISTINE 10P";
+  if (typeof gradeStrengthScore === "number" && gradeStrengthScore >= 1) {
+    const s = gradeStrengthScore;
+    if (s >= 96) return "PRISTINE 10P";
+    if (s >= 91) return "GEM MINT 10";
+    if (s >= 86) return "MINT+ 9.5";
+    if (s >= 81) return "MINT 9";
+    if (s >= 76) return "NM-MINT+ 8.5";
+    if (s >= 71) return "NM-MINT 8";
+    if (s >= 66) return "NM+ 7.5";
+    if (s >= 61) return "NEAR MINT 7";
+    if (s >= 51) return "EXCELLENT-MINT 6";
+    if (s >= 41) return "EXCELLENT 5";
+    if (s >= 31) return "VERY GOOD-EXCELLENT 4";
+    if (s >= 21) return "GOOD 3";
+    if (s >= 11) return "FAIR 2";
+    return "POOR 1";
+  }
+  // Legacy fallback — pre-MVGS certs without a strength score.
   const n = Number(overall);
   if (n >= 10) return "GEM MINT";
   if (n >= 9) return "MINT";
@@ -178,7 +202,8 @@ function HeroSection({ report }: { report: VaultReport }) {
     overall,
     report.grades.isBlackLabel,
     report.grades.isNonNumeric,
-    report.grades.gradeLabel
+    report.grades.gradeLabel,
+    report.grades.gradeStrengthScore
   );
   const isBlackLabel = report.grades.isBlackLabel;
 

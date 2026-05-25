@@ -1,5 +1,20 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, serial, boolean, numeric, uniqueIndex, index, jsonb, bigint, customType } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  integer,
+  timestamp,
+  decimal,
+  serial,
+  boolean,
+  numeric,
+  uniqueIndex,
+  index,
+  jsonb,
+  bigint,
+  customType,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -15,10 +30,17 @@ import { z } from "zod";
  * code that does NOT exist yet.
  */
 const vector1536 = customType<{ data: number[]; driverData: string }>({
-  dataType() { return "vector(1536)"; },
-  toDriver(value: number[]): string { return "[" + value.join(",") + "]"; },
+  dataType() {
+    return "vector(1536)";
+  },
+  toDriver(value: number[]): string {
+    return "[" + value.join(",") + "]";
+  },
   fromDriver(value: string): number[] {
-    return value.replace(/[\[\]]/g, "").split(",").map(Number);
+    return value
+      .replace(/[\[\]]/g, "")
+      .split(",")
+      .map(Number);
   },
 });
 
@@ -42,7 +64,9 @@ const vector1536 = customType<{ data: number[]; driverData: string }>({
 export const BUILD_STAMP = "MV-P5-20260225-nohalf";
 
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   email: varchar("email").unique(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
@@ -144,8 +168,16 @@ export const contactInquiries = pgTable("contact_inquiries", {
 });
 
 export type ContactInquiry = typeof contactInquiries.$inferSelect;
-export const CONTACT_TOPICS = ["submission", "grading", "cert-vault", "ownership", "returns-shipping", "payment", "other"] as const;
-export type ContactTopic = typeof CONTACT_TOPICS[number];
+export const CONTACT_TOPICS = [
+  "submission",
+  "grading",
+  "cert-vault",
+  "ownership",
+  "returns-shipping",
+  "payment",
+  "other",
+] as const;
+export type ContactTopic = (typeof CONTACT_TOPICS)[number];
 
 export const submissions = pgTable("submissions", {
   id: serial("id").primaryKey(),
@@ -308,13 +340,15 @@ export const certificates = pgTable("certificates", {
   ownerName: text("owner_name"),
   ownerEmail: text("owner_email"),
   // Grading report — per-subgrade commentary filled in by the grader
-  gradingReport: jsonb("grading_report").$type<{
-    centering?: string;
-    corners?: string;
-    edges?: string;
-    surface?: string;
-    overall?: string;
-  }>().default({}),
+  gradingReport: jsonb("grading_report")
+    .$type<{
+      centering?: string;
+      corners?: string;
+      edges?: string;
+      surface?: string;
+      overall?: string;
+    }>()
+    .default({}),
   // AI-assisted grading fields
   aiAnalysis: jsonb("ai_analysis").$type<Record<string, unknown>>().default({}),
   aiDraftGrade: decimal("ai_draft_grade", { precision: 3, scale: 1 }),
@@ -326,8 +360,16 @@ export const certificates = pgTable("certificates", {
   // every scan-ingest or admin CaptureWizard upload. Does NOT feed grade
   // calculation — the centering grade remains AI-driven via centering_inner_*.
   cropGeometry: jsonb("crop_geometry").$type<{
-    front?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } | null;
-    back?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean } | null;
+    front?: {
+      pre_padding_px: { top: number; bottom: number; left: number; right: number };
+      post_asymmetry_px: { horizontal: number; vertical: number };
+      extended: boolean;
+    } | null;
+    back?: {
+      pre_padding_px: { top: number; bottom: number; left: number; right: number };
+      post_asymmetry_px: { horizontal: number; vertical: number };
+      extended: boolean;
+    } | null;
     pipeline_version?: string;
     recorded_at?: string;
   } | null>(),
@@ -335,17 +377,23 @@ export const certificates = pgTable("certificates", {
   // had `position?: {x_percent, y_percent}` (nested) but every writer (admin
   // image-viewer, AI grader, scan-ingest) stores x_percent/y_percent as
   // direct properties. Type-only fix; data already flat in DB, no migration.
-  defects: jsonb("defects").$type<Array<{
-    id?: number;
-    type: string;
-    severity: "minor" | "moderate" | "significant" | string;
-    description: string;
-    location: string;
-    image_side?: "front" | "back";
-    x_percent?: number;
-    y_percent?: number;
-  }>>().default([]),
-  aiDefects: jsonb("ai_defects").$type<Array<{type: string; severity: string; x: number; y: number; description: string}>>().default([]),
+  defects: jsonb("defects")
+    .$type<
+      Array<{
+        id?: number;
+        type: string;
+        severity: "minor" | "moderate" | "significant" | string;
+        description: string;
+        location: string;
+        image_side?: "front" | "back";
+        x_percent?: number;
+        y_percent?: number;
+      }>
+    >()
+    .default([]),
+  aiDefects: jsonb("ai_defects")
+    .$type<Array<{ type: string; severity: string; x: number; y: number; description: string }>>()
+    .default([]),
   // MVGS-classified defect array. Two write paths feed this column:
   //   1. Legacy: server/routes.ts auto-promotes ai_defects on grade approval
   //      (shape: {type, severity, x, y, description}) — MVGS fields absent.
@@ -353,22 +401,61 @@ export const certificates = pgTable("certificates", {
   //      {id, mvgsCode, tier, zone, x_percent, y_percent} — MVGS fields present.
   // MVGS fields are therefore typed optional so both shapes validate; the
   // scoring engine only looks at pins where mvgsCode + tier + zone are all set.
-  verifiedDefects: jsonb("verified_defects").$type<Array<{
-    // Legacy fields (preserved for backwards compat — never remove).
-    type?: string;
-    severity?: string;
-    x?: number;
-    y?: number;
-    // MVGS fields — present on new classified pins.
-    id?: string;
-    mvgsCode?: "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS" | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
-    tier?: "D1" | "D2" | "D3";
-    zone?: "FA" | "FH" | "FB" | "FC1" | "FC2" | "FC3" | "FC4" | "FE1" | "FE2" | "FE3" | "FE4"
-         | "BA" | "BB" | "BC1" | "BC2" | "BC3" | "BC4" | "BE1" | "BE2" | "BE3" | "BE4";
-    x_percent?: number;
-    y_percent?: number;
-    description?: string;
-  }>>().default([]),
+  verifiedDefects: jsonb("verified_defects")
+    .$type<
+      Array<{
+        // Legacy fields (preserved for backwards compat — never remove).
+        type?: string;
+        severity?: string;
+        x?: number;
+        y?: number;
+        // MVGS fields — present on new classified pins.
+        id?: string;
+        mvgsCode?:
+          | "WH"
+          | "CH"
+          | "FR"
+          | "SC"
+          | "SP"
+          | "PI"
+          | "PL"
+          | "PS"
+          | "SV"
+          | "ST"
+          | "GL"
+          | "CR"
+          | "RD"
+          | "DG"
+          | "OC";
+        tier?: "D1" | "D2" | "D3";
+        zone?:
+          | "FA"
+          | "FH"
+          | "FB"
+          | "FC1"
+          | "FC2"
+          | "FC3"
+          | "FC4"
+          | "FE1"
+          | "FE2"
+          | "FE3"
+          | "FE4"
+          | "BA"
+          | "BB"
+          | "BC1"
+          | "BC2"
+          | "BC3"
+          | "BC4"
+          | "BE1"
+          | "BE2"
+          | "BE3"
+          | "BE4";
+        x_percent?: number;
+        y_percent?: number;
+        description?: string;
+      }>
+    >()
+    .default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
   // Admin-controlled marketing-pool flag. Distinct from
@@ -387,7 +474,7 @@ export const certificates = pgTable("certificates", {
   // coffee-break sessions out of the dashboard average.
   gradingTimeSeconds: integer("grading_time_seconds"),
   // Stolen card flag — set to "stolen" when a verified report exists; null otherwise
-  stolenStatus: text("stolen_status"),            // null | "reported_stolen"
+  stolenStatus: text("stolen_status"), // null | "reported_stolen"
   stolenReportedAt: timestamp("stolen_reported_at"),
   // Document Reference Number — plaintext, shown only on Owner Copy PDF
   referenceNumber: text("reference_number").unique(),
@@ -408,55 +495,77 @@ export const certificates = pgTable("certificates", {
   // returns undefined for `c.gradingFrontOriginal` etc., and recrop falls
   // through to `c.frontImagePath` — i.e. the already-cropped display image,
   // not the raw scanner buffer.
-  gradingFrontOriginal:      text("grading_front_original"),
-  gradingFrontCropped:       text("grading_front_cropped"),
-  gradingFrontGreyscale:     text("grading_front_greyscale"),
-  gradingFrontHighcontrast:  text("grading_front_highcontrast"),
-  gradingFrontEdgeenhanced:  text("grading_front_edgeenhanced"),
-  gradingFrontInverted:      text("grading_front_inverted"),
-  gradingBackOriginal:       text("grading_back_original"),
-  gradingBackCropped:        text("grading_back_cropped"),
-  gradingBackGreyscale:      text("grading_back_greyscale"),
-  gradingBackHighcontrast:   text("grading_back_highcontrast"),
-  gradingBackEdgeenhanced:   text("grading_back_edgeenhanced"),
-  gradingBackInverted:       text("grading_back_inverted"),
+  gradingFrontOriginal: text("grading_front_original"),
+  gradingFrontCropped: text("grading_front_cropped"),
+  gradingFrontGreyscale: text("grading_front_greyscale"),
+  gradingFrontHighcontrast: text("grading_front_highcontrast"),
+  gradingFrontEdgeenhanced: text("grading_front_edgeenhanced"),
+  gradingFrontInverted: text("grading_front_inverted"),
+  gradingBackOriginal: text("grading_back_original"),
+  gradingBackCropped: text("grading_back_cropped"),
+  gradingBackGreyscale: text("grading_back_greyscale"),
+  gradingBackHighcontrast: text("grading_back_highcontrast"),
+  gradingBackEdgeenhanced: text("grading_back_edgeenhanced"),
+  gradingBackInverted: text("grading_back_inverted"),
   // Grading commentary + scoring metadata. All exist in the live DB but were
   // missing from the schema — same gap-class as the grading_* columns above.
   // Without these, raw-SQL writes succeed but Drizzle reads return undefined,
   // so the values never round-trip on cert load.
-  gradeExplanation:        text("grade_explanation"),
+  gradeExplanation: text("grade_explanation"),
   // grade_strength_score doubles as the MVGS (MintVault Grading Standard)
   // score 0–100. Written by the admin grading-panel "Approve" path via the
   // pure scoring helper in server/mvgs-scoring.ts.
-  gradeStrengthScore:      integer("grade_strength_score"),
+  gradeStrengthScore: integer("grade_strength_score"),
   // MVGS inputs — admin-set per cert. dark_border_front / dark_border_back
   // each boost the WH (whitening) ×1.25 edge multiplier on their own side.
   // Legacy dark_border column is preserved for backwards compat and now
   // mirrors (dark_border_front OR dark_border_back) on save.
   // eye_appeal_modifier is the ±2 finishing adjustment applied after all
   // deductions.
-  darkBorder:              boolean("dark_border").notNull().default(false),
-  darkBorderFront:         boolean("dark_border_front").notNull().default(false),
-  darkBorderBack:          boolean("dark_border_back").notNull().default(false),
-  eyeAppealModifier:       integer("eye_appeal_modifier").notNull().default(0),
-  centeringOuterFront:     jsonb("centering_outer_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
-  centeringOuterBack:      jsonb("centering_outer_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
-  centeringInnerFront:     jsonb("centering_inner_front").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
-  centeringInnerBack:      jsonb("centering_inner_back").$type<{ top_pct: number; left_pct: number; right_pct: number; bottom_pct: number } | null>(),
-  centeringMethod:         text("centering_method"),
+  darkBorder: boolean("dark_border").notNull().default(false),
+  darkBorderFront: boolean("dark_border_front").notNull().default(false),
+  darkBorderBack: boolean("dark_border_back").notNull().default(false),
+  eyeAppealModifier: integer("eye_appeal_modifier").notNull().default(0),
+  centeringOuterFront: jsonb("centering_outer_front").$type<{
+    top_pct: number;
+    left_pct: number;
+    right_pct: number;
+    bottom_pct: number;
+  } | null>(),
+  centeringOuterBack: jsonb("centering_outer_back").$type<{
+    top_pct: number;
+    left_pct: number;
+    right_pct: number;
+    bottom_pct: number;
+  } | null>(),
+  centeringInnerFront: jsonb("centering_inner_front").$type<{
+    top_pct: number;
+    left_pct: number;
+    right_pct: number;
+    bottom_pct: number;
+  } | null>(),
+  centeringInnerBack: jsonb("centering_inner_back").$type<{
+    top_pct: number;
+    left_pct: number;
+    right_pct: number;
+    bottom_pct: number;
+  } | null>(),
+  centeringMethod: text("centering_method"),
   // AI defect-candidate suggestions surfaced by the Haiku scan-time defect
   // pass. Admin confirms or rejects each candidate; confirmed ones move to
   // the `defects` array. Distinct column so the candidate list survives
   // independent of the persisted defects.
-  aiDefectCandidates: jsonb("ai_defect_candidates").$type<Array<{
-    type: string;
-    severity: "minor" | "moderate" | "significant";
-    description: string;
-    location: string;
-    image_side: string;
-    x_percent: number;
-    y_percent: number;
-  }>>(),
+  aiDefectCandidates: jsonb("ai_defect_candidates").$type<
+    Array<{
+      type: string;
+      severity: "minor" | "moderate" | "significant";
+      description: string;
+      location: string;
+      image_side: string;
+      x_percent: number;
+      y_percent: number;
+    }>
+  >(),
   // Per-zone grading values. corner_values / edge_values / surface_values
   // already exist in DB; these schema entries surface them via Drizzle so
   // the GET /grading endpoint can return them on cert reload. Same gap-class
@@ -464,26 +573,45 @@ export const certificates = pgTable("certificates", {
   // but never came back out via db.select(). Result: per-zone dropdowns
   // reset to zeros on every page reload, even when data was saved.
   cornerValues: jsonb("corner_values").$type<{
-    frontTL: number; frontTR: number; frontBL: number; frontBR: number;
-    backTL: number; backTR: number; backBL: number; backBR: number;
+    frontTL: number;
+    frontTR: number;
+    frontBL: number;
+    frontBR: number;
+    backTL: number;
+    backTR: number;
+    backBL: number;
+    backBR: number;
   } | null>(),
   edgeValues: jsonb("edge_values").$type<{
-    frontTop: number; frontBottom: number; frontLeft: number; frontRight: number;
-    backTop: number; backBottom: number; backLeft: number; backRight: number;
+    frontTop: number;
+    frontBottom: number;
+    frontLeft: number;
+    frontRight: number;
+    backTop: number;
+    backBottom: number;
+    backLeft: number;
+    backRight: number;
   } | null>(),
   surfaceValues: jsonb("surface_values").$type<{
-    front: number; back: number;
-    hasPrintLines?: boolean; hasHoloScratches?: boolean; hasSurfaceScratches?: boolean;
-    hasStaining?: boolean; hasIndentation?: boolean; hasRollerMarks?: boolean;
-    hasColorRegistration?: boolean; hasCrease?: boolean; hasTear?: boolean;
+    front: number;
+    back: number;
+    hasPrintLines?: boolean;
+    hasHoloScratches?: boolean;
+    hasSurfaceScratches?: boolean;
+    hasStaining?: boolean;
+    hasIndentation?: boolean;
+    hasRollerMarks?: boolean;
+    hasColorRegistration?: boolean;
+    hasCrease?: boolean;
+    hasTear?: boolean;
   } | null>(),
   // ── RAG Phase 0: passive embedding for future retrieval ─────────────────
   // Populated by the hourly embed-corpus cron over the existing approved
   // corpus. embedded_at = NULL means "not yet embedded"; non-null is the
   // timestamp of the last successful embed. Re-embedding on model change
   // is a future op (set embedded_at = NULL to re-queue).
-  embedding:   vector1536("embedding"),
-  embeddedAt:  timestamp("embedded_at", { withTimezone: true }),
+  embedding: vector1536("embedding"),
+  embeddedAt: timestamp("embedded_at", { withTimezone: true }),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -516,23 +644,27 @@ export const cardSets = pgTable("card_sets", {
   deletedAt: timestamp("deleted_at"),
 });
 
-export const cardMaster = pgTable("card_master", {
-  id: serial("id").primaryKey(),
-  setId: text("set_id").notNull(),
-  cardNumber: text("card_number").notNull(),
-  cardName: text("card_name").notNull(),
-  language: text("language").notNull().default("English"),
-  variant: text("variant"),
-  rarity: text("rarity"),
-  year: text("year"),
-  imageUrl: text("image_url"),
-  isDeleted: boolean("is_deleted").notNull().default(false),
-  deletedAt: timestamp("deleted_at"),
-  deletedBy: text("deleted_by"),
-}, (t) => ({
-  unqSetNumLang: uniqueIndex("uq_card_master_set_number_lang").on(t.setId, t.cardNumber, t.language),
-  idxLookup: index("idx_card_master_lookup").on(t.setId, t.cardNumber, t.language),
-}));
+export const cardMaster = pgTable(
+  "card_master",
+  {
+    id: serial("id").primaryKey(),
+    setId: text("set_id").notNull(),
+    cardNumber: text("card_number").notNull(),
+    cardName: text("card_name").notNull(),
+    language: text("language").notNull().default("English"),
+    variant: text("variant"),
+    rarity: text("rarity"),
+    year: text("year"),
+    imageUrl: text("image_url"),
+    isDeleted: boolean("is_deleted").notNull().default(false),
+    deletedAt: timestamp("deleted_at"),
+    deletedBy: text("deleted_by"),
+  },
+  (t) => ({
+    unqSetNumLang: uniqueIndex("uq_card_master_set_number_lang").on(t.setId, t.cardNumber, t.language),
+    idxLookup: index("idx_card_master_lookup").on(t.setId, t.cardNumber, t.language),
+  })
+);
 
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
@@ -547,11 +679,11 @@ export const auditLog = pgTable("audit_log", {
 // ── MVGS compliance interest (public form capture) ────────────────────────
 // Backs POST /api/mvgs/interest. Append-only; no auth, no public read.
 export const mvgsInterest = pgTable("mvgs_interest", {
-  id:        serial("id").primaryKey(),
-  company:   text("company").notNull(),
-  email:     text("email").notNull(),
-  message:   text("message"),
-  ip:        text("ip"),
+  id: serial("id").primaryKey(),
+  company: text("company").notNull(),
+  email: text("email").notNull(),
+  message: text("message"),
+  ip: text("ip"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -597,61 +729,69 @@ export const reelAnalytics = pgTable("reel_analytics", {
 // One row per (reel_date, cert_number). Reel publishing is held until every
 // row in a given reel_date is approved=true (or the operator triggers the
 // approve-all endpoint).
-export const reelCardApprovals = pgTable("reel_card_approvals", {
-  id: serial("id").primaryKey(),
-  reelDate: text("reel_date").notNull(),
-  certNumber: text("cert_number").notNull(),
-  approved: boolean("approved").notNull().default(false),
-  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
-  reviewedBy: text("reviewed_by"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => ({
-  uniqDateCert: uniqueIndex("idx_reel_card_approvals_date_cert").on(t.reelDate, t.certNumber),
-}));
+export const reelCardApprovals = pgTable(
+  "reel_card_approvals",
+  {
+    id: serial("id").primaryKey(),
+    reelDate: text("reel_date").notNull(),
+    certNumber: text("cert_number").notNull(),
+    approved: boolean("approved").notNull().default(false),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: text("reviewed_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqDateCert: uniqueIndex("idx_reel_card_approvals_date_cert").on(t.reelDate, t.certNumber),
+  })
+);
 
 // ── AI feature toggles (DB-backed, runtime-flippable) ─────────────────────
 // One row per env-var flag from server/config/feature-flags.ts. The DB row
 // overrides the env-var default at runtime. Absence of a row means "use env
 // default". Cleared via DELETE to revert.
 export const featureOverrides = pgTable("feature_overrides", {
-  name:      text("name").primaryKey(),
-  enabled:   boolean("enabled").notNull(),
+  name: text("name").primaryKey(),
+  enabled: boolean("enabled").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   updatedBy: text("updated_by").notNull(),
-  reason:    text("reason"),
+  reason: text("reason"),
 });
 
 // ── AI prediction history (append-only, queryable per call) ───────────────
 // Every Claude/GPT call writes a row here on success. Used by the AI Learning
 // dashboard for accuracy + cost analytics, and as the future RAG corpus.
-export const aiPredictions = pgTable("ai_predictions", {
-  id:            bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-  certId:        text("cert_id").notNull(),
-  model:         text("model").notNull(),
-  promptVersion: text("prompt_version"),
-  callType:      text("call_type").notNull(), // "identify" | "defect_suggest" | "quick_grade" | "full_grade" | "centering" | ...
-  prediction:    jsonb("prediction").notNull(),
-  latencyMs:     integer("latency_ms"),
-  inputTokens:   integer("input_tokens"),
-  outputTokens:  integer("output_tokens"),
-  costGbp:       numeric("cost_gbp", { precision: 8, scale: 5 }),
-  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => ({
-  certCallIdx: index("ai_predictions_cert_call_idx").on(t.certId, t.callType),
-  createdIdx:  index("ai_predictions_created_idx").on(t.createdAt),
-}));
+export const aiPredictions = pgTable(
+  "ai_predictions",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    certId: text("cert_id").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version"),
+    callType: text("call_type").notNull(), // "identify" | "defect_suggest" | "quick_grade" | "full_grade" | "centering" | ...
+    prediction: jsonb("prediction").notNull(),
+    latencyMs: integer("latency_ms"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    costGbp: numeric("cost_gbp", { precision: 8, scale: 5 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    certCallIdx: index("ai_predictions_cert_call_idx").on(t.certId, t.callType),
+    createdIdx: index("ai_predictions_created_idx").on(t.createdAt),
+  })
+);
 
 // Founding-member homepage waitlist (replaces the old stats trio CTA).
 // Soft-delete only (deleted_at) per project rules. Email is normalised
 // case-insensitively at the index level.
 export const waitlistSignups = pgTable("waitlist_signups", {
-  id:         serial("id").primaryKey(),
-  email:      text("email").notNull(),
-  source:     text("source").notNull().default("homepage_founding_member"),
-  ipAddress:  text("ip_address"),
-  userAgent:  text("user_agent"),
-  createdAt:  timestamp("created_at").notNull().defaultNow(),
-  deletedAt:  timestamp("deleted_at"),
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  source: text("source").notNull().default("homepage_founding_member"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export type CardSet = typeof cardSets.$inferSelect;
@@ -705,10 +845,10 @@ export type InsertCertificateImage = z.infer<typeof insertCertificateImageSchema
 
 // ── Label printing — isolated tracking table ───────────────────────────────────
 export const labelPrints = pgTable("label_prints", {
-  id:        serial("id").primaryKey(),
-  certId:    text("cert_id").notNull().unique(),
-  sheetRef:  text("sheet_ref"),
-  queuedAt:  timestamp("queued_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull().unique(),
+  sheetRef: text("sheet_ref"),
+  queuedAt: timestamp("queued_at").notNull().defaultNow(),
   printedAt: timestamp("printed_at"),
 });
 
@@ -718,14 +858,14 @@ export type InsertLabelPrint = z.infer<typeof insertLabelPrintSchema>;
 
 // ── Label overrides — edit display fields without touching the certificate ─────
 export const labelOverrides = pgTable("label_overrides", {
-  id:                serial("id").primaryKey(),
-  certId:            text("cert_id").notNull().unique(),
-  cardNameOverride:  text("card_name_override"),
-  setOverride:       text("set_override"),
-  variantOverride:   text("variant_override"),
-  languageOverride:  text("language_override"),
-  yearOverride:      text("year_override"),
-  editedAt:          timestamp("edited_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull().unique(),
+  cardNameOverride: text("card_name_override"),
+  setOverride: text("set_override"),
+  variantOverride: text("variant_override"),
+  languageOverride: text("language_override"),
+  yearOverride: text("year_override"),
+  editedAt: timestamp("edited_at").notNull().defaultNow(),
 });
 
 export type LabelOverride = typeof labelOverrides.$inferSelect;
@@ -734,8 +874,8 @@ export type InsertLabelOverride = z.infer<typeof insertLabelOverrideSchema>;
 
 // ── Reprint log — tracks every single-label reprint without affecting printed flag ──
 export const reprintLog = pgTable("reprint_log", {
-  id:          serial("id").primaryKey(),
-  certId:      text("cert_id").notNull(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(),
   reprintTime: timestamp("reprint_time").notNull().defaultNow(),
 });
 
@@ -743,29 +883,29 @@ export type ReprintLog = typeof reprintLog.$inferSelect;
 
 // ── Ownership history — tracks every claim and transfer event ─────────────────
 export const ownershipHistory = pgTable("ownership_history", {
-  id:          serial("id").primaryKey(),
-  certId:      text("cert_id").notNull(),
-  fromUserId:  varchar("from_user_id"),
-  toUserId:    varchar("to_user_id").notNull(),
-  toEmail:     text("to_email"),
-  eventType:   text("event_type").notNull(),
-  notes:       text("notes"),
-  publicName:  boolean("public_name").default(false),
-  createdAt:   timestamp("created_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(),
+  fromUserId: varchar("from_user_id"),
+  toUserId: varchar("to_user_id").notNull(),
+  toEmail: text("to_email"),
+  eventType: text("event_type").notNull(),
+  notes: text("notes"),
+  publicName: boolean("public_name").default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type OwnershipHistoryRecord = typeof ownershipHistory.$inferSelect;
 
 // ── Claim verifications — email verification tokens for ownership claims ──────
 export const claimVerifications = pgTable("claim_verifications", {
-  id:          serial("id").primaryKey(),
-  certId:      text("cert_id").notNull(),
-  email:       text("email").notNull(),
-  ownerName:   text("owner_name"),
-  tokenHash:   text("token_hash").notNull(),
-  expiresAt:   timestamp("expires_at").notNull(),
-  usedAt:      timestamp("used_at"),
-  createdAt:   timestamp("created_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(),
+  email: text("email").notNull(),
+  ownerName: text("owner_name"),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
   declaredNew: boolean("declared_new").notNull().default(false),
 });
 
@@ -775,55 +915,55 @@ export type ClaimVerification = typeof claimVerifications.$inferSelect;
 // Step 1: current owner confirms via ownerTokenHash
 // Step 2: new owner confirms via newOwnerTokenHash → transfer completes
 export const transferVerifications = pgTable("transfer_verifications", {
-  id:                   serial("id").primaryKey(),
-  certId:               text("cert_id").notNull(),
-  fromEmail:            text("from_email").notNull(),
-  toEmail:              text("to_email").notNull(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(),
+  fromEmail: text("from_email").notNull(),
+  toEmail: text("to_email").notNull(),
   // Step 1 — current owner confirmation
-  ownerTokenHash:       text("owner_token_hash").notNull(),
-  ownerExpiresAt:       timestamp("owner_expires_at").notNull(),
-  ownerConfirmedAt:     timestamp("owner_confirmed_at"),
+  ownerTokenHash: text("owner_token_hash").notNull(),
+  ownerExpiresAt: timestamp("owner_expires_at").notNull(),
+  ownerConfirmedAt: timestamp("owner_confirmed_at"),
   // Step 2 — new owner confirmation (generated after step 1)
-  newOwnerTokenHash:    text("new_owner_token_hash"),
-  newOwnerExpiresAt:    timestamp("new_owner_expires_at"),
-  newOwnerName:         text("new_owner_name"),
+  newOwnerTokenHash: text("new_owner_token_hash"),
+  newOwnerExpiresAt: timestamp("new_owner_expires_at"),
+  newOwnerName: text("new_owner_name"),
   // Completion
-  usedAt:               timestamp("used_at"),
-  createdAt:            timestamp("created_at").notNull().defaultNow(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
   // Dispute window (v229)
-  disputeDeadline:      timestamp("dispute_deadline"),
-  disputedAt:           timestamp("disputed_at"),
-  disputeReason:        text("dispute_reason"),
+  disputeDeadline: timestamp("dispute_deadline"),
+  disputedAt: timestamp("disputed_at"),
+  disputeReason: text("dispute_reason"),
   // ── v2 transfer flow columns ──────────────────────────────────────────────
-  flowVersion:              varchar("flow_version", { length: 4 }).notNull().default("v1"),
-  status:                   varchar("transfer_status", { length: 30 }).notNull().default("pending_owner"),
-  referenceNumberProvided:  text("reference_number_provided"),
-  outgoingKeeperUserId:     varchar("outgoing_keeper_user_id"),
-  incomingKeeperUserId:     varchar("incoming_keeper_user_id"),
-  incomingConfirmDeadline:  timestamp("incoming_confirm_deadline"),
-  disputedBy:               varchar("disputed_by", { length: 10 }),
-  finalisedAt:              timestamp("finalised_at"),
-  cancelledAt:              timestamp("cancelled_at"),
-  cancellationReason:       text("cancellation_reason"),
+  flowVersion: varchar("flow_version", { length: 4 }).notNull().default("v1"),
+  status: varchar("transfer_status", { length: 30 }).notNull().default("pending_owner"),
+  referenceNumberProvided: text("reference_number_provided"),
+  outgoingKeeperUserId: varchar("outgoing_keeper_user_id"),
+  incomingKeeperUserId: varchar("incoming_keeper_user_id"),
+  incomingConfirmDeadline: timestamp("incoming_confirm_deadline"),
+  disputedBy: varchar("disputed_by", { length: 10 }),
+  finalisedAt: timestamp("finalised_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancellationReason: text("cancellation_reason"),
 });
 
 export type TransferVerification = typeof transferVerifications.$inferSelect;
 
 // v2 transfer statuses — DVLA-style flow + v435 buyer-initiated entry point
 export const TRANSFER_V2_STATUSES = [
-  "pending_owner",                    // Seller-init: outgoing keeper has initiated, awaiting their email confirmation
-  "pending_incoming",                 // Seller-init: outgoing confirmed, awaiting incoming keeper confirmation + ref number
-  "pending_owner_invited_by_buyer",   // v435 buyer-init: incoming keeper has claimed via claim code; owner has 14 days to confirm or dispute
-  "pending_dispute",                  // Both parties confirmed (or buyer-init owner confirmed); 14-day dispute window
-  "completed",                        // Dispute window passed or skipped, transfer finalised
-  "disputed",                         // One party raised a dispute during the window (or buyer-init owner rejected)
-  "cancelled",                        // Cancelled by outgoing keeper
-  "expired",                          // Token/owner-deadline expired without action — buyer-init expiry preserves original ownership (no auto-complete on owner silence)
+  "pending_owner", // Seller-init: outgoing keeper has initiated, awaiting their email confirmation
+  "pending_incoming", // Seller-init: outgoing confirmed, awaiting incoming keeper confirmation + ref number
+  "pending_owner_invited_by_buyer", // v435 buyer-init: incoming keeper has claimed via claim code; owner has 14 days to confirm or dispute
+  "pending_dispute", // Both parties confirmed (or buyer-init owner confirmed); 14-day dispute window
+  "completed", // Dispute window passed or skipped, transfer finalised
+  "disputed", // One party raised a dispute during the window (or buyer-init owner rejected)
+  "cancelled", // Cancelled by outgoing keeper
+  "expired", // Token/owner-deadline expired without action — buyer-init expiry preserves original ownership (no auto-complete on owner silence)
 ] as const;
-export type TransferV2Status = typeof TRANSFER_V2_STATUSES[number];
+export type TransferV2Status = (typeof TRANSFER_V2_STATUSES)[number];
 
 export const OWNERSHIP_STATUSES = ["unclaimed", "claimed", "transfer_pending"] as const;
-export type OwnershipStatus = typeof OWNERSHIP_STATUSES[number];
+export type OwnershipStatus = (typeof OWNERSHIP_STATUSES)[number];
 
 export const NUMERIC_GRADES = [
   { value: 10, label: "GEM MT", description: "Gem Mint" },
@@ -881,11 +1021,11 @@ export function gradeLabelFull(gradeType: string, gradeOverall: string): string 
 // Controls how many active submissions are allowed per tier before new orders
 // are blocked. Admin can override with force_open = true.
 export const tierCapacity = pgTable("tier_capacity", {
-  id:         serial("id").primaryKey(),
-  tierSlug:   text("tier_slug").notNull().unique(),
-  maxActive:  integer("max_active").notNull(),
-  forceOpen:  boolean("force_open").notNull().default(false),
-  updatedAt:  timestamp("updated_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  tierSlug: text("tier_slug").notNull().unique(),
+  maxActive: integer("max_active").notNull(),
+  forceOpen: boolean("force_open").notNull().default(false),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export type TierCapacityRecord = typeof tierCapacity.$inferSelect;
@@ -895,16 +1035,16 @@ export type TierCapacityRecord = typeof tierCapacity.$inferSelect;
 // with a verification token emailed to them. Once verified the certificate is
 // flagged `stolen` and a red banner appears on its Vault page.
 export const stolenReports = pgTable("stolen_reports", {
-  id:              serial("id").primaryKey(),
-  certId:          text("cert_id").notNull(),            // e.g. MV1
-  reporterName:    text("reporter_name").notNull(),
-  reporterEmail:   text("reporter_email").notNull(),
-  description:     text("description"),                  // optional free-text
-  verifyToken:     text("verify_token").notNull().unique(),
-  verifiedAt:      timestamp("verified_at"),
-  clearedAt:       timestamp("cleared_at"),
-  clearedBy:       text("cleared_by"),                   // admin email
-  createdAt:       timestamp("created_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  certId: text("cert_id").notNull(), // e.g. MV1
+  reporterName: text("reporter_name").notNull(),
+  reporterEmail: text("reporter_email").notNull(),
+  description: text("description"), // optional free-text
+  verifyToken: text("verify_token").notNull().unique(),
+  verifiedAt: timestamp("verified_at"),
+  clearedAt: timestamp("cleared_at"),
+  clearedBy: text("cleared_by"), // admin email
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type StolenReport = typeof stolenReports.$inferSelect;
@@ -914,15 +1054,15 @@ export type InsertStolenReport = typeof stolenReports.$inferInsert;
 // Caches eBay UK listing results per card (24h TTL) to avoid hitting the API
 // on every Vault page load. Populated and read by server/ebay.ts.
 export const ebayPriceCache = pgTable("ebay_price_cache", {
-  id:                 serial("id").primaryKey(),
-  cardKey:            text("card_key").notNull().unique(),
-  cardName:           text("card_name").notNull(),
-  cardNumber:         text("card_number"),
-  setName:            text("set_name"),
-  averagePricePence:  integer("average_price_pence"),
-  listingCount:       integer("listing_count").notNull().default(0),
-  listingsJson:       jsonb("listings_json").notNull().default([]),
-  lastUpdatedAt:      timestamp("last_updated_at").notNull().defaultNow(),
+  id: serial("id").primaryKey(),
+  cardKey: text("card_key").notNull().unique(),
+  cardName: text("card_name").notNull(),
+  cardNumber: text("card_number"),
+  setName: text("set_name"),
+  averagePricePence: integer("average_price_pence"),
+  listingCount: integer("listing_count").notNull().default(0),
+  listingsJson: jsonb("listings_json").notNull().default([]),
+  lastUpdatedAt: timestamp("last_updated_at").notNull().defaultNow(),
 });
 
 export type EbayPriceCacheRecord = typeof ebayPriceCache.$inferSelect;
@@ -997,6 +1137,7 @@ export interface PublicCertificate {
   // gradeType !== "numeric" or when the cert was approved before MVGS
   // existed. UI gates rendering on both fields.
   gradeStrengthScore: number | null;
+  labelType: string;
   frontImageUrl: string | null;
   backImageUrl: string | null;
   gradedDate: string;
@@ -1023,10 +1164,15 @@ export interface PopulationData {
 }
 
 export const SUBMISSION_STATUSES = [
-  "new", "received", "in_grading", "ready_to_return", "shipped", "completed",
+  "new",
+  "received",
+  "in_grading",
+  "ready_to_return",
+  "shipped",
+  "completed",
 ] as const;
 
-export type SubmissionStatus = typeof SUBMISSION_STATUSES[number];
+export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
 
 export const SUBMISSION_STATUS_LABELS: Record<string, string> = {
   draft: "Draft",
@@ -1063,10 +1209,10 @@ export interface BulkDiscountTier {
 }
 
 export const bulkDiscountTiers: BulkDiscountTier[] = [
-  { minQty: 1,  maxQty: 9,    percent: 0,    label: "1–9 cards" },
-  { minQty: 10, maxQty: 24,   percent: 5,    label: "10–24 cards" },
-  { minQty: 25, maxQty: 49,   percent: 7.5,  label: "25–49 cards" },
-  { minQty: 50, maxQty: null, percent: 10,   label: "50+ cards" },
+  { minQty: 1, maxQty: 9, percent: 0, label: "1–9 cards" },
+  { minQty: 10, maxQty: 24, percent: 5, label: "10–24 cards" },
+  { minQty: 25, maxQty: 49, percent: 7.5, label: "25–49 cards" },
+  { minQty: 50, maxQty: null, percent: 10, label: "50+ cards" },
 ];
 
 export function getBulkDiscountPercent(quantity: number): number {
@@ -1084,7 +1230,7 @@ export const VAULT_CLUB_SILVER_DISCOUNT_PERCENT = 10;
 
 export function getVaultClubDiscountPercent(
   tier: string | null | undefined,
-  status: string | null | undefined,
+  status: string | null | undefined
 ): number {
   if (tier === "silver" && (status === "active" || status === "trialing")) {
     return VAULT_CLUB_SILVER_DISCOUNT_PERCENT;
@@ -1135,7 +1281,7 @@ export function getInsuranceSurchargePerCard(declaredValuePerCard: number): Insu
 export function calculateOrderTotals(pricePerCard: number, quantity: number, totalDeclaredValue: number = 0) {
   const subtotal = pricePerCard * quantity;
   const discountPercent = getBulkDiscountPercent(quantity);
-  const discountAmount = Math.round(subtotal * discountPercent / 100);
+  const discountAmount = Math.round((subtotal * discountPercent) / 100);
   const discountedSubtotal = subtotal - discountAmount;
   const insurance = getInsuranceTier(totalDeclaredValue);
   const shipping = insurance.shippingPence;
@@ -1149,9 +1295,15 @@ export function calculateOrderTotals(pricePerCard: number, quantity: number, tot
 
   const total = discountedSubtotal + shipping + totalInsuranceFee;
   return {
-    subtotal, discountPercent, discountAmount, discountedSubtotal,
-    shipping, shippingLabel,
-    insuranceSurchargePerCard, totalInsuranceFee, insuranceSurchargeLabel,
+    subtotal,
+    discountPercent,
+    discountAmount,
+    discountedSubtotal,
+    shipping,
+    shippingLabel,
+    insuranceSurchargePerCard,
+    totalInsuranceFee,
+    insuranceSurchargeLabel,
     declaredValuePerCard,
     total,
   };
@@ -1216,25 +1368,62 @@ export const pricingTiers: PricingTier[] = [
 // ============================================================================
 
 export const MARKETPLACE_LISTING_STATUSES = ["draft", "active", "sold", "cancelled", "frozen", "expired"] as const;
-export type MarketplaceListingStatus = typeof MARKETPLACE_LISTING_STATUSES[number];
+export type MarketplaceListingStatus = (typeof MARKETPLACE_LISTING_STATUSES)[number];
 
-export const MARKETPLACE_OFFER_STATUSES = ["pending", "accepted", "declined", "countered", "withdrawn", "expired"] as const;
-export type MarketplaceOfferStatus = typeof MARKETPLACE_OFFER_STATUSES[number];
+export const MARKETPLACE_OFFER_STATUSES = [
+  "pending",
+  "accepted",
+  "declined",
+  "countered",
+  "withdrawn",
+  "expired",
+] as const;
+export type MarketplaceOfferStatus = (typeof MARKETPLACE_OFFER_STATUSES)[number];
 
-export const MARKETPLACE_ORDER_STATUSES = ["pending_payment", "paid", "shipped", "delivered", "completed", "cancelled", "refunded", "disputed"] as const;
-export type MarketplaceOrderStatus = typeof MARKETPLACE_ORDER_STATUSES[number];
+export const MARKETPLACE_ORDER_STATUSES = [
+  "pending_payment",
+  "paid",
+  "shipped",
+  "delivered",
+  "completed",
+  "cancelled",
+  "refunded",
+  "disputed",
+] as const;
+export type MarketplaceOrderStatus = (typeof MARKETPLACE_ORDER_STATUSES)[number];
 
 export const SELLER_STATUSES = ["none", "pending", "active", "suspended", "rejected"] as const;
-export type SellerStatus = typeof SELLER_STATUSES[number];
+export type SellerStatus = (typeof SELLER_STATUSES)[number];
 
-export const MARKETPLACE_SHIPPING_METHODS = ["royal_mail_tracked_24", "royal_mail_tracked_48", "royal_mail_special_delivery"] as const;
-export type MarketplaceShippingMethod = typeof MARKETPLACE_SHIPPING_METHODS[number];
+export const MARKETPLACE_SHIPPING_METHODS = [
+  "royal_mail_tracked_24",
+  "royal_mail_tracked_48",
+  "royal_mail_special_delivery",
+] as const;
+export type MarketplaceShippingMethod = (typeof MARKETPLACE_SHIPPING_METHODS)[number];
 
-export const MARKETPLACE_DISPUTE_REASONS = ["item_not_received", "not_as_described", "counterfeit", "damaged_in_transit", "wrong_card", "stolen_card", "seller_unresponsive", "other"] as const;
-export type MarketplaceDisputeReason = typeof MARKETPLACE_DISPUTE_REASONS[number];
+export const MARKETPLACE_DISPUTE_REASONS = [
+  "item_not_received",
+  "not_as_described",
+  "counterfeit",
+  "damaged_in_transit",
+  "wrong_card",
+  "stolen_card",
+  "seller_unresponsive",
+  "other",
+] as const;
+export type MarketplaceDisputeReason = (typeof MARKETPLACE_DISPUTE_REASONS)[number];
 
-export const MARKETPLACE_DISPUTE_STATUSES = ["open", "seller_responded", "under_review", "resolved_buyer", "resolved_seller", "resolved_partial", "escalated"] as const;
-export type MarketplaceDisputeStatus = typeof MARKETPLACE_DISPUTE_STATUSES[number];
+export const MARKETPLACE_DISPUTE_STATUSES = [
+  "open",
+  "seller_responded",
+  "under_review",
+  "resolved_buyer",
+  "resolved_seller",
+  "resolved_partial",
+  "escalated",
+] as const;
+export type MarketplaceDisputeStatus = (typeof MARKETPLACE_DISPUTE_STATUSES)[number];
 
 export const marketplaceListings = pgTable("marketplace_listings", {
   id: serial("id").primaryKey(),
@@ -1417,15 +1606,19 @@ export const marketplaceDisputes = pgTable("marketplace_disputes", {
 
 export type MarketplaceDispute = typeof marketplaceDisputes.$inferSelect;
 
-export const marketplaceWatchlist = pgTable("marketplace_watchlist", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  listingId: integer("listing_id").notNull(),
-  priceAlertThresholdPence: integer("price_alert_threshold_pence"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (table) => ({
-  userListingUnique: uniqueIndex("uniq_marketplace_watchlist_user_listing").on(table.userId, table.listingId),
-}));
+export const marketplaceWatchlist = pgTable(
+  "marketplace_watchlist",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    listingId: integer("listing_id").notNull(),
+    priceAlertThresholdPence: integer("price_alert_threshold_pence"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    userListingUnique: uniqueIndex("uniq_marketplace_watchlist_user_listing").on(table.userId, table.listingId),
+  })
+);
 
 export type MarketplaceWatchlistEntry = typeof marketplaceWatchlist.$inferSelect;
 
@@ -1455,42 +1648,40 @@ export const IG_POST_TYPES = [
   "vault_club",
   "market_insight",
 ] as const;
-export type IgPostType = typeof IG_POST_TYPES[number];
+export type IgPostType = (typeof IG_POST_TYPES)[number];
 
-export const IG_POST_STATUSES = [
-  "pending",
-  "generating",
-  "ready",
-  "posted",
-  "failed",
-  "skipped",
-] as const;
-export type IgPostStatus = typeof IG_POST_STATUSES[number];
+export const IG_POST_STATUSES = ["pending", "generating", "ready", "posted", "failed", "skipped"] as const;
+export type IgPostStatus = (typeof IG_POST_STATUSES)[number];
 
-export const igPostQueue = pgTable("ig_post_queue", {
-  id: serial("id").primaryKey(),
-  scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
-  postType: text("post_type").notNull(),                 // one of IG_POST_TYPES
-  certId: integer("cert_id"),                            // certificates.id, nullable
-  imageR2Key: text("image_r2_key"),
-  caption: text("caption"),
-  hashtags: text("hashtags"),
-  status: text("status").notNull().default("pending"),   // one of IG_POST_STATUSES
-  metaPostId: text("meta_post_id"),
-  errorDetail: text("error_detail"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  postedAt: timestamp("posted_at", { withTimezone: true }),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-}, (t) => ({
-  scheduledIdx: index("ig_post_queue_scheduled_for_idx").on(t.scheduledFor),
-  statusIdx:    index("ig_post_queue_status_idx").on(t.status),
-  // (deleted_at, scheduled_for) covers the canonical queue-list query
-  // `WHERE deleted_at IS NULL ORDER BY scheduled_for DESC`.
-  deletedScheduledIdx: index("ig_post_queue_deleted_at_scheduled_for_idx").on(t.deletedAt, t.scheduledFor),
-}));
+export const igPostQueue = pgTable(
+  "ig_post_queue",
+  {
+    id: serial("id").primaryKey(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    postType: text("post_type").notNull(), // one of IG_POST_TYPES
+    certId: integer("cert_id"), // certificates.id, nullable
+    imageR2Key: text("image_r2_key"),
+    caption: text("caption"),
+    hashtags: text("hashtags"),
+    status: text("status").notNull().default("pending"), // one of IG_POST_STATUSES
+    metaPostId: text("meta_post_id"),
+    errorDetail: text("error_detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    scheduledIdx: index("ig_post_queue_scheduled_for_idx").on(t.scheduledFor),
+    statusIdx: index("ig_post_queue_status_idx").on(t.status),
+    // (deleted_at, scheduled_for) covers the canonical queue-list query
+    // `WHERE deleted_at IS NULL ORDER BY scheduled_for DESC`.
+    deletedScheduledIdx: index("ig_post_queue_deleted_at_scheduled_for_idx").on(t.deletedAt, t.scheduledFor),
+  })
+);
 
 export const insertIgPostQueueSchema = createInsertSchema(igPostQueue).omit({
-  id: true, createdAt: true,
+  id: true,
+  createdAt: true,
 });
 export type IgPostQueueRow = typeof igPostQueue.$inferSelect;
 export type InsertIgPostQueue = z.infer<typeof insertIgPostQueueSchema>;
