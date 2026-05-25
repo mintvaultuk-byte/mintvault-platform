@@ -522,7 +522,7 @@ async function drawFront(ctx: any, cert: CertificateRecord, logo: any, loadImage
     // MIDDLE, abbreviation BOTTOM. Hard-coded so a future panel resize
     // doesn't silently shift the rows.
     const cardNumCY = 34;    // zone 1 centre — top third
-    const digitCY   = 96;    // zone 2 centre — middle third
+    const digitCY   = 111;    // zone 2 centre — middle third
     const abbrCY    = 158;   // zone 3 centre — bottom third
 
     // Element 1 — card number (#4) in zone 1
