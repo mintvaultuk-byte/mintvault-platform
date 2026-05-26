@@ -166,6 +166,49 @@ async function renderItemBuffers(items: PrintBatchItem[]): Promise<{
   return { fronts, backs, inserts };
 }
 
+// ── Crop marks (PDF only) ────────────────────────────────────────────────────
+// Corner trim guides for guillotine cutting of the 70×20mm slab labels. Each
+// label corner gets an outward "L" of two short ticks that lie ON the label's
+// edge lines, offset 0.3mm clear of the artwork so ink never touches the label.
+// Ticks sit entirely in the 2mm page margins / 4mm inter-cell gaps — verified
+// clear of the claim insert (x ≥ 76mm) and of adjacent rows. The claim insert is
+// intentionally NOT marked: it stays on the Cricut Print-Then-Cut / SVG path.
+const CROP_MARK_LEN_MM = 1.5;
+const CROP_MARK_OFFSET_MM = 0.3;
+const CROP_MARK_STROKE_PT = 0.3;
+const CROP_MARK_HEX = "#000000";
+
+function drawLabelCropMarks(doc: InstanceType<typeof PDFDocument>, cell: CellSpec): void {
+  const x0 = cell.xMm;
+  const y0 = cell.yMm;
+  const x1 = cell.xMm + cell.wMm;
+  const y1 = cell.yMm + cell.hMm;
+  const off = CROP_MARK_OFFSET_MM;
+  const len = CROP_MARK_LEN_MM;
+  // Four corners with outward direction signs (sx, sy).
+  const corners = [
+    { cx: x0, cy: y0, sx: -1, sy: -1 }, // top-left
+    { cx: x1, cy: y0, sx: 1, sy: -1 }, // top-right
+    { cx: x0, cy: y1, sx: -1, sy: 1 }, // bottom-left
+    { cx: x1, cy: y1, sx: 1, sy: 1 }, // bottom-right
+  ];
+  doc.save();
+  doc.lineWidth(CROP_MARK_STROKE_PT).strokeColor(CROP_MARK_HEX);
+  for (const c of corners) {
+    // Horizontal tick — lies on the cy edge line, extends outward along x.
+    doc
+      .moveTo(mm(c.cx + c.sx * off), mm(c.cy))
+      .lineTo(mm(c.cx + c.sx * (off + len)), mm(c.cy))
+      .stroke();
+    // Vertical tick — lies on the cx edge line, extends outward along y.
+    doc
+      .moveTo(mm(c.cx), mm(c.cy + c.sy * off))
+      .lineTo(mm(c.cx), mm(c.cy + c.sy * (off + len)))
+      .stroke();
+  }
+  doc.restore();
+}
+
 // ── PDF generator (A4 full page) ─────────────────────────────────────────────
 
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
@@ -200,6 +243,13 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
           width: mm(cell.wMm),
           height: mm(cell.hMm),
         });
+      }
+      // Guillotine trim guides — 70×20mm slab labels only (front + back).
+      // Drawn after the artwork so the ticks sit on top of the white margins.
+      for (const cell of layout) {
+        if (cell.kind === "label" || cell.kind === "back") {
+          drawLabelCropMarks(doc, cell);
+        }
       }
       doc.end();
     } catch (err) {
@@ -299,8 +349,11 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 // v4 (2026-05-26): DPI dropped 144 → 96. Cricut treats imported PNGs as 96
 //   DPI (not 144), so a 144 DPI canvas rendered ~1.5× too large
 //   (24.9×35.2cm). 96 DPI canvas (627×887px) lands at 16.59×23.47cm.
+// v5 (2026-05-26): PDF gains guillotine crop marks at each corner of the
+//   70×20mm slab labels (front + back). PNG/Cricut path unchanged; key bumped
+//   to invalidate cached v4 PDFs so new batches serve the crop-marked PDF.
 export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
-  return `print-batches/${batchId}-v4.${ext}`;
+  return `print-batches/${batchId}-v5.${ext}`;
 }
 
 export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {
