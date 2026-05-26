@@ -62,6 +62,22 @@ function playSystemSound(filename) {
   }
 }
 
+// ── Reboot ───────────────────────────────────────────────────────────────
+
+// Reboots the scanner-app LaunchAgent via launchctl kickstart -k.
+// Shows a brief notification before firing so the operator knows it's intentional.
+function rebootScanner() {
+  const { Notification } = require("electron");
+  new Notification({ title: "MintVault Scanner", body: "Rebooting…" }).show();
+  // Small delay so the notification is visible before the process dies.
+  setTimeout(() => {
+    spawn("launchctl", ["kickstart", "-k", "gui/501/com.mintvault.scanner-app"], {
+      stdio: "ignore",
+      detached: true,
+    }).unref();
+  }, 500);
+}
+
 // ── Tray ─────────────────────────────────────────────────────────────────
 
 // Last-ditch fallback: a 16×16 PNG of a solid black filled square with
@@ -166,6 +182,7 @@ function buildTrayMenu() {
     { label: "Open inbox folder", click: () => shell.openPath(INBOX) },
     { label: "Show logs", click: () => shell.openPath(path.join(os.homedir(), "mintvault-scans", "scanner-app.log")) },
     { label: "Restart watcher", click: async () => { await watcher.stop(); await watcher.start(); refreshTray(); } },
+    { label: "Reboot scanner", click: () => rebootScanner() },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
   ]);

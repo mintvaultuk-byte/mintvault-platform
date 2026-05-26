@@ -41,6 +41,11 @@ const STABLE_MS  = 2_000;   // file size unchanged for this long → ready
 const STABLE_POLL_MS = 500;
 const RETRY_DELAY_MS = 5_000;
 
+// HTTP status codes that trigger automatic retry with exponential backoff.
+const RETRYABLE_STATUSES = new Set([502, 503]);
+const MAX_RETRIES = 3;
+const RETRY_BACKOFF = [5_000, 10_000, 20_000]; // 5s, 10s, 20s
+
 class Watcher extends EventEmitter {
   constructor() {
     super();
@@ -287,27 +292,29 @@ class Watcher extends EventEmitter {
     this.log(`scan arrived during ${cur.state} — leaving in inbox: ${path.basename(filePath)}`, "warn");
   }
 
-  async uploadPair(frontPath, backPath, isRetry = false) {
-    if (this.uploading) return;
+  async uploadPair(frontPath, backPath, retryCount = 0) {
+    if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
     stateMod.set({ state: "uploading" });
     this.emitState();
-    this.log(`uploading pair: ${path.basename(frontPath)} + ${path.basename(backPath)}${isRetry ? " (retry)" : ""}`);
+    const retryLabel = retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : "";
+    this.log(`uploading pair: ${path.basename(frontPath)} + ${path.basename(backPath)}${retryLabel}`);
 
     let r;
     try { r = await server.uploadPair(frontPath, backPath); }
     catch (err) { r = { ok: false, status: 0, body: { error: `network: ${err.message}` } }; }
 
     if (!r.ok) {
-      this.uploading = false;
       const reason = r.body?.error || `HTTP ${r.status}`;
-      if (!isRetry) {
-        // Retry once after RETRY_DELAY_MS — covers transient network blips.
-        this.log(`upload failed, retrying in ${RETRY_DELAY_MS}ms: ${reason}`, "warn");
-        await new Promise(rs => setTimeout(rs, RETRY_DELAY_MS));
-        return this.uploadPair(frontPath, backPath, true);
+      // Retry on 502/503 with exponential backoff, up to MAX_RETRIES.
+      if (RETRYABLE_STATUSES.has(r.status) && retryCount < MAX_RETRIES) {
+        const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
+        this.log(`upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
+        await new Promise(rs => setTimeout(rs, delay));
+        return this.uploadPair(frontPath, backPath, retryCount + 1);
       }
+      this.uploading = false;
       return this.failPair(frontPath, backPath, reason);
     }
 
@@ -360,23 +367,31 @@ class Watcher extends EventEmitter {
 
   // ── Manual / one-shot upload ─────────────────────────────────────────
 
-  async uploadManual(filePath, certId, side, replaceExisting, source) {
-    if (this.uploading) {
+  async uploadManual(filePath, certId, side, replaceExisting, source, retryCount = 0) {
+    if (this.uploading && retryCount === 0) {
       this.log(`manual upload requested while uploading — deferring`, "warn");
       return { ok: false, error: "upload in flight" };
     }
     this.uploading = true;
     stateMod.set({ state: "uploading", manualPending: { certId, side, replaceExisting } });
     this.emitState();
-    this.log(`manual upload: ${path.basename(filePath)} → ${certId} ${side}${replaceExisting ? " (replace)" : ""}`);
+    const retryLabel = retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : "";
+    this.log(`manual upload: ${path.basename(filePath)} → ${certId} ${side}${replaceExisting ? " (replace)" : ""}${retryLabel}`);
 
     let r;
     try { r = await server.attachImage(certId, side, filePath, replaceExisting); }
     catch (err) { r = { ok: false, status: 0, body: { error: `network: ${err.message}` } }; }
 
-    this.uploading = false;
     if (!r.ok) {
       const reason = r.body?.error || `HTTP ${r.status}`;
+      // Retry on 502/503 with exponential backoff, up to MAX_RETRIES.
+      if (RETRYABLE_STATUSES.has(r.status) && retryCount < MAX_RETRIES) {
+        const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
+        this.log(`manual upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
+        await new Promise(rs => setTimeout(rs, delay));
+        return this.uploadManual(filePath, certId, side, replaceExisting, source, retryCount + 1);
+      }
+      this.uploading = false;
       this.log(`manual upload FAILED: ${reason}`, "error");
       const failDir = this.dateFolder(FAILED);
       const moved = this.moveFile(filePath, failDir);
@@ -385,6 +400,7 @@ class Watcher extends EventEmitter {
       this.emitState();
       return { ok: false, error: reason };
     }
+    this.uploading = false;
 
     const processedDir = this.dateFolder(PROCESSED);
     this.moveFile(filePath, processedDir);
