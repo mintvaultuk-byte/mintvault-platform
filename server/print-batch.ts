@@ -32,12 +32,13 @@
  *   B) generatePrintBatchCutSVG() → 165.9×297mm SVG with cut rectangles only.
  *      Magenta hairline (#FF00FF) on a <g id="cut"> layer. ScanNCut Direct
  *      Cut and Cricut SVG cut path both consume this.
- *   C) generatePrintBatchPNG()    → 165.9×234.7mm Cricut canvas @ 144 DPI
- *      = 941×1331px PNG composite. Cricut Design Space ignores the pHYs
- *      DPI chunk and renders ALL PNGs at 144 DPI internally — sizing the
- *      canvas to 144 DPI is what actually controls the print dimensions on
- *      the Cricut mat. (Earlier 300 / 600 DPI canvases got displayed at
- *      ~87×123cm / ~69×97cm because Cricut reinterpreted them.)
+ *   C) generatePrintBatchPNG()    → 165.9×234.7mm Cricut canvas @ 96 DPI
+ *      = 627×887px PNG composite. Cricut Design Space ignores the pHYs
+ *      DPI chunk and treats ALL PNGs as 96 DPI internally — sizing the
+ *      canvas to 96 DPI is what actually controls the print dimensions on
+ *      the Cricut mat. (Earlier 600 / 300 / 144 DPI canvases got displayed
+ *      oversized — e.g. 144 DPI rendered ~1.5× large at ~24.9×35.2cm —
+ *      because Cricut reinterpreted them at 96 DPI.)
  *
  * Single source of truth: buildLayout() returns the cell array consumed by
  * all three renderers — PDF, SVG and PNG cannot drift from each other.
@@ -58,7 +59,11 @@ import type { CertificateRecord } from "@shared/schema";
 // ── Unit conversion ──────────────────────────────────────────────────────────
 const MM_TO_PT = 2.83464567;
 const mm = (v: number) => v * MM_TO_PT;
-const DPI = 144;
+// Cricut Design Space ignores the PNG pHYs DPI chunk and treats every imported
+// PNG as 96 DPI. So the canvas must be sized at 96 DPI for the print to land at
+// its true mm dimensions on the Cricut mat. At 96 DPI: 165.9mm → 627px,
+// 234.7mm → 887px (16.59×23.47cm — the Print Then Cut max printable area).
+const DPI = 96;
 const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
@@ -232,10 +237,10 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 
 // ── PNG composite — Cricut Print Then Cut ────────────────────────────────────
 //
-// 165.9×234.7mm (Cricut Explore 4 Print Then Cut max printable area) @ 144
-// DPI = 941×1331px. Cricut Design Space ignores the embedded pHYs DPI chunk
-// and renders every PNG at 144 DPI internally, so the canvas pixel size at
-// 144 DPI is what actually controls the printed dimensions on the mat. 4
+// 165.9×234.7mm (Cricut Explore 4 Print Then Cut max printable area) @ 96
+// DPI = 627×887px. Cricut Design Space ignores the embedded pHYs DPI chunk
+// and treats every imported PNG as 96 DPI, so the canvas pixel size at 96
+// DPI is what actually controls the printed dimensions on the mat. 4
 // rows × 54mm + 3 × 4mm gaps + 2 × 2mm margins = 232mm content height,
 // 2.7mm spare at the bottom for Cricut's registration marks.
 
@@ -266,8 +271,8 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
   // Embed PNG pHYs chunk for any downstream tool that respects it (e.g.
   // home printers reading the metadata to size A4 output). Cricut Design
   // Space itself does NOT honour pHYs — it sizes prints based on raw pixel
-  // count at its own assumed 144 DPI, which is why the canvas above is
-  // sized at 144 DPI to begin with.
+  // count at its own assumed 96 DPI, which is why the canvas above is
+  // sized at 96 DPI to begin with.
   const rawBuffer = canvas.toBuffer("image/png");
   return sharp(rawBuffer).withMetadata({ density: DPI }).toBuffer();
 }
@@ -291,8 +296,11 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 //   area (165.9×234.7mm) so Auto-Resize doesn't distort labels.
 // v3 (2026-05-25): DPI dropped 600 → 144 to match Cricut Design Space's
 //   internal rendering (it ignores pHYs and assumes 144 DPI).
+// v4 (2026-05-26): DPI dropped 144 → 96. Cricut treats imported PNGs as 96
+//   DPI (not 144), so a 144 DPI canvas rendered ~1.5× too large
+//   (24.9×35.2cm). 96 DPI canvas (627×887px) lands at 16.59×23.47cm.
 export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
-  return `print-batches/${batchId}-v3.${ext}`;
+  return `print-batches/${batchId}-v4.${ext}`;
 }
 
 export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {
