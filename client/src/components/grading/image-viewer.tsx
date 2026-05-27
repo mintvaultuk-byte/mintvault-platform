@@ -97,7 +97,8 @@ function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCode | nu
   const t = String(type).toLowerCase().trim();
   if (t === "whitening") return "WH";
   if (t === "scratch" || t === "scratch (surface)") return "SC";
-  if (t === "scratch (gloss)" || t === "scratch (gloss-penetrating)" || t === "holo_scratch" || t === "holo scratch") return "SP";
+  if (t === "scratch (gloss)" || t === "scratch (gloss-penetrating)" || t === "holo_scratch" || t === "holo scratch")
+    return "SP";
   if (t === "stain") return "ST";
   if (t === "chip" || t === "edge chip") return "CH";
   if (t === "fray" || t === "edge roughness") return "FR";
@@ -160,7 +161,7 @@ const PIN_CURSOR_SVG = encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">' +
     '<circle cx="12" cy="12" r="10" fill="none" stroke="#D4AF37" stroke-width="2"/>' +
     '<circle cx="12" cy="12" r="3" fill="#D4AF37"/>' +
-    "</svg>",
+    "</svg>"
 );
 const PIN_CURSOR = `url("data:image/svg+xml,${PIN_CURSOR_SVG}") 12 12, crosshair`;
 
@@ -784,7 +785,7 @@ export default function ImageViewer({
                       if (d.tier === "D2") return "#EA580C"; // orange-600
                       if (d.tier === "D3") return "#16A34A"; // green-600
                       if (isAi) return "#DC2626";
-                      return "#D4AF37";                       // gold (legacy)
+                      return "#D4AF37"; // gold (legacy)
                     })();
                     const badge = isAi ? "AI" : String(humanIdx);
                     const isEditing = editingDefectId === d.id;
@@ -1318,8 +1319,7 @@ function DefectEditPopover({
   // falling back to a best-guess mapping of the legacy `type` string (or
   // WH as a last resort so a value is always selected). Default tier D2
   // matches the batch picker's default for new pins.
-  const initialCode: MvgsCode =
-    defect.mvgsCode ?? mapLegacyTypeToMvgsCode(defect.type) ?? "WH";
+  const initialCode: MvgsCode = defect.mvgsCode ?? mapLegacyTypeToMvgsCode(defect.type) ?? "WH";
   const initialTier: "D1" | "D2" | "D3" = defect.tier ?? "D2";
   const [localCode, setLocalCode] = useState<MvgsCode>(initialCode);
   const [localTier, setLocalTier] = useState<"D1" | "D2" | "D3">(initialTier);
@@ -1336,7 +1336,7 @@ function DefectEditPopover({
           xPercent: defect.x_percent,
           yPercent: defect.y_percent,
           imageSide: defect.image_side,
-        }),
+        })
       );
     }
     // Sync the legacy `type` field to the MVGS label so the side-list
@@ -1351,7 +1351,11 @@ function DefectEditPopover({
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (!ref.current) return;
-      if (e.target instanceof Node && !ref.current.contains(e.target)) onClose();
+      if (e.target instanceof Node && !ref.current.contains(e.target)) {
+        const t = e.target as HTMLElement;
+        if (t.dataset?.testid?.startsWith("edit-tier-")) return;
+        onClose();
+      }
     }
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
