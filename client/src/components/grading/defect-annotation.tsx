@@ -18,16 +18,44 @@ export interface Defect {
 }
 
 export type MvgsCode =
-  | "WH" | "CH" | "FR" | "SC" | "SP" | "PI" | "PL" | "PS"
-  | "SV" | "ST" | "GL" | "CR" | "RD" | "DG" | "OC";
+  | "WH"
+  | "CH"
+  | "FR"
+  | "SC"
+  | "SP"
+  | "PI"
+  | "PL"
+  | "PS"
+  | "SV"
+  | "ST"
+  | "GL"
+  | "CR"
+  | "RD"
+  | "DG"
+  | "OC";
 
 export type MvgsZone =
-  | "FA" | "FH" | "FB"
-  | "FC1" | "FC2" | "FC3" | "FC4"
-  | "FE1" | "FE2" | "FE3" | "FE4"
-  | "BA" | "BB"
-  | "BC1" | "BC2" | "BC3" | "BC4"
-  | "BE1" | "BE2" | "BE3" | "BE4";
+  | "FA"
+  | "FH"
+  | "FB"
+  | "FC1"
+  | "FC2"
+  | "FC3"
+  | "FC4"
+  | "FE1"
+  | "FE2"
+  | "FE3"
+  | "FE4"
+  | "BA"
+  | "BB"
+  | "BC1"
+  | "BC2"
+  | "BC3"
+  | "BC4"
+  | "BE1"
+  | "BE2"
+  | "BE3"
+  | "BE4";
 
 /** MVGS defect-type catalogue with codes + display labels. The picker in
  *  image-viewer.tsx renders this; the scoring engine in
@@ -58,24 +86,35 @@ export function deriveZone(opts: { xPercent: number; yPercent: number; imageSide
   const isFront = String(opts.imageSide).toLowerCase() !== "back";
   const x = opts.xPercent;
   const y = opts.yPercent;
-  // Tighter bands match a real Pokémon-card border (~3-4 mm out of
-  // 63 mm width / 88 mm height). A pin must land inside the actual
-  // printed border to register as an edge/corner; anything further
-  // in is treated as art/surface.
-  const leftBand = x < 7;
-  const rightBand = x > 93;
-  const topBand = y < 5;
-  const bottomBand = y > 95;
-  // Corners — two bands meet.
-  if (topBand && leftBand)  return isFront ? "FC1" : "BC1";
-  if (topBand && rightBand) return isFront ? "FC2" : "BC2";
-  if (bottomBand && rightBand) return isFront ? "FC3" : "BC3";
-  if (bottomBand && leftBand)  return isFront ? "FC4" : "BC4";
-  // Edges — single band.
-  if (topBand)    return isFront ? "FE1" : "BE1";
-  if (rightBand)  return isFront ? "FE2" : "BE2";
-  if (bottomBand) return isFront ? "FE3" : "BE3";
-  if (leftBand)   return isFront ? "FE4" : "BE4";
+  // Edge bands match the actual printed border on a Pokémon-card-sized scan
+  // (~3-4 mm out of 63 mm width / 88 mm height). A pin must land inside the
+  // physical border to register as an edge.
+  const leftEdge = x < 7;
+  const rightEdge = x > 93;
+  const topEdge = y < 5;
+  const bottomEdge = y > 95;
+  // Corner bands are intentionally WIDER than the edge bands so a pin placed
+  // visually "on a corner" but slightly inside the corner intersection
+  // (e.g. x=8, y=4) still maps to FC/BC rather than dropping into FE/BE.
+  // Pre-fix corner intersection was a 7%×5% rectangle (~0.35% of the image);
+  // the wider 10%×8% rectangle (~0.8%, 2.3× larger) tolerates the usual
+  // touch-zoom imprecision without bleeding into the edge or art zones.
+  const leftCorner = x < 10;
+  const rightCorner = x > 90;
+  const topCorner = y < 8;
+  const bottomCorner = y > 92;
+  // Corners — both corner-band axes hit.
+  if (topCorner && leftCorner) return isFront ? "FC1" : "BC1";
+  if (topCorner && rightCorner) return isFront ? "FC2" : "BC2";
+  if (bottomCorner && rightCorner) return isFront ? "FC3" : "BC3";
+  if (bottomCorner && leftCorner) return isFront ? "FC4" : "BC4";
+  // Edges — single edge-band axis hit. Narrower than the corner bands so
+  // pins genuinely inside the card body (e.g. x=8, y=15) stay in the art
+  // zone rather than getting pulled into FE/BE.
+  if (topEdge) return isFront ? "FE1" : "BE1";
+  if (rightEdge) return isFront ? "FE2" : "BE2";
+  if (bottomEdge) return isFront ? "FE3" : "BE3";
+  if (leftEdge) return isFront ? "FE4" : "BE4";
   // Interior — art zone by default.
   return isFront ? "FA" : "BA";
 }
@@ -96,15 +135,30 @@ interface Props {
 }
 
 const DEFECT_TYPES = [
-  "Scratch", "Print Line", "Whitening", "Silvering", "Corner Softness",
-  "Corner Rounding", "Edge Chip", "Edge Roughness", "Indentation", "Stain",
-  "Crease", "Ink Spot", "Foil Peel", "Roller Mark", "Colour Fade",
-  "Registration Error", "Holo Scratch", "Missing Ink", "Other",
+  "Scratch",
+  "Print Line",
+  "Whitening",
+  "Silvering",
+  "Corner Softness",
+  "Corner Rounding",
+  "Edge Chip",
+  "Edge Roughness",
+  "Indentation",
+  "Stain",
+  "Crease",
+  "Ink Spot",
+  "Foil Peel",
+  "Roller Mark",
+  "Colour Fade",
+  "Registration Error",
+  "Holo Scratch",
+  "Missing Ink",
+  "Other",
 ];
 
 const SEV_COLOR: Record<string, string> = {
-  minor:       "bg-amber-50 text-amber-600 border-amber-200",
-  moderate:    "bg-orange-50 text-orange-600 border-orange-200",
+  minor: "bg-amber-50 text-amber-600 border-amber-200",
+  moderate: "bg-orange-50 text-orange-600 border-orange-200",
   significant: "bg-red-50 text-red-600 border-red-200",
 };
 
@@ -117,17 +171,19 @@ const SEVERITY_CYCLE: Defect["severity"][] = ["minor", "moderate", "significant"
 
 export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight, candidates }: Props) {
   function removeDefect(id: number) {
-    onChange(defects.filter(d => d.id !== id));
+    onChange(defects.filter((d) => d.id !== id));
     if (highlightId === id) onHighlight(null);
   }
 
   function cycleSeverity(id: number) {
-    onChange(defects.map(d => {
-      if (d.id !== id) return d;
-      const i = SEVERITY_CYCLE.indexOf(d.severity);
-      const next = SEVERITY_CYCLE[(i + 1) % SEVERITY_CYCLE.length];
-      return { ...d, severity: next };
-    }));
+    onChange(
+      defects.map((d) => {
+        if (d.id !== id) return d;
+        const i = SEVERITY_CYCLE.indexOf(d.severity);
+        const next = SEVERITY_CYCLE[(i + 1) % SEVERITY_CYCLE.length];
+        return { ...d, severity: next };
+      })
+    );
   }
 
   return (
@@ -136,7 +192,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
           MVGS tier badge shown if set, X to remove. */}
       {defects.length > 0 && (
         <div className="space-y-1.5">
-          {defects.map(d => (
+          {defects.map((d) => (
             <div
               key={d.id}
               className={`flex items-start gap-2 rounded-lg px-3 py-2 border cursor-pointer transition-all ${
@@ -162,7 +218,10 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               </div>
               <button
                 type="button"
-                onClick={e => { e.stopPropagation(); removeDefect(d.id); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeDefect(d.id);
+                }}
                 className="flex-shrink-0 text-[#888888] hover:text-red-600 transition-colors p-0.5"
               >
                 <X size={12} />
@@ -177,7 +236,9 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
           automatically and have no confirm/reject UI here. */}
       {candidates && candidates.length > 0 && (
         <div className="space-y-1.5 border-t border-dashed border-[#D4AF37]/30 pt-2">
-          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">AI suggestions ({candidates.length}) — info only</p>
+          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">
+            AI suggestions ({candidates.length}) — info only
+          </p>
           {candidates.map((c, i) => (
             <div
               key={`cand-${i}`}
@@ -203,7 +264,9 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
       )}
 
       {defects.length === 0 && (!candidates || candidates.length === 0) && (
-        <p className="text-[#555555] text-xs text-center py-2">No defects marked. Click "Mark Defects" and tap the image to start.</p>
+        <p className="text-[#555555] text-xs text-center py-2">
+          No defects marked. Click "Mark Defects" and tap the image to start.
+        </p>
       )}
     </div>
   );

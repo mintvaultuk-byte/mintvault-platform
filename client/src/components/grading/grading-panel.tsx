@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2, Eye, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
 import DefectAnnotation, { type Defect, type DefectCandidate, deriveZone } from "./defect-annotation";
 import CenteringInput from "./centering-input";
 import { calcCornerSubgrade, type CornerValues } from "./corner-grading";
 import { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
-import SurfaceGrading, { calcSurfaceSubgrade, type SurfaceValues } from "./surface-grading";
+import type { SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
 import GradingNotes from "./grading-notes";
@@ -156,6 +156,31 @@ const DEFAULT_SURFACE: SurfaceValues = {
   hasCrease: false,
   hasTear: false,
 };
+
+// Condition checkboxes shown alongside the MVGS-derived surface subgrade.
+// Mirrors the legacy SurfaceGrading component's ISSUES list — duplicated
+// here because we render the surface UI inline now (the manual front/back
+// dropdowns from the old component are gone, surface subgrade comes from
+// computeMvgsScore). hasCrease/hasTear still feed calculateOverallGrade
+// as caps on the headline grade.
+const SURFACE_ISSUES: { key: keyof SurfaceValues; label: string; warning?: string }[] = [
+  { key: "hasPrintLines", label: "Print lines present" },
+  { key: "hasHoloScratches", label: "Holo scratches present" },
+  { key: "hasSurfaceScratches", label: "Surface scratches present" },
+  { key: "hasStaining", label: "Staining present" },
+  { key: "hasIndentation", label: "Indentation present" },
+  { key: "hasRollerMarks", label: "Roller marks present" },
+  { key: "hasColorRegistration", label: "Colour / registration issues" },
+  { key: "hasCrease", label: "Crease present", warning: "Maximum overall grade capped at 5.0" },
+  { key: "hasTear", label: "Tear or missing material", warning: "Maximum overall grade capped at 3.0" },
+];
+
+function surfaceGradeColor(g: number): string {
+  if (g >= 10) return "#D4AF37";
+  if (g >= 8) return "#16A34A";
+  if (g >= 6) return "#CA8A04";
+  return "#DC2626";
+}
 
 export default function GradingPanel({
   certId,
@@ -815,23 +840,12 @@ export default function GradingPanel({
   const edgesCalc = calcEdgeSubgrade(edges);
   const cornersGrade = cornersOverride ?? cornersCalc.grade;
   const edgesGrade = edgesOverride ?? edgesCalc.grade;
-  const surfaceGrade = surfaceOverride ?? calcSurfaceSubgrade(surface);
 
-  // Zone-set counts for the partial-zones indicator + worstKey for the
-  // "Limited by …" tooltip on the summary stepper. Surfaced post-PR-#45
-  // when admins can no longer rely on AI pre-fill across all 8 zones.
-  const cornersZonesSet = Object.values(corners).filter((v) => typeof v === "number" && v > 0).length;
-  const edgesZonesSet = Object.values(edges).filter((v) => typeof v === "number" && v > 0).length;
-
-  // AI / manual subgrades — produced from the steppers + AI baseline +
-  // per-zone arrays. Used as the displayed subs when NO MVGS pins are
-  // classified, and as the input to calculateOverallGrade in the same case.
-  const aiSub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
-
-  // MVGS-derived overall — once any defect has been MVGS-classified
-  // (mvgsCode set), the MVGS scoring engine becomes authoritative for both
-  // the four subgrade chips AND the headline overall grade. Admin's
-  // explicit overallOverride still wins over MVGS, which wins over AI.
+  // MVGS derivations — moved above surfaceGrade because the surface UI no
+  // longer has manual front/back selectors; surfaceGrade is now driven by
+  // mvgsSurfaceGrade (the surface deduction from the scoring engine). Once
+  // any defect is MVGS-classified the engine also drives the headline
+  // grade (admin's overallOverride still wins over MVGS, which wins over AI).
   const mvgsForOverall = computeMvgsScore({
     centeringFrontLr: frontLR || null,
     centeringFrontTb: frontTB || null,
@@ -858,6 +872,23 @@ export default function GradingPanel({
   const mvgsCornersGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.corners ?? 0));
   const mvgsEdgesGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges ?? 0));
   const mvgsSurfaceGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.surface ?? 0));
+
+  // Surface subgrade is now MVGS-derived (was Math.min(front, back) from
+  // the old manual SurfaceGrading dropdowns). Admin's explicit override
+  // still wins. When no surface pins exist the engine returns no
+  // deduction → grade 10, which matches "no surface defects observed".
+  const surfaceGrade = surfaceOverride ?? mvgsSurfaceGrade;
+
+  // Zone-set counts for the partial-zones indicator + worstKey for the
+  // "Limited by …" tooltip on the summary stepper. Surfaced post-PR-#45
+  // when admins can no longer rely on AI pre-fill across all 8 zones.
+  const cornersZonesSet = Object.values(corners).filter((v) => typeof v === "number" && v > 0).length;
+  const edgesZonesSet = Object.values(edges).filter((v) => typeof v === "number" && v > 0).length;
+
+  // AI / manual subgrades — produced from the steppers + AI baseline +
+  // per-zone arrays. Used as the displayed subs when NO MVGS pins are
+  // classified, and as the input to calculateOverallGrade in the same case.
+  const aiSub = { centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade };
 
   // Displayed + saved subs: MVGS when any pin is MVGS-classified, AI/manual
   // otherwise. Feeds GradeDisplay's subgrade chips, isBlackLabel(), and
@@ -1831,17 +1862,102 @@ export default function GradingPanel({
               </div>
             </div>
 
-            {/* Surface */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3">
-              <SurfaceGrading
-                values={surface}
-                onChange={(v) => {
-                  setSurface(v);
-                  clearOverallOverrideIfSet();
-                }}
-                overrideGrade={surfaceOverride}
-                onOverride={setSurfaceOverride}
-              />
+            {/* Surface — MVGS-derived. Manual front/back dropdowns from the
+                old SurfaceGrading component are gone; surface subgrade comes
+                from computeMvgsScore (mvgsSurfaceGrade) with the override
+                stepper layered on top. Condition checkboxes still drive
+                hasCrease / hasTear caps. */}
+            <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Eye size={14} className="text-[#D4AF37]" />
+                <h3 className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Surface</h3>
+              </div>
+
+              {surface.hasCrease && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
+                  <p className="text-red-600 text-xs">Crease detected — maximum overall grade capped at 5.0</p>
+                </div>
+              )}
+              {surface.hasTear && (
+                <div className="flex items-center gap-2 bg-red-100 border border-red-400 rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
+                  <p className="text-red-600 text-xs">Tear or missing material — maximum overall grade capped at 3.0</p>
+                </div>
+              )}
+
+              {/* Issue checkboxes — flow into the surface state, which then
+                  feeds the headline-grade caps (hasCrease → 5, hasTear → 3)
+                  via calculateOverallGrade. */}
+              <div className="space-y-1.5">
+                {SURFACE_ISSUES.map((issue) => (
+                  <label key={String(issue.key)} className="flex items-start gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={surface[issue.key] as boolean}
+                      onChange={(e) => {
+                        setSurface({ ...surface, [issue.key]: e.target.checked });
+                        clearOverallOverrideIfSet();
+                      }}
+                      className="mt-0.5 accent-[#D4AF37]"
+                    />
+                    <span
+                      className={`text-xs group-hover:text-[#1A1A1A] transition-colors ${
+                        issue.warning ? "text-red-300" : "text-[#888888]"
+                      }`}
+                    >
+                      {issue.warning && "⚠️ "}
+                      {issue.label}
+                      {issue.warning && <span className="text-red-600 text-[10px] block ml-1">{issue.warning}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {/* MVGS-derived surface subgrade — read-only display + override
+                  stepper. Mirrors the visual treatment of the old SurfaceGrading
+                  component's subgrade row. */}
+              <div>
+                <p className="text-[#333333] text-[10px]">
+                  Surface:{" "}
+                  <span className="font-bold text-sm" style={{ color: surfaceGradeColor(surfaceGrade) }}>
+                    {surfaceGrade}
+                  </span>
+                  <span className="text-[#555555]"> (MVGS — from defect pins)</span>
+                  {surfaceOverride !== null && <span className="text-[#333333]"> (manual)</span>}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <select
+                    value={surfaceOverride ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : parseFloat(e.target.value);
+                      setSurfaceOverride(v);
+                      clearOverallOverrideIfSet();
+                    }}
+                    data-testid="select-surface-override"
+                    className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
+                  >
+                    <option value="">Override (auto)</option>
+                    {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                  {surfaceOverride !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSurfaceOverride(null);
+                        clearOverallOverrideIfSet();
+                      }}
+                      className="text-[#555555] text-[10px] hover:text-[#333333]"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Authentication */}
