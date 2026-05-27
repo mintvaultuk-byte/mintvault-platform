@@ -583,7 +583,7 @@ export default function ImageViewer({
           {currentUrl ? (
             <div
               className={`relative w-full h-full ${markMode ? "" : "overflow-hidden"}`}
-              style={{ transform: transformStyle, transition: transitionStyle }}
+              style={{ transform: transformStyle, transition: transitionStyle, padding: "1.5%" }}
             >
               <img
                 ref={imgElRef}
