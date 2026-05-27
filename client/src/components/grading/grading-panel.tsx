@@ -5,8 +5,8 @@ import { useToast } from "@/hooks/use-toast";
 import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
 import DefectAnnotation, { type Defect, type DefectCandidate, deriveZone } from "./defect-annotation";
 import CenteringInput from "./centering-input";
-import CornerGrading, { calcCornerSubgrade, CornerSelect, type CornerValues } from "./corner-grading";
-import EdgeGrading, { calcEdgeSubgrade, EdgeSelect, type EdgeValues } from "./edge-grading";
+import { calcCornerSubgrade, type CornerValues } from "./corner-grading";
+import { calcEdgeSubgrade, type EdgeValues } from "./edge-grading";
 import SurfaceGrading, { calcSurfaceSubgrade, type SurfaceValues } from "./surface-grading";
 import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
@@ -1302,140 +1302,10 @@ export default function GradingPanel({
                 onZoomChange={setViewerZoom}
                 onModeChange={setViewerMode}
               />
-              {/* Top + side overlays (absolute — these work fine) */}
-              {viewerZoom <= 1 &&
-                !viewerMode.fullscreen &&
-                !viewerMode.markMode &&
-                (() => {
-                  const cc =
-                    viewerSide === "back"
-                      ? { tl: corners.backTL, tr: corners.backTR }
-                      : { tl: corners.frontTL, tr: corners.frontTR };
-                  const allCorners =
-                    viewerSide === "back"
-                      ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
-                      : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
-                  const cLow = Math.min(...allCorners);
-                  const isCLow = (v: number) => v === cLow && cLow < 10;
-                  const setC = (pos: "tl" | "tr", v: number) => {
-                    const key =
-                      viewerSide === "back"
-                        ? ({ tl: "backTL", tr: "backTR" } as const)[pos]
-                        : ({ tl: "frontTL", tr: "frontTR" } as const)[pos];
-                    setCorners((prev) => ({ ...prev, [key]: v }));
-                    clearOverallOverrideIfSet();
-                  };
-                  const ee =
-                    viewerSide === "back"
-                      ? { top: edges.backTop, left: edges.backLeft, right: edges.backRight }
-                      : { top: edges.frontTop, left: edges.frontLeft, right: edges.frontRight };
-                  const allEdges =
-                    viewerSide === "back"
-                      ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
-                      : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
-                  const eLow = Math.min(...allEdges);
-                  const isELow = (v: number) => v === eLow && eLow < 10;
-                  const setE = (pos: "top" | "left" | "right", v: number) => {
-                    const key =
-                      viewerSide === "back"
-                        ? ({ top: "backTop", left: "backLeft", right: "backRight" } as const)[pos]
-                        : ({ top: "frontTop", left: "frontLeft", right: "frontRight" } as const)[pos];
-                    setEdges((prev) => ({ ...prev, [key]: v }));
-                    clearOverallOverrideIfSet();
-                  };
-                  return (
-                    <>
-                      {/* TL / T / TR all anchored above the card (top:-28) so the
-                        labels are NOT on the card art. Horizontal anchors put TL
-                        flush at the card-left edge, T centred, TR at the card-right
-                        edge — clear separation, plenty of horizontal gap. The
-                        outer wrapper carries 32px top margin to make room. */}
-                      <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, left: 0 }}>
-                        <span className="text-[8px] font-bold text-[#555555]">TL</span>
-                        <CornerSelect value={cc.tl} onChange={(v) => setC("tl", v)} isLowest={isCLow(cc.tl)} />
-                      </div>
-                      <div className="absolute z-20 flex flex-col items-center gap-1" style={{ top: -28, right: 0 }}>
-                        <span className="text-[8px] font-bold text-[#555555]">TR</span>
-                        <CornerSelect value={cc.tr} onChange={(v) => setC("tr", v)} isLowest={isCLow(cc.tr)} />
-                      </div>
-                      <div
-                        className="absolute z-20 flex flex-col items-center gap-1"
-                        style={{ top: -28, left: "50%", transform: "translateX(-50%)" }}
-                      >
-                        <span className="text-[8px] font-bold text-[#555555]">T</span>
-                        <EdgeSelect value={ee.top} onChange={(v) => setE("top", v)} isLowest={isELow(ee.top)} />
-                      </div>
-                      <div
-                        className="absolute z-20 flex items-center gap-1"
-                        style={{ top: "50%", left: -56, transform: "translateY(-50%)" }}
-                      >
-                        <span className="text-[8px] font-bold text-[#555555]">L</span>
-                        <EdgeSelect value={ee.left} onChange={(v) => setE("left", v)} isLowest={isELow(ee.left)} />
-                      </div>
-                      <div
-                        className="absolute z-20 flex items-center gap-1"
-                        style={{ top: "50%", right: -56, transform: "translateY(-50%)" }}
-                      >
-                        <EdgeSelect value={ee.right} onChange={(v) => setE("right", v)} isLowest={isELow(ee.right)} />
-                        <span className="text-[8px] font-bold text-[#555555]">R</span>
-                      </div>
-                    </>
-                  );
-                })()}
+              {/* Corner/edge zone selectors removed — MVGS defect pins now
+                  drive corners/edges subgrades via computeMvgsScore. */}
             </div>
-            {/* Bottom row — normal flow, always below card + controls */}
-            {viewerZoom <= 1 &&
-              !viewerMode.fullscreen &&
-              !viewerMode.markMode &&
-              (() => {
-                const cc =
-                  viewerSide === "back"
-                    ? { bl: corners.backBL, br: corners.backBR }
-                    : { bl: corners.frontBL, br: corners.frontBR };
-                const allCorners =
-                  viewerSide === "back"
-                    ? [corners.backTL, corners.backTR, corners.backBL, corners.backBR]
-                    : [corners.frontTL, corners.frontTR, corners.frontBL, corners.frontBR];
-                const cLow = Math.min(...allCorners);
-                const isCLow = (v: number) => v === cLow && cLow < 10;
-                const setCBot = (pos: "bl" | "br", v: number) => {
-                  const key =
-                    viewerSide === "back"
-                      ? ({ bl: "backBL", br: "backBR" } as const)[pos]
-                      : ({ bl: "frontBL", br: "frontBR" } as const)[pos];
-                  setCorners((prev) => ({ ...prev, [key]: v }));
-                };
-                const eeBot = viewerSide === "back" ? edges.backBottom : edges.frontBottom;
-                const allEdges =
-                  viewerSide === "back"
-                    ? [edges.backTop, edges.backBottom, edges.backLeft, edges.backRight]
-                    : [edges.frontTop, edges.frontBottom, edges.frontLeft, edges.frontRight];
-                const eLow = Math.min(...allEdges);
-                const isELow = eeBot === eLow && eLow < 10;
-                return (
-                  <div className="flex items-start justify-between mt-3 px-1">
-                    <div className="flex flex-col items-center gap-1">
-                      <CornerSelect value={cc.bl} onChange={(v) => setCBot("bl", v)} isLowest={isCLow(cc.bl)} />
-                      <span className="text-[8px] font-bold text-[#555555]">BL</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1">
-                      <EdgeSelect
-                        value={eeBot}
-                        onChange={(v) => {
-                          const key = viewerSide === "back" ? "backBottom" : "frontBottom";
-                          setEdges((prev) => ({ ...prev, [key]: v }));
-                        }}
-                        isLowest={isELow}
-                      />
-                      <span className="text-[8px] font-bold text-[#555555]">B</span>
-                    </div>
-                    <div className="flex flex-col items-center gap-1">
-                      <CornerSelect value={cc.br} onChange={(v) => setCBot("br", v)} isLowest={isCLow(cc.br)} />
-                      <span className="text-[8px] font-bold text-[#555555]">BR</span>
-                    </div>
-                  </div>
-                );
-              })()}
+            {/* Bottom corner/edge selectors removed — MVGS-driven. */}
           </div>
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -1719,10 +1589,10 @@ export default function GradingPanel({
                 strengthScore={
                   (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
                 }
-                cornersZonesSet={cornersZonesSet}
-                edgesZonesSet={edgesZonesSet}
-                cornersWorstKey={cornersOverride == null ? cornersCalc.worstKey : ""}
-                edgesWorstKey={edgesOverride == null ? edgesCalc.worstKey : ""}
+                cornersZonesSet={0}
+                edgesZonesSet={0}
+                cornersWorstKey=""
+                edgesWorstKey=""
                 aiSubgrades={aiSubgrades}
                 aiConfidence={aiConfidenceMap}
                 onSubgradeChange={(key, val) => {
@@ -1913,31 +1783,52 @@ export default function GradingPanel({
               })()}
             </div>
 
-            {/* Corners */}
+            {/* Corners — read-only MVGS-driven subgrade with manual override */}
             <div className="bg-[#F7F7F5] rounded-lg p-3">
-              <CornerGrading
-                values={corners}
-                subgrade={cornersGrade}
-                onChange={(v) => {
-                  setCorners(v);
-                  clearOverallOverrideIfSet();
-                }}
-                overrideGrade={cornersOverride}
-                onOverride={setCornersOverride}
-              />
+              <div className="flex items-center justify-between">
+                <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Corners</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold text-[#1A1A1A]">{sub.corners || "—"}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    value={cornersOverride ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      setCornersOverride(v);
+                      clearOverallOverrideIfSet();
+                    }}
+                    placeholder="Override"
+                    className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* Edges */}
+            {/* Edges — read-only MVGS-driven subgrade with manual override */}
             <div className="bg-[#F7F7F5] rounded-lg p-3">
-              <EdgeGrading
-                values={edges}
-                onChange={(v) => {
-                  setEdges(v);
-                  clearOverallOverrideIfSet();
-                }}
-                overrideGrade={edgesOverride}
-                onOverride={setEdgesOverride}
-              />
+              <div className="flex items-center justify-between">
+                <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Edges</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold text-[#1A1A1A]">{sub.edges || "—"}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    value={edgesOverride ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : Number(e.target.value);
+                      setEdgesOverride(v);
+                      clearOverallOverrideIfSet();
+                    }}
+                    placeholder="Override"
+                    className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Surface */}
