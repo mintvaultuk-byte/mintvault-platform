@@ -898,6 +898,16 @@ export default function GradingPanel({
     ? { centering: mvgsCenteringGrade, corners: mvgsCornersGrade, edges: mvgsEdgesGrade, surface: mvgsSurfaceGrade }
     : aiSub;
 
+  // Auto-populate overrides from MVGS when locked — ensures buildPayload
+  // always ships non-null subgrades once defects are MVGS-classified, so
+  // grade description generation works without manual entry.
+  useEffect(() => {
+    if (!hasMvgsPins) return;
+    if (sub.corners > 0) setCornersOverride(sub.corners);
+    if (sub.edges > 0) setEdgesOverride(sub.edges);
+    if (sub.surface > 0) setSurfaceOverride(sub.surface);
+  }, [hasMvgsPins, sub.corners, sub.edges, sub.surface]);
+
   const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
   const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
 
