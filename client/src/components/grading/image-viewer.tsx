@@ -878,6 +878,10 @@ export default function ImageViewer({
                             anchorAbove={popoverAbove}
                             anchorRect={editingDefectAnchor}
                             onChangeField={(k, v) => updateDefectField(d.id, k, v)}
+                            onBulkUpdate={(patch) => {
+                              if (!onDefectsChange) return;
+                              onDefectsChange(defects.map((dd) => (dd.id === d.id ? { ...dd, ...patch } : dd)));
+                            }}
                             onDelete={() => deleteDefect(d.id)}
                             onClose={() => {
                               setEditingDefectId(null);
@@ -1302,6 +1306,7 @@ function DefectEditPopover({
   anchorAbove,
   anchorRect,
   onChangeField,
+  onBulkUpdate,
   onDelete,
   onClose,
 }: {
@@ -1310,6 +1315,7 @@ function DefectEditPopover({
   anchorAbove: boolean;
   anchorRect: DOMRect;
   onChangeField: <K extends keyof Defect>(key: K, value: Defect[K]) => void;
+  onBulkUpdate: (patch: Partial<Defect>) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -1325,25 +1331,25 @@ function DefectEditPopover({
   const [localTier, setLocalTier] = useState<"D1" | "D2" | "D3">(initialTier);
 
   function handleDone() {
-    // Persist MVGS fields first — these drive the scoring engine.
-    onChangeField("mvgsCode", localCode);
-    onChangeField("tier", localTier);
-    // Derive zone if missing (legacy pins predating MVGS zones won't have it).
-    if (!defect.zone) {
-      onChangeField(
-        "zone",
-        deriveZone({
-          xPercent: defect.x_percent,
-          yPercent: defect.y_percent,
-          imageSide: defect.image_side,
-        })
-      );
-    }
-    // Sync the legacy `type` field to the MVGS label so the side-list
-    // display + aria-labels show the new label. The legacy `severity`
-    // field is left as-is — it no longer affects MVGS scoring.
+    // Atomic bulk update — sequential onChangeField calls raced because each
+    // read from the same stale closure snapshot, so the last write won and
+    // mvgsCode/tier/zone were silently dropped. Single call applies all
+    // mutations at once → computeMvgsScore sees all three fields on the
+    // next render → subgrades update correctly.
     const label = MVGS_DEFECT_TYPES.find((t) => t.code === localCode)?.label ?? "";
-    if (label) onChangeField("type", label);
+    const zone =
+      defect.zone ??
+      deriveZone({
+        xPercent: defect.x_percent,
+        yPercent: defect.y_percent,
+        imageSide: defect.image_side,
+      });
+    onBulkUpdate({
+      mvgsCode: localCode,
+      tier: localTier,
+      zone,
+      ...(label ? { type: label } : {}),
+    });
     onClose();
   }
   // Click outside closes. mousedown (not click) on capture phase so we beat
