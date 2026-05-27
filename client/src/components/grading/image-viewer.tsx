@@ -92,7 +92,7 @@ interface Props {
 // shapes) to MVGS codes. Used when an existing pin lacks an mvgsCode at
 // edit-popover open time. Falls through to null for unmapped types — the
 // popover then defaults to WH so something is always selected.
-function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCode | null {
+export function mapLegacyTypeToMvgsCode(type: string | undefined | null): MvgsCode | null {
   if (!type) return null;
   const t = String(type).toLowerCase().trim();
   if (t === "whitening") return "WH";

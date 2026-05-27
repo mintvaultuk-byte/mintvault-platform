@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import ImageViewer from "./image-viewer";
-import DefectAnnotation, { type Defect, type DefectCandidate } from "./defect-annotation";
+import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
+import DefectAnnotation, { type Defect, type DefectCandidate, deriveZone } from "./defect-annotation";
 import CenteringInput from "./centering-input";
 import CornerGrading, { calcCornerSubgrade, CornerSelect, type CornerValues } from "./corner-grading";
 import EdgeGrading, { calcEdgeSubgrade, EdgeSelect, type EdgeValues } from "./edge-grading";
@@ -1440,24 +1440,50 @@ export default function GradingPanel({
           <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
-              {defects.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
-                    // setDefects is in the debounced-autosave useEffect dep
-                    // array (L622+), so the empty array auto-saves to the
-                    // /grade endpoint ~500 ms after this state change.
-                    setDefects([]);
-                  }}
-                  className="flex items-center gap-1 text-[#888888] hover:text-red-600 text-[10px] font-bold uppercase tracking-wider transition-colors"
-                  data-testid="btn-clear-defects"
-                  title="Delete all defect pins"
-                >
-                  <Trash2 size={10} />
-                  Clear Defects
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDefects(
+                        defects.map((d) => ({
+                          ...d,
+                          mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
+                          tier: d.tier ?? "D2",
+                          zone:
+                            d.zone ??
+                            deriveZone({
+                              xPercent: d.x_percent,
+                              yPercent: d.y_percent,
+                              imageSide: d.image_side,
+                            }),
+                        }))
+                      );
+                    }}
+                    className="flex items-center gap-1 text-[#B8960C] hover:text-[#D4AF37] text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    data-testid="btn-recalc-zones"
+                    title="Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+                  >
+                    <Zap size={10} />
+                    Recalculate
+                  </button>
+                )}
+                {defects.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+                      setDefects([]);
+                    }}
+                    className="flex items-center gap-1 text-[#888888] hover:text-red-600 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    data-testid="btn-clear-defects"
+                    title="Delete all defect pins"
+                  >
+                    <Trash2 size={10} />
+                    Clear Defects
+                  </button>
+                )}
+              </div>
             </div>
 
             <DefectAnnotation
@@ -1780,18 +1806,18 @@ export default function GradingPanel({
               {(() => {
                 const FRONT_CHIPS: { label: string; grade: string; devMax: number }[] = [
                   { label: "≤55/45", grade: "10", devMax: 10 },
-                  { label: "56–60",  grade: "9",  devMax: 20 },
-                  { label: "61–65",  grade: "8",  devMax: 30 },
-                  { label: "66–70",  grade: "7",  devMax: 40 },
-                  { label: "71–75",  grade: "6",  devMax: 50 },
-                  { label: "76–80",  grade: "5",  devMax: 60 },
-                  { label: ">80",    grade: "≤4", devMax: Infinity },
+                  { label: "56–60", grade: "9", devMax: 20 },
+                  { label: "61–65", grade: "8", devMax: 30 },
+                  { label: "66–70", grade: "7", devMax: 40 },
+                  { label: "71–75", grade: "6", devMax: 50 },
+                  { label: "76–80", grade: "5", devMax: 60 },
+                  { label: ">80", grade: "≤4", devMax: Infinity },
                 ];
                 const BACK_CHIPS: { label: string; grade: string; devMax: number }[] = [
                   { label: "≤75/25", grade: "10", devMax: 50 },
-                  { label: "76–85",  grade: "8",  devMax: 70 },
-                  { label: "86–90",  grade: "5",  devMax: 80 },
-                  { label: ">90",    grade: "1",  devMax: Infinity },
+                  { label: "76–85", grade: "8", devMax: 70 },
+                  { label: "86–90", grade: "5", devMax: 80 },
+                  { label: ">90", grade: "1", devMax: Infinity },
                 ];
                 const devFromRatio = (raw: string): number | null => {
                   const m = raw.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
@@ -1805,14 +1831,10 @@ export default function GradingPanel({
                   for (let i = 0; i < chips.length; i++) if (dev <= chips[i].devMax) return i;
                   return chips.length - 1;
                 };
-                const frontDevs = [devFromRatio(frontLR), devFromRatio(frontTB)].filter(
-                  (v): v is number => v !== null,
-                );
-                const backDevs = [devFromRatio(backLR), devFromRatio(backTB)].filter(
-                  (v): v is number => v !== null,
-                );
+                const frontDevs = [devFromRatio(frontLR), devFromRatio(frontTB)].filter((v): v is number => v !== null);
+                const backDevs = [devFromRatio(backLR), devFromRatio(backTB)].filter((v): v is number => v !== null);
                 const frontHits = new Set(frontDevs.map((d) => matchIdx(d, FRONT_CHIPS)));
-                const backHits  = new Set(backDevs.map((d)  => matchIdx(d, BACK_CHIPS)));
+                const backHits = new Set(backDevs.map((d) => matchIdx(d, BACK_CHIPS)));
 
                 const Chip = ({ label, grade, active }: { label: string; grade: string; active: boolean }) => (
                   <span
