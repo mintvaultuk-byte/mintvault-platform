@@ -1168,7 +1168,7 @@ export default function GradingPanel({
 
       {quickGrade && (
         <QuickGrade
-          subgrades={{ centering, corners: cornersGrade, edges: edgesGrade, surface: surfaceGrade }}
+          subgrades={{ centering, corners: sub.corners, edges: sub.edges, surface: sub.surface }}
           onChange={(s) => {
             setCenteringOverride(s.centering);
             setCornersOverride(s.corners);
@@ -1480,10 +1480,10 @@ export default function GradingPanel({
                     key === "centering"
                       ? centering
                       : key === "corners"
-                        ? cornersGrade
+                        ? sub.corners
                         : key === "edges"
-                          ? edgesGrade
-                          : surfaceGrade;
+                          ? sub.edges
+                          : sub.surface;
                   const isManual = aiVal !== undefined && curVal !== aiVal;
                   return (
                     <div
@@ -1814,50 +1814,58 @@ export default function GradingPanel({
               })()}
             </div>
 
-            {/* Corners — read-only MVGS-driven subgrade with manual override */}
+            {/* Corners — MVGS-driven when locked, override when unlocked */}
             <div className="bg-[#F7F7F5] rounded-lg p-3">
               <div className="flex items-center justify-between">
                 <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Corners</p>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-[#1A1A1A]">{sub.corners || "—"}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    step={0.5}
-                    value={cornersOverride ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
-                      setCornersOverride(v);
-                      clearOverallOverrideIfSet();
-                    }}
-                    placeholder={hasMvgsPins ? String(sub.corners) : "Override"}
-                    className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
-                  />
+                  {hasMvgsPins ? (
+                    <span className="w-20 text-xs text-center text-[#888888] italic">MVGS auto</span>
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      step={0.5}
+                      value={cornersOverride ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? null : Number(e.target.value);
+                        setCornersOverride(v);
+                        clearOverallOverrideIfSet();
+                      }}
+                      placeholder="Override"
+                      className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                    />
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Edges — read-only MVGS-driven subgrade with manual override */}
+            {/* Edges — MVGS-driven when locked, override when unlocked */}
             <div className="bg-[#F7F7F5] rounded-lg p-3">
               <div className="flex items-center justify-between">
                 <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Edges</p>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-[#1A1A1A]">{sub.edges || "—"}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    step={0.5}
-                    value={edgesOverride ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value === "" ? null : Number(e.target.value);
-                      setEdgesOverride(v);
-                      clearOverallOverrideIfSet();
-                    }}
-                    placeholder={hasMvgsPins ? String(sub.edges) : "Override"}
-                    className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
-                  />
+                  {hasMvgsPins ? (
+                    <span className="w-20 text-xs text-center text-[#888888] italic">MVGS auto</span>
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      step={0.5}
+                      value={edgesOverride ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value === "" ? null : Number(e.target.value);
+                        setEdgesOverride(v);
+                        clearOverallOverrideIfSet();
+                      }}
+                      placeholder="Override"
+                      className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -1927,34 +1935,40 @@ export default function GradingPanel({
                   {surfaceOverride !== null && <span className="text-[#333333]"> (manual)</span>}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  <select
-                    value={surfaceOverride ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                      setSurfaceOverride(v);
-                      clearOverallOverrideIfSet();
-                    }}
-                    data-testid="select-surface-override"
-                    className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
-                  >
-                    <option value="">{hasMvgsPins ? `Auto (${sub.surface})` : "Override (auto)"}</option>
-                    {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                  {surfaceOverride !== null && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSurfaceOverride(null);
-                        clearOverallOverrideIfSet();
-                      }}
-                      className="text-[#555555] text-[10px] hover:text-[#333333]"
-                    >
-                      clear
-                    </button>
+                  {hasMvgsPins ? (
+                    <span className="text-xs text-[#888888] italic">MVGS auto</span>
+                  ) : (
+                    <>
+                      <select
+                        value={surfaceOverride ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value === "" ? null : parseFloat(e.target.value);
+                          setSurfaceOverride(v);
+                          clearOverallOverrideIfSet();
+                        }}
+                        data-testid="select-surface-override"
+                        className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
+                      >
+                        <option value="">Override (auto)</option>
+                        {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                      </select>
+                      {surfaceOverride !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSurfaceOverride(null);
+                            clearOverallOverrideIfSet();
+                          }}
+                          className="text-[#555555] text-[10px] hover:text-[#333333]"
+                        >
+                          clear
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
