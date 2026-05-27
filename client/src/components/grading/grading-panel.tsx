@@ -1831,7 +1831,7 @@ export default function GradingPanel({
                       setCornersOverride(v);
                       clearOverallOverrideIfSet();
                     }}
-                    placeholder="Override"
+                    placeholder={hasMvgsPins ? String(sub.corners) : "Override"}
                     className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
                   />
                 </div>
@@ -1855,7 +1855,7 @@ export default function GradingPanel({
                       setEdgesOverride(v);
                       clearOverallOverrideIfSet();
                     }}
-                    placeholder="Override"
+                    placeholder={hasMvgsPins ? String(sub.edges) : "Override"}
                     className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
                   />
                 </div>
@@ -1937,7 +1937,7 @@ export default function GradingPanel({
                     data-testid="select-surface-override"
                     className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
                   >
-                    <option value="">Override (auto)</option>
+                    <option value="">{hasMvgsPins ? `Auto (${sub.surface})` : "Override (auto)"}</option>
                     {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
                       <option key={g} value={g}>
                         {g}
