@@ -29,6 +29,15 @@ const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
 const PICTURES  = path.join(os.homedir(), "Pictures");
+// Crash-recovery queue: records every upload that's in flight so an
+// interrupted upload (app killed / machine slept mid-POST) can be re-driven
+// on the next startup. Written when an upload starts, cleared on success or
+// permanent failure.
+const PENDING_QUEUE = path.join(BASE, "pending-queue.json");
+// On startup with ignoreInitial:false, chokidar fires "add" for every
+// pre-existing inbox file. We hold those for this long before draining them
+// sequentially so we don't fire a thundering herd of uploads.
+const STARTUP_DEBOUNCE_MS = 2_000;
 
 // Accept any image format SilverFast might output. The server-side
 // scan-ingest endpoint runs everything through Sharp, which auto-detects
@@ -43,7 +52,10 @@ const STABLE_POLL_MS = 500;
 const RETRY_DELAY_MS = 5_000;
 
 // HTTP status codes that trigger automatic retry with exponential backoff.
-const RETRYABLE_STATUSES = new Set([502, 503]);
+// 504 is the sentinel server-client returns when an upload fetch is aborted
+// by its 90s AbortController timeout — routing it here lets a timed-out
+// upload retry with the same backoff as a real gateway error.
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF = [5_000, 10_000, 20_000]; // 5s, 10s, 20s
 
@@ -57,6 +69,8 @@ class Watcher extends EventEmitter {
     this.pendingManualPath = null;   // absolute path waiting for renderer to choose cert/side
     this.uploading = false;          // hard guard against concurrent uploads
     this.predictedNextCertCache = { value: null, ts: 0 };
+    this.ready = false;              // false until the startup debounce drains
+    this.initialFiles = [];          // pre-existing inbox files seen before ready
   }
 
   async start() {
@@ -76,16 +90,107 @@ class Watcher extends EventEmitter {
     try { chokidar = require("chokidar"); }
     catch (err) { this.log(`chokidar load failed: ${err.message}`, "error"); return; }
 
+    // Crash recovery: re-drive any uploads that were in flight when the app
+    // last died, BEFORE we start watching. Awaited sequentially so each
+    // interrupted upload finishes (success → moved to processed, or fail →
+    // moved to failed) and is out of the inbox before chokidar's initial
+    // scan runs — that prevents the initial scan from double-processing the
+    // same files.
+    await this.requeuePending();
+
     this.chokidar = chokidar.watch([INBOX, PICTURES], {
-      ignoreInitial: true,
+      ignoreInitial: false,
       persistent: true,
       awaitWriteFinish: false, // we do our own size-stable check
     });
-    this.chokidar.on("add", (p) => this.handleNewFile(p));
+    // Until the startup debounce fires, buffer "add" events for pre-existing
+    // files instead of processing them immediately. New files scanned after
+    // startup process normally.
+    //
+    // CRITICAL: only buffer pre-existing files from the INBOX. ~/Pictures is
+    // also watched, and with ignoreInitial:false its initial scan reports the
+    // operator's entire existing photo library — those are NOT fresh scans
+    // and must never be swept into the upload pipeline. Fresh SilverFast
+    // output landing in ~/Pictures arrives AFTER "ready" and is handled live.
+    this.chokidar.on("add", (p) => {
+      if (!this.ready) {
+        if (p.startsWith(INBOX + path.sep)) this.initialFiles.push(p);
+        return;
+      }
+      this.handleNewFile(p);
+    });
     this.chokidar.on("error", (err) => this.log(`chokidar error: ${err.message}`, "error"));
+    this.chokidar.on("ready", () => {
+      // Let the initial scan settle, then drain pre-existing files one at a
+      // time (await each) so we never fire a burst of concurrent uploads.
+      setTimeout(async () => {
+        const queued = this.initialFiles.splice(0);
+        this.ready = true;
+        if (queued.length) {
+          this.log(`startup: draining ${queued.length} pre-existing inbox file(s) after ${STARTUP_DEBOUNCE_MS}ms debounce`);
+          for (const p of queued) {
+            await this.handleNewFile(p);
+          }
+        }
+      }, STARTUP_DEBOUNCE_MS);
+    });
 
     this.log(`watching ${INBOX} + ${PICTURES}`);
     this.refreshNextCert(); // populate predicted next cert at boot
+  }
+
+  // ── Pending-queue persistence (crash recovery) ───────────────────────────
+
+  readPendingQueue() {
+    try {
+      const arr = JSON.parse(fs.readFileSync(PENDING_QUEUE, "utf8"));
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  writePendingQueue(entries) {
+    try {
+      fs.writeFileSync(PENDING_QUEUE, JSON.stringify(entries, null, 2));
+    } catch (err) {
+      this.log(`pending-queue write failed: ${err.message}`, "warn");
+    }
+  }
+
+  /** Record an in-flight upload. Idempotent on `key` so retries / re-queues
+   *  refresh the existing entry rather than duplicating it. */
+  addPending(entry) {
+    const q = this.readPendingQueue().filter((e) => e.key !== entry.key);
+    q.push({ ...entry, ts: Date.now() });
+    this.writePendingQueue(q);
+  }
+
+  /** Drop an entry once its upload succeeds or permanently fails. */
+  removePending(key) {
+    const q = this.readPendingQueue().filter((e) => e.key !== key);
+    this.writePendingQueue(q);
+  }
+
+  /** On startup, re-drive every entry still in the queue. Files already gone
+   *  from disk (upload had actually succeeded before the crash, queue write
+   *  just didn't land) are dropped as stale. Awaited sequentially. */
+  async requeuePending() {
+    const pending = this.readPendingQueue();
+    if (!pending.length) return;
+    this.log(`startup: re-queueing ${pending.length} interrupted upload(s) from pending-queue.json`);
+    for (const entry of pending) {
+      try {
+        if (entry.type === "pair" && entry.frontPath && fs.existsSync(entry.frontPath)) {
+          await this.uploadPair(entry.frontPath, entry.backPath || null);
+        } else if (entry.type === "manual" && entry.filePath && fs.existsSync(entry.filePath)) {
+          await this.uploadManual(entry.filePath, entry.certId, entry.side, entry.replaceExisting, entry.source || "requeue");
+        } else {
+          this.log(`pending entry stale (file gone), dropping: ${entry.key}`, "warn");
+          this.removePending(entry.key);
+        }
+      } catch (err) {
+        this.log(`re-queue failed for ${entry.key}: ${err.message}`, "error");
+      }
+    }
   }
 
   async stop() {
@@ -313,6 +418,11 @@ class Watcher extends EventEmitter {
     if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
+    // Record this upload as in-flight on the first attempt (not on retries —
+    // addPending is keyed, so the entry already exists across retry rounds).
+    if (retryCount === 0) {
+      this.addPending({ key: frontPath, type: "pair", frontPath, backPath });
+    }
     stateMod.set({ state: "uploading" });
     this.emitState();
     const retryLabel = retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : "";
@@ -340,6 +450,7 @@ class Watcher extends EventEmitter {
     const processedDir = this.dateFolder(PROCESSED);
     this.moveFile(frontPath, processedDir);
     this.moveFile(backPath,  processedDir);
+    this.removePending(frontPath);
     this.bufferedFront = null;
     this.lastPair = null;
     this.uploading = false;
@@ -371,6 +482,10 @@ class Watcher extends EventEmitter {
 
   failPair(frontPath, backPath, reason) {
     this.log(`FAILED ${path.basename(frontPath)}: ${reason}`, "error");
+    // Permanent failure (retries exhausted) — drop the crash-recovery entry
+    // so we don't re-drive a pair that's now in failed/ on next startup.
+    // Keyed on the original inbox path, matching what addPending stored.
+    this.removePending(frontPath);
     const failDir = this.dateFolder(FAILED);
     const movedFront = this.moveFile(frontPath, failDir);
     const movedBack  = backPath ? this.moveFile(backPath, failDir) : null;
@@ -390,6 +505,9 @@ class Watcher extends EventEmitter {
       return { ok: false, error: "upload in flight" };
     }
     this.uploading = true;
+    if (retryCount === 0) {
+      this.addPending({ key: filePath, type: "manual", filePath, certId, side, replaceExisting: !!replaceExisting, source });
+    }
     stateMod.set({ state: "uploading", manualPending: { certId, side, replaceExisting } });
     this.emitState();
     const retryLabel = retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : "";
@@ -409,6 +527,7 @@ class Watcher extends EventEmitter {
         return this.uploadManual(filePath, certId, side, replaceExisting, source, retryCount + 1);
       }
       this.uploading = false;
+      this.removePending(filePath);
       this.log(`manual upload FAILED: ${reason}`, "error");
       const failDir = this.dateFolder(FAILED);
       const moved = this.moveFile(filePath, failDir);
@@ -418,6 +537,7 @@ class Watcher extends EventEmitter {
       return { ok: false, error: reason };
     }
     this.uploading = false;
+    this.removePending(filePath);
 
     const processedDir = this.dateFolder(PROCESSED);
     this.moveFile(filePath, processedDir);
