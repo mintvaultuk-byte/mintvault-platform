@@ -298,6 +298,15 @@ class Watcher extends EventEmitter {
     const ext = path.extname(filename).toLowerCase();
 
     if (filename.startsWith(".") || filename === ".DS_Store") return;
+    // Test-scan artifacts (written as test-scan-<ts>.tif by the "test scan"
+    // button in main.js) must never enter the grading pipeline. In AUTO mode
+    // they buffer as a front/back and pair with a real card TIFF, minting a
+    // blank/mismatched cert. Skip them entirely — checked before the
+    // extension filter so it catches the file regardless of how it's named.
+    if (filename.startsWith("test-scan-")) {
+      this.log(`ignored test-scan file (not a real scan): ${filename}`);
+      return;
+    }
     if (IGNORED.has(ext)) {
       this.log(`ignored (${ext} not accepted): ${filename}`, "debug");
       return;
