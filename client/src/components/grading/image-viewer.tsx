@@ -782,7 +782,7 @@ export default function ImageViewer({
                     // Legacy admin pins with no tier fall back to gold.
                     const col = (() => {
                       if (d.tier === "D1") return "#DC2626"; // red-600
-                      if (d.tier === "D2") return "#EA580C"; // orange-600
+                      if (d.tier === "D2") return "#D97706"; // amber-600 (yellow-orange)
                       if (d.tier === "D3") return "#16A34A"; // green-600
                       if (isAi) return "#DC2626";
                       return "#D4AF37"; // gold (legacy)
