@@ -38,12 +38,6 @@ const env = loadEnv();
 const API_BASE = process.env.MINTVAULT_API_BASE || env.MINTVAULT_API_BASE || "https://mintvaultuk.com";
 const TOKEN    = process.env.SCANNER_API_TOKEN  || env.SCANNER_API_TOKEN  || "";
 
-// Hard ceiling on an upload fetch. SilverFast TIFFs are large and the
-// scan-ingest endpoint runs Sharp + (async) AI, so uploads are slow — but
-// they should never hang forever. On abort we return a 504 sentinel so the
-// watcher's retry logic (which treats 504 as retryable) re-drives the upload.
-const UPLOAD_TIMEOUT_MS = 180_000;
-
 function authHeaders() {
   return TOKEN ? { "x-scanner-token": TOKEN } : {};
 }
@@ -116,28 +110,15 @@ async function uploadPair(frontPath, backPath) {
   // blocked the response on AI completion (~20 s added). The renderer doesn't
   // consume aiStatus/aiResult anyway, so the async response is shape-compatible
   // for the desktop app. ~48 s → ~23 s scan-ingest response.
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${API_BASE}/api/admin/scan-ingest`, {
-      method: "POST",
-      headers: { ...authHeaders(), ...form.getHeaders() },
-      body: form,
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let body;
-    try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
-  } catch (err) {
-    if (err.name === "AbortError") {
-      console.warn(`[server-client] uploadPair timed out after ${UPLOAD_TIMEOUT_MS}ms — returning 504 for retry`);
-      return { ok: false, status: 504, body: { error: `upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s` } };
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const res = await fetch(`${API_BASE}/api/admin/scan-ingest`, {
+    method: "POST",
+    headers: { ...authHeaders(), ...form.getHeaders() },
+    body: form,
+  });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  return { ok: res.ok, status: res.status, body };
 }
 
 /**
@@ -150,28 +131,15 @@ async function attachImage(certId, side, filePath, replaceExisting) {
   form.append("image", fs.createReadStream(filePath));
   form.append("side", side);
   form.append("replace_existing", replaceExisting ? "true" : "false");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, {
-      method: "POST",
-      headers: { ...authHeaders(), ...form.getHeaders() },
-      body: form,
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let body;
-    try { body = JSON.parse(text); } catch { body = { raw: text }; }
-    return { ok: res.ok, status: res.status, body };
-  } catch (err) {
-    if (err.name === "AbortError") {
-      console.warn(`[server-client] attachImage timed out after ${UPLOAD_TIMEOUT_MS}ms — returning 504 for retry`);
-      return { ok: false, status: 504, body: { error: `upload timed out after ${UPLOAD_TIMEOUT_MS / 1000}s` } };
-    }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const res = await fetch(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, {
+    method: "POST",
+    headers: { ...authHeaders(), ...form.getHeaders() },
+    body: form,
+  });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  return { ok: res.ok, status: res.status, body };
 }
 
 module.exports = {

@@ -52,12 +52,12 @@ const STABLE_POLL_MS = 500;
 const RETRY_DELAY_MS = 5_000;
 
 // HTTP status codes that trigger automatic retry with exponential backoff.
-// 504 is the sentinel server-client returns when an upload fetch is aborted
-// by its 90s AbortController timeout — routing it here lets a timed-out
-// upload retry with the same backoff as a real gateway error.
+// These are all server-side errors — the request itself was valid.
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
-const MAX_RETRIES = 3;
-const RETRY_BACKOFF = [5_000, 10_000, 20_000]; // 5s, 10s, 20s
+// Permanent client errors — the request is wrong and retrying won't help.
+const PERMANENT_STATUSES = new Set([400, 401, 403, 404]);
+const MAX_RETRIES = 5;
+const RETRY_BACKOFF = [5_000, 10_000, 20_000, 30_000, 60_000]; // 5s, 10s, 20s, 30s, 60s
 
 class Watcher extends EventEmitter {
   constructor() {
@@ -442,7 +442,7 @@ class Watcher extends EventEmitter {
         return this.uploadPair(frontPath, backPath, retryCount + 1);
       }
       this.uploading = false;
-      return this.failPair(frontPath, backPath, reason);
+      return this.failPair(frontPath, backPath, reason, r.status);
     }
 
     // Success.
@@ -480,11 +480,23 @@ class Watcher extends EventEmitter {
     }, 1_500);
   }
 
-  failPair(frontPath, backPath, reason) {
+  failPair(frontPath, backPath, reason, httpStatus) {
     this.log(`FAILED ${path.basename(frontPath)}: ${reason}`, "error");
-    // Permanent failure (retries exhausted) — drop the crash-recovery entry
-    // so we don't re-drive a pair that's now in failed/ on next startup.
-    // Keyed on the original inbox path, matching what addPending stored.
+
+    // Server errors (502/503/504) after all retries: keep files in inbox and
+    // leave them in pending-queue.json so they retry on next restart.
+    const isPermanent = PERMANENT_STATUSES.has(httpStatus);
+    if (!isPermanent) {
+      this.log(`server error (${httpStatus || "unknown"}) — keeping files in inbox for retry on restart`);
+      // addPending was already called at upload start — leave it in the queue
+      this.bufferedFront = null;
+      this.lastPair = { frontPath, backPath };
+      stateMod.set({ state: "error", bufferedFront: null, lastError: reason });
+      this.emitState();
+      return;
+    }
+
+    // Permanent client error (400/401/403/404): move to failed/, drop from queue.
     this.removePending(frontPath);
     const failDir = this.dateFolder(FAILED);
     let movedFront = null;
@@ -539,8 +551,19 @@ class Watcher extends EventEmitter {
         return this.uploadManual(filePath, certId, side, replaceExisting, source, retryCount + 1);
       }
       this.uploading = false;
-      this.removePending(filePath);
       this.log(`manual upload FAILED: ${reason}`, "error");
+
+      const isPermanent = PERMANENT_STATUSES.has(r.status);
+      if (!isPermanent) {
+        // Server error — keep in inbox + pending queue for retry on restart
+        this.log(`server error (${r.status || "unknown"}) — keeping file in inbox for retry on restart`);
+        stateMod.set({ state: "error", manualPending: null, lastError: reason });
+        this.emitState();
+        return { ok: false, error: reason };
+      }
+
+      // Permanent client error — move to failed/, drop from queue
+      this.removePending(filePath);
       const failDir = this.dateFolder(FAILED);
       let moved = null;
       if (fs.existsSync(filePath)) {
@@ -589,6 +612,33 @@ class Watcher extends EventEmitter {
   }
 
   /**
+   * Move all files from today's failed/ folder back to inbox for reprocessing.
+   * Returns the count of files moved.
+   */
+  retryFailed() {
+    const today = new Date().toISOString().slice(0, 10);
+    const failedToday = path.join(FAILED, today);
+    if (!fs.existsSync(failedToday)) return { ok: true, moved: 0 };
+    const files = fs.readdirSync(failedToday).filter(f => !f.endsWith(".error.txt") && !f.startsWith("."));
+    let moved = 0;
+    for (const f of files) {
+      const src = path.join(failedToday, f);
+      const dest = path.join(INBOX, f);
+      try {
+        fs.renameSync(src, dest);
+        moved++;
+        // Also remove the .error.txt sidecar if it exists
+        const errFile = `${src}.error.txt`;
+        if (fs.existsSync(errFile)) fs.unlinkSync(errFile);
+      } catch (err) {
+        this.log(`retry-failed: couldn't move ${f}: ${err.message}`, "warn");
+      }
+    }
+    this.log(`retry-failed: moved ${moved} file(s) from failed/${today} → inbox`);
+    return { ok: true, moved };
+  }
+
+  /**
    * Reset the front-buffered state — discards the buffered front (moves to
    * discarded/). Operator uses this when they front-scanned the wrong card.
    */
@@ -632,4 +682,4 @@ class Watcher extends EventEmitter {
   }
 }
 
-module.exports = { Watcher, INBOX };
+module.exports = { Watcher, INBOX, FAILED };

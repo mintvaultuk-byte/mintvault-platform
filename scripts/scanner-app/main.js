@@ -22,7 +22,7 @@ const os    = require("node:os");
 
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
-const { Watcher, INBOX } = require("./lib/watcher");
+const { Watcher, INBOX, FAILED } = require("./lib/watcher");
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
@@ -181,6 +181,14 @@ function buildTrayMenu() {
     { label: "Show window", click: () => showPopover() },
     { label: "Open inbox folder", click: () => shell.openPath(INBOX) },
     { label: "Show logs", click: () => shell.openPath(path.join(os.homedir(), "mintvault-scans", "scanner-app.log")) },
+    { label: "Retry failed (today)", click: async () => {
+      const result = watcher.retryFailed();
+      if (result.moved > 0) {
+        await watcher.stop();
+        await watcher.start();
+        refreshTray();
+      }
+    }},
     { label: "Restart watcher", click: async () => { await watcher.stop(); await watcher.start(); refreshTray(); } },
     { label: "Reboot scanner", click: () => rebootScanner() },
     { type: "separator" },
