@@ -8,15 +8,81 @@
  * version varies — node-fetch is stable.
  */
 
-const fs       = require("node:fs");
-const os       = require("node:os");
-const path     = require("node:path");
-const FormData = require("form-data");
+const fs        = require("node:fs");
+const os        = require("node:os");
+const path      = require("node:path");
+const { Transform } = require("node:stream");
+const FormData  = require("form-data");
+const sharp     = require("sharp");
 // node-fetch v3 is ESM-only. Lazy-load via dynamic import; cache the promise.
 let _fetchPromise = null;
 function getFetch() {
   if (!_fetchPromise) _fetchPromise = import("node-fetch").then(m => m.default);
   return _fetchPromise;
+}
+
+// Progress-based upload watchdog. We never cap total upload duration —
+// large full-resolution JPEGs over a slow link can legitimately take
+// minutes. Instead we abort only if the upload stream stops making
+// progress (no bytes flushed to the socket) for this long, which means
+// the connection has genuinely stalled. On abort we return a 504 sentinel
+// so the watcher's existing retry/backoff logic re-drives the upload.
+const STALL_TIMEOUT_MS = 60_000;
+
+// Convert a source scan (TIFF/PNG/etc.) to a full-resolution JPEG buffer
+// in memory. quality 92, NO resize — pixels are preserved 1:1. sharp
+// auto-detects the input format from the file's magic bytes. The original
+// file on disk is left untouched (it still gets archived to processed/).
+// limitInputPixels:false because high-DPI SilverFast TIFFs can exceed
+// sharp's default 268MP ceiling.
+async function toJpegBuffer(filePath) {
+  return sharp(filePath, { limitInputPixels: false })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+// POST a form-data body with a stall watchdog. Streams the form through a
+// counting Transform so we can detect when bytes stop flowing; aborts after
+// STALL_TIMEOUT_MS of zero progress. Content-Length is set explicitly
+// (all parts are in-memory buffers/strings with known length) so the server
+// gets a non-chunked multipart body.
+async function postForm(url, form) {
+  const fetch = await getFetch();
+
+  let contentLength;
+  try { contentLength = form.getLengthSync(); } catch { contentLength = undefined; }
+  const headers = { ...authHeaders(), ...form.getHeaders() };
+  if (contentLength != null) headers["content-length"] = String(contentLength);
+
+  const controller = new AbortController();
+  let lastFlush = Date.now();
+  const counter = new Transform({
+    transform(chunk, _enc, cb) { lastFlush = Date.now(); cb(null, chunk); },
+  });
+  form.on("error", (err) => counter.destroy(err));
+  form.pipe(counter);
+
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastFlush > STALL_TIMEOUT_MS) {
+      console.warn(`[server-client] upload stalled — no bytes flushed for ${STALL_TIMEOUT_MS / 1000}s, aborting for retry`);
+      controller.abort();
+    }
+  }, 5_000);
+
+  try {
+    const res = await fetch(url, { method: "POST", headers, body: counter, signal: controller.signal });
+    const text = await res.text();
+    let body;
+    try { body = JSON.parse(text); } catch { body = { raw: text }; }
+    return { ok: res.ok, status: res.status, body };
+  } catch (err) {
+    if (err.name === "AbortError") {
+      return { ok: false, status: 504, body: { error: `upload stalled (no progress for ${STALL_TIMEOUT_MS / 1000}s)` } };
+    }
+    throw err;
+  } finally {
+    clearInterval(watchdog);
+  }
 }
 
 function loadEnv() {
@@ -101,24 +167,16 @@ async function softDeleteCert(certId, reason) {
  * both sides. Same multipart shape as the old watcher.
  */
 async function uploadPair(frontPath, backPath) {
-  const fetch = await getFetch();
   const form = new FormData();
-  form.append("front", fs.createReadStream(frontPath));
-  if (backPath) form.append("back", fs.createReadStream(backPath));
+  // Convert to full-resolution JPEG in memory; the raw TIFF/PNG stays on disk.
+  form.append("front", await toJpegBuffer(frontPath), { filename: "front.jpg", contentType: "image/jpeg" });
+  if (backPath) form.append("back", await toJpegBuffer(backPath), { filename: "back.jpg", contentType: "image/jpeg" });
   // Intentionally omit client_source — server defaults to "admin_ui" which
   // routes to the async AI branch. The sync branch (client_source="scanner_app")
   // blocked the response on AI completion (~20 s added). The renderer doesn't
   // consume aiStatus/aiResult anyway, so the async response is shape-compatible
   // for the desktop app. ~48 s → ~23 s scan-ingest response.
-  const res = await fetch(`${API_BASE}/api/admin/scan-ingest`, {
-    method: "POST",
-    headers: { ...authHeaders(), ...form.getHeaders() },
-    body: form,
-  });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
+  return postForm(`${API_BASE}/api/admin/scan-ingest`, form);
 }
 
 /**
@@ -126,20 +184,12 @@ async function uploadPair(frontPath, backPath) {
  * the .tif → JPEG, so the watcher only needs to stream the raw file.
  */
 async function attachImage(certId, side, filePath, replaceExisting) {
-  const fetch = await getFetch();
   const form = new FormData();
-  form.append("image", fs.createReadStream(filePath));
+  // Convert to full-resolution JPEG in memory; the raw TIFF/PNG stays on disk.
+  form.append("image", await toJpegBuffer(filePath), { filename: `${side}.jpg`, contentType: "image/jpeg" });
   form.append("side", side);
   form.append("replace_existing", replaceExisting ? "true" : "false");
-  const res = await fetch(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, {
-    method: "POST",
-    headers: { ...authHeaders(), ...form.getHeaders() },
-    body: form,
-  });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  return { ok: res.ok, status: res.status, body };
+  return postForm(`${API_BASE}/api/admin/certs/${encodeURIComponent(certId)}/image`, form);
 }
 
 module.exports = {

@@ -28,7 +28,6 @@ const BASE      = path.join(os.homedir(), "mintvault-scans");
 const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
-const PICTURES  = path.join(os.homedir(), "Pictures");
 // Crash-recovery queue: records every upload that's in flight so an
 // interrupted upload (app killed / machine slept mid-POST) can be re-driven
 // on the next startup. Written when an upload starts, cleared on success or
@@ -98,7 +97,7 @@ class Watcher extends EventEmitter {
     // same files.
     await this.requeuePending();
 
-    this.chokidar = chokidar.watch([INBOX, PICTURES], {
+    this.chokidar = chokidar.watch(INBOX, {
       ignoreInitial: false,
       persistent: true,
       awaitWriteFinish: false, // we do our own size-stable check
@@ -106,15 +105,9 @@ class Watcher extends EventEmitter {
     // Until the startup debounce fires, buffer "add" events for pre-existing
     // files instead of processing them immediately. New files scanned after
     // startup process normally.
-    //
-    // CRITICAL: only buffer pre-existing files from the INBOX. ~/Pictures is
-    // also watched, and with ignoreInitial:false its initial scan reports the
-    // operator's entire existing photo library — those are NOT fresh scans
-    // and must never be swept into the upload pipeline. Fresh SilverFast
-    // output landing in ~/Pictures arrives AFTER "ready" and is handled live.
     this.chokidar.on("add", (p) => {
       if (!this.ready) {
-        if (p.startsWith(INBOX + path.sep)) this.initialFiles.push(p);
+        this.initialFiles.push(p);
         return;
       }
       this.handleNewFile(p);
@@ -135,7 +128,7 @@ class Watcher extends EventEmitter {
       }, STARTUP_DEBOUNCE_MS);
     });
 
-    this.log(`watching ${INBOX} + ${PICTURES}`);
+    this.log(`watching ${INBOX}`);
     this.refreshNextCert(); // populate predicted next cert at boot
   }
 
@@ -314,22 +307,6 @@ class Watcher extends EventEmitter {
     if (!ACCEPTED.has(ext)) {
       this.log(`ignored (unknown ext ${ext}): ${filename}`, "debug");
       return;
-    }
-
-    // If the file landed in ~/Pictures (SilverFast default), move it to INBOX
-    // so the rest of the pipeline processes it from the canonical location.
-    if (filePath.startsWith(PICTURES + path.sep)) {
-      const dest = path.join(INBOX, filename);
-      try {
-        await fs.promises.rename(filePath, dest);
-        this.log(`moved ${filename} from ~/Pictures → inbox`);
-        // chokidar will fire a new "add" event for the dest file in INBOX,
-        // so we return here and let that event drive the normal pipeline.
-        return;
-      } catch (err) {
-        this.log(`failed to move ${filename} from ~/Pictures: ${err.message}`, "error");
-        return;
-      }
     }
 
     // Pause check — runs before stable-write detection so a paused watcher
