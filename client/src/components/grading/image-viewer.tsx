@@ -569,6 +569,7 @@ export default function ImageViewer({
           style={{
             aspectRatio: "5/7",
             maxHeight: maxH,
+            padding: "1.5%",
             // Inline cursor only in mark mode — bypasses Tailwind so the
             // SVG data URI lands intact (Tailwind has no cursor-url plugin).
             ...(markMode ? { cursor: PIN_CURSOR } : {}),
@@ -583,7 +584,7 @@ export default function ImageViewer({
           {currentUrl ? (
             <div
               className={`relative w-full h-full ${markMode ? "" : "overflow-hidden"}`}
-              style={{ transform: transformStyle, transition: transitionStyle, padding: "1.5%" }}
+              style={{ transform: transformStyle, transition: transitionStyle }}
             >
               <img
                 ref={imgElRef}
