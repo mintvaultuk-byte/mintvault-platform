@@ -42,7 +42,7 @@ const TOKEN    = process.env.SCANNER_API_TOKEN  || env.SCANNER_API_TOKEN  || "";
 // scan-ingest endpoint runs Sharp + (async) AI, so uploads are slow — but
 // they should never hang forever. On abort we return a 504 sentinel so the
 // watcher's retry logic (which treats 504 as retryable) re-drives the upload.
-const UPLOAD_TIMEOUT_MS = 90_000;
+const UPLOAD_TIMEOUT_MS = 180_000;
 
 function authHeaders() {
   return TOKEN ? { "x-scanner-token": TOKEN } : {};

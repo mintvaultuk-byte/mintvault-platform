@@ -487,8 +487,20 @@ class Watcher extends EventEmitter {
     // Keyed on the original inbox path, matching what addPending stored.
     this.removePending(frontPath);
     const failDir = this.dateFolder(FAILED);
-    const movedFront = this.moveFile(frontPath, failDir);
-    const movedBack  = backPath ? this.moveFile(backPath, failDir) : null;
+    let movedFront = null;
+    let movedBack  = null;
+    if (fs.existsSync(frontPath)) {
+      movedFront = this.moveFile(frontPath, failDir);
+    } else {
+      this.log(`front file already gone, skipping move: ${path.basename(frontPath)}`, "warn");
+    }
+    if (backPath) {
+      if (fs.existsSync(backPath)) {
+        movedBack = this.moveFile(backPath, failDir);
+      } else {
+        this.log(`back file already gone, skipping move: ${path.basename(backPath)}`, "warn");
+      }
+    }
     if (movedFront) this.writeError(movedFront, reason);
     if (movedBack)  this.writeError(movedBack,  reason);
     this.bufferedFront = null;
@@ -530,7 +542,12 @@ class Watcher extends EventEmitter {
       this.removePending(filePath);
       this.log(`manual upload FAILED: ${reason}`, "error");
       const failDir = this.dateFolder(FAILED);
-      const moved = this.moveFile(filePath, failDir);
+      let moved = null;
+      if (fs.existsSync(filePath)) {
+        moved = this.moveFile(filePath, failDir);
+      } else {
+        this.log(`file already gone, skipping move to failed: ${path.basename(filePath)}`, "warn");
+      }
       if (moved) this.writeError(moved, reason);
       stateMod.set({ state: "error", manualPending: null, lastError: reason });
       this.emitState();
