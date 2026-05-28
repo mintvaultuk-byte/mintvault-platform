@@ -28,6 +28,7 @@ const BASE      = path.join(os.homedir(), "mintvault-scans");
 const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
+const PICTURES  = path.join(os.homedir(), "Pictures");
 
 // Accept any image format SilverFast might output. The server-side
 // scan-ingest endpoint runs everything through Sharp, which auto-detects
@@ -75,7 +76,7 @@ class Watcher extends EventEmitter {
     try { chokidar = require("chokidar"); }
     catch (err) { this.log(`chokidar load failed: ${err.message}`, "error"); return; }
 
-    this.chokidar = chokidar.watch(INBOX, {
+    this.chokidar = chokidar.watch([INBOX, PICTURES], {
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: false, // we do our own size-stable check
@@ -83,7 +84,7 @@ class Watcher extends EventEmitter {
     this.chokidar.on("add", (p) => this.handleNewFile(p));
     this.chokidar.on("error", (err) => this.log(`chokidar error: ${err.message}`, "error"));
 
-    this.log(`watching ${INBOX}`);
+    this.log(`watching ${INBOX} + ${PICTURES}`);
     this.refreshNextCert(); // populate predicted next cert at boot
   }
 
@@ -199,6 +200,22 @@ class Watcher extends EventEmitter {
     if (!ACCEPTED.has(ext)) {
       this.log(`ignored (unknown ext ${ext}): ${filename}`, "debug");
       return;
+    }
+
+    // If the file landed in ~/Pictures (SilverFast default), move it to INBOX
+    // so the rest of the pipeline processes it from the canonical location.
+    if (filePath.startsWith(PICTURES + path.sep)) {
+      const dest = path.join(INBOX, filename);
+      try {
+        await fs.promises.rename(filePath, dest);
+        this.log(`moved ${filename} from ~/Pictures → inbox`);
+        // chokidar will fire a new "add" event for the dest file in INBOX,
+        // so we return here and let that event drive the normal pipeline.
+        return;
+      } catch (err) {
+        this.log(`failed to move ${filename} from ~/Pictures: ${err.message}`, "error");
+        return;
+      }
     }
 
     // Pause check — runs before stable-write detection so a paused watcher
