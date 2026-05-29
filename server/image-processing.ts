@@ -338,7 +338,7 @@ const MAX_ASPECT_TRIM_LOSS_PCT = 2;
 // The strip is invisible downstream: padWithMat covers it with the
 // mat-coloured passport frame, so the visual effect is "thicker mat
 // padding" not "extra mat strip visible inside the card". Tuneable.
-const CARD_DETECT_SAFETY_PAD_PX = 8;
+const CARD_DETECT_SAFETY_PAD_PX = 22;
 
 // Expand bounds outward by padPx, clamped to the image frame so we never
 // index past the bitmap. Applied at every return path of
