@@ -219,6 +219,9 @@ const sessionPool = new pg.Pool({
   idleTimeoutMillis: 30000,
   keepAlive: true,
 });
+sessionPool.on("error", (err) => {
+  console.error("[session-pool] idle client error (evicted):", err.message);
+});
 app.use(
   session({
     store: new PgStore({
