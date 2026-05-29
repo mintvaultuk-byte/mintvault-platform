@@ -5,9 +5,13 @@ import { getDatabaseUrl } from "./config";
 
 const DATABASE_URL = getDatabaseUrl();
 
-const pool = new pg.Pool({
+export const pool = new pg.Pool({
   connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: 8,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  keepAlive: true,
 });
 
 export const db = drizzle(pool, { schema });
