@@ -19,6 +19,7 @@
 const fs       = require("node:fs");
 const path     = require("node:path");
 const os       = require("node:os");
+const crypto   = require("node:crypto");
 const { EventEmitter } = require("node:events");
 
 const stateMod = require("./state");
@@ -33,6 +34,12 @@ const FAILED    = path.join(BASE, "failed");
 // on the next startup. Written when an upload starts, cleared on success or
 // permanent failure.
 const PENDING_QUEUE = path.join(BASE, "pending-queue.json");
+// Content-hash dedup log: the last HASH_LOG_MAX uploads as {hash, cert, side,
+// ts}. Before each upload we SHA-256 the source bytes; if the same hash was
+// already uploaded to the SAME cert+side, we skip the re-upload. A different
+// cert+side with the same hash is a legitimate scan reuse, not a duplicate.
+const HASH_LOG = path.join(BASE, "upload-hashes.json");
+const HASH_LOG_MAX = 200;
 // On startup with ignoreInitial:false, chokidar fires "add" for every
 // pre-existing inbox file. We hold those for this long before draining them
 // sequentially so we don't fire a thundering herd of uploads.
@@ -58,6 +65,12 @@ const PERMANENT_STATUSES = new Set([400, 401, 403, 404]);
 const MAX_RETRIES = 5;
 const RETRY_BACKOFF = [5_000, 10_000, 20_000, 30_000, 60_000]; // 5s, 10s, 20s, 30s, 60s
 
+// AUTO-mode mint throttle: refuse to mint a new cert if one was created less
+// than this long ago. Guards against a runaway AUTO batch minting a flood of
+// phantom certs. The pair stays in the inbox and is re-driven once the window
+// clears.
+const AUTO_THROTTLE_MS = 20_000;
+
 class Watcher extends EventEmitter {
   constructor() {
     super();
@@ -70,6 +83,7 @@ class Watcher extends EventEmitter {
     this.predictedNextCertCache = { value: null, ts: 0 };
     this.ready = false;              // false until the startup debounce drains
     this.initialFiles = [];          // pre-existing inbox files seen before ready
+    this.lastCertMintAt = 0;         // epoch-ms of last AUTO cert mint (throttle)
   }
 
   async start() {
@@ -184,6 +198,48 @@ class Watcher extends EventEmitter {
         this.log(`re-queue failed for ${entry.key}: ${err.message}`, "error");
       }
     }
+  }
+
+  // ── Content-hash dedup ───────────────────────────────────────────────────
+
+  /** SHA-256 of the source file's bytes (pre-conversion). null on read error. */
+  async sha256File(filePath) {
+    try {
+      const buf = await fs.promises.readFile(filePath);
+      return crypto.createHash("sha256").update(buf).digest("hex");
+    } catch (err) {
+      this.log(`hash failed for ${path.basename(filePath)}: ${err.message}`, "warn");
+      return null;
+    }
+  }
+
+  readHashLog() {
+    try {
+      const arr = JSON.parse(fs.readFileSync(HASH_LOG, "utf8"));
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+
+  writeHashLog(entries) {
+    try {
+      fs.writeFileSync(HASH_LOG, JSON.stringify(entries, null, 2));
+    } catch (err) {
+      this.log(`hash-log write failed: ${err.message}`, "warn");
+    }
+  }
+
+  /** Record a completed upload. Keeps only the most recent HASH_LOG_MAX. */
+  recordUpload(hash, cert, side) {
+    if (!hash || !cert || !side) return;
+    const log = this.readHashLog();
+    log.push({ hash, cert, side, ts: Date.now() });
+    this.writeHashLog(log.slice(-HASH_LOG_MAX));
+  }
+
+  /** Find a prior upload of this exact hash to the SAME cert+side. */
+  findUpload(hash, cert, side) {
+    if (!hash) return null;
+    return this.readHashLog().find((e) => e.hash === hash && e.cert === cert && e.side === side) || null;
   }
 
   async stop() {
@@ -391,6 +447,17 @@ class Watcher extends EventEmitter {
       return;
     }
     if (cur.state === "front_buffered" && this.bufferedFront) {
+      // AUTO mint throttle — don't mint a fresh cert within AUTO_THROTTLE_MS
+      // of the last one. Leave both files in the inbox and re-drive the pair
+      // once the window clears, rather than discarding the scan.
+      const since = Date.now() - this.lastCertMintAt;
+      if (since < AUTO_THROTTLE_MS) {
+        const secs = Math.round(since / 1000);
+        const wait = AUTO_THROTTLE_MS - since;
+        this.log(`AUTO throttle: skipped, ${secs}s since last cert — retrying in ${Math.ceil(wait / 1000)}s`, "warn");
+        setTimeout(() => this.handleAutoFile(filePath), wait + 250);
+        return;
+      }
       const front = this.bufferedFront;
       this.bufferedFront = null;
       return this.uploadPair(front, filePath);
@@ -400,10 +467,18 @@ class Watcher extends EventEmitter {
     this.log(`scan arrived during ${cur.state} — leaving in inbox: ${path.basename(filePath)}`, "warn");
   }
 
-  async uploadPair(frontPath, backPath, retryCount = 0) {
+  async uploadPair(frontPath, backPath, retryCount = 0, hashes = null) {
     if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
+    // Hash the source bytes once (first attempt) so we can record this upload
+    // for dedup after it succeeds. Threaded through retries to avoid re-reads.
+    if (retryCount === 0 && !hashes) {
+      hashes = {
+        front: await this.sha256File(frontPath),
+        back: backPath ? await this.sha256File(backPath) : null,
+      };
+    }
     // Record this upload as in-flight on the first attempt (not on retries —
     // addPending is keyed, so the entry already exists across retry rounds).
     if (retryCount === 0) {
@@ -425,7 +500,7 @@ class Watcher extends EventEmitter {
         const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
         this.log(`upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
         await new Promise(rs => setTimeout(rs, delay));
-        return this.uploadPair(frontPath, backPath, retryCount + 1);
+        return this.uploadPair(frontPath, backPath, retryCount + 1, hashes);
       }
       this.uploading = false;
       return this.failPair(frontPath, backPath, reason, r.status);
@@ -433,6 +508,13 @@ class Watcher extends EventEmitter {
 
     // Success.
     const certId = r.body?.certId || null;
+    // Throttle clock: a cert was just minted.
+    this.lastCertMintAt = Date.now();
+    // Record both sides for content-hash dedup.
+    if (certId && hashes) {
+      this.recordUpload(hashes.front, certId, "front");
+      if (hashes.back) this.recordUpload(hashes.back, certId, "back");
+    }
     const processedDir = this.dateFolder(PROCESSED);
     this.moveFile(frontPath, processedDir);
     this.moveFile(backPath,  processedDir);
@@ -509,10 +591,28 @@ class Watcher extends EventEmitter {
 
   // ── Manual / one-shot upload ─────────────────────────────────────────
 
-  async uploadManual(filePath, certId, side, replaceExisting, source, retryCount = 0) {
+  async uploadManual(filePath, certId, side, replaceExisting, source, retryCount = 0, srcHash = null) {
     if (this.uploading && retryCount === 0) {
       this.log(`manual upload requested while uploading — deferring`, "warn");
       return { ok: false, error: "upload in flight" };
+    }
+    // Content-hash dedup (first attempt only). Skip the upload if this exact
+    // file already went to this cert+side; move it to processed/ as normal.
+    if (retryCount === 0) {
+      srcHash = await this.sha256File(filePath);
+      if (srcHash && this.findUpload(srcHash, certId, side)) {
+        this.log(`dedup: identical file already uploaded to ${certId} ${side}, skipping`);
+        this.removePending(filePath);
+        const processedDir = this.dateFolder(PROCESSED);
+        this.moveFile(filePath, processedDir);
+        stateMod.set({ state: "success", manualPending: null, lastUploadedCert: certId, lastError: null });
+        this.emitState();
+        setTimeout(() => {
+          const s = stateMod.get();
+          if (s.state === "success") { stateMod.set({ state: "idle" }); this.emitState(); }
+        }, 1_500);
+        return { ok: true, certId, side, deduped: true };
+      }
     }
     this.uploading = true;
     if (retryCount === 0) {
@@ -534,7 +634,7 @@ class Watcher extends EventEmitter {
         const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
         this.log(`manual upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
         await new Promise(rs => setTimeout(rs, delay));
-        return this.uploadManual(filePath, certId, side, replaceExisting, source, retryCount + 1);
+        return this.uploadManual(filePath, certId, side, replaceExisting, source, retryCount + 1, srcHash);
       }
       this.uploading = false;
       this.log(`manual upload FAILED: ${reason}`, "error");
@@ -567,6 +667,8 @@ class Watcher extends EventEmitter {
 
     const processedDir = this.dateFolder(PROCESSED);
     this.moveFile(filePath, processedDir);
+    // Record for content-hash dedup.
+    this.recordUpload(srcHash, certId, side);
     stateMod.set({
       state: "success",
       manualPending: null,

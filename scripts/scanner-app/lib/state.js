@@ -33,7 +33,11 @@ function ensureDir() {
 
 const DEFAULT = Object.freeze({
   state:            "idle",
-  mode:             "AUTO",
+  // Default to MANUAL. AUTO is opt-in per session (operator clicks it in the
+  // tray) and never auto-resumes across a restart — see load(). This prevents
+  // a crash-restart from silently resuming an AUTO batch and minting phantom
+  // certs (2026-05-28: a stray AUTO resume minted 8 phantom certs MV57–64).
+  mode:             "MANUAL",
   bufferedFront:    null,
   manualPending:    null,
   lastUploadedCert: null,
@@ -71,6 +75,9 @@ function load() {
     mem = { ...DEFAULT, ...parsed };
     // sessionPaired resets at process boot — a "session" is one run.
     mem.sessionPaired = 0;
+    // Force MANUAL on every launch. AUTO must be re-armed by the operator
+    // each session so a crash-restart can't silently resume runaway minting.
+    mem.mode = "MANUAL";
   } catch {
     mem = { ...DEFAULT };
   }
