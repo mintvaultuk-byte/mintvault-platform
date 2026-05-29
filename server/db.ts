@@ -14,4 +14,8 @@ export const pool = new pg.Pool({
   keepAlive: true,
 });
 
+pool.on("error", (err) => {
+  console.error("[pg-pool] idle client error (evicted):", err.message);
+});
+
 export const db = drizzle(pool, { schema });
