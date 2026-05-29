@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
 import { createServer } from "http";
@@ -86,11 +86,12 @@ app.get("/api/db-check", async (_req, res) => {
   }
   try {
     const parsed = new URL(dbUrl);
-    const testPool = new pg.Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
-    const result = await testPool.query(
+    // Reuse the shared app pool instead of minting a new pool per request —
+    // a per-request pool meant a fresh Neon pooler auth handshake on every
+    // health-check hit, which was amplifying the 08P01 auth-timeout churn.
+    const result = await pool.query(
       "SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name"
     );
-    await testPool.end();
     res.json({
       env: process.env.NODE_ENV || "development",
       host: parsed.hostname,
@@ -213,6 +214,10 @@ const PgStore = connectPgSimple(session);
 const sessionPool = new pg.Pool({
   connectionString: getDatabaseUrl(),
   ssl: { rejectUnauthorized: false },
+  max: 8,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
+  keepAlive: true,
 });
 app.use(
   session({
