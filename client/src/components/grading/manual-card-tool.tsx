@@ -48,6 +48,35 @@ function centroid(pts: Point[]): Point {
   return { x: sx / pts.length, y: sy / pts.length };
 }
 
+/**
+ * Thin two-tone crosshair marker: a dark halo underlay (contrast on light
+ * cards) plus a coloured "+" with an open centre and ring (contrast on dark
+ * cards). Shared by every placed dot AND the live cursor reticle so they read
+ * as one family. No solid fill — the artwork and the exact centre stay visible.
+ */
+function Crosshair({ color }: { color: string }) {
+  return (
+    <svg className="absolute inset-0 pointer-events-none" width={44} height={44} viewBox="0 0 44 44" aria-hidden="true">
+      <g fill="none" strokeLinecap="round">
+        <g stroke="rgba(0,0,0,0.5)" strokeWidth={2.5}>
+          <line x1={22} y1={12} x2={22} y2={18} />
+          <line x1={22} y1={26} x2={22} y2={32} />
+          <line x1={12} y1={22} x2={18} y2={22} />
+          <line x1={26} y1={22} x2={32} y2={22} />
+          <circle cx={22} cy={22} r={3} />
+        </g>
+        <g stroke={color} strokeWidth={1.25}>
+          <line x1={22} y1={12} x2={22} y2={18} />
+          <line x1={22} y1={26} x2={22} y2={32} />
+          <line x1={12} y1={22} x2={18} y2={22} />
+          <line x1={26} y1={22} x2={32} y2={22} />
+          <circle cx={22} cy={22} r={3} />
+        </g>
+      </g>
+    </svg>
+  );
+}
+
 export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCancel, onCentering }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -58,6 +87,9 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const [rotation, setRotation] = useState(0);
   const [imgDims, setImgDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
+  // Cursor position in % while hovering the image in placement mode; drives the
+  // live targeting reticle. Null when not hovering / not placing.
+  const [hover, setHover] = useState<Point | null>(null);
   const [drag, setDrag] = useState<null | {
     pass: DotPass;
     index: number;
@@ -75,6 +107,9 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const outerReady = outerPts.length === 4;
   const innerReady = innerPts.length === 4;
   const canCompute = outerReady && (mode === "outer-only" || innerReady);
+  // Still placing points in the active pass → show the cursor reticle + guides.
+  const placing = activeArr.length < 4;
+  const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
     const el = containerRef.current;
@@ -138,6 +173,20 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       e.preventDefault();
       startDotDrag(hit.pass, hit.index, e.clientX, e.clientY);
     }
+  }
+
+  // Track the cursor for the live targeting reticle — placement mode only,
+  // never while dragging. Purely visual (the reticle is pointer-events:none);
+  // the capture handlers above are untouched.
+  function onContainerMouseMove(e: React.MouseEvent) {
+    if (drag || !placing) {
+      if (hover) setHover(null);
+      return;
+    }
+    setHover(toPct(e));
+  }
+  function onContainerMouseLeave() {
+    if (hover) setHover(null);
   }
 
   function onContainerTouchStart(e: React.TouchEvent) {
@@ -353,34 +402,10 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           onMouseDown={(e) => onDotMouseDown(pass, i, e)}
           onTouchStart={(e) => onDotTouchStart(pass, i, e)}
         >
-          {/* Visible crosshair marker — thin "+" with an open centre so the
-              exact captured pixel stays visible. Drawn twice: a dark halo
-              underlay for contrast on light cards, the coloured reticle on top
-              for contrast on dark cards. No solid fill; hit area unchanged. */}
-          <svg
-            className="absolute inset-0 pointer-events-none"
-            width={44}
-            height={44}
-            viewBox="0 0 44 44"
-            aria-hidden="true"
-          >
-            <g fill="none" strokeLinecap="round">
-              <g stroke="rgba(0,0,0,0.5)" strokeWidth={2.5}>
-                <line x1={22} y1={12} x2={22} y2={18} />
-                <line x1={22} y1={26} x2={22} y2={32} />
-                <line x1={12} y1={22} x2={18} y2={22} />
-                <line x1={26} y1={22} x2={32} y2={22} />
-                <circle cx={22} cy={22} r={3} />
-              </g>
-              <g stroke={color} strokeWidth={1.25}>
-                <line x1={22} y1={12} x2={22} y2={18} />
-                <line x1={22} y1={26} x2={22} y2={32} />
-                <line x1={12} y1={22} x2={18} y2={22} />
-                <line x1={26} y1={22} x2={32} y2={22} />
-                <circle cx={22} cy={22} r={3} />
-              </g>
-            </g>
-          </svg>
+          {/* Visible crosshair marker (shared with the cursor reticle). Thin
+              "+" with an open centre so the exact captured pixel stays visible;
+              the ~44px hit area above is unchanged. */}
+          <Crosshair color={color} />
           <span
             className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] font-bold pointer-events-none select-none"
             style={{ color }}
@@ -435,6 +460,8 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             ref={containerRef}
             className="relative rounded-lg bg-[#F7F7F5]"
             onMouseDown={onContainerMouseDown}
+            onMouseMove={onContainerMouseMove}
+            onMouseLeave={onContainerMouseLeave}
             onTouchStart={onContainerTouchStart}
           >
             <img
@@ -514,12 +541,42 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                   <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
                 </g>
               )}
+              {/* Live cursor guide lines (placement mode) — faint full-span
+                  dashed lines through the cursor for edge alignment. Dark
+                  underlay + coloured line so they read on light and dark cards. */}
+              {placing && hover && !drag && (
+                <g strokeDasharray="1.5,1.5">
+                  <g stroke="rgba(0,0,0,0.35)" strokeWidth="0.4">
+                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} />
+                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} />
+                  </g>
+                  <g stroke={activeColor} strokeWidth="0.2" opacity="0.7">
+                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} />
+                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} />
+                  </g>
+                </g>
+              )}
             </svg>
 
             {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
                 capture container. Large invisible hit area, small visible dot. */}
             {renderDots(outerPts, "outer", OUTER_COLOR)}
             {mode === "full" && renderDots(innerPts, "inner", INNER_COLOR)}
+
+            {/* Live targeting reticle — follows the cursor in placement mode,
+                centred on where the next dot will land. pointer-events:none so
+                clicks fall through to the capture container below. */}
+            {placing && hover && !drag && (
+              <div
+                className="absolute pointer-events-none"
+                style={{ left: `${hover.x}%`, top: `${hover.y}%`, zIndex: 25 }}
+                aria-hidden="true"
+              >
+                <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
+                  <Crosshair color={activeColor} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
