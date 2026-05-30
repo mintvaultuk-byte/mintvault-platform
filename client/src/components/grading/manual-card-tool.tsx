@@ -353,11 +353,34 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           onMouseDown={(e) => onDotMouseDown(pass, i, e)}
           onTouchStart={(e) => onDotTouchStart(pass, i, e)}
         >
-          {/* Visible 16px dot, centered inside the hit area */}
-          <div
-            className="absolute rounded-full border-2 border-white shadow-lg"
-            style={{ inset: 14, backgroundColor: color, pointerEvents: "none" }}
-          />
+          {/* Visible crosshair marker — thin "+" with an open centre so the
+              exact captured pixel stays visible. Drawn twice: a dark halo
+              underlay for contrast on light cards, the coloured reticle on top
+              for contrast on dark cards. No solid fill; hit area unchanged. */}
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            width={44}
+            height={44}
+            viewBox="0 0 44 44"
+            aria-hidden="true"
+          >
+            <g fill="none" strokeLinecap="round">
+              <g stroke="rgba(0,0,0,0.5)" strokeWidth={2.5}>
+                <line x1={22} y1={12} x2={22} y2={18} />
+                <line x1={22} y1={26} x2={22} y2={32} />
+                <line x1={12} y1={22} x2={18} y2={22} />
+                <line x1={26} y1={22} x2={32} y2={22} />
+                <circle cx={22} cy={22} r={3} />
+              </g>
+              <g stroke={color} strokeWidth={1.25}>
+                <line x1={22} y1={12} x2={22} y2={18} />
+                <line x1={22} y1={26} x2={22} y2={32} />
+                <line x1={12} y1={22} x2={18} y2={22} />
+                <line x1={26} y1={22} x2={32} y2={22} />
+                <circle cx={22} cy={22} r={3} />
+              </g>
+            </g>
+          </svg>
           <span
             className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] font-bold pointer-events-none select-none"
             style={{ color }}
