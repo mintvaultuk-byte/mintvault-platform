@@ -37,22 +37,28 @@ const DEFECT_CODES: Array<{ code: string; label: string }> = [
   { code: "OC", label: "Off-centre (noted)" },
 ];
 
-const CENTERING_FRONT: Array<{ ratio: string; deduction: string }> = [
-  { ratio: "≤ 55/45", deduction: "0" },
-  { ratio: "56-60 / 40-44", deduction: "-2" },
-  { ratio: "61-65 / 35-39", deduction: "-5" },
-  { ratio: "66-70 / 30-34", deduction: "-8" },
-  { ratio: "71-75 / 25-29", deduction: "-12" },
-  { ratio: "76-80 / 20-24", deduction: "-15" },
-  { ratio: "81-85 / 15-19", deduction: "-18" },
-  { ratio: "> 85/15", deduction: "-20" },
+// Mirrors shared/centering.ts FRONT_BANDS / BACK_BANDS exactly — keyed on the
+// bigger-side %. Grade is the per-axis subgrade (worst axis caps the side); the
+// deduction is what that axis spends from the front-20 / back-5 budget.
+const CENTERING_FRONT: Array<{ ratio: string; grade: string; deduction: string }> = [
+  { ratio: "≤ 55/45", grade: "10", deduction: "0" },
+  { ratio: "56-60 / 40-44", grade: "9", deduction: "-2" },
+  { ratio: "61-65 / 35-39", grade: "8", deduction: "-5" },
+  { ratio: "66-70 / 30-34", grade: "7", deduction: "-8" },
+  { ratio: "71-75 / 25-29", grade: "6", deduction: "-11" },
+  { ratio: "76-80 / 20-24", grade: "5", deduction: "-14" },
+  { ratio: "81-85 / 15-19", grade: "4", deduction: "-16" },
+  { ratio: "86-90 / 10-14", grade: "3", deduction: "-18" },
+  { ratio: "91-95 / 5-9", grade: "2", deduction: "-19" },
+  { ratio: "> 95/5", grade: "1", deduction: "-20" },
 ];
 
-const CENTERING_BACK: Array<{ ratio: string; deduction: string }> = [
-  { ratio: "≤ 75/25", deduction: "0" },
-  { ratio: "76-85 / 15-24", deduction: "-1" },
-  { ratio: "86-90 / 10-14", deduction: "-3" },
-  { ratio: "> 90/10", deduction: "-5" },
+const CENTERING_BACK: Array<{ ratio: string; grade: string; deduction: string }> = [
+  { ratio: "≤ 75/25", grade: "10", deduction: "0" },
+  { ratio: "76-85 / 15-24", grade: "9", deduction: "-1" },
+  { ratio: "86-90 / 10-14", grade: "8", deduction: "-2" },
+  { ratio: "91-95 / 5-9", grade: "6", deduction: "-4" },
+  { ratio: "> 95/5", grade: "3", deduction: "-5" },
 ];
 
 // ── Reusable styling helpers ──────────────────────────────────────────────
@@ -441,8 +447,8 @@ export default function StandardPage() {
 
             <h3 className={subTitle}>FE — Factory Error</h3>
             <p className={para}>
-              Card has a documented manufacturing variant — for example a No Rarity Symbol card, inverted back, or
-              known misprint. Card receives FE designation and is graded on its physical condition using standard MVGS
+              Card has a documented manufacturing variant — for example a No Rarity Symbol card, inverted back, or known
+              misprint. Card receives FE designation and is graded on its physical condition using standard MVGS
               criteria. The factory error does not inflate or reduce the grade — condition only. FE is noted on the
               certificate for collector reference.
             </p>
@@ -534,13 +540,15 @@ export default function StandardPage() {
                 <thead>
                   <tr>
                     <th className={thCls}>Ratio (worse axis)</th>
+                    <th className={thCls}>Axis grade</th>
                     <th className={thCls}>Deduction</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {CENTERING_FRONT.map(({ ratio, deduction }) => (
+                  {CENTERING_FRONT.map(({ ratio, grade, deduction }) => (
                     <tr key={ratio}>
                       <td className={codeCls}>{ratio}</td>
+                      <td className={tdCls}>{grade}</td>
                       <td className={tdCls}>{deduction}</td>
                     </tr>
                   ))}
@@ -554,13 +562,15 @@ export default function StandardPage() {
                 <thead>
                   <tr>
                     <th className={thCls}>Ratio (worse axis)</th>
+                    <th className={thCls}>Axis grade</th>
                     <th className={thCls}>Deduction</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {CENTERING_BACK.map(({ ratio, deduction }) => (
+                  {CENTERING_BACK.map(({ ratio, grade, deduction }) => (
                     <tr key={ratio}>
                       <td className={codeCls}>{ratio}</td>
+                      <td className={tdCls}>{grade}</td>
                       <td className={tdCls}>{deduction}</td>
                     </tr>
                   ))}
@@ -659,11 +669,10 @@ export default function StandardPage() {
               </table>
             </div>
             <p className={`${para} mt-3 text-xs italic`}>
-              <strong className="text-[#D4AF37]/80 not-italic">Dark Border Definition:</strong>{" "}
-              Dark border applies to any card where the printed border colour is not off-white, cream, or yellow. This
-              includes: the standard Pokémon blue card back (all sets and eras), Darkness-type card frames, and any
-              card with black or dark grey borders. The yellow/tan front border on Base Set Pokémon cards is not
-              considered dark border.{" "}
+              <strong className="text-[#D4AF37]/80 not-italic">Dark Border Definition:</strong> Dark border applies to
+              any card where the printed border colour is not off-white, cream, or yellow. This includes: the standard
+              Pokémon blue card back (all sets and eras), Darkness-type card frames, and any card with black or dark
+              grey borders. The yellow/tan front border on Base Set Pokémon cards is not considered dark border.{" "}
               <code className="text-[#D4AF37]">WH</code> (whitening) defects on dark-bordered edges apply a ×1.25
               multiplier. When in doubt, tick Dark Border Back for any standard Pokémon card — the blue back qualifies
               on every card. Tick Dark Border Front only for cards with dark front borders.
@@ -739,11 +748,10 @@ export default function StandardPage() {
             </p>
 
             <p className={`${para} mt-2 text-xs italic`}>
-              <strong className="text-[#D4AF37]/80 not-italic">Holo zone definition:</strong>{" "}
-              For traditional holo cards (Base Set through ex era), the holo zone is the artwork box — the illustrated
-              image area bounded by the inner frame line. For full-art, alternate-art, and modern V/VMAX/ex cards where
-              the entire card face is illustrated, the holo zone covers the full front surface. The ×1.5 multiplier
-              applies to{" "}
+              <strong className="text-[#D4AF37]/80 not-italic">Holo zone definition:</strong> For traditional holo cards
+              (Base Set through ex era), the holo zone is the artwork box — the illustrated image area bounded by the
+              inner frame line. For full-art, alternate-art, and modern V/VMAX/ex cards where the entire card face is
+              illustrated, the holo zone covers the full front surface. The ×1.5 multiplier applies to{" "}
               <code className="text-[#D4AF37]">SP</code> defects anywhere within the defined holo zone.
             </p>
 
@@ -754,10 +762,10 @@ export default function StandardPage() {
               no bump.
             </p>
             <p className={`${para} mb-3`}>
-              <strong className="text-[#ccc]">Crease cap and floor rule priority:</strong> When a D1 crease (CR) cap
-              and the floor rule produce different maximum grades, the stricter cap always applies. Example: a card
-              with a crease (cap ≤74, grade 6) and a surface subgrade of 4 (floor rule cap ≤4.5) receives an overall
-              grade of 4 or 4.5 — the floor rule is stricter and wins.
+              <strong className="text-[#ccc]">Crease cap and floor rule priority:</strong> When a D1 crease (CR) cap and
+              the floor rule produce different maximum grades, the stricter cap always applies. Example: a card with a
+              crease (cap ≤74, grade 6) and a surface subgrade of 4 (floor rule cap ≤4.5) receives an overall grade of 4
+              or 4.5 — the floor rule is stricter and wins.
             </p>
             <p className={`${para} mb-3`}>
               Example: a card with Centering 10, Corners 10, Edges 2, Surface 10 cannot grade overall higher than 2.5. A
