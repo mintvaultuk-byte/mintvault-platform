@@ -1,8 +1,15 @@
 import { useState, useRef, useEffect } from "react";
-import { Loader2, Crop, X, Check } from "lucide-react";
+import { Loader2, Crop, X, Check, Undo2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
-import { computeCardTool, ptsToQuad, cropBoxForOuter, type CardToolMode } from "./card-tool-geometry";
+import {
+  computeCardTool,
+  ptsToQuad,
+  cropBoxForOuter,
+  routePlacement,
+  nextPass,
+  type CardToolMode,
+} from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
 
 interface Props {
@@ -22,6 +29,8 @@ interface Props {
 
 // Dots are captured in corner order. Index → label.
 const CORNER_LABELS = ["TL", "TR", "BR", "BL"] as const;
+// Plain-English corner names for the guidance banner (index → name).
+const CORNER_NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-RIGHT", "BOTTOM-LEFT"] as const;
 // Near-miss grab radius (screen px): a click within this of an already-placed
 // dot grabs the nearest dot for dragging instead of doing nothing.
 const GRAB_PX = 40;
@@ -77,6 +86,60 @@ function Crosshair({ color }: { color: string }) {
   );
 }
 
+/**
+ * Mini card-shape map showing WHICH corner is active (so the operator doesn't
+ * have to decode TL/TR/BR/BL). The active corner is a large ring in the current
+ * pass colour (gold = placing OUTER, green = placing INNER); already-placed
+ * corners are solid grey; pending corners are hollow. `activeCorner` is -1 when
+ * every point is down. Corner order matches CORNER_LABELS: [TL, TR, BR, BL].
+ */
+function CornerDiagram({
+  activeCorner,
+  activePass,
+  outerCount,
+  innerCount,
+  mode,
+}: {
+  activeCorner: number;
+  activePass: DotPass;
+  outerCount: number;
+  innerCount: number;
+  mode: CardToolMode;
+}) {
+  const CX = [13, 43, 43, 13]; // TL, TR, BR, BL
+  const CY = [13, 13, 65, 65];
+  const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
+  return (
+    <svg width={40} height={56} viewBox="0 0 56 78" className="flex-shrink-0" aria-hidden="true">
+      {/* Card body + faint inner frame */}
+      <rect x={6} y={6} width={44} height={66} rx={4} fill="#F7F7F5" stroke="#C9C5BD" strokeWidth={2} />
+      <rect x={14} y={14} width={28} height={50} rx={2} fill="none" stroke="#E2DED6" strokeWidth={1.25} />
+      {[0, 1, 2, 3].map((i) => {
+        const done = mode === "outer-only" ? i < outerCount : i < innerCount;
+        if (i === activeCorner) {
+          return (
+            <g key={i}>
+              <circle cx={CX[i]} cy={CY[i]} r={7} fill="none" stroke={activeColor} strokeWidth={2.5} />
+              <circle cx={CX[i]} cy={CY[i]} r={3} fill={activeColor} />
+            </g>
+          );
+        }
+        return (
+          <circle
+            key={i}
+            cx={CX[i]}
+            cy={CY[i]}
+            r={3.5}
+            fill={done ? "#9CA3AF" : "none"}
+            stroke={done ? "#9CA3AF" : "#C9C5BD"}
+            strokeWidth={1.5}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
 export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCancel, onCentering }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -100,9 +163,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
 
-  // Which pass placement clicks flow into next: outer until 4 placed, then
-  // inner (full mode only). Once both are full, clicks become near-miss grabs.
-  const activePass: DotPass = mode === "outer-only" ? "outer" : outerPts.length < 4 ? "outer" : "inner";
+  // Corner-by-corner capture: work TL → TR → BR → BL, placing this corner's
+  // OUTER then its INNER before moving on. The next click's pass is decided by
+  // parity (arrays level → OUTER, outer one ahead → INNER). The arrays still end
+  // ordered [TL,TR,BR,BL], so all downstream geometry is unchanged. Once both
+  // are full, clicks become near-miss grabs.
+  const activePass: DotPass = nextPass(mode, outerPts, innerPts);
   const activeArr = activePass === "outer" ? outerPts : innerPts;
   const outerReady = outerPts.length === 4;
   const innerReady = innerPts.length === 4;
@@ -110,6 +176,16 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   // Still placing points in the active pass → show the cursor reticle + guides.
   const placing = activeArr.length < 4;
   const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
+  // Guidance: total points down, target, and the corner index (0..3) we're on.
+  const totalPlaced = outerPts.length + innerPts.length;
+  const target = mode === "outer-only" ? 4 : 8;
+  const activeCorner = mode === "outer-only" ? outerPts.length : Math.floor(totalPlaced / 2);
+  // Large step prompt shown in the guidance banner (replaces the old 10px text).
+  const bannerText = canCompute
+    ? "Ready — drag any dot to fine-tune, then Compute"
+    : activePass === "outer"
+      ? `Corner ${activeCorner + 1} of 4 — ${CORNER_NAMES[activeCorner]}. Click the OUTER corner (card edge).`
+      : `Corner ${activeCorner + 1} of 4 — ${CORNER_NAMES[activeCorner]}. Click the INNER corner (where border meets artwork).`;
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
     const el = containerRef.current;
@@ -122,11 +198,23 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   }
 
   function placePoint(pt: Point) {
-    if (activePass === "outer") {
-      if (outerPts.length < 4) setOuterPts([...outerPts, pt]);
-    } else {
-      if (innerPts.length < 4) setInnerPts([...innerPts, pt]);
+    // Route by corner-by-corner parity. routePlacement returns the unchanged
+    // array by reference, so the matching setState bails out (no extra render).
+    const next = routePlacement(mode, outerPts, innerPts, pt);
+    setOuterPts(next.outer);
+    setInnerPts(next.inner);
+  }
+
+  // Per-point undo: pop the most recently placed dot, reversing the capture
+  // sequence. Mid-corner (outer ahead of inner) the last point was an OUTER;
+  // when the corner is complete (arrays level, >0) the last was an INNER.
+  function undoLast() {
+    if (mode === "outer-only") {
+      if (outerPts.length > 0) setOuterPts(outerPts.slice(0, -1));
+      return;
     }
+    if (outerPts.length > innerPts.length) setOuterPts(outerPts.slice(0, -1));
+    else if (innerPts.length > 0) setInnerPts(innerPts.slice(0, -1));
   }
 
   /** All placed dots (with pass + index) for near-miss grab tests. */
@@ -268,6 +356,10 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       if (e.target instanceof HTMLInputElement) return;
       if (e.key === "Escape") onCancel();
       else if (e.key === "Enter" && canCompute && !saving) handleCompute();
+      else if ((e.key === "Backspace" || e.key === "Delete") && outerPts.length + innerPts.length > 0) {
+        e.preventDefault();
+        undoLast();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -382,13 +474,6 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
         ).centering
       : null;
 
-  const nextLabel = CORNER_LABELS[activeArr.length] ?? "";
-  const instruction = !outerReady
-    ? `Click the 4 OUTER corners (card edge) — next: ${nextLabel}`
-    : mode === "full" && !innerReady
-      ? `Click the 4 INNER corners (border → artwork) — next: ${nextLabel}`
-      : "Ready — drag any dot to fine-tune, then Compute";
-
   function renderDots(pts: Point[], pass: DotPass, color: string) {
     return pts.map((p, i) => (
       <div
@@ -425,7 +510,10 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Card Tool — {side}
           </p>
-          <p className="text-[#555555] text-[10px]">{instruction}</p>
+          <p className="text-[#555555] text-[10px]">
+            <span style={{ color: OUTER_COLOR }}>●</span> Outer = card edge &middot;{" "}
+            <span style={{ color: INNER_COLOR }}>●</span> Inner = border → artwork
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
@@ -449,6 +537,43 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             <X size={20} />
           </button>
         </div>
+      </div>
+
+      {/* Guidance banner — corner map + large step prompt + progress + undo.
+          Replaces the old 10px instruction so the next action is unmissable. */}
+      <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[#D4D0C8] bg-white flex items-center gap-2 sm:gap-3">
+        <CornerDiagram
+          activeCorner={canCompute ? -1 : activeCorner}
+          activePass={activePass}
+          outerCount={outerPts.length}
+          innerCount={innerPts.length}
+          mode={mode}
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {!canCompute && (
+              <span
+                className="text-[10px] sm:text-xs font-black uppercase tracking-wide px-2 py-0.5 rounded"
+                style={{ background: activeColor, color: activePass === "outer" ? "#1A1400" : "#FFFFFF" }}
+              >
+                {activePass === "outer" ? "Outer" : "Inner"}
+              </span>
+            )}
+            <p className="text-[#1A1A1A] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
+          </div>
+          <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
+            {totalPlaced} of {target} points placed
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={undoLast}
+          disabled={totalPlaced === 0}
+          title="Undo last point (Backspace)"
+          className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Undo2 size={13} /> Undo
+        </button>
       </div>
 
       {/* Image area */}

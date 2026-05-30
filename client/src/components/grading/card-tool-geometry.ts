@@ -17,7 +17,7 @@
  *     PSA chart (shared/centering.ts via computeCentering) — never a new chart.
  */
 
-import { quadBounds, quadRotation, type CropQuad } from "./crop-geometry";
+import { quadBounds, quadRotation, type CropQuad, type Point } from "./crop-geometry";
 import { computeCentering, type Rect } from "./centering-from-rects";
 import type { CenteringSide } from "@shared/centering";
 
@@ -141,4 +141,39 @@ export function computeCardTool(
   }
 
   return { crop, deskewDeg, centering };
+}
+
+/**
+ * Which pass the NEXT placement click belongs to, for the corner-by-corner
+ * capture flow. The tool now captures one corner at a time — OUTER then INNER
+ * for each of TL → TR → BR → BL — instead of all four outer dots followed by
+ * all four inner. The rule: when the two arrays are level, the next click is
+ * this corner's OUTER; when outer is one ahead, it's that corner's INNER. In
+ * "outer-only" mode every click is an outer dot.
+ */
+export function nextPass(mode: CardToolMode, outer: Point[], inner: Point[]): "outer" | "inner" {
+  if (mode === "outer-only") return "outer";
+  return outer.length === inner.length ? "outer" : "inner";
+}
+
+/**
+ * Route a freshly-clicked point into the outer/inner arrays for the
+ * corner-by-corner flow. Returns the NEXT arrays (immutable; the unchanged
+ * array is returned by reference, so it's a no-op for React state). Crucially,
+ * the outer/inner arrays still END ordered [TL, TR, BR, BL] — only the INPUT
+ * order changed — so every downstream calculation (border widths, L/R + T/B
+ * ratios, deskew top edge, PSA subgrade) is byte-for-byte identical to the old
+ * "all-outer-then-all-inner" capture order. Clicks past the 8th (4th in
+ * outer-only) are ignored.
+ */
+export function routePlacement(
+  mode: CardToolMode,
+  outer: Point[],
+  inner: Point[],
+  pt: Point
+): { outer: Point[]; inner: Point[] } {
+  if (nextPass(mode, outer, inner) === "outer") {
+    return outer.length < 4 ? { outer: [...outer, pt], inner } : { outer, inner };
+  }
+  return inner.length < 4 ? { outer, inner: [...inner, pt] } : { outer, inner };
 }

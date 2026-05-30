@@ -6,10 +6,12 @@ import {
   centeringRectsForCrop,
   quadToRect,
   ptsToQuad,
+  routePlacement,
+  nextPass,
 } from "@/components/grading/card-tool-geometry";
 import { computeCentering } from "@/components/grading/centering-from-rects";
 import { centeringAxisGrade } from "../shared/centering";
-import type { CropQuad } from "@/components/grading/crop-geometry";
+import type { CropQuad, Point } from "@/components/grading/crop-geometry";
 
 // Helper: build a corner-keyed quad from [TL, TR, BR, BL] coordinate pairs.
 const quad = (tl: [number, number], tr: [number, number], br: [number, number], bl: [number, number]): CropQuad =>
@@ -127,5 +129,79 @@ describe("crop box = outer bbox + thin margin, clamped 0–100", () => {
   it("clamps to the image so the box never exceeds 0–100", () => {
     const edge = quad([0, 0], [100, 0], [100, 100], [0, 100]);
     expect(cropBoxForOuter(edge, 5)).toEqual({ left_pct: 0, top_pct: 0, width_pct: 100, height_pct: 100 });
+  });
+});
+
+describe("corner-by-corner capture builds the same arrays + ratios as the old order", () => {
+  // Physical card corners (percent units). For each corner the operator clicks
+  // the OUTER (card edge) then the INNER (border → artwork) point.
+  const O = { TL: { x: 10, y: 10 }, TR: { x: 90, y: 10 }, BR: { x: 90, y: 90 }, BL: { x: 10, y: 90 } };
+  const I = { TL: { x: 30, y: 20 }, TR: { x: 80, y: 20 }, BR: { x: 80, y: 80 }, BL: { x: 30, y: 80 } };
+
+  // New click order: TL-out, TL-in, TR-out, TR-in, BR-out, BR-in, BL-out, BL-in.
+  const CLICK_SEQUENCE: Point[] = [O.TL, I.TL, O.TR, I.TR, O.BR, I.BR, O.BL, I.BL];
+
+  // Feed a click list through routePlacement, returning the final arrays.
+  function capture(mode: "full" | "outer-only", clicks: Point[]) {
+    let outer: Point[] = [];
+    let inner: Point[] = [];
+    for (const pt of clicks) {
+      const next = routePlacement(mode, outer, inner, pt);
+      outer = next.outer;
+      inner = next.inner;
+    }
+    return { outer, inner };
+  }
+
+  it("full mode: pass alternates outer→inner per corner and arrays end [TL,TR,BR,BL]", () => {
+    const expectedPasses = ["outer", "inner", "outer", "inner", "outer", "inner", "outer", "inner"];
+    let outer: Point[] = [];
+    let inner: Point[] = [];
+    CLICK_SEQUENCE.forEach((pt, k) => {
+      // The pass for the click about to be placed must follow the corner cadence.
+      expect(nextPass("full", outer, inner)).toBe(expectedPasses[k]);
+      const next = routePlacement("full", outer, inner, pt);
+      outer = next.outer;
+      inner = next.inner;
+    });
+    expect(outer).toEqual([O.TL, O.TR, O.BR, O.BL]);
+    expect(inner).toEqual([I.TL, I.TR, I.BR, I.BL]);
+    // A 9th click is a no-op and returns the same array refs (React bail-out).
+    expect(nextPass("full", outer, inner)).toBe("outer");
+    const noop = routePlacement("full", outer, inner, { x: 1, y: 1 });
+    expect(noop.outer).toBe(outer);
+    expect(noop.inner).toBe(inner);
+  });
+
+  it("yields identical lr/tb/subgrade AND deskew to the old all-outer-then-all-inner order", () => {
+    const seq = capture("full", CLICK_SEQUENCE);
+    const fromSequence = computeCardTool("full", ptsToQuad(seq.outer), ptsToQuad(seq.inner), "front", 0, 0, 600, 900);
+
+    // Old capture order: all four outer, then all four inner — same physical pts.
+    const oldOuter = [O.TL, O.TR, O.BR, O.BL];
+    const oldInner = [I.TL, I.TR, I.BR, I.BL];
+    const fromOld = computeCardTool("full", ptsToQuad(oldOuter), ptsToQuad(oldInner), "front", 0, 0, 600, 900);
+
+    expect(fromSequence.centering!.lr).toBe(fromOld.centering!.lr);
+    expect(fromSequence.centering!.tb).toBe(fromOld.centering!.tb);
+    expect(fromSequence.centering!.subgrade).toBe(fromOld.centering!.subgrade);
+    // Deskew still derives from the two TOP outer corners (TL-out → TR-out).
+    expect(fromSequence.deskewDeg).toBe(fromOld.deskewDeg);
+    expect(seq.outer[0]).toEqual(O.TL);
+    expect(seq.outer[1]).toEqual(O.TR);
+  });
+
+  it("outer-only mode: every click is an outer dot, inner stays empty", () => {
+    const clicks = [O.TL, O.TR, O.BR, O.BL];
+    let outer: Point[] = [];
+    let inner: Point[] = [];
+    clicks.forEach((pt) => {
+      expect(nextPass("outer-only", outer, inner)).toBe("outer");
+      const next = routePlacement("outer-only", outer, inner, pt);
+      outer = next.outer;
+      inner = next.inner;
+    });
+    expect(outer).toEqual([O.TL, O.TR, O.BR, O.BL]);
+    expect(inner).toEqual([]);
   });
 });
