@@ -15,6 +15,7 @@ import CaptureWizard from "./capture-wizard";
 import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCentering, { type CenteringResult } from "./manual-centering";
+import ManualCardTool from "./manual-card-tool";
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
@@ -222,6 +223,8 @@ export default function GradingPanel({
 
   // Manual centering state
   const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
+  // 8-dot manual card tool (crop + deskew + centering in one pass)
+  const [manualCardToolSide, setManualCardToolSide] = useState<"front" | "back" | null>(null);
   const [centeringMethod, setCenteringMethod] = useState<"ai" | "manual" | null>(null);
   const [manualOuterFront, setManualOuterFront] = useState<any>(null);
   const [manualInnerFront, setManualInnerFront] = useState<any>(null);
@@ -1671,7 +1674,25 @@ export default function GradingPanel({
               </div>
             )}
 
-            {/* Centering — manual measurement buttons */}
+            {/* 8-dot Card Tool — crop + deskew + centering in one click-capture pass */}
+            <div className="flex gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setManualCardToolSide("front")}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4AF37]/60 bg-[#D4AF37]/5 text-[#9A7B1E] hover:bg-[#D4AF37]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+              >
+                Card Tool (Front)
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualCardToolSide("back")}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4AF37]/60 bg-[#D4AF37]/5 text-[#9A7B1E] hover:bg-[#D4AF37]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+              >
+                Card Tool (Back)
+              </button>
+            </div>
+
+            {/* Centering — manual measurement buttons (legacy two-rect picker) */}
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
@@ -2145,6 +2166,37 @@ export default function GradingPanel({
             clearOverallOverrideIfSet();
           }}
           onCancel={() => setManualCenteringSide(null)}
+        />
+      )}
+
+      {/* 8-dot Card Tool — crop + deskew + centering on the RAW original */}
+      {manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
+        <ManualCardTool
+          certId={certId}
+          side={manualCardToolSide}
+          rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
+          onCentering={(result) => {
+            if (result.side === "front") {
+              setFrontLR(result.leftRight);
+              setFrontTB(result.topBottom);
+              setManualOuterFront(result.outer);
+              setManualInnerFront(result.inner);
+            } else {
+              setBackLR(result.leftRight);
+              setBackTB(result.topBottom);
+              setManualOuterBack(result.outer);
+              setManualInnerBack(result.inner);
+            }
+            setCenteringOverride(null);
+            setCenteringMethod("manual");
+            clearOverallOverrideIfSet();
+          }}
+          onDone={() => {
+            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
+            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+            setManualCardToolSide(null);
+          }}
+          onCancel={() => setManualCardToolSide(null)}
         />
       )}
 
