@@ -36,27 +36,12 @@ export function getGradeLabel(grade: number | string): string {
   return "PR";
 }
 
-// Deduction keys that represent real card defects. A Pristine 10P (black
-// label) card must have ZERO of these — eye_appeal is a subjective modifier,
-// not a defect, so it is intentionally excluded.
-const DEFECT_DEDUCTION_KEYS = ["centering_front", "centering_back", "corners", "edges", "surface"] as const;
-
-/**
- * Pristine 10P (black label) gate. Requires BOTH:
- *  - overall 10 and all four subgrades 10, AND
- *  - when `deductions` is supplied, zero raw deduction in every defect
- *    category. A card with e.g. corners -1.5 / edges -1.25 buckets to a 10
- *    chip but is NOT flawless, so it must not wear the Pristine badge. Pass
- *    computeMvgsScore(...).deductions to enforce this; omit it for the legacy
- *    subgrades-only check.
- */
-export function isBlackLabel(sub: SubGrades, overall: number, deductions?: Record<string, number>): boolean {
-  const subsAllTen =
-    overall === 10 && sub.centering === 10 && sub.corners === 10 && sub.edges === 10 && sub.surface === 10;
-  if (!subsAllTen) return false;
-  if (!deductions) return true;
-  return DEFECT_DEDUCTION_KEYS.every((k) => !((deductions[k] ?? 0) < 0));
-}
+// Pristine 10P (black label) gate now lives in shared/ as the single source of
+// truth shared by this grade panel and BOTH server approve routes. Re-exported
+// here so the existing `isBlackLabel` import path in grading-panel.tsx keeps
+// working unchanged. SubGrades (above) is structurally compatible with the
+// shared PristineSubgrades, so callers pass it straight through.
+export { isBlackLabel, isPristine, DEFECT_DEDUCTION_KEYS } from "@shared/pristine";
 
 // ── Centering ─────────────────────────────────────────────────────────────
 // The MVGS centering calculator and the legacy getCenteringGrade() lenient
