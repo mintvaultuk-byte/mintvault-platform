@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { Loader2, Crop, X, Check, Undo2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
@@ -160,6 +160,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     startPts: Point[];
   }>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Available image-area box (px) the card is scaled to fit, so the whole card
+  // — all four corners incl. the TOP edge — is visible below the banner without
+  // scrolling. Measured from the image-area; purely presentational (the capture
+  // math reads the rendered box at click time and is unaffected by this).
+  const fitRef = useRef<HTMLDivElement>(null);
+  const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
   const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
 
@@ -350,6 +356,24 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       window.removeEventListener("touchcancel", onUp);
     };
   }, [drag]);
+
+  // Measure the available image-area box; re-measure on resize / chrome reflow
+  // (e.g. the banner or controls wrapping). The card image is capped to this box
+  // so it always fits fully — no scrolling the top corner under the banner.
+  // Layout only; capture/geometry untouched.
+  useLayoutEffect(() => {
+    const el = fitRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = Math.floor(el.clientWidth);
+      const h = Math.floor(el.clientHeight);
+      setFitBox((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -576,14 +600,18 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
         </button>
       </div>
 
-      {/* Image area */}
-      <div className="flex-1 flex items-center justify-center p-0 sm:p-4 min-h-0 overflow-auto">
-        <div className="relative max-h-[90vh] sm:max-h-[85vh] max-w-[100vw]">
+      {/* Image area — the card is scaled to FIT this measured box (fitRef) so
+          all four corners, incl. the TOP edge, are visible below the banner
+          without scrolling. overflow-hidden on the outer stops the tool itself
+          scrolling; the inner is scroll-safe (m-auto) as a short-screen fallback. */}
+      <div className="flex-1 min-h-0 p-0 sm:p-4 overflow-hidden">
+        <div ref={fitRef} className="w-full h-full flex overflow-auto">
           {/* Capture container — shrink-wraps the natural-aspect image, so its
-              box == the visible card. Dots are absolute children (same box). */}
+              box == the visible card. Dots are absolute children (same box).
+              Centred with m-auto (scroll-safe, unlike align-items:center). */}
           <div
             ref={containerRef}
-            className="relative rounded-lg bg-[#F7F7F5]"
+            className="relative rounded-lg bg-[#F7F7F5] m-auto"
             onMouseDown={onContainerMouseDown}
             onMouseMove={onContainerMouseMove}
             onMouseLeave={onContainerMouseLeave}
@@ -592,7 +620,8 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             <img
               src={rawImageUrl}
               alt={`${side} raw`}
-              className="block max-h-[88vh] sm:max-h-[80vh] max-w-[100vw] w-auto cursor-crosshair"
+              className="block max-h-[80vh] max-w-[100vw] w-auto cursor-crosshair"
+              style={{ maxWidth: fitBox?.w, maxHeight: fitBox?.h }}
               draggable={false}
               onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
             />
