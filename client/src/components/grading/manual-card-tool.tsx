@@ -58,19 +58,19 @@ function Crosshair({ color }: { color: string }) {
   return (
     <svg className="absolute inset-0 pointer-events-none" width={44} height={44} viewBox="0 0 44 44" aria-hidden="true">
       <g fill="none" strokeLinecap="round">
-        <g stroke="rgba(0,0,0,0.5)" strokeWidth={2.5}>
-          <line x1={22} y1={12} x2={22} y2={18} />
-          <line x1={22} y1={26} x2={22} y2={32} />
-          <line x1={12} y1={22} x2={18} y2={22} />
-          <line x1={26} y1={22} x2={32} y2={22} />
-          <circle cx={22} cy={22} r={3} />
+        <g stroke="rgba(0,0,0,0.5)" strokeWidth={1.75}>
+          <line x1={22} y1={15} x2={22} y2={19} />
+          <line x1={22} y1={25} x2={22} y2={29} />
+          <line x1={15} y1={22} x2={19} y2={22} />
+          <line x1={25} y1={22} x2={29} y2={22} />
+          <circle cx={22} cy={22} r={2} />
         </g>
-        <g stroke={color} strokeWidth={1.25}>
-          <line x1={22} y1={12} x2={22} y2={18} />
-          <line x1={22} y1={26} x2={22} y2={32} />
-          <line x1={12} y1={22} x2={18} y2={22} />
-          <line x1={26} y1={22} x2={32} y2={22} />
-          <circle cx={22} cy={22} r={3} />
+        <g stroke={color} strokeWidth={1}>
+          <line x1={22} y1={15} x2={22} y2={19} />
+          <line x1={22} y1={25} x2={22} y2={29} />
+          <line x1={15} y1={22} x2={19} y2={22} />
+          <line x1={25} y1={22} x2={29} y2={22} />
+          <circle cx={22} cy={22} r={2} />
         </g>
       </g>
     </svg>
@@ -541,6 +541,24 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                   <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
                 </g>
               )}
+              {/* Full-length guides through each placed point in the ACTIVE
+                  pass — line the next dot up exactly above/below/beside a
+                  committed corner. Faint pass-coloured over a dark underlay,
+                  true 1px dashes via non-scaling-stroke. The brighter white
+                  cursor guides below paint over these. */}
+              {placing &&
+                activeArr.map((p, i) => (
+                  <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
+                    <g stroke="rgba(0,0,0,0.3)">
+                      <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
+                      <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
+                    </g>
+                    <g stroke={activeColor} opacity={0.4}>
+                      <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                      <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    </g>
+                  </g>
+                ))}
               {/* Live cursor guide lines (placement mode) — full-span sniper-
                   scope crosshairs through the cursor for edge alignment. White
                   ~0.6 alpha over a thin dark underlay so they read on light and
