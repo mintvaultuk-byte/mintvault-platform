@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Loader2, Crop, X, RotateCcw, Crosshair } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { quadBounds, quadRotation, type Point, type CropQuad } from "./crop-geometry";
 
 interface Props {
   side: "front" | "back";
@@ -8,17 +9,6 @@ interface Props {
   rawImageUrl: string;
   onDone: () => void;
   onCancel: () => void;
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-interface CropQuad {
-  tl: Point;
-  tr: Point;
-  br: Point;
-  bl: Point;
 }
 
 const CORNER_KEYS: (keyof CropQuad)[] = ["tl", "tr", "br", "bl"];
@@ -31,24 +21,6 @@ const DEFAULT_QUAD: CropQuad = {
 
 function clamp(v: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, v));
-}
-
-/** Compute bounding box of quad for backend crop */
-function quadBounds(q: CropQuad) {
-  const xs = [q.tl.x, q.tr.x, q.br.x, q.bl.x];
-  const ys = [q.tl.y, q.tr.y, q.br.y, q.bl.y];
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
-  const right = Math.max(...xs);
-  const bottom = Math.max(...ys);
-  return { left_pct: left, top_pct: top, width_pct: right - left, height_pct: bottom - top };
-}
-
-/** Compute rotation angle from the top edge of the quad (TL → TR) */
-function quadRotation(q: CropQuad): number {
-  const dx = q.tr.x - q.tl.x;
-  const dy = q.tr.y - q.tl.y;
-  return Math.atan2(dy, dx) * (180 / Math.PI);
 }
 
 /** SVG polygon points string */
@@ -77,6 +49,10 @@ const CORNER_LABELS: Record<keyof CropQuad, string> = { tl: "TL", tr: "TR", br: 
 export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel }: Props) {
   const [quad, setQuad] = useState<CropQuad>({ ...DEFAULT_QUAD });
   const [rotation, setRotation] = useState(0);
+  // Natural pixel dimensions of the raw image, captured on load. Needed so the
+  // deskew angle (quadRotation) is computed in pixel space rather than on
+  // aspect-distorted percentages. 0 until the image loads (square fallback).
+  const [imgDims, setImgDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [drag, setDrag] = useState<null | {
@@ -228,7 +204,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     try {
       // Compute bounding box + rotation from quad for the backend
       const bounds = quadBounds(quad);
-      const autoRotation = rotation || quadRotation(quad);
+      const autoRotation = rotation || quadRotation(quad, imgDims.w, imgDims.h);
       // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
       const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : Math.abs(autoRotation) > 0.3 ? autoRotation : 0;
 
@@ -293,7 +269,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   }
 
   const bounds = quadBounds(quad);
-  const derivedAngle = quadRotation(quad);
+  const derivedAngle = quadRotation(quad, imgDims.w, imgDims.h);
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#F7F7F5] flex flex-col select-none">
@@ -334,6 +310,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
                 alt={`${side} raw`}
                 className="block max-h-[88vh] sm:max-h-[80vh] max-w-[100vw] w-auto"
                 draggable={false}
+                onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
               />
 
               {/* Layer 1: SVG overlay — dark mask + edge lines — NO pointer events */}

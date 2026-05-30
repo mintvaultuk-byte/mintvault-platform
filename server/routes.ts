@@ -30,6 +30,8 @@ import {
   auditLog,
 } from "@shared/schema";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
+import { isBlackLabel } from "@shared/pristine";
+import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
@@ -3250,7 +3252,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
       const finalOverall = isNonNum ? null : parseFloat(overall);
-      const computedLabel = !isNonNum && finalOverall === 10 ? "black" : "Standard";
+      // label_type (Pristine/black) is computed below, AFTER the MVGS run, so
+      // the shared isBlackLabel() gate can see the raw per-category deductions —
+      // a card that buckets to a 10 chip but carries real defect deduction must
+      // NOT be flagged Pristine.
 
       // Cap at 1800s (30 min) so a grader leaving the tab open all day doesn't
       // skew the dashboard average. Anything over 30 min gets clamped — keeps
@@ -3281,6 +3286,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
         .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
       let mvgsScore: number | null = null;
+      let mvgsDeductions: Record<string, number> | undefined;
       if (!isNonNum) {
         const r = computeMvgsScore({
           centeringFrontLr: (cert as any).centeringFrontLr ?? null,
@@ -3295,9 +3301,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
         });
         mvgsScore = r.score;
+        mvgsDeductions = r.deductions;
       }
       const useMvgsClassifiedVerified = mvgsPins.length > 0;
       const mvgsVerifiedJson = useMvgsClassifiedVerified ? JSON.stringify(savedDefects) : null;
+
+      // Pristine 10P / black label — shared gate (one source of truth with the
+      // client panel and the other approve route). Subgrades from the approved
+      // payload; deductions from the MVGS run above. Requires overall 10 + all
+      // four subgrades 10 + zero raw defect deduction.
+      const computedLabel =
+        !isNonNum &&
+        isBlackLabel(
+          {
+            centering: num(centering) ?? -1,
+            corners: num(corners) ?? -1,
+            edges: num(edges) ?? -1,
+            surface: num(surface) ?? -1,
+          },
+          finalOverall ?? -1,
+          mvgsDeductions
+        )
+          ? "black"
+          : "Standard";
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -9838,15 +9864,48 @@ Defects (admin-confirmed): ${defectLines}`;
       const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
       const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
 
-      // Compute Black Label: all subgrades must be exactly 10.0
-      const allTen =
+      // Pristine 10P / black label — shared gate (one source of truth with the
+      // client panel and the approve-grade route). Mirror that route: run MVGS
+      // on the final state so the gate sees raw per-category deductions, not
+      // just the subgrade chips. A card with e.g. corners -1.5 must NOT be
+      // flagged Pristine even if its corners subgrade rounds to 10.
+      let blackDeductions: Record<string, number> | undefined;
+      if (!isNonNum) {
+        const { computeMvgsScore } = await import("./mvgs-scoring");
+        const finalDefects: any[] = Array.isArray(b.defects)
+          ? b.defects
+          : Array.isArray((cert as any).defects)
+            ? (cert as any).defects
+            : [];
+        const mvgsPins = finalDefects
+          .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+          .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
+        const r = computeMvgsScore({
+          centeringFrontLr: txt(b.centering_front_lr) ?? (cert as any).centeringFrontLr ?? null,
+          centeringFrontTb: txt(b.centering_front_tb) ?? (cert as any).centeringFrontTb ?? null,
+          centeringBackLr: txt(b.centering_back_lr) ?? (cert as any).centeringBackLr ?? null,
+          centeringBackTb: txt(b.centering_back_tb) ?? (cert as any).centeringBackTb ?? null,
+          defects: mvgsPins,
+          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
+          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
+          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
+        });
+        blackDeductions = r.deductions;
+      }
+      const labelType =
         !isNonNum &&
-        gradeNum === 10 &&
-        finalCentering === 10 &&
-        finalCorners === 10 &&
-        finalEdges === 10 &&
-        finalSurface === 10;
-      const labelType = allTen ? "black" : "Standard";
+        isBlackLabel(
+          {
+            centering: finalCentering ?? -1,
+            corners: finalCorners ?? -1,
+            edges: finalEdges ?? -1,
+            surface: finalSurface ?? -1,
+          },
+          gradeNum ?? -1,
+          blackDeductions
+        )
+          ? "black"
+          : "Standard";
       const gradeType = isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric";
 
       await db.execute(sql`
@@ -10521,21 +10580,12 @@ Defects (admin-confirmed): ${defectLines}`;
       const lr = lRound >= 100 - lRound ? `${lRound}/${100 - lRound}` : `${100 - lRound}/${lRound}`;
       const tb = tRound >= 100 - tRound ? `${tRound}/${100 - tRound}` : `${100 - tRound}/${tRound}`;
 
-      const worstDev = Math.max(Math.abs(lFloat - 50), Math.abs(tFloat - 50));
-      const subgrade =
-        worstDev <= 2
-          ? 10
-          : worstDev <= 5
-            ? 9
-            : worstDev <= 10
-              ? 8
-              : worstDev <= 15
-                ? 7
-                : worstDev <= 20
-                  ? 6
-                  : worstDev <= 35
-                    ? 5
-                    : 4;
+      // Centering subgrade — canonical PSA chart (shared/centering.ts): the
+      // worst of the two axes for this side. One source of truth shared with the
+      // client ManualCentering panel and computeMvgsScore. Replaces the old
+      // side-agnostic worstDev ladder, which mis-scored front cards (a 60/40
+      // front is grade 9 on the strict front chart, not the ladder's 8).
+      const subgrade = Math.min(centeringAxisGrade(lr, side), centeringAxisGrade(tb, side));
 
       const outerCol = side === "front" ? "centering_outer_front" : "centering_outer_back";
       const innerCol = side === "front" ? "centering_inner_front" : "centering_inner_back";
