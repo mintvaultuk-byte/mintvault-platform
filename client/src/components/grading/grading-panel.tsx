@@ -18,14 +18,15 @@ import ManualCentering, { type CenteringResult } from "./manual-centering";
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
-import {
-  calculateOverallGrade,
-  getGradeLabel,
-  isBlackLabel as checkBlackLabel,
-  getCenteringGrade,
-  mvgsCenteringSubgrade,
-} from "./grade-logic";
+import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
 import { computeMvgsScore, gradeFromMvgsScore } from "@shared/mvgs-scoring";
+// Centering single source of truth (true PSA chart — front strict / back lenient).
+import {
+  centeringSubgrade,
+  centeringSubgradeStrict,
+  centeringAxisGradeOrNull,
+  type CenteringAxis,
+} from "@shared/centering";
 
 function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => void }) {
   const { toast } = useToast();
@@ -832,9 +833,10 @@ export default function GradingPanel({
   // initialised defaults (DEFAULT_CORNERS / nulls) — safe to compute even
   // when no images are present yet.
 
-  // Calculated subgrades
-  const centeringCalc =
-    frontLR && frontTB && backLR && backTB ? getCenteringGrade(frontLR, frontTB, backLR, backTB) : null;
+  // Calculated subgrades. centeringCalc uses the strict variant: null until
+  // all four ratios are present and valid, so CenteringInput shows no auto
+  // subgrade for a partially-filled card.
+  const centeringCalc = centeringSubgradeStrict(frontLR, frontTB, backLR, backTB)?.subgrade ?? null;
   const centering = centeringOverride ?? centeringCalc ?? 10;
   const cornersCalc = calcCornerSubgrade(corners);
   const edgesCalc = calcEdgeSubgrade(edges);
@@ -860,15 +862,16 @@ export default function GradingPanel({
   });
   const hasMvgsPins = (defects || []).some((d) => d.mvgsCode);
 
-  // MVGS subgrades — each category has a 25-pt budget; remaining points
-  // bucket to 1-10. Centering's budget spans the combined front+back
-  // deductions (front max -20, back max -5, total max -25). The three
-  // other categories cap at -25 inside the scoring engine, so remaining ≥ 0.
-  const mvgsCenteringGrade = mvgsRemainingToGrade(
-    25 -
-      Math.abs(mvgsForOverall.deductions.centering_front ?? 0) -
-      Math.abs(mvgsForOverall.deductions.centering_back ?? 0)
-  );
+  // MVGS subgrades. Centering comes straight from the shared PSA chart
+  // (worst of the four axes) — the SAME number that scores the card and that
+  // the chip/toast display, so they can never diverge. Corners/edges/surface
+  // keep the 25-pt budget bucket (remaining points → 1-10).
+  const mvgsCenteringGrade = centeringSubgrade(
+    frontLR || null,
+    frontTB || null,
+    backLR || null,
+    backTB || null
+  ).subgrade;
   const mvgsCornersGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.corners ?? 0));
   const mvgsEdgesGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.edges ?? 0));
   const mvgsSurfaceGrade = mvgsRemainingToGrade(25 - Math.abs(mvgsForOverall.deductions.surface ?? 0));
@@ -915,7 +918,9 @@ export default function GradingPanel({
   // Mirrors the server-side 422 check so the button stays disabled until ready.
   const subgradesIncomplete = !centering || !cornersGrade || !edgesGrade || !surfaceGrade;
   const label = getGradeLabel(overall);
-  const isBlack = checkBlackLabel(sub, overall);
+  // Pass MVGS deductions so a card with sub-grade-10-but-non-zero defects
+  // (e.g. corners -1.5) does NOT flag as Pristine 10P.
+  const isBlack = checkBlackLabel(sub, overall, mvgsForOverall.deductions);
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
@@ -1715,39 +1720,41 @@ export default function GradingPanel({
                 matching the current input values are highlighted in gold.
                 Display only — no state changes, no saves. */}
               {(() => {
-                const FRONT_CHIPS: { label: string; grade: string; devMax: number }[] = [
-                  { label: "≤55/45", grade: "10", devMax: 10 },
-                  { label: "56–60", grade: "9", devMax: 20 },
-                  { label: "61–65", grade: "8", devMax: 30 },
-                  { label: "66–70", grade: "7", devMax: 40 },
-                  { label: "71–75", grade: "6", devMax: 50 },
-                  { label: "76–80", grade: "5", devMax: 60 },
-                  { label: ">80", grade: "≤4", devMax: Infinity },
+                // Bands mirror shared/centering.ts exactly. A chip highlights
+                // when an entered axis grades into that band — matched via the
+                // shared centeringAxisGradeOrNull, so the legend can never drift
+                // from the engine.
+                const FRONT_CHIPS: { label: string; grade: number }[] = [
+                  { label: "≤55/45", grade: 10 },
+                  { label: "≤60/40", grade: 9 },
+                  { label: "≤65/35", grade: 8 },
+                  { label: "≤70/30", grade: 7 },
+                  { label: "≤75/25", grade: 6 },
+                  { label: "≤80/20", grade: 5 },
+                  { label: "≤85/15", grade: 4 },
+                  { label: "≤90/10", grade: 3 },
+                  { label: "≤95/5", grade: 2 },
+                  { label: ">95", grade: 1 },
                 ];
-                const BACK_CHIPS: { label: string; grade: string; devMax: number }[] = [
-                  { label: "≤75/25", grade: "10", devMax: 50 },
-                  { label: "76–85", grade: "8", devMax: 70 },
-                  { label: "86–90", grade: "5", devMax: 80 },
-                  { label: ">90", grade: "1", devMax: Infinity },
+                const BACK_CHIPS: { label: string; grade: number }[] = [
+                  { label: "≤75/25", grade: 10 },
+                  { label: "≤85/15", grade: 9 },
+                  { label: "≤90/10", grade: 8 },
+                  { label: "≤95/5", grade: 6 },
+                  { label: ">95", grade: 3 },
                 ];
-                const devFromRatio = (raw: string): number | null => {
-                  const m = raw.trim().match(/^(\d+)\s*\/\s*(\d+)$/);
-                  if (!m) return null;
-                  const a = parseInt(m[1], 10);
-                  const b = parseInt(m[2], 10);
-                  if (isNaN(a) || isNaN(b) || a + b === 0) return null;
-                  return (Math.abs(a - b) / (a + b)) * 100;
-                };
-                const matchIdx = (dev: number, chips: { devMax: number }[]): number => {
-                  for (let i = 0; i < chips.length; i++) if (dev <= chips[i].devMax) return i;
-                  return chips.length - 1;
-                };
-                const frontDevs = [devFromRatio(frontLR), devFromRatio(frontTB)].filter((v): v is number => v !== null);
-                const backDevs = [devFromRatio(backLR), devFromRatio(backTB)].filter((v): v is number => v !== null);
-                const frontHits = new Set(frontDevs.map((d) => matchIdx(d, FRONT_CHIPS)));
-                const backHits = new Set(backDevs.map((d) => matchIdx(d, BACK_CHIPS)));
+                const frontHits = new Set(
+                  [centeringAxisGradeOrNull(frontLR, "front"), centeringAxisGradeOrNull(frontTB, "front")].filter(
+                    (g): g is number => g !== null
+                  )
+                );
+                const backHits = new Set(
+                  [centeringAxisGradeOrNull(backLR, "back"), centeringAxisGradeOrNull(backTB, "back")].filter(
+                    (g): g is number => g !== null
+                  )
+                );
 
-                const Chip = ({ label, grade, active }: { label: string; grade: string; active: boolean }) => (
+                const Chip = ({ label, grade, active }: { label: string; grade: number; active: boolean }) => (
                   <span
                     className={
                       active
@@ -1764,14 +1771,14 @@ export default function GradingPanel({
                   <div className="space-y-1 pt-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Front</span>
-                      {FRONT_CHIPS.map((c, i) => (
-                        <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(i)} />
+                      {FRONT_CHIPS.map((c) => (
+                        <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(c.grade)} />
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Back</span>
-                      {BACK_CHIPS.map((c, i) => (
-                        <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(i)} />
+                      {BACK_CHIPS.map((c) => (
+                        <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(c.grade)} />
                       ))}
                     </div>
                   </div>
@@ -1795,7 +1802,7 @@ export default function GradingPanel({
                   <button
                     type="button"
                     onClick={() => {
-                      const result = mvgsCenteringSubgrade(frontLR, frontTB, backLR, backTB);
+                      const result = centeringSubgradeStrict(frontLR, frontTB, backLR, backTB);
                       if (!result) {
                         toast({
                           title: "MVGS calc unavailable",
@@ -1805,8 +1812,14 @@ export default function GradingPanel({
                         return;
                       }
                       setCenteringOverride(result.subgrade);
+                      const AXIS_NAMES: Record<CenteringAxis, string> = {
+                        frontLR: "Front L/R",
+                        frontTB: "Front T/B",
+                        backLR: "Back L/R",
+                        backTB: "Back T/B",
+                      };
                       toast({
-                        title: `Centering set to ${result.subgrade}/10 (MVGS — worst axis: ${result.worstAxisName} ${result.worstAxisValue}/10)`,
+                        title: `Centering set to ${result.subgrade}/10 (MVGS — worst axis: ${AXIS_NAMES[result.worstAxis]} ${result.perAxis[result.worstAxis]}/10)`,
                       });
                     }}
                     disabled={isDisabled}
