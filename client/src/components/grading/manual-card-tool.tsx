@@ -541,18 +541,22 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                   <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
                 </g>
               )}
-              {/* Live cursor guide lines (placement mode) — faint full-span
-                  dashed lines through the cursor for edge alignment. Dark
-                  underlay + coloured line so they read on light and dark cards. */}
+              {/* Live cursor guide lines (placement mode) — full-span sniper-
+                  scope crosshairs through the cursor for edge alignment. White
+                  ~0.6 alpha over a thin dark underlay so they read on light and
+                  dark cards. non-scaling-stroke → true 1px + uniform dashes on
+                  screen despite the preserveAspectRatio="none" stretch. */}
               {placing && hover && !drag && (
-                <g strokeDasharray="1.5,1.5">
-                  <g stroke="rgba(0,0,0,0.35)" strokeWidth="0.4">
-                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} />
-                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} />
+                <g strokeDasharray="5,4">
+                  {/* Dark underlay so the white guides read on light borders */}
+                  <g stroke="rgba(0,0,0,0.4)">
+                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} strokeWidth={2} vectorEffect="non-scaling-stroke" />
                   </g>
-                  <g stroke={activeColor} strokeWidth="0.2" opacity="0.7">
-                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} />
-                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} />
+                  {/* White full-length guides */}
+                  <g stroke="rgba(255,255,255,0.6)">
+                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
                   </g>
                 </g>
               )}
