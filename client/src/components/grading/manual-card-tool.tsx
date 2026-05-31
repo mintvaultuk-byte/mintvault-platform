@@ -1024,7 +1024,24 @@ export default function ManualCardTool({
             (component state). Combined with the beforeunload guard above
             for defensive coverage on any other navigation source. */}
         <div ref={fitRef} className="w-full h-full overflow-auto overscroll-contain">
-          <div className="min-w-full min-h-full flex items-center justify-center">
+          {/* Wrapper centres the card when it FITS the viewport, but falls
+              back to start-aligned when it OVERFLOWS. Without the `safe`
+              keyword, `justify-content: center` on an overflowing flex item
+              pushes the start of the item past the container's content box,
+              making the left/top portion of the content unreachable by
+              scroll (the scroll range becomes [0, overflow] but the
+              leftmost content sits at NEGATIVE scroll coordinates that
+              don't exist). At zoom > 1 the operator could not pan to the
+              card's left edge — and the back-gesture fired because there
+              was nothing left for the scroller to consume. `safe center`
+              fixes both: at zoom 1 centre, at zoom > 1 start-align, so
+              the left edge is at scrollLeft 0 and reachable. Tailwind
+              doesn't expose `safe` keywords through utility classes in
+              our version, so it's an inline style. */}
+          <div
+            className="min-w-full min-h-full flex"
+            style={{ justifyContent: "safe center", alignItems: "safe center" }}
+          >
             {/* Capture container — shrink-wraps the (scaled) image, so its box
                 == the visible card. Dots are absolute children (same box). */}
             <div
