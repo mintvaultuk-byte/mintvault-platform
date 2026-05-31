@@ -50,6 +50,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
+import { AdminButton, adminButtonClass } from "@/components/admin";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -211,13 +212,16 @@ function fmtDate(s: string | null | undefined): string {
 function statusBadge(s: HistoryEntry["status"]): { label: string; cls: string } {
   switch (s) {
     case "ok":
-      return { label: "OK", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+      return { label: "OK", cls: "bg-[var(--admin-panel2)] text-[var(--admin-green)] border-[var(--admin-line)]" };
     case "partial":
-      return { label: "Partial", cls: "bg-amber-50    text-amber-700    border-amber-200" };
+      return { label: "Partial", cls: "bg-[var(--admin-panel2)] text-[var(--admin-amber)] border-[var(--admin-line)]" };
     case "failed":
-      return { label: "Failed", cls: "bg-red-50      text-red-700      border-red-200" };
+      return { label: "Failed", cls: "bg-[var(--admin-panel2)] text-[var(--admin-red)] border-[var(--admin-line)]" };
     default:
-      return { label: "Unknown", cls: "bg-[#F5F2EB]   text-[#666666]    border-[#E8E4DC]" };
+      return {
+        label: "Unknown",
+        cls: "bg-[var(--admin-panel2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)]",
+      };
   }
 }
 
@@ -270,21 +274,24 @@ function PipelineControls({ paused }: { paused: boolean }) {
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Pipeline Controls</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">
+        Pipeline Controls
+      </h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="border border-[#E8E4DC] rounded-xl p-4">
-          <div className="flex items-center gap-2 text-[#666666] text-xs uppercase tracking-wider mb-1">
-            <PlayCircle size={14} className="text-[#D4AF37]" /> Manual trigger
+        <div className="border border-[var(--admin-line)] rounded-xl p-4">
+          <div className="flex items-center gap-2 text-[var(--admin-ink-dim)] text-xs uppercase tracking-wider mb-1">
+            <PlayCircle size={14} className="text-[var(--admin-gold-hi)]" /> Manual trigger
           </div>
-          <button
-            type="button"
+          <AdminButton
+            variant="gold"
+            size="sm"
             onClick={() => {
               setGenerateResult(null);
               generateMutation.mutate();
             }}
             disabled={generateMutation.isPending || paused}
-            className="mt-2 w-full inline-flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+            className="mt-2 w-full uppercase tracking-wider"
             data-testid="btn-generate-reel"
           >
             {generateMutation.isPending ? (
@@ -296,32 +303,32 @@ function PipelineControls({ paused }: { paused: boolean }) {
             ) : (
               "Generate Reel Now"
             )}
-          </button>
-          <p className="mt-2 text-[10px] text-[#888888]">
+          </AdminButton>
+          <p className="mt-2 text-[10px] text-[var(--admin-ink-faint)]">
             Long-running — Segmind ~30-60 s per card. Connection may time out before completion.
           </p>
         </div>
 
         <ScheduleCard />
 
-        <div className="border border-[#E8E4DC] rounded-xl p-4">
-          <div className="flex items-center gap-2 text-[#666666] text-xs uppercase tracking-wider mb-1">
-            <KeyRound size={14} className="text-[#D4AF37]" /> Segmind key
+        <div className="border border-[var(--admin-line)] rounded-xl p-4">
+          <div className="flex items-center gap-2 text-[var(--admin-ink-dim)] text-xs uppercase tracking-wider mb-1">
+            <KeyRound size={14} className="text-[var(--admin-gold-hi)]" /> Segmind key
           </div>
           {keyStatus === undefined ? (
-            <p className="mt-2 text-sm text-[#888888]">
+            <p className="mt-2 text-sm text-[var(--admin-ink-faint)]">
               <Loader2 size={12} className="animate-spin inline" /> checking…
             </p>
           ) : keyStatus.configured ? (
-            <p className="mt-2 text-sm font-semibold text-emerald-700 flex items-center gap-1">
+            <p className="mt-2 text-sm font-semibold text-[var(--admin-green)] flex items-center gap-1">
               <CheckCircle2 size={14} /> Key configured
             </p>
           ) : (
-            <p className="mt-2 text-sm font-semibold text-red-700 flex items-center gap-1">
+            <p className="mt-2 text-sm font-semibold text-[var(--admin-red)] flex items-center gap-1">
               <XCircle size={14} /> Key missing
             </p>
           )}
-          <p className="mt-1 text-[10px] text-[#888888]">
+          <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
             Set via <code>fly secrets set SEGMIND_API_KEY=…</code>
           </p>
         </div>
@@ -333,12 +340,12 @@ function PipelineControls({ paused }: { paused: boolean }) {
         <div
           className={`mt-4 text-sm rounded-lg p-3 border ${
             typeof generateResult === "string"
-              ? "bg-amber-50 text-amber-800 border-amber-200"
+              ? "bg-[var(--admin-panel2)] text-[var(--admin-amber)] border-[var(--admin-line)]"
               : generateResult.status === "ok"
-                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                ? "bg-[var(--admin-panel2)] text-[var(--admin-green)] border-[var(--admin-line)]"
                 : generateResult.status === "skipped"
-                  ? "bg-[#F5F2EB] text-[#555] border-[#E8E4DC]"
-                  : "bg-red-50 text-red-800 border-red-200"
+                  ? "bg-[var(--admin-panel2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)]"
+                  : "bg-[var(--admin-panel2)] text-[var(--admin-red)] border-[var(--admin-line)]"
           }`}
           data-testid="text-generate-result"
         >
@@ -373,26 +380,26 @@ function ScheduleCard() {
   // hint once smart schedule is on so the operator knows what to expect.
   if (!settings) {
     return (
-      <div className="border border-[#E8E4DC] rounded-xl p-4">
-        <div className="flex items-center gap-2 text-[#666666] text-xs uppercase tracking-wider mb-1">
-          <Calendar size={14} className="text-[#D4AF37]" /> Schedule (UTC)
+      <div className="border border-[var(--admin-line)] rounded-xl p-4">
+        <div className="flex items-center gap-2 text-[var(--admin-ink-dim)] text-xs uppercase tracking-wider mb-1">
+          <Calendar size={14} className="text-[var(--admin-gold-hi)]" /> Schedule (UTC)
         </div>
-        <p className="mt-2 text-sm text-[#888888]">
+        <p className="mt-2 text-sm text-[var(--admin-ink-faint)]">
           <Loader2 size={12} className="animate-spin inline" /> loading…
         </p>
       </div>
     );
   }
   return (
-    <div className="border border-[#E8E4DC] rounded-xl p-4">
-      <div className="flex items-center gap-2 text-[#666666] text-xs uppercase tracking-wider mb-1">
-        <Calendar size={14} className="text-[#D4AF37]" /> Schedule (UTC)
+    <div className="border border-[var(--admin-line)] rounded-xl p-4">
+      <div className="flex items-center gap-2 text-[var(--admin-ink-dim)] text-xs uppercase tracking-wider mb-1">
+        <Calendar size={14} className="text-[var(--admin-gold-hi)]" /> Schedule (UTC)
       </div>
       <div className="mt-2 flex items-center gap-2">
         <select
           value={settings.schedule_day}
           onChange={(e) => update({ key: "schedule_day", value: Number(e.target.value) })}
-          className="text-xs border border-[#E8E4DC] rounded px-2 py-1 bg-white"
+          className="text-xs border border-[var(--admin-line)] rounded px-2 py-1 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
           data-testid="select-schedule-day"
         >
           {DAY_LABELS.map((d, i) => (
@@ -405,7 +412,7 @@ function ScheduleCard() {
           value={settings.schedule_hour_utc}
           onChange={(e) => update({ key: "schedule_hour_utc", value: Number(e.target.value) })}
           disabled={settings.smart_schedule}
-          className="text-xs border border-[#E8E4DC] rounded px-2 py-1 bg-white disabled:opacity-50"
+          className="text-xs border border-[var(--admin-line)] rounded px-2 py-1 bg-[var(--admin-panel2)] text-[var(--admin-ink)] disabled:opacity-50"
           data-testid="select-schedule-hour"
         >
           {Array.from({ length: 24 }, (_, h) => (
@@ -420,23 +427,23 @@ function ScheduleCard() {
           type="checkbox"
           checked={settings.smart_schedule}
           onChange={() => update({ key: "smart_schedule", value: !settings.smart_schedule })}
-          className="accent-[#D4AF37] h-3 w-3"
+          className="accent-[var(--admin-gold)] h-3 w-3"
           data-testid="check-smart-schedule"
         />
-        <span className="text-[10px] text-[#666] inline-flex items-center gap-1">
-          <Sparkles size={10} className="text-[#D4AF37]" /> Smart schedule (IG peak)
+        <span className="text-[10px] text-[var(--admin-ink-dim)] inline-flex items-center gap-1">
+          <Sparkles size={10} className="text-[var(--admin-gold-hi)]" /> Smart schedule (IG peak)
         </span>
       </label>
       {settings.smart_schedule && (
-        <p className="mt-1 text-[10px] text-[#888]">
+        <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
           {meta?.valid ? (
             "Posts at the IG-insights peak hour of the day."
           ) : (
-            <span className="text-amber-700">Connect Meta to read peak hour.</span>
+            <span className="text-[var(--admin-amber)]">Connect Meta to read peak hour.</span>
           )}
         </p>
       )}
-      <p className="mt-1 text-[10px] text-[#888888]">Skipped if fewer than 3 featured cards.</p>
+      <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">Skipped if fewer than 3 featured cards.</p>
     </div>
   );
 }
@@ -448,12 +455,14 @@ function PauseToggleRow() {
   return (
     <div
       className={`mt-4 flex items-center justify-between rounded-xl p-3 border ${
-        paused ? "bg-red-50 border-red-200" : "bg-[#FAFAF8] border-[#E8E4DC]"
+        paused
+          ? "bg-[var(--admin-panel2)] border-[var(--admin-red)]"
+          : "bg-[var(--admin-panel2)] border-[var(--admin-line)]"
       }`}
     >
       <div className="flex items-center gap-2 text-sm">
-        <Pause size={14} className={paused ? "text-red-700" : "text-[#888]"} />
-        <span className={paused ? "text-red-800 font-semibold" : "text-[#555]"}>
+        <Pause size={14} className={paused ? "text-[var(--admin-red)]" : "text-[var(--admin-ink-faint)]"} />
+        <span className={paused ? "text-[var(--admin-red)] font-semibold" : "text-[var(--admin-ink-dim)]"}>
           {paused ? "Pipeline is PAUSED — scheduler will not run." : "Pipeline running on schedule."}
         </span>
       </div>
@@ -461,8 +470,10 @@ function PauseToggleRow() {
         type="button"
         onClick={() => update({ key: "pipeline_paused", value: !paused })}
         disabled={updating}
-        className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all ${
-          paused ? "bg-emerald-600 text-white hover:bg-emerald-700" : "bg-red-600 text-white hover:bg-red-700"
+        className={`text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all border ${
+          paused
+            ? "bg-[var(--admin-panel3)] text-[var(--admin-green)] border-[var(--admin-line)] hover:bg-[var(--admin-panel2)]"
+            : "bg-[var(--admin-panel3)] text-[var(--admin-red)] border-[var(--admin-line)] hover:bg-[var(--admin-panel2)]"
         } disabled:opacity-50`}
         data-testid="btn-toggle-pause"
       >
@@ -482,14 +493,14 @@ function AiIngestSettings() {
   const autoOn = settings.ai_auto_ingest_enabled !== false;
   const identifyOnly = settings.ai_ingest_identify_only !== false;
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">AI Ingest</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">AI Ingest</h2>
 
       {/* Toggle 1 — master kill-switch */}
-      <div className="flex items-start justify-between gap-4 py-3 border-b border-[#F0EEE8]">
+      <div className="flex items-start justify-between gap-4 py-3 border-b border-[var(--admin-line)]">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[#1A1A1A]">Auto AI on scan upload</p>
-          <p className="text-xs text-[#666] mt-0.5 leading-relaxed">
+          <p className="text-sm font-semibold text-[var(--admin-ink)]">Auto AI on scan upload</p>
+          <p className="text-xs text-[var(--admin-ink-dim)] mt-0.5 leading-relaxed">
             Automatically run identify + centering AI when a card is scanned. Turn off to speed up scanning sessions.
           </p>
         </div>
@@ -498,7 +509,7 @@ function AiIngestSettings() {
           onClick={() => update({ key: "ai_auto_ingest_enabled", value: !autoOn })}
           disabled={updating}
           className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            autoOn ? "bg-[#D4AF37]" : "bg-[#D4D0C8]"
+            autoOn ? "bg-[var(--admin-gold)]" : "bg-[var(--admin-panel3)]"
           } disabled:opacity-50`}
           aria-pressed={autoOn}
           data-testid="toggle-ai-auto-ingest"
@@ -514,8 +525,8 @@ function AiIngestSettings() {
       {/* Toggle 2 — identify+centering only (documentation toggle) */}
       <div className={`flex items-start justify-between gap-4 py-3 ${!autoOn ? "opacity-50" : ""}`}>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[#1A1A1A]">Identify + centering only</p>
-          <p className="text-xs text-[#666] mt-0.5 leading-relaxed">
+          <p className="text-sm font-semibold text-[var(--admin-ink)]">Identify + centering only</p>
+          <p className="text-xs text-[var(--admin-ink-dim)] mt-0.5 leading-relaxed">
             When auto AI is on, run identify and centering only. Full grade and defect detection are always manual.
           </p>
         </div>
@@ -524,7 +535,7 @@ function AiIngestSettings() {
           onClick={() => update({ key: "ai_ingest_identify_only", value: !identifyOnly })}
           disabled={updating || !autoOn}
           className={`flex-shrink-0 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            identifyOnly ? "bg-[#D4AF37]" : "bg-[#D4D0C8]"
+            identifyOnly ? "bg-[var(--admin-gold)]" : "bg-[var(--admin-panel3)]"
           } disabled:cursor-not-allowed`}
           aria-pressed={identifyOnly}
           data-testid="toggle-ai-identify-only"
@@ -546,11 +557,11 @@ function SelectionRules() {
   const { settings, update } = useSettings();
   if (!settings) return null;
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Selection Rules</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">Selection Rules</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
             Min grade — {settings.min_grade === 0 ? "Any grade" : settings.min_grade}
           </label>
           <input
@@ -560,12 +571,14 @@ function SelectionRules() {
             step={1}
             value={settings.min_grade}
             onChange={(e) => update({ key: "min_grade", value: Number(e.target.value) })}
-            className="w-full mt-2 accent-[#D4AF37]"
+            className="w-full mt-2 accent-[var(--admin-gold)]"
             data-testid="slider-min-grade"
           />
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Max cards — {settings.max_cards}</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+            Max cards — {settings.max_cards}
+          </label>
           <input
             type="range"
             min={3}
@@ -573,16 +586,16 @@ function SelectionRules() {
             step={1}
             value={settings.max_cards}
             onChange={(e) => update({ key: "max_cards", value: Number(e.target.value) })}
-            className="w-full mt-2 accent-[#D4AF37]"
+            className="w-full mt-2 accent-[var(--admin-gold)]"
             data-testid="slider-max-cards"
           />
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Sort order</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sort order</label>
           <select
             value={settings.sort_order}
             onChange={(e) => update({ key: "sort_order", value: e.target.value })}
-            className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+            className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
             data-testid="select-sort-order"
           >
             <option value="grade_desc">Grade ↓</option>
@@ -610,16 +623,16 @@ function VideoStyle() {
   const dirty = draftPrompt !== null && draftPrompt !== settings.video_prompt;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Video Style</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">Video Style</h2>
       <div className="space-y-4">
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Prompt</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Prompt</label>
           <textarea
             rows={3}
             value={draftPrompt ?? ""}
             onChange={(e) => setDraftPrompt(e.target.value)}
-            className="mt-2 w-full text-sm border border-[#E8E4DC] rounded p-2 bg-white font-mono"
+            className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded p-2 bg-[var(--admin-panel2)] text-[var(--admin-ink)] font-mono"
             data-testid="textarea-prompt"
           />
           <button
@@ -628,18 +641,18 @@ function VideoStyle() {
               if (draftPrompt !== null) update({ key: "video_prompt", value: draftPrompt });
             }}
             disabled={!dirty}
-            className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+            className={adminButtonClass({ variant: "gold", size: "sm", className: "mt-2 uppercase tracking-wider" })}
           >
             {dirty ? "Save Prompt" : "Saved"}
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Model</label>
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Model</label>
             <select
               value={settings.video_model}
               onChange={(e) => update({ key: "video_model", value: e.target.value })}
-              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
               data-testid="select-model"
             >
               {MODEL_OPTIONS.map((m) => (
@@ -650,16 +663,16 @@ function VideoStyle() {
             </select>
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Clip length</label>
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Clip length</label>
             <div className="mt-2 flex gap-2">
               {[4, 6, 8].map((s) => (
-                <label key={s} className="inline-flex items-center gap-1 cursor-pointer">
+                <label key={s} className="inline-flex items-center gap-1 cursor-pointer text-[var(--admin-ink)]">
                   <input
                     type="radio"
                     name="clip-length"
                     checked={settings.clip_length_seconds === s}
                     onChange={() => update({ key: "clip_length_seconds", value: s })}
-                    className="accent-[#D4AF37]"
+                    className="accent-[var(--admin-gold)]"
                     data-testid={`radio-clip-${s}`}
                   />
                   <span className="text-sm">{s}s</span>
@@ -668,13 +681,13 @@ function VideoStyle() {
             </div>
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Include back</label>
-            <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Include back</label>
+            <label className="mt-2 inline-flex items-center gap-2 cursor-pointer text-[var(--admin-ink)]">
               <input
                 type="checkbox"
                 checked={settings.include_back}
                 onChange={() => update({ key: "include_back", value: !settings.include_back })}
-                className="accent-[#D4AF37] h-4 w-4"
+                className="accent-[var(--admin-gold)] h-4 w-4"
                 data-testid="check-include-back"
               />
               <span className="text-sm">{settings.include_back ? "Front + Back" : "Front only"}</span>
@@ -701,13 +714,15 @@ function OutputPublishing() {
   const dirty = draftCaption !== null && draftCaption !== settings.caption_template;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Output &amp; Publishing</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">
+        Output &amp; Publishing
+      </h2>
       <div className="space-y-4">
-        <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+        <div className="flex items-center justify-between bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3">
           <div>
-            <p className="text-sm font-semibold text-[#1A1A1A]">Auto-post to Instagram</p>
-            <p className="text-[10px] text-[#888]">
+            <p className="text-sm font-semibold text-[var(--admin-ink)]">Auto-post to Instagram</p>
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">
               After each successful reel run, fire <code>runIgDailyPost</code> with <code>force=true</code>.
             </p>
           </div>
@@ -716,23 +731,23 @@ function OutputPublishing() {
               type="checkbox"
               checked={settings.auto_post_instagram}
               onChange={() => update({ key: "auto_post_instagram", value: !settings.auto_post_instagram })}
-              className="accent-[#D4AF37] h-4 w-4"
+              className="accent-[var(--admin-gold)] h-4 w-4"
               data-testid="check-auto-post"
             />
-            <span className="text-xs text-[#666]">{settings.auto_post_instagram ? "on" : "off"}</span>
+            <span className="text-xs text-[var(--admin-ink-dim)]">{settings.auto_post_instagram ? "on" : "off"}</span>
           </label>
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Caption template</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Caption template</label>
           <textarea
             rows={3}
             value={draftCaption ?? ""}
             onChange={(e) => setDraftCaption(e.target.value)}
-            className="mt-2 w-full text-sm border border-[#E8E4DC] rounded p-2 bg-white font-mono"
+            className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded p-2 bg-[var(--admin-panel2)] text-[var(--admin-ink)] font-mono"
             data-testid="textarea-caption"
           />
-          <p className="mt-1 text-[10px] text-[#888]">
+          <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
             Variables: <code>{"{{topGrade}}"}</code>, <code>{"{{cardCount}}"}</code>, <code>{"{{date}}"}</code>,{" "}
             <code>{"{{topCard}}"}</code>
           </p>
@@ -742,7 +757,7 @@ function OutputPublishing() {
               if (draftCaption !== null) update({ key: "caption_template", value: draftCaption });
             }}
             disabled={!dirty}
-            className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+            className={adminButtonClass({ variant: "gold", size: "sm", className: "mt-2 uppercase tracking-wider" })}
           >
             {dirty ? "Save Caption" : "Saved"}
           </button>
@@ -750,16 +765,18 @@ function OutputPublishing() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Output resolution</label>
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+              Output resolution
+            </label>
             <div className="mt-2 flex gap-3">
               {[720, 1080].map((r) => (
-                <label key={r} className="inline-flex items-center gap-1 cursor-pointer">
+                <label key={r} className="inline-flex items-center gap-1 cursor-pointer text-[var(--admin-ink)]">
                   <input
                     type="radio"
                     name="output-resolution"
                     checked={settings.output_resolution === r}
                     onChange={() => update({ key: "output_resolution", value: r })}
-                    className="accent-[#D4AF37]"
+                    className="accent-[var(--admin-gold)]"
                     data-testid={`radio-res-${r}`}
                   />
                   <span className="text-sm">{r}p</span>
@@ -768,13 +785,13 @@ function OutputPublishing() {
             </div>
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Watermark</label>
-            <label className="mt-2 inline-flex items-center gap-2 cursor-pointer">
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Watermark</label>
+            <label className="mt-2 inline-flex items-center gap-2 cursor-pointer text-[var(--admin-ink)]">
               <input
                 type="checkbox"
                 checked={settings.watermark_enabled}
                 onChange={() => update({ key: "watermark_enabled", value: !settings.watermark_enabled })}
-                className="accent-[#D4AF37] h-4 w-4"
+                className="accent-[var(--admin-gold)] h-4 w-4"
                 data-testid="check-watermark"
               />
               <span className="text-sm">{settings.watermark_enabled ? "on" : "off"}</span>
@@ -817,13 +834,13 @@ function Notifications() {
   const hookDirty = draftWebhook !== null && draftWebhook !== settings.notify_webhook_url;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Notifications</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">Notifications</h2>
       <div className="space-y-4">
-        <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+        <div className="flex items-center justify-between bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3">
           <div>
-            <p className="text-sm font-semibold text-[#1A1A1A]">Notify card owners when featured</p>
-            <p className="text-[10px] text-[#888]">
+            <p className="text-sm font-semibold text-[var(--admin-ink)]">Notify card owners when featured</p>
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">
               Emails each cert's owner only if they have <code>marketing_feature_consent</code>.
             </p>
           </div>
@@ -832,21 +849,21 @@ function Notifications() {
               type="checkbox"
               checked={settings.notify_card_owners}
               onChange={() => update({ key: "notify_card_owners", value: !settings.notify_card_owners })}
-              className="accent-[#D4AF37] h-4 w-4"
+              className="accent-[var(--admin-gold)] h-4 w-4"
               data-testid="check-notify-card-owners"
             />
-            <span className="text-xs text-[#666]">{settings.notify_card_owners ? "on" : "off"}</span>
+            <span className="text-xs text-[var(--admin-ink-dim)]">{settings.notify_card_owners ? "on" : "off"}</span>
           </label>
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Email recipient</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Email recipient</label>
           <div className="mt-2 flex gap-2">
             <input
               type="email"
               value={draftEmail ?? ""}
               onChange={(e) => setDraftEmail(e.target.value)}
               placeholder="ops@mintvaultuk.com"
-              className="flex-1 text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              className="flex-1 text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
               data-testid="input-notify-email"
             />
             <button
@@ -855,22 +872,22 @@ function Notifications() {
                 if (draftEmail !== null) update({ key: "notify_email", value: draftEmail });
               }}
               disabled={!emailDirty}
-              className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+              className={adminButtonClass({ variant: "gold", size: "sm", className: "uppercase tracking-wider" })}
             >
               Save
             </button>
           </div>
-          <p className="mt-1 text-[10px] text-[#888]">Leave blank to disable.</p>
+          <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">Leave blank to disable.</p>
         </div>
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-[#888]">Webhook URL</label>
+          <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Webhook URL</label>
           <div className="mt-2 flex gap-2">
             <input
               type="url"
               value={draftWebhook ?? ""}
               onChange={(e) => setDraftWebhook(e.target.value)}
               placeholder="https://hooks.example.com/…"
-              className="flex-1 text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white font-mono"
+              className="flex-1 text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)] font-mono"
               data-testid="input-notify-webhook"
             />
             <button
@@ -879,7 +896,7 @@ function Notifications() {
                 if (draftWebhook !== null) update({ key: "notify_webhook_url", value: draftWebhook });
               }}
               disabled={!hookDirty}
-              className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+              className={adminButtonClass({ variant: "gold", size: "sm", className: "uppercase tracking-wider" })}
             >
               Save
             </button>
@@ -890,14 +907,14 @@ function Notifications() {
                 testMutation.mutate();
               }}
               disabled={!settings.notify_webhook_url || testMutation.isPending}
-              className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-white border border-[#E8E4DC] text-[#555] hover:bg-[#FAFAF8] disabled:opacity-50"
+              className={adminButtonClass({ size: "sm", className: "uppercase tracking-wider" })}
             >
               {testMutation.isPending ? "Testing…" : "Test"}
             </button>
           </div>
           {testResult && (
             <p
-              className={`mt-2 text-xs ${testResult.startsWith("Webhook accepted") ? "text-emerald-700" : "text-red-700"}`}
+              className={`mt-2 text-xs ${testResult.startsWith("Webhook accepted") ? "text-[var(--admin-green)]" : "text-[var(--admin-red)]"}`}
             >
               {testResult}
             </p>
@@ -923,29 +940,33 @@ function SocialPublishing() {
   if (!settings) return null;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Social Publishing</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">
+        Social Publishing
+      </h2>
 
       {/* Meta */}
-      <div className="border border-[#E8E4DC] rounded-xl p-4 mb-4">
+      <div className="border border-[var(--admin-line)] rounded-xl p-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Instagram size={14} className="text-[#D4AF37]" />
-            <Facebook size={14} className="text-[#D4AF37]" />
-            <span className="text-xs uppercase tracking-wider text-[#666]">Meta (Instagram + Facebook)</span>
+            <Instagram size={14} className="text-[var(--admin-gold-hi)]" />
+            <Facebook size={14} className="text-[var(--admin-gold-hi)]" />
+            <span className="text-xs uppercase tracking-wider text-[var(--admin-ink-dim)]">
+              Meta (Instagram + Facebook)
+            </span>
           </div>
           <span
             className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
               meta?.valid
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-red-50 text-red-700 border-red-200"
+                ? "bg-[var(--admin-panel2)] text-[var(--admin-green)] border-[var(--admin-line)]"
+                : "bg-[var(--admin-panel2)] text-[var(--admin-red)] border-[var(--admin-line)]"
             }`}
           >
             {meta === undefined ? "…" : meta.valid ? "Connected" : "Not connected"}
           </span>
         </div>
         {meta && (
-          <p className="text-[10px] text-[#888] mb-3 font-mono">
+          <p className="text-[10px] text-[var(--admin-ink-faint)] mb-3 font-mono">
             IG user: {meta.igUserId ?? "—"} · FB page: {meta.fbPageId ?? "—"} · scopes: {meta.scopes.length}
           </p>
         )}
@@ -966,7 +987,7 @@ function SocialPublishing() {
             onChange={(v) => update({ key: "instagram_draft_mode", value: v })}
           />
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
               Post delay — {settings.post_delay_minutes} min
             </label>
             <input
@@ -976,7 +997,7 @@ function SocialPublishing() {
               step={5}
               value={settings.post_delay_minutes}
               onChange={(e) => update({ key: "post_delay_minutes", value: Number(e.target.value) })}
-              className="w-full mt-2 accent-[#D4AF37]"
+              className="w-full mt-2 accent-[var(--admin-gold)]"
               data-testid="slider-post-delay"
             />
           </div>
@@ -984,23 +1005,25 @@ function SocialPublishing() {
       </div>
 
       {/* TikTok */}
-      <div className="border border-[#E8E4DC] rounded-xl p-4">
+      <div className="border border-[var(--admin-line)] rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Music size={14} className="text-[#D4AF37]" />
-            <span className="text-xs uppercase tracking-wider text-[#666]">TikTok</span>
+            <Music size={14} className="text-[var(--admin-gold-hi)]" />
+            <span className="text-xs uppercase tracking-wider text-[var(--admin-ink-dim)]">TikTok</span>
           </div>
           <span
             className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${
               tiktok?.valid
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-red-50 text-red-700 border-red-200"
+                ? "bg-[var(--admin-panel2)] text-[var(--admin-green)] border-[var(--admin-line)]"
+                : "bg-[var(--admin-panel2)] text-[var(--admin-red)] border-[var(--admin-line)]"
             }`}
           >
             {tiktok === undefined ? "…" : tiktok.valid ? "Connected" : "Not connected"}
           </span>
         </div>
-        {tiktok && <p className="text-[10px] text-[#888] mb-3 font-mono">open_id: {tiktok.openId ?? "—"}</p>}
+        {tiktok && (
+          <p className="text-[10px] text-[var(--admin-ink-faint)] mb-3 font-mono">open_id: {tiktok.openId ?? "—"}</p>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <ToggleRow
             label="Auto-post TikTok"
@@ -1008,11 +1031,11 @@ function SocialPublishing() {
             onChange={(v) => update({ key: "auto_post_tiktok", value: v })}
           />
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Privacy</label>
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Privacy</label>
             <select
               value={settings.tiktok_privacy}
               onChange={(e) => update({ key: "tiktok_privacy", value: e.target.value })}
-              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
               data-testid="select-tiktok-privacy"
             >
               <option value="PUBLIC_TO_EVERYONE">Public</option>
@@ -1038,11 +1061,16 @@ function SocialPublishing() {
 
 function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg px-3 py-2">
-      <span className="text-sm text-[#1A1A1A]">{label}</span>
+    <div className="flex items-center justify-between bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg px-3 py-2">
+      <span className="text-sm text-[var(--admin-ink)]">{label}</span>
       <label className="inline-flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" checked={value} onChange={() => onChange(!value)} className="accent-[#D4AF37] h-4 w-4" />
-        <span className="text-xs text-[#666]">{value ? "on" : "off"}</span>
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={() => onChange(!value)}
+          className="accent-[var(--admin-gold)] h-4 w-4"
+        />
+        <span className="text-xs text-[var(--admin-ink-dim)]">{value ? "on" : "off"}</span>
       </label>
     </div>
   );
@@ -1073,8 +1101,10 @@ function ContentEnhancement() {
   const formatDirty = draftFormat !== null && draftFormat !== settings.text_overlay_format;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-      <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest mb-4">Content Enhancement</h2>
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
+      <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest mb-4">
+        Content Enhancement
+      </h2>
       <div className="space-y-4">
         <AssetUploadRow
           label="Intro clip"
@@ -1102,15 +1132,17 @@ function ContentEnhancement() {
               value={settings.text_overlay_enabled}
               onChange={(v) => update({ key: "text_overlay_enabled", value: v })}
             />
-            <label className="mt-3 block text-[10px] uppercase tracking-wider text-[#888]">Format</label>
+            <label className="mt-3 block text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+              Format
+            </label>
             <input
               type="text"
               value={draftFormat ?? ""}
               onChange={(e) => setDraftFormat(e.target.value)}
-              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white font-mono"
+              className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)] font-mono"
               data-testid="input-text-overlay-format"
             />
-            <p className="mt-1 text-[10px] text-[#888]">
+            <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
               Variables: <code>{"{{certNumber}}"}</code>, <code>{"{{grade}}"}</code>, <code>{"{{cardName}}"}</code>
             </p>
             <button
@@ -1119,17 +1151,17 @@ function ContentEnhancement() {
                 if (draftFormat !== null) update({ key: "text_overlay_format", value: draftFormat });
               }}
               disabled={!formatDirty}
-              className="mt-2 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#1A1400] hover:opacity-90 disabled:opacity-50"
+              className={adminButtonClass({ variant: "gold", size: "sm", className: "mt-2 uppercase tracking-wider" })}
             >
               Save
             </button>
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-[#888]">Transition</label>
+            <label className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Transition</label>
             <select
               value={settings.transition_style}
               onChange={(e) => update({ key: "transition_style", value: e.target.value })}
-              className="mt-2 w-full text-sm border border-[#E8E4DC] rounded px-2 py-1.5 bg-white"
+              className="mt-2 w-full text-sm border border-[var(--admin-line)] rounded px-2 py-1.5 bg-[var(--admin-panel2)] text-[var(--admin-ink)]"
               data-testid="select-transition"
             >
               <option value="cut">Cut</option>
@@ -1139,7 +1171,7 @@ function ContentEnhancement() {
           </div>
         </div>
 
-        <div className="border-t border-[#F0EDE5] pt-3">
+        <div className="border-t border-[var(--admin-line)] pt-3">
           <ToggleRow
             label="Auto-generate thumbnail"
             value={settings.auto_generate_thumbnail}
@@ -1170,17 +1202,17 @@ function AssetUploadRow({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   return (
-    <div className="flex items-center justify-between gap-3 bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
+    <div className="flex items-center justify-between gap-3 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3">
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-[#1A1A1A]">{label}</p>
-        <p className="text-[10px] text-[#888] truncate font-mono">{current || "none"}</p>
-        {err && <p className="text-[10px] text-red-700">{err}</p>}
+        <p className="text-sm font-semibold text-[var(--admin-ink)]">{label}</p>
+        <p className="text-[10px] text-[var(--admin-ink-faint)] truncate font-mono">{current || "none"}</p>
+        {err && <p className="text-[10px] text-[var(--admin-red)]">{err}</p>}
       </div>
       <label
         className={`inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg cursor-pointer ${
           busy
-            ? "bg-white text-[#888] border border-[#E8E4DC] opacity-50"
-            : "bg-white text-[#555] border border-[#E8E4DC] hover:border-[#D4AF37]"
+            ? "bg-[var(--admin-panel3)] text-[var(--admin-ink-faint)] border border-[var(--admin-line)] opacity-50"
+            : "bg-[var(--admin-panel3)] text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-ink)]"
         }`}
       >
         <Upload size={12} /> {busy ? "Uploading…" : "Upload"}
@@ -1264,38 +1296,46 @@ function FeaturedCardsTable() {
 
   return (
     <>
-      <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+      <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
         <div className="flex items-baseline justify-between mb-4">
-          <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Featured Cards</h2>
-          <span className="text-xs text-[#888888]">
+          <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest">Featured Cards</h2>
+          <span className="text-xs text-[var(--admin-ink-faint)]">
             {isLoading ? "…" : `${featuredCount} of ${visible.length} in pool`}
           </span>
         </div>
-        <p className="text-xs text-[#666666] mb-4">
+        <p className="text-xs text-[var(--admin-ink-dim)] mb-4">
           Admin-curated pool. <strong>Pinned</strong> cards (📌) always appear first regardless of grade or sort order.{" "}
           <strong>Blacklisted</strong> cards (🚫) are excluded permanently. Toggles write
           <code className="mx-1">audit_log</code> rows.
         </p>
         {isLoading ? (
           <div className="py-12 flex justify-center">
-            <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+            <Loader2 size={20} className="text-[var(--admin-gold-hi)] animate-spin" />
           </div>
         ) : visible.length === 0 ? (
-          <p className="text-sm text-[#888888] py-6 text-center">No graded cards yet.</p>
+          <p className="text-sm text-[var(--admin-ink-faint)] py-6 text-center">No graded cards yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left border-b border-[#E8E4DC]">
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cert ID</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Card Name</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Set</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Grade</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">
+                <tr className="text-left border-b border-[var(--admin-line)]">
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                    Cert ID
+                  </th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                    Card Name
+                  </th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Set</th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                    Grade
+                  </th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] text-center">
                     Featured
                   </th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">Pinned</th>
-                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888] text-center">
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] text-center">
+                    Pinned
+                  </th>
+                  <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] text-center">
                     Blacklist
                   </th>
                 </tr>
@@ -1306,19 +1346,19 @@ function FeaturedCardsTable() {
                   return (
                     <tr
                       key={c.certNumber}
-                      className={`border-b border-[#F0EDE5] ${c.pinned ? "bg-[#FAF5E0]" : ""}`}
+                      className={`border-b border-[var(--admin-line)] ${c.pinned ? "bg-[var(--admin-panel2)]" : ""}`}
                       data-testid={`row-card-${c.certNumber}`}
                     >
-                      <td className="py-2 px-3 font-mono text-[#1A1A1A]">
-                        {c.pinned && <Pin size={12} className="inline mr-1 text-[#D4AF37]" />}
+                      <td className="py-2 px-3 font-mono text-[var(--admin-gold-hi)]">
+                        {c.pinned && <Pin size={12} className="inline mr-1 text-[var(--admin-gold-hi)]" />}
                         {c.certNumber}
                       </td>
-                      <td className="py-2 px-3 text-[#1A1A1A]">{c.cardName ?? "—"}</td>
-                      <td className="py-2 px-3 text-[#555]">
+                      <td className="py-2 px-3 text-[var(--admin-ink)]">{c.cardName ?? "—"}</td>
+                      <td className="py-2 px-3 text-[var(--admin-ink-dim)]">
                         {c.cardSet ?? "—"}
                         {c.year ? ` (${c.year})` : ""}
                       </td>
-                      <td className="py-2 px-3 font-bold text-[#1A1A1A]">{fmtGrade(c.grade)}</td>
+                      <td className="py-2 px-3 font-bold text-[var(--admin-ink)]">{fmtGrade(c.grade)}</td>
                       <td className="py-2 px-3 text-center">
                         <input
                           type="checkbox"
@@ -1328,7 +1368,7 @@ function FeaturedCardsTable() {
                             setBusyCert(c.certNumber);
                             toggleFeatured.mutate({ certNumber: c.certNumber, value: !c.featured });
                           }}
-                          className="accent-[#D4AF37] h-4 w-4"
+                          className="accent-[var(--admin-gold)] h-4 w-4"
                           data-testid={`toggle-featured-${c.certNumber}`}
                         />
                       </td>
@@ -1342,8 +1382,8 @@ function FeaturedCardsTable() {
                           disabled={busy}
                           className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${
                             c.pinned
-                              ? "bg-[#D4AF37] text-[#1A1400]"
-                              : "bg-white border border-[#E8E4DC] text-[#888] hover:border-[#D4AF37]"
+                              ? "bg-[var(--admin-gold)] text-[var(--admin-bg)]"
+                              : "bg-[var(--admin-panel3)] border border-[var(--admin-line)] text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]"
                           } disabled:opacity-50`}
                           aria-label={c.pinned ? "Unpin" : "Pin"}
                           title={c.pinned ? "Unpin" : "Pin"}
@@ -1360,7 +1400,7 @@ function FeaturedCardsTable() {
                             toggleBlacklisted.mutate({ certNumber: c.certNumber, value: true });
                           }}
                           disabled={busy}
-                          className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-white border border-[#E8E4DC] text-[#888] hover:border-red-400 hover:text-red-600 disabled:opacity-50"
+                          className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--admin-panel3)] border border-[var(--admin-line)] text-[var(--admin-ink-faint)] hover:border-[var(--admin-red)] hover:text-[var(--admin-red)] disabled:opacity-50"
                           aria-label="Blacklist"
                           title="Blacklist"
                           data-testid={`toggle-blacklist-${c.certNumber}`}
@@ -1378,7 +1418,7 @@ function FeaturedCardsTable() {
 
         {error && (
           <div
-            className="mt-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm"
+            className="mt-4 flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-red)] text-[var(--admin-red)] rounded-lg p-3 text-sm"
             role="alert"
           >
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />
@@ -1412,30 +1452,36 @@ function BlacklistSection({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-[#FAFAF8] transition-colors"
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-[var(--admin-panel2)] transition-colors"
       >
-        <h2 className="text-sm font-bold text-[#888] uppercase tracking-widest">Blacklisted ({cards.length})</h2>
-        {open ? <ChevronUp size={16} className="text-[#888]" /> : <ChevronDown size={16} className="text-[#888]" />}
+        <h2 className="text-sm font-bold text-[var(--admin-ink-faint)] uppercase tracking-widest">
+          Blacklisted ({cards.length})
+        </h2>
+        {open ? (
+          <ChevronUp size={16} className="text-[var(--admin-ink-faint)]" />
+        ) : (
+          <ChevronDown size={16} className="text-[var(--admin-ink-faint)]" />
+        )}
       </button>
       {open && (
-        <div className="border-t border-[#E8E4DC] px-6 py-4">
+        <div className="border-t border-[var(--admin-line)] px-6 py-4">
           <table className="w-full text-sm">
             <tbody>
               {cards.map((c) => (
-                <tr key={c.certNumber} className="border-b border-[#F0EDE5]">
-                  <td className="py-2 px-3 font-mono text-[#1A1A1A]">{c.certNumber}</td>
-                  <td className="py-2 px-3 text-[#555]">{c.cardName ?? "—"}</td>
-                  <td className="py-2 px-3 font-bold text-[#1A1A1A]">{fmtGrade(c.grade)}</td>
+                <tr key={c.certNumber} className="border-b border-[var(--admin-line)]">
+                  <td className="py-2 px-3 font-mono text-[var(--admin-gold-hi)]">{c.certNumber}</td>
+                  <td className="py-2 px-3 text-[var(--admin-ink-dim)]">{c.cardName ?? "—"}</td>
+                  <td className="py-2 px-3 font-bold text-[var(--admin-ink)]">{fmtGrade(c.grade)}</td>
                   <td className="py-2 px-3 text-right">
                     <button
                       type="button"
                       onClick={() => onRestore(c.certNumber)}
                       disabled={busyCert === c.certNumber}
-                      className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-lg bg-white border border-[#E8E4DC] text-[#555] hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50"
+                      className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-lg bg-[var(--admin-panel3)] border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-green)] hover:text-[var(--admin-green)] disabled:opacity-50"
                     >
                       Restore
                     </button>
@@ -1571,23 +1617,27 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
   }
 
   return (
-    <div className="border border-[#E8E4DC] rounded-xl overflow-hidden" data-testid={`history-${entry.date}`}>
-      <div className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[#FAFAF8] transition-colors">
+    <div className="border border-[var(--admin-line)] rounded-xl overflow-hidden" data-testid={`history-${entry.date}`}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-[var(--admin-panel2)] transition-colors">
         <button
           type="button"
           onClick={() => setOpen(!open)}
           className="flex items-center gap-3 min-w-0 flex-1 text-left"
         >
           {thumbUrl && open && (
-            <img src={thumbUrl} alt="" className="w-[60px] h-[60px] object-cover rounded border border-[#E8E4DC]" />
+            <img
+              src={thumbUrl}
+              alt=""
+              className="w-[60px] h-[60px] object-cover rounded border border-[var(--admin-line)]"
+            />
           )}
-          <span className="font-mono text-sm text-[#1A1A1A]">{entry.date}</span>
+          <span className="font-mono text-sm text-[var(--admin-gold-hi)]">{entry.date}</span>
           <span
             className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border font-semibold ${badge.cls}`}
           >
             {badge.label}
           </span>
-          <span className="text-xs text-[#666] truncate">
+          <span className="text-xs text-[var(--admin-ink-dim)] truncate">
             {entry.successCount}/{entry.cardCount} ok
             {entry.failCount > 0 && <> · {entry.failCount} failed</>}
             {entry.model && (
@@ -1603,7 +1653,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           <button
             type="button"
             onClick={() => publish("instagram")}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
             title="Publish to Instagram"
           >
             <Instagram size={12} />
@@ -1611,7 +1661,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           <button
             type="button"
             onClick={() => publish("facebook")}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
             title="Publish to Facebook"
           >
             <Facebook size={12} />
@@ -1619,7 +1669,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           <button
             type="button"
             onClick={() => publish("tiktok")}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
             title="Publish to TikTok"
           >
             <Music size={12} />
@@ -1627,7 +1677,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           <button
             type="button"
             onClick={refreshInsights}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
             title="Refresh IG insights"
           >
             <RefreshCw size={12} />
@@ -1636,7 +1686,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
             type="button"
             onClick={downloadAll}
             disabled={entry.successCount === 0}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37] disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] disabled:opacity-40"
             title={stale ? "URLs may have expired" : "Download all videos"}
           >
             <Download size={12} /> {stale ? "Stale" : ""}
@@ -1644,38 +1694,42 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
           <button
             type="button"
             onClick={onRerun}
-            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+            className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
             title="Re-run with force=true"
           >
             <RotateCcw size={12} />
           </button>
-          {open ? <ChevronUp size={16} className="text-[#888]" /> : <ChevronDown size={16} className="text-[#888]" />}
+          {open ? (
+            <ChevronUp size={16} className="text-[var(--admin-ink-faint)]" />
+          ) : (
+            <ChevronDown size={16} className="text-[var(--admin-ink-faint)]" />
+          )}
         </div>
       </div>
       {pubMsg && (
-        <div className="px-4 py-2 text-[10px] bg-[#FAFAF8] border-t border-[#E8E4DC] text-[#555] font-mono">
+        <div className="px-4 py-2 text-[10px] bg-[var(--admin-panel2)] border-t border-[var(--admin-line)] text-[var(--admin-ink-dim)] font-mono">
           {pubMsg}
         </div>
       )}
       {open && (
-        <div className="border-t border-[#E8E4DC] p-4 bg-[#FAFAF8]">
-          <p className="text-[10px] text-[#888] mb-3">
+        <div className="border-t border-[var(--admin-line)] p-4 bg-[var(--admin-panel2)]">
+          <p className="text-[10px] text-[var(--admin-ink-faint)] mb-3">
             Generated {fmtDate(entry.createdAt)} · manifest <code>{entry.manifestKey}</code>
           </p>
           {hasApprovals && (
-            <div className="mb-3 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg p-2">
-              <span className="text-xs text-amber-800">Per-card approval required before publishing.</span>
+            <div className="mb-3 flex items-center justify-between bg-[var(--admin-panel3)] border border-[var(--admin-amber)] rounded-lg p-2">
+              <span className="text-xs text-[var(--admin-amber)]">Per-card approval required before publishing.</span>
               <button
                 type="button"
                 onClick={approveAll}
-                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-green)] hover:border-[var(--admin-green)]"
               >
                 Approve All
               </button>
             </div>
           )}
           {entry.cards.length === 0 ? (
-            <p className="text-sm text-[#888]">No per-card data — manifest is empty or unreadable.</p>
+            <p className="text-sm text-[var(--admin-ink-faint)]">No per-card data — manifest is empty or unreadable.</p>
           ) : (
             <ul className="space-y-3">
               {entry.cards.map((c, i) => {
@@ -1683,20 +1737,24 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
                 return (
                   <li
                     key={`${entry.date}-${c.certNumber}-${i}`}
-                    className="bg-white border border-[#E8E4DC] rounded-lg p-3"
+                    className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg p-3"
                     data-testid={`history-card-${entry.date}-${c.certNumber}`}
                   >
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="flex items-baseline gap-2 min-w-0">
-                        <span className="font-mono text-sm font-semibold text-[#1A1A1A]">{c.certNumber}</span>
-                        <span className="text-xs text-[#666]">grade {fmtGrade(c.grade)}</span>
-                        {c.cardName && <span className="text-xs text-[#888] truncate">· {c.cardName}</span>}
+                        <span className="font-mono text-sm font-semibold text-[var(--admin-gold-hi)]">
+                          {c.certNumber}
+                        </span>
+                        <span className="text-xs text-[var(--admin-ink-dim)]">grade {fmtGrade(c.grade)}</span>
+                        {c.cardName && (
+                          <span className="text-xs text-[var(--admin-ink-faint)] truncate">· {c.cardName}</span>
+                        )}
                         {ap && (
                           <span
                             className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border font-semibold ${
                               ap.approved
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : "bg-red-50 text-red-700 border-red-200"
+                                ? "bg-[var(--admin-panel2)] text-[var(--admin-green)] border-[var(--admin-line)]"
+                                : "bg-[var(--admin-panel2)] text-[var(--admin-red)] border-[var(--admin-line)]"
                             }`}
                           >
                             {ap.approved ? "approved" : "pending"}
@@ -1709,7 +1767,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
                             <button
                               type="button"
                               onClick={() => toggleApproval(c.certNumber, false)}
-                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-red-400 hover:text-red-700"
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-red)] hover:text-[var(--admin-red)]"
                             >
                               Reject
                             </button>
@@ -1717,7 +1775,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
                             <button
                               type="button"
                               onClick={() => toggleApproval(c.certNumber, true)}
-                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-emerald-400 hover:text-emerald-700"
+                              className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-green)] hover:text-[var(--admin-green)]"
                             >
                               <Check size={10} className="inline" /> Approve
                             </button>
@@ -1725,7 +1783,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
                         <button
                           type="button"
                           onClick={() => regenerate(c.certNumber)}
-                          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#E8E4DC] text-[#555] hover:border-[#D4AF37] hover:text-[#D4AF37]"
+                          className="text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)]"
                         >
                           <RotateCcw size={10} className="inline" /> Regen
                         </button>
@@ -1736,14 +1794,14 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
                         src={c.videoUrl}
                         controls
                         preload="none"
-                        className="w-full max-w-sm rounded-lg border border-[#E8E4DC] bg-black"
+                        className="w-full max-w-sm rounded-lg border border-[var(--admin-line)] bg-black"
                       />
                     ) : c.error ? (
-                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2 font-mono break-words">
+                      <p className="text-xs text-[var(--admin-red)] bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded p-2 font-mono break-words">
                         {c.error}
                       </p>
                     ) : (
-                      <p className="text-xs text-[#888]">No video URL · no error recorded</p>
+                      <p className="text-xs text-[var(--admin-ink-faint)]">No video URL · no error recorded</p>
                     )}
                   </li>
                 );
@@ -1771,17 +1829,17 @@ function HistorySection() {
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
       <div className="flex items-baseline justify-between mb-4">
-        <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Reel History</h2>
-        <span className="text-xs text-[#888888]">Last 10 runs</span>
+        <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest">Reel History</h2>
+        <span className="text-xs text-[var(--admin-ink-faint)]">Last 10 runs</span>
       </div>
       {isLoading ? (
         <div className="py-12 flex justify-center">
-          <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+          <Loader2 size={20} className="text-[var(--admin-gold-hi)] animate-spin" />
         </div>
       ) : (data?.history.length ?? 0) === 0 ? (
-        <p className="text-sm text-[#888] py-6 text-center">
+        <p className="text-sm text-[var(--admin-ink-faint)] py-6 text-center">
           No reel runs yet. Audit-log only captures completed runs — pure skips won't appear.
         </p>
       ) : (
@@ -1836,13 +1894,15 @@ function AnalyticsSection() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
+    <div className="bg-[var(--admin-panel)] rounded-2xl border border-[var(--admin-line)] p-6">
       <div className="flex items-baseline justify-between mb-4">
-        <h2 className="text-sm font-bold text-[#D4AF37] uppercase tracking-widest">Analytics</h2>
-        <span className="text-xs text-[#888888]">{isLoading ? "…" : `$${totalUsd.toFixed(2)} spent to date`}</span>
+        <h2 className="text-sm font-bold text-[var(--admin-gold-hi)] uppercase tracking-widest">Analytics</h2>
+        <span className="text-xs text-[var(--admin-ink-faint)]">
+          {isLoading ? "…" : `$${totalUsd.toFixed(2)} spent to date`}
+        </span>
       </div>
       {best && (
-        <div className="mb-4 inline-flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-[#FAF5E0] border border-[#D4AF37] text-[#1A1400]">
+        <div className="mb-4 inline-flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold px-3 py-1.5 rounded-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)] text-[var(--admin-gold-hi)]">
           ★ Best performing: {best.reelDate}
           {best.instagramLikes != null && <> · {best.instagramLikes.toLocaleString()} likes</>}
         </div>
@@ -1861,24 +1921,30 @@ function AnalyticsSection() {
       )}
       {isLoading ? (
         <div className="py-12 flex justify-center">
-          <Loader2 size={20} className="text-[#D4AF37] animate-spin" />
+          <Loader2 size={20} className="text-[var(--admin-gold-hi)] animate-spin" />
         </div>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-[#888] py-6 text-center">No runs recorded yet.</p>
+        <p className="text-sm text-[var(--admin-ink-faint)] py-6 text-center">No runs recorded yet.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left border-b border-[#E8E4DC]">
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Date</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Success</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Cost</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">IG Likes</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Views</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Reach</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Eng%</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">vs Prev</th>
-                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[#888888]">Posted</th>
+              <tr className="text-left border-b border-[var(--admin-line)]">
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Date</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                  Success
+                </th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cost</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                  IG Likes
+                </th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Views</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Reach</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Eng%</th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                  vs Prev
+                </th>
+                <th className="py-2 px-3 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Posted</th>
               </tr>
             </thead>
             <tbody>
@@ -1886,22 +1952,24 @@ function AnalyticsSection() {
                 const prev = rows[i + 1];
                 const eng = engagementRate(r);
                 return (
-                  <tr key={`${r.reelDate}-${i}`} className="border-b border-[#F0EDE5]">
-                    <td className="py-2 px-3 font-mono text-[#1A1A1A]">{r.reelDate}</td>
-                    <td className="py-2 px-3 text-emerald-700">{r.successCount ?? 0}</td>
-                    <td className="py-2 px-3 font-mono">${(r.estimatedCostUsd ?? 0).toFixed(2)}</td>
-                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramLikes ?? "—"}</td>
-                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramViews ?? "—"}</td>
-                    <td className="py-2 px-3 text-[#1A1A1A]">{r.instagramReach ?? "—"}</td>
-                    <td className="py-2 px-3 text-[#1A1A1A]">{eng == null ? "—" : `${eng.toFixed(1)}%`}</td>
-                    <td className="py-2 px-3 text-[#555]">{trendArrow(r, prev)}</td>
-                    <td className="py-2 px-3 text-[10px] text-[#555] space-x-1">
+                  <tr key={`${r.reelDate}-${i}`} className="border-b border-[var(--admin-line)]">
+                    <td className="py-2 px-3 font-mono text-[var(--admin-gold-hi)]">{r.reelDate}</td>
+                    <td className="py-2 px-3 text-[var(--admin-green)]">{r.successCount ?? 0}</td>
+                    <td className="py-2 px-3 font-mono text-[var(--admin-ink)]">
+                      ${(r.estimatedCostUsd ?? 0).toFixed(2)}
+                    </td>
+                    <td className="py-2 px-3 text-[var(--admin-ink)]">{r.instagramLikes ?? "—"}</td>
+                    <td className="py-2 px-3 text-[var(--admin-ink)]">{r.instagramViews ?? "—"}</td>
+                    <td className="py-2 px-3 text-[var(--admin-ink)]">{r.instagramReach ?? "—"}</td>
+                    <td className="py-2 px-3 text-[var(--admin-ink)]">{eng == null ? "—" : `${eng.toFixed(1)}%`}</td>
+                    <td className="py-2 px-3 text-[var(--admin-ink-dim)]">{trendArrow(r, prev)}</td>
+                    <td className="py-2 px-3 text-[10px] text-[var(--admin-ink-dim)] space-x-1">
                       {r.instagramPostId && (
                         <a
                           href={`https://www.instagram.com/p/${r.instagramPostId}`}
                           target="_blank"
                           rel="noopener"
-                          className="inline-flex items-center hover:text-[#D4AF37]"
+                          className="inline-flex items-center hover:text-[var(--admin-gold-hi)]"
                           title="View on Instagram"
                         >
                           <Instagram size={12} />
@@ -1928,21 +1996,24 @@ export default function AdminWeeklyReelPage() {
   const paused = !!settings?.pipeline_paused;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8] px-4 py-12">
+    <div className="admin-root min-h-screen px-4 py-12">
       <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-xl font-black text-[#1A1A1A]">Weekly Reel</h1>
-              <p className="text-xs text-[#888]">Grade-highlight video pipeline · admin curated</p>
+              <h1 className="text-xl font-black text-[var(--admin-ink)]">Weekly Reel</h1>
+              <p className="text-xs text-[var(--admin-ink-faint)]">Grade-highlight video pipeline · admin curated</p>
             </div>
             {paused && (
-              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-red-100 text-red-700 border border-red-200">
+              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full bg-[var(--admin-panel2)] text-[var(--admin-red)] border border-[var(--admin-red)]">
                 Paused
               </span>
             )}
           </div>
-          <Link href="/admin" className="text-xs text-[#666] hover:text-[#D4AF37] transition-colors">
+          <Link
+            href="/admin"
+            className="text-xs text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold-hi)] transition-colors"
+          >
             ← Admin Dashboard
           </Link>
         </div>

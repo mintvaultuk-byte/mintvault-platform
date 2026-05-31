@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import "./styles/v2-tokens.css";
+import "./styles/admin-tokens.css";
 
 // v2 fonts: Fraunces (display italic), Geist (body), JetBrains Mono (code)
 import "@fontsource/fraunces/400-italic.css";

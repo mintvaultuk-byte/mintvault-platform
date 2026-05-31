@@ -120,20 +120,23 @@ function EditLabelModal({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md" data-testid="edit-label-modal">
+      <DialogContent
+        className="bg-[var(--admin-panel)] border-[var(--admin-line)] text-[var(--admin-ink)] max-w-md"
+        data-testid="edit-label-modal"
+      >
         <DialogHeader>
-          <DialogTitle className="text-yellow-400 flex items-center gap-2">
+          <DialogTitle className="text-[var(--admin-gold-hi)] flex items-center gap-2">
             <Pencil className="h-4 w-4" /> Edit Label Data — {certId}
           </DialogTitle>
         </DialogHeader>
 
         {isLoading ? (
           <div className="flex justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
+            <Loader2 className="h-5 w-5 animate-spin text-[var(--admin-gold)]" />
           </div>
         ) : (
           <form onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))} className="space-y-4">
-            <div className="rounded-md bg-[#FFF9E6] border border-yellow-700/30 p-3 text-[11px] text-yellow-300 flex gap-2">
+            <div className="rounded-md bg-[var(--admin-panel2)] border border-[var(--admin-line)] p-3 text-[11px] text-[var(--admin-gold-hi)] flex gap-2">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               Label display only — grade, cert number, QR code and schema are not changed.
             </div>
@@ -146,26 +149,31 @@ function EditLabelModal({
               { id: "year", label: "Year" },
             ].map(({ id, label }) => (
               <div key={id} className="space-y-1">
-                <Label htmlFor={`edit-${id}`} className="text-xs text-[#666666]">
+                <Label htmlFor={`edit-${id}`} className="text-xs text-[var(--admin-ink-dim)]">
                   {label}
                 </Label>
                 <Input
                   id={`edit-${id}`}
                   {...form.register(id as any)}
-                  className="h-8 text-sm bg-[#FAFAF8] border-[#E8E4DC] text-[#1A1A1A]"
+                  className="h-8 text-sm bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)]"
                   data-testid={`input-edit-${id}`}
                 />
               </div>
             ))}
 
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose} className="text-[#999999]">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onClose}
+                className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)]"
+              >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={saveMutation.isPending}
-                className="bg-yellow-600 hover:bg-yellow-500 text-black font-bold"
+                className="bg-[var(--admin-gold)] hover:bg-[var(--admin-gold-hi)] text-[#1c1607] font-bold"
                 data-testid="btn-save-label-edit"
               >
                 {saveMutation.isPending ? (
@@ -212,20 +220,25 @@ function ReprintReasonModal({
         if (!open) onCancel();
       }}
     >
-      <DialogContent className="bg-white border-[#E8E4DC] text-[#1A1A1A] max-w-md" data-testid="reprint-reason-modal">
+      <DialogContent
+        className="bg-[var(--admin-panel)] border-[var(--admin-line)] text-[var(--admin-ink)] max-w-md"
+        data-testid="reprint-reason-modal"
+      >
         <DialogHeader>
-          <DialogTitle className="text-yellow-400 flex items-center gap-2">
+          <DialogTitle className="text-[var(--admin-gold-hi)] flex items-center gap-2">
             <AlertCircle className="h-4 w-4" /> Reprint claimed cert(s)
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="rounded-md bg-[#FFF9E6] border border-yellow-700/30 p-3 text-[11px] text-yellow-700 flex gap-2">
+          <div className="rounded-md bg-[var(--admin-panel2)] border border-[var(--admin-line)] p-3 text-[11px] text-[var(--admin-gold-hi)] flex gap-2">
             <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold mb-1">
                 {claimedCertIds.length} of {allCertIds.length} selected cert(s) already claimed:
               </p>
-              <p className="font-mono text-[10px] break-all">{claimedCertIds.join(", ")}</p>
+              <p className="text-[10px] break-all" style={{ fontFamily: "var(--admin-mono)" }}>
+                {claimedCertIds.join(", ")}
+              </p>
               <p className="mt-2">
                 Reprinting a claimed cert is recorded to audit_log with the reason below. Use only for damaged-in-post,
                 lost, or bad-cut reprints.
@@ -233,8 +246,8 @@ function ReprintReasonModal({
             </div>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="reprint-reason" className="text-xs text-[#666666]">
-              Reason (10-500 chars) <span className="text-red-500">*</span>
+            <Label htmlFor="reprint-reason" className="text-xs text-[var(--admin-ink-dim)]">
+              Reason (10-500 chars) <span className="text-[var(--admin-red)]">*</span>
             </Label>
             <textarea
               id="reprint-reason"
@@ -243,24 +256,33 @@ function ReprintReasonModal({
               rows={4}
               maxLength={500}
               placeholder="e.g. Lost in post — Royal Mail reported as undeliverable, replacement requested by customer"
-              className="w-full px-3 py-2 text-sm bg-[#FAFAF8] border border-[#E8E4DC] rounded-md text-[#1A1A1A] placeholder:text-[#AAAAAA] focus:outline-none focus:border-[#D4AF37] resize-none"
+              className="w-full px-3 py-2 text-sm bg-[var(--admin-bg2)] border border-[var(--admin-line-hard)] rounded-md text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)] resize-none"
               data-testid="input-reprint-reason"
             />
-            <p className="text-[10px] text-[#999999]">
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">
               {trimmed.length} / 500 chars{" "}
               {trimmed.length < 10 && trimmed.length > 0 ? `(${10 - trimmed.length} more required)` : ""}
             </p>
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={onCancel} className="text-[#999999]">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onCancel}
+            className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)]"
+          >
             Cancel
           </Button>
           <Button
             type="button"
             disabled={!valid || submitting}
             onClick={() => onSubmit(trimmed)}
-            className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
+            className="text-white font-bold"
+            style={{
+              background: "color-mix(in srgb, var(--admin-green) 28%, transparent)",
+              borderColor: "color-mix(in srgb, var(--admin-green) 45%, transparent)",
+            }}
             data-testid="btn-submit-reprint-reason"
           >
             {submitting ? (
@@ -299,7 +321,9 @@ function CertRow({
   return (
     <div
       className={`rounded-lg border transition-colors ${
-        selected ? "border-yellow-500/70 bg-[#FFF9E6]" : "border-[#E8E4DC] hover:border-[#E8E4DC]"
+        selected
+          ? "border-[var(--admin-gold)]/70 bg-[var(--admin-panel2)]"
+          : "border-[var(--admin-line)] hover:border-[var(--admin-line-hard)]"
       }`}
       data-testid={`queue-row-${cert.certId}`}
     >
@@ -307,18 +331,22 @@ function CertRow({
       <div className="flex items-center gap-3 p-2">
         {/* Checkbox */}
         <div
-          className="shrink-0 text-yellow-500 cursor-pointer"
+          className="shrink-0 text-[var(--admin-gold)] cursor-pointer"
           onClick={onToggle}
           data-testid={`checkbox-${cert.certId}`}
         >
-          {selected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4 text-[#999999]" />}
+          {selected ? (
+            <CheckSquare className="h-4 w-4" />
+          ) : (
+            <Square className="h-4 w-4 text-[var(--admin-ink-faint)]" />
+          )}
         </div>
 
         {/* Thumbnail */}
         <img
           src={imgUrl}
           alt={`Label ${cert.certId}`}
-          className="h-8 w-28 object-cover rounded border border-[#E8E4DC] shrink-0 cursor-pointer"
+          className="h-8 w-28 object-cover rounded border border-[var(--admin-line)] shrink-0 cursor-pointer"
           onClick={onToggle}
           loading="lazy"
           data-testid={`thumb-${cert.certId}`}
@@ -327,25 +355,32 @@ function CertRow({
         {/* Info — clicks toggle checkbox */}
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onToggle}>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-mono text-xs text-yellow-400" data-testid={`certid-${cert.certId}`}>
+            <span
+              className="text-xs text-[var(--admin-gold-hi)]"
+              style={{ fontFamily: "var(--admin-mono)" }}
+              data-testid={`certid-${cert.certId}`}
+            >
               {cert.certId}
             </span>
-            <Badge variant="outline" className="text-[10px] px-1 py-0 text-[#666666] border-[#E8E4DC]">
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1 py-0 text-[var(--admin-ink-dim)] border-[var(--admin-line)]"
+            >
               {gradeDisplay(cert)}
             </Badge>
             {cert.lastPrintedAt && (
               <Badge
                 variant="outline"
-                className="text-[10px] px-1 py-0 text-emerald-400 border-emerald-700/50"
+                className="text-[10px] px-1 py-0 text-[var(--admin-green)] border-[color-mix(in_srgb,var(--admin-green)_45%,transparent)]"
                 data-testid={`badge-printed-${cert.certId}`}
               >
                 Printed
               </Badge>
             )}
           </div>
-          <p className="text-xs text-[#666666] truncate leading-tight">{cert.cardName}</p>
+          <p className="text-xs text-[var(--admin-ink-dim)] truncate leading-tight">{cert.cardName}</p>
           {cert.lastPrintedAt && (
-            <p className="text-[10px] text-[#999999]">Last printed {fmtDate(cert.lastPrintedAt)}</p>
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">Last printed {fmtDate(cert.lastPrintedAt)}</p>
           )}
         </div>
 
@@ -359,7 +394,7 @@ function CertRow({
               e.stopPropagation();
               setShowPreview((v) => !v);
             }}
-            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
+            className="h-7 w-7 p-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)]"
             data-testid={`btn-preview-${cert.certId}`}
             title="Preview label"
           >
@@ -374,7 +409,7 @@ function CertRow({
               e.stopPropagation();
               onReprint(cert.certId);
             }}
-            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
+            className="h-7 w-7 p-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)]"
             data-testid={`btn-reprint-${cert.certId}`}
             title="Reprint label"
           >
@@ -388,7 +423,7 @@ function CertRow({
               e.stopPropagation();
               onEditLabel(cert.certId, cert);
             }}
-            className="h-7 w-7 p-0 text-[#999999] hover:text-yellow-400"
+            className="h-7 w-7 p-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)]"
             data-testid={`btn-edit-label-${cert.certId}`}
             title="Edit label display data"
           >
@@ -396,14 +431,14 @@ function CertRow({
           </Button>
 
           {/* Separator */}
-          <div className="h-4 w-px bg-[#E8E4DC] mx-0.5" />
+          <div className="h-4 w-px bg-[var(--admin-line)] mx-0.5" />
 
           {/* Certificate PDF download */}
           <a
             href={`/api/admin/certificates/${cert.certId}/certificate-document`}
             onClick={(e) => e.stopPropagation()}
             download={`MintVault-Certificate-${cert.certId}.pdf`}
-            className="inline-flex items-center gap-1 h-7 px-2 text-[10px] text-[#999999] hover:text-yellow-400 rounded-md hover:bg-[#FFF9E6] transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-1 h-7 px-2 text-[10px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)] rounded-md hover:bg-[var(--admin-panel2)] transition-colors whitespace-nowrap"
             data-testid={`btn-cert-doc-${cert.certId}`}
             title="Download Certificate PDF"
           >
@@ -416,7 +451,8 @@ function CertRow({
             href={`/api/admin/certificates/${cert.certId}/claim-insert`}
             onClick={(e) => e.stopPropagation()}
             download={`MintVault-ClaimInsert-${cert.certId}.pdf`}
-            className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1A1400] bg-[#D4AF37] hover:bg-[#B8960C] rounded-md transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1c1607] rounded-md transition-colors whitespace-nowrap"
+            style={{ background: "var(--admin-gold-grad)" }}
             data-testid={`btn-claim-insert-${cert.certId}`}
             title="Download Claim Insert PDF"
           >
@@ -433,7 +469,9 @@ function CertRow({
               onToggle();
             }}
             className={`h-7 px-2 text-[10px] gap-1 whitespace-nowrap ${
-              selected ? "text-yellow-400 hover:text-yellow-300" : "text-emerald-500 hover:text-emerald-400"
+              selected
+                ? "text-[var(--admin-gold-hi)] hover:text-[var(--admin-gold)]"
+                : "text-[var(--admin-green)] hover:text-[var(--admin-green)]"
             }`}
             data-testid={`btn-add-to-sheet-${cert.certId}`}
             title={selected ? "Remove from sheet" : "Add to sheet"}
@@ -447,7 +485,7 @@ function CertRow({
       {/* Inline label preview */}
       {showPreview && (
         <div className="px-2 pb-2">
-          <div className="rounded overflow-hidden border border-[#E8E4DC] max-w-xs">
+          <div className="rounded overflow-hidden border border-[var(--admin-line)] max-w-xs">
             <img
               src={imgUrl}
               alt={`${cert.certId} front label preview`}
@@ -510,7 +548,7 @@ function LatestSheetSection({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-xs text-[#999999] py-2">
+      <div className="flex items-center gap-2 text-xs text-[var(--admin-ink-faint)] py-2">
         <Loader2 className="h-3 w-3 animate-spin" /> Loading latest sheet…
       </div>
     );
@@ -527,25 +565,27 @@ function LatestSheetSection({
   return (
     <div className="space-y-1" data-testid="latest-sheet-section">
       {/* Latest Sheet card */}
-      <div className="rounded-lg border border-[#E8E4DC] overflow-hidden">
+      <div className="rounded-lg border border-[var(--admin-line)] overflow-hidden">
         {/* Clickable header row */}
         <button
-          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-[#F5F3EF] hover:bg-[#FAFAF8] transition-colors text-left"
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-[var(--admin-panel2)] hover:bg-[var(--admin-panel3)] transition-colors text-left"
           onClick={() => setDetailOpen((v) => !v)}
           data-testid="btn-toggle-latest-detail"
         >
           <div className="flex items-center gap-3 min-w-0">
             {latest.printed ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="h-4 w-4 text-[var(--admin-green)] shrink-0" />
             ) : (
-              <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
+              <Clock className="h-4 w-4 text-[var(--admin-gold)] shrink-0" />
             )}
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[#1A1A1A]">
+              <p className="text-sm font-semibold text-[var(--admin-ink)]">
                 Latest Sheet
-                <span className="ml-2 text-xs font-normal text-[#999999]">{sheetLabel(latest.sheetRef)}</span>
+                <span className="ml-2 text-xs font-normal text-[var(--admin-ink-faint)]">
+                  {sheetLabel(latest.sheetRef)}
+                </span>
               </p>
-              <p className="text-[11px] text-[#999999] mt-0.5">
+              <p className="text-[11px] text-[var(--admin-ink-faint)] mt-0.5">
                 {latest.total} cert{latest.total !== 1 ? "s" : ""}
                 {" · "}
                 {latest.printed ? `Printed ${fmtDate(latest.printedAt)}` : "Not yet marked printed"}
@@ -563,7 +603,7 @@ function LatestSheetSection({
                   e.stopPropagation();
                   onDownloadPng(`/api/admin/print-batch/${latestBatchId}/png`, `mintvault-batch-${latestBatchId}.png`);
                 }}
-                className="h-7 text-[10px] px-2 border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10"
+                className="h-7 text-[10px] px-2 border-[var(--admin-gold)]/60 text-[var(--admin-gold-hi)] hover:bg-[var(--admin-gold)]/10"
                 data-testid="btn-download-latest-png"
               >
                 {downloadingPng ? (
@@ -585,7 +625,7 @@ function LatestSheetSection({
                 e.stopPropagation();
                 handleReprint(latest.sheetRef);
               }}
-              className="h-7 text-[10px] px-2 border-yellow-700/40 text-yellow-400 hover:bg-[#FFF9E6]"
+              className="h-7 text-[10px] px-2 border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] text-[var(--admin-gold-hi)] hover:bg-[var(--admin-panel2)]"
               data-testid="btn-reprint-latest-sheet"
             >
               {reprintingRef === latest.sheetRef ? (
@@ -596,32 +636,39 @@ function LatestSheetSection({
               Reprint Sheet
             </Button>
             {detailOpen ? (
-              <ChevronUp className="h-4 w-4 text-[#999999]" />
+              <ChevronUp className="h-4 w-4 text-[var(--admin-ink-faint)]" />
             ) : (
-              <ChevronDown className="h-4 w-4 text-[#999999]" />
+              <ChevronDown className="h-4 w-4 text-[var(--admin-ink-faint)]" />
             )}
           </div>
         </button>
 
         {/* Expanded cert list */}
         {detailOpen && (
-          <div className="border-t border-[#E8E4DC] p-3 space-y-1 max-h-64 overflow-y-auto">
+          <div className="border-t border-[var(--admin-line)] p-3 space-y-1 max-h-64 overflow-y-auto">
             {detailLoading ? (
               <div className="flex justify-center py-4">
-                <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--admin-gold)]" />
               </div>
             ) : detailItems.length === 0 ? (
-              <p className="text-xs text-[#999999] text-center py-2">No certificates on this sheet.</p>
+              <p className="text-xs text-[var(--admin-ink-faint)] text-center py-2">No certificates on this sheet.</p>
             ) : (
               detailItems.map((item) => (
                 <div
                   key={item.certId}
-                  className="flex items-center gap-3 px-2 py-1.5 rounded text-xs text-[#666666] bg-gray-50"
+                  className="flex items-center gap-3 px-2 py-1.5 rounded text-xs text-[var(--admin-ink-dim)] bg-[var(--admin-bg2)]"
                   data-testid={`latest-detail-cert-${item.certId}`}
                 >
-                  <span className="font-mono text-yellow-600 shrink-0 w-14">{item.certId}</span>
+                  <span
+                    className="text-[var(--admin-gold-hi)] shrink-0 w-14"
+                    style={{ fontFamily: "var(--admin-mono)" }}
+                  >
+                    {item.certId}
+                  </span>
                   <span className="truncate">{item.cert?.cardName ?? "—"}</span>
-                  <span className="ml-auto text-[#999999] shrink-0">{item.cert?.gradeOverall ?? "—"}</span>
+                  <span className="ml-auto text-[var(--admin-ink-faint)] shrink-0">
+                    {item.cert?.gradeOverall ?? "—"}
+                  </span>
                 </div>
               ))
             )}
@@ -633,7 +680,7 @@ function LatestSheetSection({
       {older.length > 0 && (
         <div>
           <button
-            className="text-[11px] text-[#999999] hover:text-[#666666] transition-colors pl-1"
+            className="text-[11px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors pl-1"
             onClick={() => setHistoryOpen((v) => !v)}
             data-testid="btn-view-full-history"
           >
@@ -641,27 +688,27 @@ function LatestSheetSection({
           </button>
 
           {historyOpen && (
-            <div className="mt-1.5 rounded-lg border border-[#E8E4DC] divide-y divide-[#E8E4DC] overflow-hidden">
+            <div className="mt-1.5 rounded-lg border border-[var(--admin-line)] divide-y divide-[var(--admin-line)] overflow-hidden">
               {sheets.map((sheet, idx) => (
                 <div
                   key={sheet.sheetRef}
-                  className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 text-[11px] text-[#999999]"
+                  className="flex items-center justify-between gap-3 px-3 py-2 bg-[var(--admin-bg2)] text-[11px] text-[var(--admin-ink-faint)]"
                   data-testid={`full-history-row-${sheet.sheetRef}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {sheet.printed ? (
-                      <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                      <CheckCircle2 className="h-3 w-3 text-[var(--admin-green)] shrink-0" />
                     ) : (
-                      <Clock className="h-3 w-3 text-yellow-600 shrink-0" />
+                      <Clock className="h-3 w-3 text-[var(--admin-gold)] shrink-0" />
                     )}
                     <span>{sheetLabel(sheet.sheetRef)}</span>
-                    <span className="text-[#AAAAAA]">
+                    <span className="text-[var(--admin-ink-faint)]">
                       · {sheet.total} cert{sheet.total !== 1 ? "s" : ""}
                     </span>
                     {idx === 0 && (
                       <Badge
                         variant="outline"
-                        className="text-[9px] border-yellow-700/40 text-yellow-600 py-0 px-1 ml-1"
+                        className="text-[9px] border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] text-[var(--admin-gold-hi)] py-0 px-1 ml-1"
                       >
                         latest
                       </Badge>
@@ -672,7 +719,7 @@ function LatestSheetSection({
                     variant="ghost"
                     disabled={reprintingRef === sheet.sheetRef || generating}
                     onClick={() => handleReprint(sheet.sheetRef)}
-                    className="h-6 text-[10px] px-2 text-[#999999] hover:text-yellow-400"
+                    className="h-6 text-[10px] px-2 text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)]"
                     data-testid={`btn-reprint-history-${sheet.sheetRef}`}
                   >
                     <Printer className="h-3 w-3 mr-1" />
@@ -694,13 +741,13 @@ export default function AdminPrinting() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6" data-testid="admin-printing-root">
-      <div className="flex items-center gap-1 border-b border-[#E8E4DC] pb-0">
+      <div className="flex items-center gap-1 border-b border-[var(--admin-line)] pb-0">
         <button
           onClick={() => setTab("sheet")}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t transition-colors border-b-2 ${
             tab === "sheet"
-              ? "border-yellow-500 text-yellow-400"
-              : "border-transparent text-[#999999] hover:text-[#666666]"
+              ? "border-[var(--admin-gold)] text-[var(--admin-gold-hi)]"
+              : "border-transparent text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]"
           }`}
           data-testid="tab-sheet-printing"
         >
@@ -710,8 +757,8 @@ export default function AdminPrinting() {
           onClick={() => setTab("browser")}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t transition-colors border-b-2 ${
             tab === "browser"
-              ? "border-yellow-500 text-yellow-400"
-              : "border-transparent text-[#999999] hover:text-[#666666]"
+              ? "border-[var(--admin-gold)] text-[var(--admin-gold-hi)]"
+              : "border-transparent text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]"
           }`}
           data-testid="tab-cert-browser"
         >
@@ -1088,10 +1135,10 @@ function SheetPrintingPanel() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-yellow-400 tracking-wide flex items-center gap-2">
+          <h2 className="text-lg font-bold text-[var(--admin-gold-hi)] tracking-wide flex items-center gap-2">
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
-          <p className="text-xs text-[#999999] mt-0.5">
+          <p className="text-xs text-[var(--admin-ink-faint)] mt-0.5">
             A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 20 mm slab label + 85.6 × 54 mm claim insert · Cricut /
             ScanNCut compatible
           </p>
@@ -1100,7 +1147,7 @@ function SheetPrintingPanel() {
           size="sm"
           variant="ghost"
           onClick={() => refetchCerts()}
-          className="text-[#999999] hover:text-yellow-400"
+          className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)]"
           data-testid="btn-refresh-printing"
         >
           <RefreshCw className="h-4 w-4" />
@@ -1108,7 +1155,7 @@ function SheetPrintingPanel() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex items-center gap-1 border-b border-[#E8E4DC]">
+      <div className="flex items-center gap-1 border-b border-[var(--admin-line)]">
         {(["all", "unprinted", "printed"] as FilterMode[]).map((mode) => {
           const label = mode === "all" ? "All" : mode === "unprinted" ? "Unprinted" : "Printed";
           const count = mode === "all" ? countAll : mode === "unprinted" ? countUnprinted : countPrinted;
@@ -1119,14 +1166,16 @@ function SheetPrintingPanel() {
               data-testid={`filter-${mode}`}
               className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-t transition-colors border-b-2 ${
                 filterMode === mode
-                  ? "border-yellow-500 text-yellow-400"
-                  : "border-transparent text-[#999999] hover:text-[#666666]"
+                  ? "border-[var(--admin-gold)] text-[var(--admin-gold-hi)]"
+                  : "border-transparent text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]"
               }`}
             >
               {label}
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                  filterMode === mode ? "bg-[#FFF9E6] text-yellow-400" : "bg-[#E8E4DC] text-[#999999]"
+                  filterMode === mode
+                    ? "bg-[var(--admin-panel2)] text-[var(--admin-gold-hi)]"
+                    : "bg-[var(--admin-panel3)] text-[var(--admin-ink-faint)]"
                 }`}
               >
                 {count}
@@ -1139,18 +1188,18 @@ function SheetPrintingPanel() {
       {/* Search + toolbar */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#999999] pointer-events-none" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--admin-ink-faint)] pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by cert ID or card name…"
-            className="pl-8 pr-8 h-8 text-xs bg-[#FAFAF8] border-[#E8E4DC] text-[#1A1A1A] placeholder-[#AAAAAA]"
+            className="pl-8 pr-8 h-8 text-xs bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)] placeholder-[var(--admin-ink-faint)]"
             data-testid="input-search-certs"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#666666]"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]"
               data-testid="btn-clear-search"
             >
               <X className="h-3.5 w-3.5" />
@@ -1159,14 +1208,14 @@ function SheetPrintingPanel() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <span className="text-xs text-[#999999]">
+          <span className="text-xs text-[var(--admin-ink-faint)]">
             {visibleCerts.length} cert{visibleCerts.length !== 1 ? "s" : ""}
             {search || filterMode !== "all" ? " (filtered)" : ""}
           </span>
           {selected.size > 0 && (
             <button
               onClick={clearSelection}
-              className="text-[11px] text-[#999999] hover:text-[#666666] transition-colors"
+              className="text-[11px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
               data-testid="btn-clear-selection"
             >
               Clear ({selected.size})
@@ -1175,7 +1224,7 @@ function SheetPrintingPanel() {
           {visibleCerts.length > 0 && (
             <button
               onClick={toggleAll}
-              className="text-[11px] text-yellow-500/70 hover:text-yellow-400 transition-colors"
+              className="text-[11px] text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold-hi)] transition-colors"
               data-testid="btn-toggle-all"
             >
               {allVisible ? "Deselect all" : "Select all"}
@@ -1184,7 +1233,7 @@ function SheetPrintingPanel() {
           {visibleCerts.length > MAX_CERTS_PER_BATCH && (
             <button
               onClick={selectFirstBatch}
-              className="text-[11px] text-yellow-500/70 hover:text-yellow-400 transition-colors"
+              className="text-[11px] text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold-hi)] transition-colors"
               data-testid="btn-select-first-batch"
             >
               First {MAX_CERTS_PER_BATCH}
@@ -1196,10 +1245,10 @@ function SheetPrintingPanel() {
       {/* Certificate list — full width */}
       {certsLoading ? (
         <div className="flex items-center justify-center h-40">
-          <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
+          <Loader2 className="h-5 w-5 animate-spin text-[var(--admin-gold)]" />
         </div>
       ) : visibleCerts.length === 0 ? (
-        <div className="rounded-lg border border-[#E8E4DC] p-10 text-center text-[#999999] text-sm">
+        <div className="rounded-lg border border-[var(--admin-line)] p-10 text-center text-[var(--admin-ink-faint)] text-sm">
           {search || filterMode !== "all" ? "No certificates match your filter." : "No certificates found."}
         </div>
       ) : (
@@ -1225,7 +1274,7 @@ function SheetPrintingPanel() {
           disabled={selected.size === 0 || downloadingInserts}
           data-testid="btn-claim-inserts"
           variant="outline"
-          className="border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 font-medium"
+          className="border-[var(--admin-gold)]/60 text-[var(--admin-gold-hi)] hover:bg-[var(--admin-gold)]/10 font-medium"
         >
           {downloadingInserts ? (
             <>
@@ -1248,7 +1297,11 @@ function SheetPrintingPanel() {
                 ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
                 : "Generates a batch, downloads the Cricut PNG, and opens the print dialog for the PDF"
           }
-          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
+          className="text-white font-bold"
+          style={{
+            background: "color-mix(in srgb, var(--admin-green) 28%, transparent)",
+            borderColor: "color-mix(in srgb, var(--admin-green) 45%, transparent)",
+          }}
         >
           {downloadingBatch ? (
             <>
@@ -1261,7 +1314,7 @@ function SheetPrintingPanel() {
           )}
         </Button>
         {selected.size > PRINT_BATCH_MAX && (
-          <span className="text-xs text-red-400" data-testid="text-over-limit">
+          <span className="text-xs text-[var(--admin-red)]" data-testid="text-over-limit">
             Max {PRINT_BATCH_MAX} — deselect {selected.size - PRINT_BATCH_MAX}
           </span>
         )}
@@ -1269,8 +1322,8 @@ function SheetPrintingPanel() {
 
       {/* Post-generate mark-printed prompt */}
       {pendingSheetRef && (
-        <div className="rounded-md border border-yellow-700/40 bg-[#FFF9E6] p-3 flex items-center justify-between gap-4">
-          <p className="text-xs text-yellow-300">
+        <div className="rounded-md border border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] bg-[var(--admin-panel2)] p-3 flex items-center justify-between gap-4">
+          <p className="text-xs text-[var(--admin-gold-hi)]">
             <strong>PDF downloaded.</strong> Print the sheet, then confirm it was printed.
           </p>
           <Button
@@ -1278,7 +1331,11 @@ function SheetPrintingPanel() {
             onClick={() => markPrintedMutation.mutate(pendingSheetRef)}
             disabled={markPrintedMutation.isPending}
             data-testid="btn-mark-printed-inline"
-            className="bg-emerald-700 hover:bg-emerald-600 text-[#1A1A1A] text-xs shrink-0"
+            className="text-white text-xs shrink-0"
+            style={{
+              background: "color-mix(in srgb, var(--admin-green) 28%, transparent)",
+              borderColor: "color-mix(in srgb, var(--admin-green) 45%, transparent)",
+            }}
           >
             {markPrintedMutation.isPending ? (
               <>

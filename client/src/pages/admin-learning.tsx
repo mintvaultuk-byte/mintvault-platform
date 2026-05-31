@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Panel, Badge, AdminButton } from "@/components/admin";
 
 // ── New /api/admin/ai-dashboard-stats response shape ───────────────────────
 interface AiDashboardStats {
@@ -33,16 +34,46 @@ interface AiFeatureFlag {
 }
 
 const FLAG_COPY: Record<string, { title: string; description: string }> = {
-  AI_IDENTIFY_ENABLED:           { title: "Card identification",       description: "Claude Haiku identifies the card from front-image scans during ingest." },
-  AI_DEFECT_SUGGEST_ENABLED:     { title: "AI defect suggestions",     description: "Haiku suggests candidate defects on scan; admin reviews before approval." },
-  AI_HAIKU_QUICK_GRADE_ENABLED:  { title: "Haiku quick-grade",         description: "Pre-fills the grading form with subgrades from a fast Haiku pass." },
-  AI_FULL_GRADE_ENABLED:         { title: "Full Opus grade",           description: "Heavy Opus 4.7 grading run with adaptive thinking — slower, more thorough." },
-  AI_CENTERING_ENABLED:          { title: "Centering measurement",     description: "Standalone Sonnet pass that returns centering ratios and a subgrade." },
-  AI_STANDALONE_DETECT_ENABLED:  { title: "Standalone defect detect",  description: "On-demand Sonnet defect run, separate from the scan-time Haiku pass." },
-  AI_STANDALONE_GRADE_ENABLED:   { title: "Standalone grade-card",     description: "On-demand Sonnet grade-only run that uses prior step context." },
-  AI_DESCRIPTION_GEN_ENABLED:    { title: "Grade description",         description: "Generates the public-facing grade explanation after subgrades are set." },
-  AI_GPT_SECOND_OPINION_ENABLED: { title: "GPT-4o second opinion",     description: "Optional OpenAI call run alongside Claude for identification reconciliation." },
-  AI_PUBLIC_ESTIMATE_ENABLED:    { title: "Public Pre-Grade tool",     description: "Powers /tools/estimate — public-facing free AI grading estimate." },
+  AI_IDENTIFY_ENABLED: {
+    title: "Card identification",
+    description: "Claude Haiku identifies the card from front-image scans during ingest.",
+  },
+  AI_DEFECT_SUGGEST_ENABLED: {
+    title: "AI defect suggestions",
+    description: "Haiku suggests candidate defects on scan; admin reviews before approval.",
+  },
+  AI_HAIKU_QUICK_GRADE_ENABLED: {
+    title: "Haiku quick-grade",
+    description: "Pre-fills the grading form with subgrades from a fast Haiku pass.",
+  },
+  AI_FULL_GRADE_ENABLED: {
+    title: "Full Opus grade",
+    description: "Heavy Opus 4.7 grading run with adaptive thinking — slower, more thorough.",
+  },
+  AI_CENTERING_ENABLED: {
+    title: "Centering measurement",
+    description: "Standalone Sonnet pass that returns centering ratios and a subgrade.",
+  },
+  AI_STANDALONE_DETECT_ENABLED: {
+    title: "Standalone defect detect",
+    description: "On-demand Sonnet defect run, separate from the scan-time Haiku pass.",
+  },
+  AI_STANDALONE_GRADE_ENABLED: {
+    title: "Standalone grade-card",
+    description: "On-demand Sonnet grade-only run that uses prior step context.",
+  },
+  AI_DESCRIPTION_GEN_ENABLED: {
+    title: "Grade description",
+    description: "Generates the public-facing grade explanation after subgrades are set.",
+  },
+  AI_GPT_SECOND_OPINION_ENABLED: {
+    title: "GPT-4o second opinion",
+    description: "Optional OpenAI call run alongside Claude for identification reconciliation.",
+  },
+  AI_PUBLIC_ESTIMATE_ENABLED: {
+    title: "Public Pre-Grade tool",
+    description: "Powers /tools/estimate — public-facing free AI grading estimate.",
+  },
 };
 
 interface LearningOverview {
@@ -88,22 +119,28 @@ function tendency(diff: number | null): string {
 }
 
 function tendencyColor(diff: number | null): string {
-  if (diff === null) return "text-[#888888]";
+  if (diff === null) return "text-[var(--admin-ink-faint)]";
   const abs = Math.abs(diff);
-  if (abs <= 0.2) return "text-emerald-600";
-  if (abs <= 0.5) return "text-amber-600";
-  return "text-red-600";
+  if (abs <= 0.2) return "text-[var(--admin-green)]";
+  if (abs <= 0.5) return "text-[var(--admin-amber)]";
+  return "text-[var(--admin-red)]";
 }
 
 function AccuracyBar({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-[#888888] text-xs">No data</span>;
-  const color = value >= 80 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
+  if (value === null) return <span className="text-[var(--admin-ink-faint)] text-xs">No data</span>;
+  const color =
+    value >= 80 ? "bg-[var(--admin-green)]" : value >= 65 ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]";
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
+      <div className="flex-1 h-2 bg-[rgba(243,238,227,0.06)] rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
       </div>
-      <span className="text-sm font-bold text-[#1A1A1A] w-10 text-right">{value}%</span>
+      <span
+        className="text-sm font-bold text-[var(--admin-ink)] w-10 text-right"
+        style={{ fontFamily: "var(--admin-mono)" }}
+      >
+        {value}%
+      </span>
     </div>
   );
 }
@@ -114,16 +151,23 @@ function generateSuggestions(accuracy: AccuracyData | undefined): string[] {
 
   const checkDiff = (cat: string, diff: number | null, posLabel: string, negLabel: string) => {
     if (diff === null) return;
-    if (diff > 0.3) suggestions.push(`${cat.toUpperCase()}: AI is too ${posLabel} by an average of ${Math.abs(diff).toFixed(1)} points. Consider adding stricter language to the ${cat} criteria in the grading prompt.`);
-    else if (diff < -0.3) suggestions.push(`${cat.toUpperCase()}: AI is too ${negLabel} by an average of ${Math.abs(diff).toFixed(1)} points. Consider relaxing ${cat} criteria slightly.`);
+    if (diff > 0.3)
+      suggestions.push(
+        `${cat.toUpperCase()}: AI is too ${posLabel} by an average of ${Math.abs(diff).toFixed(1)} points. Consider adding stricter language to the ${cat} criteria in the grading prompt.`
+      );
+    else if (diff < -0.3)
+      suggestions.push(
+        `${cat.toUpperCase()}: AI is too ${negLabel} by an average of ${Math.abs(diff).toFixed(1)} points. Consider relaxing ${cat} criteria slightly.`
+      );
   };
 
   checkDiff("centering", accuracy.avg_centering_diff, "strict", "generous");
-  checkDiff("corners",   accuracy.avg_corners_diff,   "generous", "strict");
-  checkDiff("edges",     accuracy.avg_edges_diff,      "generous", "strict");
-  checkDiff("surface",   accuracy.avg_surface_diff,    "generous", "strict");
+  checkDiff("corners", accuracy.avg_corners_diff, "generous", "strict");
+  checkDiff("edges", accuracy.avg_edges_diff, "generous", "strict");
+  checkDiff("surface", accuracy.avg_surface_diff, "generous", "strict");
 
-  if (suggestions.length === 0) suggestions.push("AI performance is within acceptable range. No prompt changes recommended at this time.");
+  if (suggestions.length === 0)
+    suggestions.push("AI performance is within acceptable range. No prompt changes recommended at this time.");
   return suggestions;
 }
 
@@ -184,10 +228,10 @@ export default function AdminLearningPage() {
 
   const o = overview?.overview;
   const maxCount = overview?.grade_distribution.length
-    ? Math.max(...overview.grade_distribution.map(d => d.count))
+    ? Math.max(...overview.grade_distribution.map((d) => d.count))
     : 1;
   const maxActivity = overview?.activity_last_30_days.length
-    ? Math.max(...overview.activity_last_30_days.map(d => d.count))
+    ? Math.max(...overview.activity_last_30_days.map((d) => d.count))
     : 1;
 
   const suggestions = generateSuggestions(accuracy);
@@ -224,8 +268,10 @@ export default function AdminLearningPage() {
     const expireMs = lastRunData.lastRunAtMs + lastRunData.windowMs;
     if (expireMs <= Date.now()) return;
     const id = setInterval(() => {
-      if (Date.now() >= expireMs) { clearInterval(id); }
-      setTick(t => t + 1);
+      if (Date.now() >= expireMs) {
+        clearInterval(id);
+      }
+      setTick((t) => t + 1);
     }, 1000);
     return () => clearInterval(id);
   }, [lastRunData?.lastRunAtMs, lastRunData?.windowMs]);
@@ -240,9 +286,15 @@ export default function AdminLearningPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.skipped) {
-        toast({ title: `Debounced — try again in ${data.waitSec}s`, description: "Force-run is rate-limited to one per 60s." });
+        toast({
+          title: `Debounced — try again in ${data.waitSec}s`,
+          description: "Force-run is rate-limited to one per 60s.",
+        });
       } else {
-        toast({ title: `Embedded ${data.embedded ?? 0} cert${data.embedded === 1 ? "" : "s"}`, description: `Picked ${data.picked}, skipped ${data.skippedCount}, failed ${data.failed}.` });
+        toast({
+          title: `Embedded ${data.embedded ?? 0} cert${data.embedded === 1 ? "" : "s"}`,
+          description: `Picked ${data.picked}, skipped ${data.skippedCount}, failed ${data.failed}.`,
+        });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/admin/embedding-status"] });
       refetchLastRun();
@@ -288,96 +340,132 @@ export default function AdminLearningPage() {
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Brain size={22} className="text-[#D4AF37]" />
+        <Brain size={22} className="text-[var(--admin-gold-hi)]" />
         <div>
-          <h1 className="text-xl font-bold text-[#1A1A1A]">AI Learning Dashboard</h1>
-          <p className="text-[#888888] text-sm">Track AI accuracy and improve grading consistency over time</p>
+          <h1 className="text-xl font-bold text-[var(--admin-ink)]">AI Learning Dashboard</h1>
+          <p className="text-[var(--admin-ink-dim)] text-sm">
+            Track AI accuracy and improve grading consistency over time
+          </p>
         </div>
       </div>
 
       {loadingOverview ? (
         <div className="flex items-center justify-center py-20">
-          <div className="animate-spin w-8 h-8 border-2 border-[#D4AF37] border-t-transparent rounded-full" />
+          <div className="animate-spin w-8 h-8 border-2 border-[var(--admin-gold)] border-t-transparent rounded-full" />
         </div>
       ) : (
         <>
           {/* Overview stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: "Total Graded",    value: o?.total_graded ?? 0,    icon: <BarChart3 size={16} className="text-[#D4AF37]" /> },
-              { label: "This Month",      value: o?.this_month ?? 0,       icon: <TrendingUp size={16} className="text-[#D4AF37]" /> },
-              { label: "Average Grade",   value: o?.avg_grade ? Number(o.avg_grade).toFixed(1) : "—", icon: <CheckCircle2 size={16} className="text-[#D4AF37]" /> },
-              { label: "Avg Time/Card",   value: formatSeconds(Number(avgTimeSeconds)), icon: <Clock size={16} className="text-[#D4AF37]" /> },
+              {
+                label: "Total Graded",
+                value: o?.total_graded ?? 0,
+                icon: <BarChart3 size={16} className="text-[var(--admin-gold-hi)]" />,
+              },
+              {
+                label: "This Month",
+                value: o?.this_month ?? 0,
+                icon: <TrendingUp size={16} className="text-[var(--admin-gold-hi)]" />,
+              },
+              {
+                label: "Average Grade",
+                value: o?.avg_grade ? Number(o.avg_grade).toFixed(1) : "—",
+                icon: <CheckCircle2 size={16} className="text-[var(--admin-gold-hi)]" />,
+              },
+              {
+                label: "Avg Time/Card",
+                value: formatSeconds(Number(avgTimeSeconds)),
+                icon: <Clock size={16} className="text-[var(--admin-gold-hi)]" />,
+              },
             ].map(({ label, value, icon }) => (
-              <div key={label} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-4">
-                <div className="flex items-center gap-1.5 mb-2">{icon}<p className="text-[#888888] text-xs uppercase tracking-widest">{label}</p></div>
-                <p className="text-2xl font-black text-[#1A1A1A]">{value}</p>
+              <div
+                key={label}
+                className="bg-[var(--admin-panel)] border border-[var(--admin-line-soft)] rounded-xl p-4"
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  {icon}
+                  <p className="text-[var(--admin-ink-faint)] text-xs uppercase tracking-widest">{label}</p>
+                </div>
+                <p className="text-2xl font-black text-[var(--admin-ink)]" style={{ fontFamily: "var(--admin-mono)" }}>
+                  {value}
+                </p>
               </div>
             ))}
           </div>
 
           {o && o.pristine_10p_count > 0 && (
-            <div className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/30 rounded-xl px-4 py-3">
-              <span className="text-[#D4AF37] text-lg">★</span>
-              <p className="text-[#D4AF37] font-bold text-sm">{o.pristine_10p_count} Pristine 10P{o.pristine_10p_count !== 1 ? "s" : ""} awarded</p>
+            <div className="flex items-center gap-2 bg-[rgba(212,175,55,0.1)] border border-[rgba(212,175,55,0.35)] rounded-xl px-4 py-3">
+              <span className="text-[var(--admin-gold-hi)] text-lg">★</span>
+              <p className="text-[var(--admin-gold-hi)] font-bold text-sm">
+                {o.pristine_10p_count} Pristine 10P{o.pristine_10p_count !== 1 ? "s" : ""} awarded
+              </p>
             </div>
           )}
 
           {/* Grade distribution */}
           {(overview?.grade_distribution?.length ?? 0) > 0 && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6">
-              <h2 className="text-[#1A1A1A] font-bold mb-4">Grade Distribution</h2>
+            <Panel>
+              <h2 className="text-[var(--admin-ink)] font-bold mb-4">Grade Distribution</h2>
               <div className="flex items-end gap-1 h-24">
                 {overview!.grade_distribution.map(({ final_grade, count }) => (
                   <div key={final_grade} className="flex-1 flex flex-col items-center gap-1">
                     <div
-                      className="w-full bg-[#D4AF37] rounded-t-sm min-h-1"
+                      className="w-full bg-[var(--admin-gold)] rounded-t-sm min-h-1"
                       style={{ height: `${(count / maxCount) * 80}px` }}
                     />
-                    <span className="text-[8px] text-[#888888] font-mono">{final_grade}</span>
-                    <span className="text-[8px] text-[#555555]">{count}</span>
+                    <span className="text-[8px] text-[var(--admin-ink-faint)] font-mono">{final_grade}</span>
+                    <span className="text-[8px] text-[var(--admin-ink-dim)]">{count}</span>
                   </div>
                 ))}
               </div>
-            </div>
+            </Panel>
           )}
 
           {/* AI Accuracy */}
           {hasAiData && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-5">
+            <Panel bodyClassName="space-y-5">
               <div className="flex items-center gap-2">
-                <Brain size={16} className="text-[#D4AF37]" />
-                <h2 className="text-[#1A1A1A] font-bold">AI Accuracy</h2>
+                <Brain size={16} className="text-[var(--admin-gold-hi)]" />
+                <h2 className="text-[var(--admin-ink)] font-bold">AI Accuracy</h2>
               </div>
-              <p className="text-[#555555] text-sm">
+              <p className="text-[var(--admin-ink-dim)] text-sm">
                 AI agrees with your final grade within 0.5 points:{" "}
-                <strong className="text-[#1A1A1A]">{accuracy?.overall_accuracy}%</strong> of the time
+                <strong className="text-[var(--admin-ink)]">{accuracy?.overall_accuracy}%</strong> of the time
               </p>
               <div className="space-y-3">
-                {([
-                  { label: "Centering", acc: accuracy?.centering_accuracy, diff: accuracy?.avg_centering_diff },
-                  { label: "Corners",   acc: accuracy?.corners_accuracy,   diff: accuracy?.avg_corners_diff },
-                  { label: "Edges",     acc: accuracy?.edges_accuracy,     diff: accuracy?.avg_edges_diff },
-                  { label: "Surface",   acc: accuracy?.surface_accuracy,   diff: accuracy?.avg_surface_diff },
-                ] as const).map(({ label, acc, diff }) => (
+                {(
+                  [
+                    { label: "Centering", acc: accuracy?.centering_accuracy, diff: accuracy?.avg_centering_diff },
+                    { label: "Corners", acc: accuracy?.corners_accuracy, diff: accuracy?.avg_corners_diff },
+                    { label: "Edges", acc: accuracy?.edges_accuracy, diff: accuracy?.avg_edges_diff },
+                    { label: "Surface", acc: accuracy?.surface_accuracy, diff: accuracy?.avg_surface_diff },
+                  ] as const
+                ).map(({ label, acc, diff }) => (
                   <div key={label} className="grid grid-cols-[100px_1fr_80px_120px] items-center gap-3">
-                    <p className="text-sm font-medium text-[#1A1A1A]">{label}</p>
+                    <p className="text-sm font-medium text-[var(--admin-ink)]">{label}</p>
                     <AccuracyBar value={acc ?? null} />
-                    <p className="text-xs text-[#888888] text-right">
+                    <p
+                      className="text-xs text-[var(--admin-ink-faint)] text-right"
+                      style={{ fontFamily: "var(--admin-mono)" }}
+                    >
                       {diff !== null && diff !== undefined ? (diff > 0 ? "+" : "") + Number(diff).toFixed(1) : "—"}
                     </p>
                     <p className={`text-xs font-medium ${tendencyColor(diff ?? null)}`}>{tendency(diff ?? null)}</p>
                   </div>
                 ))}
               </div>
-            </div>
+            </Panel>
           )}
 
           {!hasAiData && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 text-center">
-              <Brain size={24} className="text-[#CCCCCC] mx-auto mb-2" />
-              <p className="text-[#888888] text-sm">AI accuracy data will appear here once you've graded cards using the AI assistant and approved final grades.</p>
-            </div>
+            <Panel className="text-center">
+              <Brain size={24} className="text-[var(--admin-ink-faint)] mx-auto mb-2" />
+              <p className="text-[var(--admin-ink-dim)] text-sm">
+                AI accuracy data will appear here once you've graded cards using the AI assistant and approved final
+                grades.
+              </p>
+            </Panel>
           )}
 
           {/* AI Predictions Accuracy — fed from ai_predictions table.
@@ -385,99 +473,135 @@ export default function AdminLearningPage() {
               the panel shows an insufficient-data state with the count we
               still need before the numbers stabilise. */}
           {stats && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
+            <Panel bodyClassName="space-y-4">
               <div className="flex items-center gap-2">
-                <Brain size={16} className="text-[#D4AF37]" />
-                <h2 className="text-[#1A1A1A] font-bold">AI Accuracy (Predictions)</h2>
+                <Brain size={16} className="text-[var(--admin-gold-hi)]" />
+                <h2 className="text-[var(--admin-ink)] font-bold">AI Accuracy (Predictions)</h2>
               </div>
               {stats.ai_accuracy.approved_count >= 30 ? (
                 <>
-                  <p className="text-[#555555] text-sm">
-                    Based on <strong className="text-[#1A1A1A]">{stats.ai_accuracy.approved_count}</strong> approved card{stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions
-                    {" "}(out of {stats.ai_accuracy.prediction_count} total predictions logged).
+                  <p className="text-[var(--admin-ink-dim)] text-sm">
+                    Based on <strong className="text-[var(--admin-ink)]">{stats.ai_accuracy.approved_count}</strong>{" "}
+                    approved card{stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions (out
+                    of {stats.ai_accuracy.prediction_count} total predictions logged).
                   </p>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Exact match</p>
-                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.exact_agreement_pct ?? "—"}%</p>
+                      <p className="text-[var(--admin-ink-faint)] text-xs uppercase tracking-widest mb-1">
+                        Exact match
+                      </p>
+                      <p
+                        className="text-2xl font-black text-[var(--admin-ink)]"
+                        style={{ fontFamily: "var(--admin-mono)" }}
+                      >
+                        {stats.ai_accuracy.exact_agreement_pct ?? "—"}%
+                      </p>
                     </div>
                     <div>
-                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Within ½ point</p>
-                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.within_half_point_pct ?? "—"}%</p>
+                      <p className="text-[var(--admin-ink-faint)] text-xs uppercase tracking-widest mb-1">
+                        Within ½ point
+                      </p>
+                      <p
+                        className="text-2xl font-black text-[var(--admin-ink)]"
+                        style={{ fontFamily: "var(--admin-mono)" }}
+                      >
+                        {stats.ai_accuracy.within_half_point_pct ?? "—"}%
+                      </p>
                     </div>
                     <div>
-                      <p className="text-[#888888] text-xs uppercase tracking-widest mb-1">Mean abs. error</p>
-                      <p className="text-2xl font-black text-[#1A1A1A]">{stats.ai_accuracy.mean_absolute_error ?? "—"}</p>
+                      <p className="text-[var(--admin-ink-faint)] text-xs uppercase tracking-widest mb-1">
+                        Mean abs. error
+                      </p>
+                      <p
+                        className="text-2xl font-black text-[var(--admin-ink)]"
+                        style={{ fontFamily: "var(--admin-mono)" }}
+                      >
+                        {stats.ai_accuracy.mean_absolute_error ?? "—"}
+                      </p>
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="text-center py-2">
-                  <p className="text-[#555555] text-sm">
-                    Need <strong className="text-[#D4AF37]">{Math.max(0, 30 - stats.ai_accuracy.approved_count)}</strong> more graded card{30 - stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI predictions before accuracy figures are statistically meaningful.
+                  <p className="text-[var(--admin-ink-dim)] text-sm">
+                    Need{" "}
+                    <strong className="text-[var(--admin-gold-hi)]">
+                      {Math.max(0, 30 - stats.ai_accuracy.approved_count)}
+                    </strong>{" "}
+                    more graded card{30 - stats.ai_accuracy.approved_count === 1 ? "" : "s"} with captured AI
+                    predictions before accuracy figures are statistically meaningful.
                   </p>
-                  <p className="text-[#888888] text-xs mt-2">
-                    Currently {stats.ai_accuracy.approved_count} approved · {stats.ai_accuracy.prediction_count} predictions logged.
+                  <p className="text-[var(--admin-ink-faint)] text-xs mt-2">
+                    Currently {stats.ai_accuracy.approved_count} approved · {stats.ai_accuracy.prediction_count}{" "}
+                    predictions logged.
                   </p>
                 </div>
               )}
-            </div>
+            </Panel>
           )}
 
           {/* Prompt suggestions */}
-          <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
+          <Panel bodyClassName="space-y-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-[#D4AF37]" />
-              <h2 className="text-[#1A1A1A] font-bold">Prompt Refinement Suggestions</h2>
+              <AlertTriangle size={16} className="text-[var(--admin-gold-hi)]" />
+              <h2 className="text-[var(--admin-ink)] font-bold">Prompt Refinement Suggestions</h2>
             </div>
             {suggestions.map((s, i) => (
-              <div key={i} className="border-l-4 border-[#D4AF37] bg-[#D4AF37]/5 rounded-r-xl pl-4 pr-4 py-3">
-                <p className="text-[#555555] text-sm leading-relaxed">{s}</p>
+              <div
+                key={i}
+                className="border-l-4 border-[var(--admin-gold)] bg-[rgba(212,175,55,0.06)] rounded-r-xl pl-4 pr-4 py-3"
+              >
+                <p className="text-[var(--admin-ink-dim)] text-sm leading-relaxed">{s}</p>
               </div>
             ))}
-          </div>
+          </Panel>
 
           {/* Activity chart */}
           {(overview?.activity_last_30_days?.length ?? 0) > 0 && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6">
-              <h2 className="text-[#1A1A1A] font-bold mb-4">Cards Graded — Last 30 Days</h2>
+            <Panel>
+              <h2 className="text-[var(--admin-ink)] font-bold mb-4">Cards Graded — Last 30 Days</h2>
               <div className="flex items-end gap-0.5 h-16">
                 {overview!.activity_last_30_days.map(({ day, count }) => (
                   <div key={day} className="flex-1 flex flex-col items-center" title={`${day}: ${count}`}>
                     <div
-                      className="w-full bg-[#D4AF37]/60 rounded-t-sm min-h-0.5"
+                      className="w-full bg-[rgba(212,175,55,0.6)] rounded-t-sm min-h-0.5"
                       style={{ height: `${(count / maxActivity) * 52}px` }}
                     />
                   </div>
                 ))}
               </div>
               <div className="flex justify-between mt-1">
-                <span className="text-[9px] text-[#AAAAAA]">30 days ago</span>
-                <span className="text-[9px] text-[#AAAAAA]">Today</span>
+                <span className="text-[9px] text-[var(--admin-ink-faint)]">30 days ago</span>
+                <span className="text-[9px] text-[var(--admin-ink-faint)]">Today</span>
               </div>
-            </div>
+            </Panel>
           )}
 
           {/* Game distribution */}
           {(overview?.game_distribution?.length ?? 0) > 0 && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6">
-              <h2 className="text-[#1A1A1A] font-bold mb-4">By Card Game</h2>
+            <Panel>
+              <h2 className="text-[var(--admin-ink)] font-bold mb-4">By Card Game</h2>
               <div className="space-y-2">
                 {overview!.game_distribution.map(({ card_game, count }) => {
                   const total = overview!.game_distribution.reduce((a, b) => a + b.count, 0);
                   const pct = Math.round((count / total) * 100);
                   return (
                     <div key={card_game} className="flex items-center gap-3">
-                      <span className="text-sm text-[#1A1A1A] w-24 capitalize">{card_game || "Other"}</span>
-                      <div className="flex-1 h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#D4AF37] rounded-full" style={{ width: `${pct}%` }} />
+                      <span className="text-sm text-[var(--admin-ink)] w-24 capitalize">{card_game || "Other"}</span>
+                      <div className="flex-1 h-2 bg-[rgba(243,238,227,0.06)] rounded-full overflow-hidden">
+                        <div className="h-full bg-[var(--admin-gold)] rounded-full" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="text-xs text-[#888888] w-12 text-right">{count} ({pct}%)</span>
+                      <span
+                        className="text-xs text-[var(--admin-ink-faint)] w-12 text-right"
+                        style={{ fontFamily: "var(--admin-mono)" }}
+                      >
+                        {count} ({pct}%)
+                      </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </Panel>
           )}
 
           {/* AI Feature Toggles — DB-backed runtime overrides.
@@ -487,42 +611,35 @@ export default function AdminLearningPage() {
               means the override row is absent and the env-var default is
               in effect; "Custom" means an override row is set. */}
           {flagsData?.flags && flagsData.flags.length > 0 && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-4">
+            <Panel bodyClassName="space-y-4">
               <div className="flex items-center gap-2">
-                <ToggleLeft size={16} className="text-[#D4AF37]" />
-                <h2 className="text-[#1A1A1A] font-bold">AI Feature Toggles</h2>
+                <ToggleLeft size={16} className="text-[var(--admin-gold-hi)]" />
+                <h2 className="text-[var(--admin-ink)] font-bold">AI Feature Toggles</h2>
               </div>
-              <p className="text-[#555555] text-xs">
-                Per-feature kill-switches. Disabling a flag stops that AI call within ~1 second — no redeploy. Reverting to "default" clears the override.
+              <p className="text-[var(--admin-ink-dim)] text-xs">
+                Per-feature kill-switches. Disabling a flag stops that AI call within ~1 second — no redeploy. Reverting
+                to "default" clears the override.
               </p>
               <div className="space-y-3">
                 {flagsData.flags.map((f) => {
                   const copy = FLAG_COPY[f.name] || { title: f.name, description: "" };
                   const isSubmitting = submittingFlag === f.name;
                   return (
-                    <div key={f.name} className="flex items-start justify-between gap-4 border-t border-[#E8E4DC] pt-3 first:border-t-0 first:pt-0">
+                    <div
+                      key={f.name}
+                      className="flex items-start justify-between gap-4 border-t border-[var(--admin-line)] pt-3 first:border-t-0 first:pt-0"
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-bold text-[#1A1A1A]">{copy.title}</p>
-                          <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
-                            f.overrideSet
-                              ? "border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37]"
-                              : "border-[#D4D0C8] bg-white text-[#888888]"
-                          }`}>
-                            {f.overrideSet ? "Custom" : "Default"}
-                          </span>
-                          <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full border ${
-                            f.enabled
-                              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                              : "border-red-200 bg-red-50 text-red-600"
-                          }`}>
-                            {f.enabled ? "Enabled" : "Disabled"}
-                          </span>
+                          <p className="text-sm font-bold text-[var(--admin-ink)]">{copy.title}</p>
+                          <Badge variant={f.overrideSet ? "gold" : "neu"}>{f.overrideSet ? "Custom" : "Default"}</Badge>
+                          <Badge variant={f.enabled ? "act" : "red"}>{f.enabled ? "Enabled" : "Disabled"}</Badge>
                         </div>
-                        <p className="text-[#555555] text-xs mt-1">{copy.description}</p>
+                        <p className="text-[var(--admin-ink-dim)] text-xs mt-1">{copy.description}</p>
                         {f.overrideSet && (
-                          <p className="text-[#888888] text-[10px] mt-1">
-                            Last toggled by {f.updatedBy || "—"} {f.updatedAt ? `on ${new Date(f.updatedAt).toLocaleString()}` : ""}
+                          <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
+                            Last toggled by {f.updatedBy || "—"}{" "}
+                            {f.updatedAt ? `on ${new Date(f.updatedAt).toLocaleString()}` : ""}
                             {f.reason ? ` · ${f.reason}` : ""}
                           </p>
                         )}
@@ -532,17 +649,21 @@ export default function AdminLearningPage() {
                         disabled={isSubmitting}
                         onClick={() => setPendingFlag({ flag: f, nextEnabled: !f.enabled })}
                         className={`flex-shrink-0 inline-flex h-6 w-11 items-center rounded-full border transition-colors ${
-                          f.enabled ? "bg-[#D4AF37] border-[#D4AF37]" : "bg-[#E8E4DC] border-[#D4D0C8]"
+                          f.enabled
+                            ? "bg-[var(--admin-gold)] border-[var(--admin-gold)]"
+                            : "bg-[var(--admin-panel3)] border-[var(--admin-line-hard)]"
                         } ${isSubmitting ? "opacity-60" : ""}`}
                         title={`Toggle ${copy.title}`}
                       >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${f.enabled ? "translate-x-6" : "translate-x-1"}`} />
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${f.enabled ? "translate-x-6" : "translate-x-1"}`}
+                        />
                       </button>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </Panel>
           )}
 
           {/* RAG Phase 0 — corpus status. Passive panel showing how many
@@ -550,57 +671,72 @@ export default function AdminLearningPage() {
               future retrieval system. Hourly background job populates
               the column; retrieval logic is deferred until ~200 cards. */}
           {embedStatus && (
-            <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-xl p-6 space-y-3">
+            <Panel bodyClassName="space-y-3">
               <div className="flex items-center gap-2">
-                <Database size={16} className="text-[#D4AF37]" />
-                <h2 className="text-[#1A1A1A] font-bold">RAG Corpus</h2>
+                <Database size={16} className="text-[var(--admin-gold-hi)]" />
+                <h2 className="text-[var(--admin-ink)] font-bold">RAG Corpus</h2>
               </div>
               {embedStatus.ready === false ? (
-                <p className="text-[#555555] text-sm">
-                  Pending migration — pgvector is not yet enabled on the database. Once the migration runs, the hourly embed-corpus job will start populating this panel.
+                <p className="text-[var(--admin-ink-dim)] text-sm">
+                  Pending migration — pgvector is not yet enabled on the database. Once the migration runs, the hourly
+                  embed-corpus job will start populating this panel.
                 </p>
               ) : (
                 <>
-                  <p className="text-[#1A1A1A] text-sm">
-                    <strong>{embedStatus.embedded_count}</strong> / <strong>{embedStatus.total_approved}</strong> cards embedded for future retrieval system
-                    {" "}({embedStatus.percentage}%).
+                  <p className="text-[var(--admin-ink)] text-sm">
+                    <strong>{embedStatus.embedded_count}</strong> / <strong>{embedStatus.total_approved}</strong> cards
+                    embedded for future retrieval system ({embedStatus.percentage}%).
                   </p>
-                  <div className="h-2 bg-[#E8E4DC] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#D4AF37] rounded-full transition-all" style={{ width: `${embedStatus.percentage}%` }} />
+                  <div className="h-2 bg-[rgba(243,238,227,0.06)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--admin-gold)] rounded-full transition-all"
+                      style={{ width: `${embedStatus.percentage}%` }}
+                    />
                   </div>
                   {embedStatus.oldest_unembedded_cert_id && (
-                    <p className="text-[#888888] text-xs">
-                      Next up: <span className="font-mono">{embedStatus.oldest_unembedded_cert_id}</span> · hourly job picks up to 50 per tick.
+                    <p className="text-[var(--admin-ink-faint)] text-xs">
+                      Next up:{" "}
+                      <span className="font-mono text-[var(--admin-gold-hi)]">
+                        {embedStatus.oldest_unembedded_cert_id}
+                      </span>{" "}
+                      · hourly job picks up to 50 per tick.
                     </p>
                   )}
                   {embedStatus.embedded_count === embedStatus.total_approved && embedStatus.total_approved > 0 && (
-                    <p className="text-emerald-600 text-xs">All approved cards embedded ✓</p>
+                    <p className="text-[var(--admin-green)] text-xs">All approved cards embedded ✓</p>
                   )}
                   {/* Dormant-retrieval banner — vectors are being written but
                       no grading pass consumes them yet. Wiring is a separate
                       task; this line keeps the operator aware of that. */}
-                  <p className="text-[#B8960C] text-xs bg-[#FBF8EE] border border-[#D4AF37]/30 rounded px-2 py-1.5">
-                    ⓘ Embeddings are being generated but not yet consumed by any grading pass. Retrieval wiring is a separate task.
+                  <p className="text-[var(--admin-gold-hi)] text-xs bg-[rgba(212,175,55,0.06)] border border-[rgba(212,175,55,0.3)] rounded px-2 py-1.5">
+                    ⓘ Embeddings are being generated but not yet consumed by any grading pass. Retrieval wiring is a
+                    separate task.
                   </p>
                   {/* Force embed now — bypasses the hourly cadence and runs
                       the next batch immediately. 60s server-side debounce. */}
-                  <button
+                  <AdminButton
                     type="button"
+                    variant="gold"
+                    size="sm"
                     onClick={forceEmbedNow}
                     disabled={forceEmbedding || secondsLeft > 0}
-                    className="text-xs bg-[#D4AF37] text-[#1A1400] font-bold uppercase tracking-widest px-3 py-1.5 rounded hover:bg-[#B8960C] transition-colors disabled:opacity-60"
+                    className="uppercase tracking-widest"
                     data-testid="button-force-embed-now"
                   >
-                    {forceEmbedding ? "Running…" : secondsLeft > 0 ? `Force embed (${secondsLeft}s)` : "Force embed now"}
-                  </button>
+                    {forceEmbedding
+                      ? "Running…"
+                      : secondsLeft > 0
+                        ? `Force embed (${secondsLeft}s)`
+                        : "Force embed now"}
+                  </AdminButton>
                 </>
               )}
-            </div>
+            </Panel>
           )}
 
           {!o?.total_graded && (
-            <div className="text-center py-12 text-[#888888]">
-              <Brain size={32} className="mx-auto mb-3 text-[#CCCCCC]" />
+            <div className="text-center py-12 text-[var(--admin-ink-faint)]">
+              <Brain size={32} className="mx-auto mb-3 text-[var(--admin-ink-faint)]" />
               <p className="text-sm">No grading sessions recorded yet.</p>
               <p className="text-xs mt-1">Data appears here as you grade cards and approve grades.</p>
             </div>
@@ -612,17 +748,18 @@ export default function AdminLearningPage() {
           dependency to keep the patch self-contained on this page. */}
       {pendingFlag && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
           onClick={() => setPendingFlag(null)}
         >
           <div
-            className="bg-white rounded-xl border border-[#E8E4DC] p-6 max-w-md w-full mx-4 space-y-4"
+            className="bg-[var(--admin-panel)] rounded-xl border border-[var(--admin-line)] p-6 max-w-md w-full mx-4 space-y-4 shadow-[var(--admin-sh)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-[#1A1A1A] font-bold">
-              {pendingFlag.nextEnabled ? "Enable" : "Disable"} {FLAG_COPY[pendingFlag.flag.name]?.title || pendingFlag.flag.name}?
+            <h3 className="text-[var(--admin-ink)] font-bold">
+              {pendingFlag.nextEnabled ? "Enable" : "Disable"}{" "}
+              {FLAG_COPY[pendingFlag.flag.name]?.title || pendingFlag.flag.name}?
             </h3>
-            <p className="text-[#555555] text-sm">
+            <p className="text-[var(--admin-ink-dim)] text-sm">
               {pendingFlag.nextEnabled
                 ? "This AI call will start running again on the next request."
                 : "This AI call will stop running within ~1 second of confirming."}
@@ -631,21 +768,18 @@ export default function AdminLearningPage() {
                 : " A custom override will be saved."}
             </p>
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setPendingFlag(null)}
-                className="px-3 py-1.5 text-sm rounded border border-[#D4D0C8] text-[#555555] hover:text-[#1A1A1A]"
-              >
+              <AdminButton type="button" size="sm" onClick={() => setPendingFlag(null)}>
                 Cancel
-              </button>
-              <button
+              </AdminButton>
+              <AdminButton
                 type="button"
+                variant="gold"
+                size="sm"
                 onClick={() => applyFlagToggle(pendingFlag.flag, pendingFlag.nextEnabled)}
                 disabled={submittingFlag === pendingFlag.flag.name}
-                className="px-3 py-1.5 text-sm rounded bg-[#D4AF37] text-white font-bold disabled:opacity-60"
               >
                 {submittingFlag === pendingFlag.flag.name ? "Applying…" : "Confirm"}
-              </button>
+              </AdminButton>
             </div>
           </div>
         </div>

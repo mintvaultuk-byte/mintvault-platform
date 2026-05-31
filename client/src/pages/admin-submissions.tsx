@@ -3,9 +3,31 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
 import {
-  ArrowLeft, Package, Search, Printer, CheckCircle, Truck, Clock,
-  MapPin, Phone, Mail, FileText, ChevronRight, ScanLine, X, Edit2, Save, XCircle, CreditCard, Download,
-  Camera, Upload, Layers, FlaskConical, PackageCheck, Loader2,
+  ArrowLeft,
+  Package,
+  Search,
+  Printer,
+  CheckCircle,
+  Truck,
+  Clock,
+  MapPin,
+  Phone,
+  Mail,
+  FileText,
+  ChevronRight,
+  ScanLine,
+  X,
+  Edit2,
+  Save,
+  XCircle,
+  CreditCard,
+  Download,
+  Camera,
+  Upload,
+  Layers,
+  FlaskConical,
+  PackageCheck,
+  Loader2,
 } from "lucide-react";
 
 interface SubmissionRow {
@@ -60,14 +82,23 @@ interface SubmissionRow {
 
 function statusColor(status: string) {
   switch (status?.toLowerCase()) {
-    case "new": case "paid": return "bg-blue-500/20 text-blue-400 border-blue-500/40";
-    case "received": return "bg-amber-500/20 text-amber-400 border-amber-500/40";
-    case "in_grading": return "bg-purple-500/20 text-purple-400 border-purple-500/40";
-    case "ready_to_return": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
-    case "shipped": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/40";
-    case "completed": return "bg-green-500/20 text-green-400 border-green-500/40";
-    case "draft": return "bg-gray-500/20 text-gray-400 border-gray-500/40";
-    default: return "bg-gray-500/20 text-gray-400 border-gray-500/40";
+    case "new":
+    case "paid":
+      return "bg-[color-mix(in_srgb,var(--admin-gold)_18%,transparent)] text-[var(--admin-gold-hi)] border-[var(--admin-line)]";
+    case "received":
+      return "bg-[color-mix(in_srgb,var(--admin-amber)_18%,transparent)] text-[var(--admin-amber)] border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)]";
+    case "in_grading":
+      return "bg-[color-mix(in_srgb,var(--admin-gold)_18%,transparent)] text-[var(--admin-gold-hi)] border-[var(--admin-line)]";
+    case "ready_to_return":
+      return "bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]";
+    case "shipped":
+      return "bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]";
+    case "completed":
+      return "bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]";
+    case "draft":
+      return "bg-[var(--admin-panel2)] text-[var(--admin-ink-faint)] border-[var(--admin-line-soft)]";
+    default:
+      return "bg-[var(--admin-panel2)] text-[var(--admin-ink-faint)] border-[var(--admin-line-soft)]";
   }
 }
 
@@ -124,14 +155,19 @@ export default function AdminSubmissions() {
     <div className="max-w-5xl mx-auto px-4 py-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-submissions-title">
+          <h1
+            className="text-2xl font-bold text-[var(--admin-gold-hi)] tracking-widest"
+            data-testid="text-submissions-title"
+          >
             SUBMISSIONS
           </h1>
-          <p className="text-gray-500 text-sm">{subs.length} total submissions{hasActiveFilters ? " (filtered)" : ""}</p>
+          <p className="text-[var(--admin-ink-faint)] text-sm">
+            {subs.length} total submissions{hasActiveFilters ? " (filtered)" : ""}
+          </p>
         </div>
         <a
           href="/api/admin/submissions/export-csv"
-          className="inline-flex items-center gap-2 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-sm font-medium hover:bg-[#D4AF37]/10 transition-colors"
+          className="inline-flex items-center gap-2 border border-[var(--admin-line)] text-[var(--admin-gold-hi)] px-4 py-2 rounded text-sm font-medium hover:bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] transition-colors"
           data-testid="button-export-submissions-csv"
         >
           <Download size={16} /> Export CSV
@@ -140,13 +176,13 @@ export default function AdminSubmissions() {
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40" size={16} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--admin-gold)]/40" size={16} />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search ID, name, email, postcode..."
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-4 py-2 pl-9 text-white text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="w-full bg-transparent border border-[var(--admin-line)] rounded px-4 py-2 pl-9 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
             data-testid="input-search-subs"
           />
         </div>
@@ -157,8 +193,8 @@ export default function AdminSubmissions() {
               onClick={() => setStatusFilter(f)}
               className={`text-xs px-2.5 py-1.5 rounded border transition-colors ${
                 statusFilter === f
-                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-gray-500 border-gray-700 hover:text-gray-300"
+                  ? "bg-[color-mix(in_srgb,var(--admin-gold)_18%,transparent)] text-[var(--admin-gold-hi)] border-[var(--admin-line)]"
+                  : "text-[var(--admin-ink-faint)] border-[var(--admin-line-soft)] hover:text-[var(--admin-ink-dim)]"
               }`}
               data-testid={`filter-sub-${f}`}
             >
@@ -170,29 +206,34 @@ export default function AdminSubmissions() {
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <label className="text-gray-500 text-xs">From:</label>
+          <label className="text-[var(--admin-ink-faint)] text-xs">From:</label>
           <input
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
             data-testid="input-date-from-subs"
           />
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-gray-500 text-xs">To:</label>
+          <label className="text-[var(--admin-ink-faint)] text-xs">To:</label>
           <input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
+            className="bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
             data-testid="input-date-to-subs"
           />
         </div>
         {hasActiveFilters && (
           <button
-            onClick={() => { setStatusFilter("all"); setDateFrom(""); setDateTo(""); setSearchQuery(""); }}
-            className="text-xs text-gray-500 hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
+            onClick={() => {
+              setStatusFilter("all");
+              setDateFrom("");
+              setDateTo("");
+              setSearchQuery("");
+            }}
+            className="text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)] flex items-center gap-1 transition-colors"
             data-testid="button-clear-filters-subs"
           >
             <X size={12} /> Clear filters
@@ -203,13 +244,15 @@ export default function AdminSubmissions() {
       {isLoading ? (
         <div className="animate-pulse space-y-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-[#D4AF37]/5 rounded" />
+            <div key={i} className="h-16 bg-[var(--admin-line-soft)] rounded" />
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 border border-[#D4AF37]/10 rounded-lg">
-          <Package className="mx-auto text-[#D4AF37]/20 mb-3" size={40} />
-          <p className="text-gray-500">{searchQuery ? "No matching submissions" : "No submissions yet"}</p>
+        <div className="text-center py-16 border border-[var(--admin-line-soft)] rounded-lg">
+          <Package className="mx-auto text-[var(--admin-ink-faint)]/50 mb-3" size={40} />
+          <p className="text-[var(--admin-ink-dim)]">
+            {searchQuery ? "No matching submissions" : "No submissions yet"}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -217,34 +260,40 @@ export default function AdminSubmissions() {
             <button
               key={sub.id}
               onClick={() => setSelectedSub(sub.submissionId)}
-              className="w-full border border-[#D4AF37]/15 rounded-lg p-4 flex items-center justify-between gap-3 hover:border-[#D4AF37]/30 transition-colors text-left"
+              className="w-full border border-[var(--admin-line)] rounded-lg p-4 flex items-center justify-between gap-3 hover:border-[color-mix(in_srgb,var(--admin-gold)_30%,transparent)] transition-colors text-left"
               data-testid={`sub-row-${sub.submissionId}`}
             >
               <div className="flex items-center gap-4 min-w-0 flex-1">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[#D4AF37] font-mono text-xs font-bold">{sub.submissionId}</span>
+                    <span
+                      className="text-[var(--admin-gold-hi)] text-xs font-bold"
+                      style={{ fontFamily: "var(--admin-mono)" }}
+                    >
+                      {sub.submissionId}
+                    </span>
                     <span className={`text-xs px-1.5 py-0.5 rounded border ${statusColor(sub.status)}`}>
                       {SUBMISSION_STATUS_LABELS[sub.status?.toLowerCase()] || sub.status}
                     </span>
                     {sub.highValueFlag && (
-                      <span className="text-xs px-1.5 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40">
+                      <span className="text-xs px-1.5 py-0.5 rounded border bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] text-[var(--admin-red)] border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)]">
                         HV
                       </span>
                     )}
                   </div>
-                  <p className="text-white text-sm">
+                  <p className="text-[var(--admin-ink)] text-sm">
                     {sub.customerFirstName} {sub.customerLastName}
-                    <span className="text-gray-500 ml-2 text-xs">{sub.returnPostcode}</span>
+                    <span className="text-[var(--admin-ink-faint)] ml-2 text-xs">{sub.returnPostcode}</span>
                   </p>
-                  <p className="text-gray-500 text-xs">
-                    {sub.cardCount || 0} cards · {pricingTiers.find(t => t.id === sub.serviceTier)?.name || sub.serviceTier || "—"}
-                    · £{parseFloat(sub.totalPrice || "0").toFixed(2)}
-                    · {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : ""}
+                  <p className="text-[var(--admin-ink-faint)] text-xs">
+                    {sub.cardCount || 0} cards ·{" "}
+                    {pricingTiers.find((t) => t.id === sub.serviceTier)?.name || sub.serviceTier || "—"}· £
+                    {parseFloat(sub.totalPrice || "0").toFixed(2)}·{" "}
+                    {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString() : ""}
                   </p>
                 </div>
               </div>
-              <ChevronRight size={16} className="text-[#D4AF37]/30 shrink-0" />
+              <ChevronRight size={16} className="text-[var(--admin-gold)]/30 shrink-0" />
             </button>
           ))}
         </div>
@@ -313,7 +362,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const markReceivedMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const form = new FormData();
-      files.forEach(f => form.append("photos", f));
+      files.forEach((f) => form.append("photos", f));
       const res = await fetch(`/api/admin/submissions/${submissionId}/mark-received`, {
         method: "POST",
         credentials: "include",
@@ -353,12 +402,16 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   if (isLoading || !sub) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-6">
-        <button onClick={onBack} className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-sm mb-4" data-testid="button-back-subs">
+        <button
+          onClick={onBack}
+          className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm mb-4"
+          data-testid="button-back-subs"
+        >
           <ArrowLeft size={14} className="inline mr-1" /> Back to Submissions
         </button>
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-[#D4AF37]/10 rounded w-48" />
-          <div className="h-64 bg-[#D4AF37]/5 rounded" />
+          <div className="h-8 bg-[var(--admin-line)] rounded w-48" />
+          <div className="h-64 bg-[var(--admin-line-soft)] rounded" />
         </div>
       </div>
     );
@@ -366,8 +419,8 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
   const currentStatus = sub.status?.toLowerCase();
   const nextStatus = SUBMISSION_STATUS_TRANSITIONS[currentStatus];
-  const tierData = pricingTiers.find(t => t.id === sub.serviceTier);
-  const typeData = submissionTypes.find(t => t.id === sub.serviceType);
+  const tierData = pricingTiers.find((t) => t.id === sub.serviceTier);
+  const typeData = submissionTypes.find((t) => t.id === sub.serviceType);
 
   const handleAdvanceStatus = () => {
     if (!nextStatus) return;
@@ -383,25 +436,39 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
-      <button onClick={onBack} className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-sm mb-4 transition-colors" data-testid="button-back-subs">
+      <button
+        onClick={onBack}
+        className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm mb-4 transition-colors"
+        data-testid="button-back-subs"
+      >
         <ArrowLeft size={14} className="inline mr-1" /> Back to Submissions
       </button>
 
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-bold text-[#D4AF37] font-mono tracking-wider" data-testid="text-sub-detail-id">
+          <h2
+            className="text-xl font-bold text-[var(--admin-gold-hi)] tracking-wider"
+            style={{ fontFamily: "var(--admin-mono)" }}
+            data-testid="text-sub-detail-id"
+          >
             {sub.submissionId}
           </h2>
           <span className={`text-xs px-2 py-0.5 rounded border ${statusColor(sub.status)}`}>
             {SUBMISSION_STATUS_LABELS[currentStatus] || sub.status}
           </span>
           {sub.highValueFlag && (
-            <span className="text-xs px-2 py-0.5 rounded border bg-red-500/20 text-red-400 border-red-500/40 ml-1" data-testid="badge-high-value">
+            <span
+              className="text-xs px-2 py-0.5 rounded border bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] text-[var(--admin-red)] border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] ml-1"
+              data-testid="badge-high-value"
+            >
               High Value
             </span>
           )}
           {sub.requiresManualApproval && (
-            <span className="text-xs px-2 py-0.5 rounded border bg-amber-500/20 text-amber-400 border-amber-500/40 ml-1" data-testid="badge-manual-approval">
+            <span
+              className="text-xs px-2 py-0.5 rounded border bg-[color-mix(in_srgb,var(--admin-amber)_18%,transparent)] text-[var(--admin-amber)] border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] ml-1"
+              data-testid="badge-manual-approval"
+            >
               Requires Approval
             </span>
           )}
@@ -409,7 +476,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
         <div className="flex items-center gap-2">
           <a
             href={`/api/admin/submissions/${submissionId}/packing-slip`}
-            className="text-xs border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
+            className="text-xs border border-[var(--admin-line)] text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors"
             data-testid="button-print-slip"
           >
             <Printer size={12} /> Print Slip
@@ -418,13 +485,13 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       </div>
 
       {nextStatus && (
-        <div className="border border-[#D4AF37]/30 rounded-lg p-4 mb-6 bg-[#D4AF37]/5">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <p className="text-[#D4AF37] text-sm font-medium">
+              <p className="text-[var(--admin-gold-hi)] text-sm font-medium">
                 Next step: {SUBMISSION_STATUS_LABELS[nextStatus]}
               </p>
-              <p className="text-gray-500 text-xs">
+              <p className="text-[var(--admin-ink-faint)] text-xs">
                 {SUBMISSION_STATUS_LABELS[currentStatus]} → {SUBMISSION_STATUS_LABELS[nextStatus]}
               </p>
             </div>
@@ -433,7 +500,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               <button
                 onClick={() => setShowReturnForm(true)}
                 disabled={statusMutation.isPending}
-                className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 flex items-center gap-2 disabled:opacity-50"
+                className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] flex items-center gap-2 disabled:opacity-50"
                 data-testid="button-advance-status"
               >
                 <Truck size={14} /> Mark Shipped
@@ -442,7 +509,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               <button
                 onClick={() => setShowMarkReceived(true)}
                 disabled={statusMutation.isPending}
-                className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 flex items-center gap-2 disabled:opacity-50"
+                className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] flex items-center gap-2 disabled:opacity-50"
                 data-testid="button-advance-status"
               >
                 <Camera size={14} /> Mark Received
@@ -451,7 +518,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               <button
                 onClick={handleAdvanceStatus}
                 disabled={statusMutation.isPending}
-                className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 flex items-center gap-2 disabled:opacity-50"
+                className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] flex items-center gap-2 disabled:opacity-50"
                 data-testid="button-advance-status"
               >
                 <CheckCircle size={14} />
@@ -463,17 +530,17 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       )}
 
       {showReturnForm && (
-        <div className="border border-[#D4AF37]/30 rounded-lg p-4 mb-6">
-          <h3 className="text-[#D4AF37] font-semibold text-sm uppercase tracking-wider mb-3">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
+          <h3 className="text-[var(--admin-gold-hi)] font-semibold text-sm uppercase tracking-wider mb-3">
             Shipping Details
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="text-gray-400 text-xs block mb-1">Carrier</label>
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Carrier</label>
               <select
                 value={carrierInput}
                 onChange={(e) => setCarrierInput(e.target.value)}
-                className="w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="select-carrier"
               >
                 <option value="Royal Mail">Royal Mail</option>
@@ -483,24 +550,24 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               </select>
             </div>
             <div>
-              <label className="text-gray-400 text-xs block mb-1">Tracking Number *</label>
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Tracking Number *</label>
               <input
                 type="text"
                 value={trackingInput}
                 onChange={(e) => setTrackingInput(e.target.value)}
-                className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="input-return-tracking"
               />
             </div>
           </div>
           <div className="max-w-[200px] mb-3">
-            <label className="text-gray-400 text-xs block mb-1">Return Postage Cost (pence)</label>
+            <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Return Postage Cost (pence)</label>
             <input
               type="number"
               value={postageCostInput}
               onChange={(e) => setPostageCostInput(e.target.value)}
               placeholder="Optional"
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+              className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
               data-testid="input-postage-cost"
             />
           </div>
@@ -514,14 +581,14 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                 });
               }}
               disabled={!trackingInput || statusMutation.isPending}
-              className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center gap-2"
+              className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] disabled:opacity-50 flex items-center gap-2"
               data-testid="button-confirm-shipped"
             >
               <Truck size={14} /> {statusMutation.isPending ? "Shipping..." : "Confirm Shipped"}
             </button>
             <button
               onClick={() => setShowReturnForm(false)}
-              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] text-sm px-4 py-2 rounded border border-[var(--admin-line-soft)] hover:border-[var(--admin-line)] transition-colors"
               data-testid="button-cancel-ship"
             >
               Cancel
@@ -532,35 +599,40 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
       {/* ── Mark Received Modal ────────────────────────────────────────────── */}
       {showMarkReceived && (
-        <div className="border border-[#D4AF37]/30 rounded-lg p-4 mb-6 bg-[#D4AF37]/5">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Camera size={14} className="text-[#D4AF37]" />
-              <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Mark Cards Received</h3>
+              <Camera size={14} className="text-[var(--admin-gold)]" />
+              <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+                Mark Cards Received
+              </h3>
             </div>
             <button
-              onClick={() => { setShowMarkReceived(false); setReceiptFiles([]); }}
-              className="text-gray-500 hover:text-white transition-colors"
+              onClick={() => {
+                setShowMarkReceived(false);
+                setReceiptFiles([]);
+              }}
+              className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] transition-colors"
             >
               <X size={14} />
             </button>
           </div>
-          <p className="text-gray-400 text-xs mb-3">
+          <p className="text-[var(--admin-ink-dim)] text-xs mb-3">
             Upload receipt photos (up to 6) showing the cards as they arrived. These will be emailed to the customer.
           </p>
 
           {/* File picker */}
-          <label className="flex items-center gap-2 border border-dashed border-[#D4AF37]/30 rounded-lg px-4 py-3 cursor-pointer hover:border-[#D4AF37]/60 transition-colors mb-3">
-            <Upload size={14} className="text-[#D4AF37]/60" />
-            <span className="text-gray-400 text-xs">Click to add photos (JPEG/PNG, max 6)</span>
+          <label className="flex items-center gap-2 border border-dashed border-[var(--admin-line)] rounded-lg px-4 py-3 cursor-pointer hover:border-[color-mix(in_srgb,var(--admin-gold)_60%,transparent)] transition-colors mb-3">
+            <Upload size={14} className="text-[var(--admin-gold)]" />
+            <span className="text-[var(--admin-ink-dim)] text-xs">Click to add photos (JPEG/PNG, max 6)</span>
             <input
               type="file"
               multiple
               accept="image/jpeg,image/png,image/webp"
               className="hidden"
-              onChange={e => {
+              onChange={(e) => {
                 const newFiles = Array.from(e.target.files ?? []).slice(0, 6 - receiptFiles.length);
-                setReceiptFiles(prev => [...prev, ...newFiles].slice(0, 6));
+                setReceiptFiles((prev) => [...prev, ...newFiles].slice(0, 6));
                 e.target.value = "";
               }}
             />
@@ -574,11 +646,11 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                   <img
                     src={URL.createObjectURL(f)}
                     alt={f.name}
-                    className="w-16 h-16 object-cover rounded border border-[#D4AF37]/20"
+                    className="w-16 h-16 object-cover rounded border border-[var(--admin-line)]"
                   />
                   <button
-                    onClick={() => setReceiptFiles(prev => prev.filter((_, idx) => idx !== i))}
-                    className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => setReceiptFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="absolute -top-1 -right-1 bg-[var(--admin-red)] text-[var(--admin-bg)] rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X size={9} />
                   </button>
@@ -588,22 +660,29 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           )}
 
           {markReceivedMutation.isError && (
-            <p className="text-red-400 text-xs mb-3">{(markReceivedMutation.error as Error)?.message}</p>
+            <p className="text-[var(--admin-red)] text-xs mb-3">{(markReceivedMutation.error as Error)?.message}</p>
           )}
 
           <div className="flex gap-2">
             <button
               onClick={() => markReceivedMutation.mutate(receiptFiles)}
               disabled={markReceivedMutation.isPending}
-              className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50 flex items-center gap-2"
+              className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] disabled:opacity-50 flex items-center gap-2"
               data-testid="button-confirm-received"
             >
-              {markReceivedMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle size={13} />}
+              {markReceivedMutation.isPending ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <CheckCircle size={13} />
+              )}
               {markReceivedMutation.isPending ? "Saving..." : "Confirm Received"}
             </button>
             <button
-              onClick={() => { setShowMarkReceived(false); setReceiptFiles([]); }}
-              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded border border-gray-700 hover:border-gray-500 transition-colors"
+              onClick={() => {
+                setShowMarkReceived(false);
+                setReceiptFiles([]);
+              }}
+              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] text-sm px-4 py-2 rounded border border-[var(--admin-line-soft)] hover:border-[var(--admin-line)] transition-colors"
             >
               Cancel
             </button>
@@ -613,16 +692,18 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
       {/* ── Granular status buttons (received+) ───────────────────────────────── */}
       {["received", "in_grading", "ready_to_return", "shipped"].includes(currentStatus) && (
-        <div className="border border-[#D4AF37]/20 rounded-lg p-4 mb-6">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
           <div className="flex items-center gap-2 mb-3">
-            <Layers size={14} className="text-[#D4AF37]" />
-            <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Granular Status Updates</h3>
+            <Layers size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Granular Status Updates
+            </h3>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => granularStatusMutation.mutate("queued")}
               disabled={granularStatusMutation.isPending}
-              className="text-xs border border-purple-500/40 bg-purple-500/10 text-purple-400 px-3 py-1.5 rounded hover:bg-purple-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs border border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
               data-testid="button-status-queued"
             >
               <Clock size={11} /> Move to Grading Queue
@@ -630,7 +711,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
             <button
               onClick={() => granularStatusMutation.mutate("grading_started")}
               disabled={granularStatusMutation.isPending}
-              className="text-xs border border-blue-500/40 bg-blue-500/10 text-blue-400 px-3 py-1.5 rounded hover:bg-blue-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs border border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-amber)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
               data-testid="button-status-grading"
             >
               <FlaskConical size={11} /> Mark Grading Started
@@ -638,7 +719,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
             <button
               onClick={() => granularStatusMutation.mutate("encapsulating")}
               disabled={granularStatusMutation.isPending}
-              className="text-xs border border-cyan-500/40 bg-cyan-500/10 text-cyan-400 px-3 py-1.5 rounded hover:bg-cyan-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-green)_10%,transparent)] text-[var(--admin-green)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-green)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
               data-testid="button-status-encapsulating"
             >
               <PackageCheck size={11} /> Mark Encapsulating
@@ -646,26 +727,30 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
             <button
               onClick={() => granularStatusMutation.mutate("delivered")}
               disabled={granularStatusMutation.isPending}
-              className="text-xs border border-green-500/40 bg-green-500/10 text-green-400 px-3 py-1.5 rounded hover:bg-green-500/20 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-green)_10%,transparent)] text-[var(--admin-green)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-green)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
               data-testid="button-status-delivered"
             >
               <CheckCircle size={11} /> Mark Delivered
             </button>
           </div>
           {granularStatusMutation.isError && (
-            <p className="text-red-400 text-xs mt-2">{(granularStatusMutation.error as Error)?.message}</p>
+            <p className="text-[var(--admin-red)] text-xs mt-2">{(granularStatusMutation.error as Error)?.message}</p>
           )}
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="border border-[#D4AF37]/20 rounded-lg p-4">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
-            <MapPin size={14} className="text-[#D4AF37]" />
-            <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Return Address</h3>
+            <MapPin size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Return Address
+            </h3>
           </div>
-          <div className="text-white text-sm space-y-0.5" data-testid="text-return-address">
-            <p className="font-medium">{sub.customerFirstName} {sub.customerLastName}</p>
+          <div className="text-[var(--admin-ink)] text-sm space-y-0.5" data-testid="text-return-address">
+            <p className="font-medium">
+              {sub.customerFirstName} {sub.customerLastName}
+            </p>
             <p>{sub.returnAddressLine1}</p>
             {sub.returnAddressLine2 && <p>{sub.returnAddressLine2}</p>}
             <p>{sub.returnCity}</p>
@@ -674,22 +759,26 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           </div>
         </div>
 
-        <div className="border border-[#D4AF37]/20 rounded-lg p-4">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Mail size={14} className="text-[#D4AF37]" />
-            <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Contact</h3>
+            <Mail size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">Contact</h3>
           </div>
           <div className="text-sm space-y-1.5">
-            <p className="text-white">{sub.customerEmail}</p>
-            {sub.phone && <p className="text-gray-400 flex items-center gap-1"><Phone size={12} /> {sub.phone}</p>}
+            <p className="text-[var(--admin-ink)]">{sub.customerEmail}</p>
+            {sub.phone && (
+              <p className="text-[var(--admin-ink-dim)] flex items-center gap-1">
+                <Phone size={12} /> {sub.phone}
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="border border-[#D4AF37]/20 rounded-lg p-4 mb-6">
+      <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
         <div className="flex items-center gap-2 mb-3">
-          <FileText size={14} className="text-[#D4AF37]" />
-          <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Order Details</h3>
+          <FileText size={14} className="text-[var(--admin-gold)]" />
+          <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">Order Details</h3>
         </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <DetailRow label="Service" value={typeData?.name || sub.serviceType} />
@@ -699,51 +788,96 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           <DetailRow label="Service Cost" value={`£${((sub.gradingCost || 0) / 100).toFixed(2)}`} />
           <DetailRow label="Shipping" value={`£${((sub.shippingCost || 0) / 100).toFixed(2)}`} />
           <DetailRow label="Shipping Insurance" value={sub.shippingInsuranceTier || "—"} />
-          {sub.insuranceFee > 0 && <DetailRow label="Insurance Surcharge" value={`£${(sub.insuranceFee / 100).toFixed(2)}`} />}
+          {sub.insuranceFee > 0 && (
+            <DetailRow label="Insurance Surcharge" value={`£${(sub.insuranceFee / 100).toFixed(2)}`} />
+          )}
           <DetailRow label="Total Paid" value={`£${parseFloat(sub.totalPrice || "0").toFixed(2)}`} highlight />
           <DetailRow label="Payment Ref" value={sub.paymentIntentId?.slice(0, 20) || "—"} />
-          {sub.notes && <div className="col-span-2"><DetailRow label="Notes" value={sub.notes} /></div>}
+          {sub.notes && (
+            <div className="col-span-2">
+              <DetailRow label="Notes" value={sub.notes} />
+            </div>
+          )}
         </div>
       </div>
 
       {sub.serviceType === "crossover" && (
-        <div className="border border-amber-500/30 rounded-lg p-4 mb-6 bg-amber-500/5" data-testid="section-crossover-details">
+        <div
+          className="border border-[color-mix(in_srgb,var(--admin-amber)_30%,transparent)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-amber)_5%,transparent)]"
+          data-testid="section-crossover-details"
+        >
           <div className="flex items-center gap-2 mb-3">
-            <ScanLine size={14} className="text-amber-400" />
-            <h3 className="text-amber-400 font-semibold text-xs uppercase tracking-wider">Crossover Details</h3>
+            <ScanLine size={14} className="text-[var(--admin-amber)]" />
+            <h3 className="text-[var(--admin-amber)] font-semibold text-xs uppercase tracking-wider">
+              Crossover Details
+            </h3>
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            <DetailRow label="Original Company" value={sub.crossoverCompany || "—"} testId="text-admin-crossover-company" />
-            {sub.crossoverOriginalGrade && <DetailRow label="Original Grade" value={sub.crossoverOriginalGrade} testId="text-admin-crossover-grade" />}
-            {sub.crossoverCertNumber && <DetailRow label="Cert Number" value={sub.crossoverCertNumber} testId="text-admin-crossover-cert" />}
+            <DetailRow
+              label="Original Company"
+              value={sub.crossoverCompany || "—"}
+              testId="text-admin-crossover-company"
+            />
+            {sub.crossoverOriginalGrade && (
+              <DetailRow
+                label="Original Grade"
+                value={sub.crossoverOriginalGrade}
+                testId="text-admin-crossover-grade"
+              />
+            )}
+            {sub.crossoverCertNumber && (
+              <DetailRow label="Cert Number" value={sub.crossoverCertNumber} testId="text-admin-crossover-cert" />
+            )}
           </div>
-          <p className="text-amber-400/60 text-xs mt-3">⚠️ Subject to review — return cards that do not meet crossover standards.</p>
+          <p className="text-[var(--admin-amber)]/70 text-xs mt-3">
+            ⚠️ Subject to review — return cards that do not meet crossover standards.
+          </p>
         </div>
       )}
 
       {sub.serviceType === "reholder" && (sub.reholderCompany || sub.reholderReason || sub.reholderCondition) && (
-        <div className="border border-purple-500/30 rounded-lg p-4 mb-6 bg-purple-500/5" data-testid="section-reholder-details">
+        <div
+          className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]"
+          data-testid="section-reholder-details"
+        >
           <div className="flex items-center gap-2 mb-3">
-            <Package size={14} className="text-purple-400" />
-            <h3 className="text-purple-400 font-semibold text-xs uppercase tracking-wider">Reholder Details</h3>
+            <Package size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Reholder Details
+            </h3>
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            {sub.reholderCompany && <DetailRow label="Current Grader" value={sub.reholderCompany} testId="text-admin-reholder-company" />}
-            {sub.reholderReason && <DetailRow label="Reason" value={sub.reholderReason} testId="text-admin-reholder-reason" />}
-            {sub.reholderCondition && <DetailRow label="Slab Condition" value={sub.reholderCondition} testId="text-admin-reholder-condition" />}
+            {sub.reholderCompany && (
+              <DetailRow label="Current Grader" value={sub.reholderCompany} testId="text-admin-reholder-company" />
+            )}
+            {sub.reholderReason && (
+              <DetailRow label="Reason" value={sub.reholderReason} testId="text-admin-reholder-reason" />
+            )}
+            {sub.reholderCondition && (
+              <DetailRow label="Slab Condition" value={sub.reholderCondition} testId="text-admin-reholder-condition" />
+            )}
           </div>
         </div>
       )}
 
       {sub.serviceType === "authentication" && (sub.authReason || sub.authConcerns) && (
-        <div className="border border-blue-500/30 rounded-lg p-4 mb-6 bg-blue-500/5" data-testid="section-auth-details">
+        <div
+          className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]"
+          data-testid="section-auth-details"
+        >
           <div className="flex items-center gap-2 mb-3">
-            <CheckCircle size={14} className="text-blue-400" />
-            <h3 className="text-blue-400 font-semibold text-xs uppercase tracking-wider">Authentication Details</h3>
+            <CheckCircle size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Authentication Details
+            </h3>
           </div>
           <div className="grid grid-cols-1 gap-y-2 text-sm">
-            {sub.authReason && <DetailRow label="Reason for Authentication" value={sub.authReason} testId="text-admin-auth-reason" />}
-            {sub.authConcerns && <DetailRow label="Specific Concerns" value={sub.authConcerns} testId="text-admin-auth-concerns" />}
+            {sub.authReason && (
+              <DetailRow label="Reason for Authentication" value={sub.authReason} testId="text-admin-auth-reason" />
+            )}
+            {sub.authConcerns && (
+              <DetailRow label="Specific Concerns" value={sub.authConcerns} testId="text-admin-auth-concerns" />
+            )}
           </div>
         </div>
       )}
@@ -753,25 +887,41 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       )}
 
       {(sub.returnCarrier || sub.returnTracking) && (
-        <div className="border border-cyan-500/20 rounded-lg p-4 mb-6 bg-cyan-500/5">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]">
           <div className="flex items-center gap-2 mb-3">
-            <Truck size={14} className="text-cyan-400" />
-            <h3 className="text-cyan-400 font-semibold text-xs uppercase tracking-wider">Return Shipping</h3>
+            <Truck size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Return Shipping
+            </h3>
           </div>
           <div className="text-sm space-y-1">
-            {sub.returnCarrier && <p className="text-white">Carrier: {sub.returnCarrier}</p>}
-            {sub.returnTracking && <p className="text-white font-mono">Tracking: {sub.returnTracking}</p>}
-            {sub.returnPostageCost && <p className="text-gray-400">Postage: £{(sub.returnPostageCost / 100).toFixed(2)}</p>}
+            {sub.returnCarrier && <p className="text-[var(--admin-ink)]">Carrier: {sub.returnCarrier}</p>}
+            {sub.returnTracking && (
+              <p className="text-[var(--admin-ink)]" style={{ fontFamily: "var(--admin-mono)" }}>
+                Tracking: {sub.returnTracking}
+              </p>
+            )}
+            {sub.returnPostageCost && (
+              <p className="text-[var(--admin-ink-dim)]">Postage: £{(sub.returnPostageCost / 100).toFixed(2)}</p>
+            )}
           </div>
         </div>
       )}
 
-      <div className="border border-red-500/30 rounded-lg p-4 mb-6 bg-red-500/5" data-testid="section-admin-notes">
+      <div
+        className="border border-[color-mix(in_srgb,var(--admin-red)_30%,transparent)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-red)_5%,transparent)]"
+        data-testid="section-admin-notes"
+      >
         <div className="flex items-center gap-2 mb-3">
-          <FileText size={14} className="text-red-400" />
-          <h3 className="text-red-400 font-semibold text-xs uppercase tracking-wider">Admin Notes</h3>
+          <FileText size={14} className="text-[var(--admin-red)]" />
+          <h3 className="text-[var(--admin-red)] font-semibold text-xs uppercase tracking-wider">Admin Notes</h3>
           {sub.adminFlagged && (
-            <span className="ml-auto text-xs bg-red-500/20 text-red-400 border border-red-500/40 rounded px-2 py-0.5" data-testid="badge-flagged">Flagged</span>
+            <span
+              className="ml-auto text-xs bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] text-[var(--admin-red)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded px-2 py-0.5"
+              data-testid="badge-flagged"
+            >
+              Flagged
+            </span>
           )}
         </div>
         <textarea
@@ -779,16 +929,20 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           onChange={(e) => setAdminNotesInput(e.target.value)}
           placeholder="Internal notes visible to admin only…"
           rows={3}
-          className="w-full bg-black/40 border border-[#D4AF37]/20 rounded px-3 py-2 text-white text-sm resize-none focus:outline-none focus:border-[#D4AF37]/60 placeholder:text-gray-600"
+          className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm resize-none focus:outline-none focus:border-[color-mix(in_srgb,var(--admin-gold)_60%,transparent)] placeholder:text-[var(--admin-ink-faint)]"
           data-testid="textarea-admin-notes"
         />
         <div className="flex items-center gap-4 mt-3">
-          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none" data-testid="label-flag-submission">
+          <label
+            className="flex items-center gap-2 text-sm text-[var(--admin-ink-dim)] cursor-pointer select-none"
+            data-testid="label-flag-submission"
+          >
             <input
               type="checkbox"
               checked={adminFlaggedInput}
               onChange={(e) => setAdminFlaggedInput(e.target.checked)}
-              className="accent-red-500 w-4 h-4"
+              className="w-4 h-4"
+              style={{ accentColor: "var(--admin-red)" }}
               data-testid="checkbox-admin-flagged"
             />
             Flag this submission for review
@@ -796,7 +950,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           <button
             onClick={() => adminNotesMutation.mutate()}
             disabled={adminNotesMutation.isPending}
-            className="ml-auto border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-1.5 rounded text-sm font-medium hover:bg-[#D4AF37]/20 transition-all disabled:opacity-50"
+            className="ml-auto border border-[var(--admin-line)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-1.5 rounded text-sm font-medium hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] transition-all disabled:opacity-50"
             data-testid="button-save-admin-notes"
           >
             {adminNotesMutation.isPending ? "Saving…" : notesSaved ? "Saved ✓" : "Save Notes"}
@@ -804,10 +958,10 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
         </div>
       </div>
 
-      <div className="border border-[#D4AF37]/20 rounded-lg p-4 mb-6">
+      <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
         <div className="flex items-center gap-2 mb-3">
-          <Clock size={14} className="text-[#D4AF37]" />
-          <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Timeline</h3>
+          <Clock size={14} className="text-[var(--admin-gold)]" />
+          <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">Timeline</h3>
         </div>
         <div className="space-y-2 text-sm">
           <TimelineEntry label="Created" time={sub.createdAt} />
@@ -818,18 +972,20 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       </div>
 
       {!showReturnForm && currentStatus === "ready_to_return" && (
-        <div className="border border-[#D4AF37]/20 rounded-lg p-4">
+        <div className="border border-[var(--admin-line)] rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Truck size={14} className="text-[#D4AF37]" />
-            <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Create Return Label</h3>
+            <Truck size={14} className="text-[var(--admin-gold)]" />
+            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+              Create Return Label
+            </h3>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="text-gray-400 text-xs block mb-1">Carrier</label>
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Carrier</label>
               <select
                 value={carrierInput}
                 onChange={(e) => setCarrierInput(e.target.value)}
-                className="w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="select-return-carrier"
               >
                 <option value="Royal Mail">Royal Mail</option>
@@ -839,30 +995,30 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               </select>
             </div>
             <div>
-              <label className="text-gray-400 text-xs block mb-1">Tracking Number</label>
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Tracking Number</label>
               <input
                 type="text"
                 value={trackingInput}
                 onChange={(e) => setTrackingInput(e.target.value)}
-                className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+                className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="input-ret-tracking"
               />
             </div>
           </div>
           <div className="max-w-[200px] mb-3">
-            <label className="text-gray-400 text-xs block mb-1">Postage Cost (pence, optional)</label>
+            <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Postage Cost (pence, optional)</label>
             <input
               type="number"
               value={postageCostInput}
               onChange={(e) => setPostageCostInput(e.target.value)}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-[#D4AF37]"
+              className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
               data-testid="input-ret-postage"
             />
           </div>
           <button
             onClick={() => returnLabelMutation.mutate()}
             disabled={returnLabelMutation.isPending}
-            className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50"
+            className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] disabled:opacity-50"
             data-testid="button-save-return-label"
           >
             {returnLabelMutation.isPending ? "Saving..." : "Save Return Label"}
@@ -941,11 +1097,15 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
   };
 
   return (
-    <div className="border border-[#D4AF37]/20 rounded-lg p-4 mb-6">
+    <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
       <div className="flex items-center gap-2 mb-3">
-        <CreditCard size={14} className="text-[#D4AF37]" />
-        <h3 className="text-[#D4AF37] font-semibold text-xs uppercase tracking-wider">Customer Card Details</h3>
-        <span className="text-gray-500 text-xs ml-auto">{items.length} item{items.length !== 1 ? "s" : ""}</span>
+        <CreditCard size={14} className="text-[var(--admin-gold)]" />
+        <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+          Customer Card Details
+        </h3>
+        <span className="text-[var(--admin-ink-faint)] text-xs ml-auto">
+          {items.length} item{items.length !== 1 ? "s" : ""}
+        </span>
       </div>
       <div className="space-y-2">
         {items.map((item, idx) => {
@@ -958,21 +1118,25 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
 
           if (isEditing) {
             return (
-              <div key={item.id} className="border border-[#D4AF37]/30 rounded p-3 bg-[#D4AF37]/5" data-testid={`item-edit-${item.id}`}>
+              <div
+                key={item.id}
+                className="border border-[var(--admin-line)] rounded p-3 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]"
+                data-testid={`item-edit-${item.id}`}
+              >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[#D4AF37] text-xs font-bold">Card #{index}</span>
+                  <span className="text-[var(--admin-gold-hi)] text-xs font-bold">Card #{index}</span>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => saveEdit(item.id)}
                       disabled={updateItemMutation.isPending}
-                      className="text-emerald-400 hover:text-emerald-300 p-1 transition-colors"
+                      className="text-[var(--admin-green)] hover:text-[var(--admin-gold-hi)] p-1 transition-colors"
                       data-testid={`button-save-item-${item.id}`}
                     >
                       <Save size={14} />
                     </button>
                     <button
                       onClick={cancelEdit}
-                      className="text-gray-400 hover:text-white p-1 transition-colors"
+                      className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] p-1 transition-colors"
                       data-testid={`button-cancel-item-${item.id}`}
                     >
                       <XCircle size={14} />
@@ -981,11 +1145,11 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Game</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Game</label>
                     <select
                       value={editData.game}
                       onChange={(e) => setEditData({ ...editData, game: e.target.value })}
-                      className="w-full bg-black border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`select-game-${item.id}`}
                     >
                       <option value="">—</option>
@@ -1000,63 +1164,63 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
                     </select>
                   </div>
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Card Name</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Card Name</label>
                     <input
                       type="text"
                       value={editData.cardName}
                       onChange={(e) => setEditData({ ...editData, cardName: e.target.value })}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`input-cardname-${item.id}`}
                     />
                   </div>
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Set</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Set</label>
                     <input
                       type="text"
                       value={editData.cardSet}
                       onChange={(e) => setEditData({ ...editData, cardSet: e.target.value })}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`input-cardset-${item.id}`}
                     />
                   </div>
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Card #</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Card #</label>
                     <input
                       type="text"
                       value={editData.cardNumber}
                       onChange={(e) => setEditData({ ...editData, cardNumber: e.target.value })}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`input-cardnumber-${item.id}`}
                     />
                   </div>
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Year</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Year</label>
                     <input
                       type="text"
                       value={editData.year}
                       onChange={(e) => setEditData({ ...editData, year: e.target.value })}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`input-year-${item.id}`}
                     />
                   </div>
                   <div>
-                    <label className="text-gray-500 text-xs block mb-0.5">Declared (£)</label>
+                    <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Declared (£)</label>
                     <input
                       type="number"
                       value={editData.declaredValue}
                       onChange={(e) => setEditData({ ...editData, declaredValue: e.target.value })}
-                      className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                       data-testid={`input-declared-${item.id}`}
                     />
                   </div>
                 </div>
                 <div className="mt-2">
-                  <label className="text-gray-500 text-xs block mb-0.5">Notes</label>
+                  <label className="text-[var(--admin-ink-faint)] text-xs block mb-0.5">Notes</label>
                   <input
                     type="text"
                     value={editData.notes}
                     onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
-                    className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:border-[#D4AF37]"
+                    className="w-full bg-transparent border border-[var(--admin-line)] rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs focus:outline-none focus:border-[var(--admin-gold)]"
                     data-testid={`input-notes-${item.id}`}
                   />
                 </div>
@@ -1067,30 +1231,34 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
           return (
             <div
               key={item.id}
-              className="border border-[#D4AF37]/10 rounded p-3 flex items-start justify-between gap-3 group"
+              className="border border-[var(--admin-line-soft)] rounded p-3 flex items-start justify-between gap-3 group"
               data-testid={`item-row-${item.id}`}
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <span className="text-[#D4AF37] text-xs font-bold">#{index}</span>
-                  {item.game && <span className="text-xs text-gray-400">{item.game}</span>}
+                  <span className="text-[var(--admin-gold-hi)] text-xs font-bold">#{index}</span>
+                  {item.game && <span className="text-xs text-[var(--admin-ink-dim)]">{item.game}</span>}
                   {cardName ? (
-                    <span className="text-white text-sm font-medium">{cardName}</span>
+                    <span className="text-[var(--admin-ink)] text-sm font-medium">{cardName}</span>
                   ) : (
-                    <span className="text-gray-600 text-sm italic">(Not provided)</span>
+                    <span className="text-[var(--admin-ink-faint)] text-sm italic">(Not provided)</span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 flex-wrap text-xs text-gray-500">
-                  <span>Set: {cardSet || <span className="text-gray-600 italic">(Not provided)</span>}</span>
-                  <span>#{cardNumber || <span className="text-gray-600 italic">—</span>}</span>
-                  <span>Year: {item.year || <span className="text-gray-600 italic">—</span>}</span>
+                <div className="flex items-center gap-3 flex-wrap text-xs text-[var(--admin-ink-faint)]">
+                  <span>
+                    Set: {cardSet || <span className="text-[var(--admin-ink-faint)] italic">(Not provided)</span>}
+                  </span>
+                  <span>#{cardNumber || <span className="text-[var(--admin-ink-faint)] italic">—</span>}</span>
+                  <span>Year: {item.year || <span className="text-[var(--admin-ink-faint)] italic">—</span>}</span>
                   <span>£{declaredValue.toLocaleString()}</span>
-                  {item.notes && <span className="text-gray-400 truncate max-w-[150px]">{item.notes}</span>}
+                  {item.notes && (
+                    <span className="text-[var(--admin-ink-dim)] truncate max-w-[150px]">{item.notes}</span>
+                  )}
                 </div>
               </div>
               <button
                 onClick={() => startEdit(item)}
-                className="text-gray-600 hover:text-[#D4AF37] p-1 transition-colors shrink-0"
+                className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)] p-1 transition-colors shrink-0"
                 data-testid={`button-edit-item-${item.id}`}
               >
                 <Edit2 size={14} />
@@ -1103,28 +1271,44 @@ function SubmissionItemsSection({ submissionId, items }: { submissionId: string;
   );
 }
 
-function DetailRow({ label, value, highlight, testId }: { label: string; value: string; highlight?: boolean; testId?: string }) {
+function DetailRow({
+  label,
+  value,
+  highlight,
+  testId,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  testId?: string;
+}) {
   return (
     <div className="flex justify-between items-center">
-      <span className="text-gray-500 text-xs">{label}</span>
-      <span className={`font-medium ${highlight ? "text-[#D4AF37] font-bold" : "text-white"}`} data-testid={testId}>{value}</span>
+      <span className="text-[var(--admin-ink-faint)] text-xs">{label}</span>
+      <span
+        className={`font-medium ${highlight ? "text-[var(--admin-gold-hi)] font-bold" : "text-[var(--admin-ink)]"}`}
+        data-testid={testId}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
 function TimelineEntry({ label, time }: { label: string; time?: string }) {
-  if (!time) return (
-    <div className="flex items-center gap-3 text-gray-600">
-      <div className="w-2 h-2 rounded-full bg-gray-700" />
-      <span className="text-xs">{label}</span>
-      <span className="text-xs">—</span>
-    </div>
-  );
+  if (!time)
+    return (
+      <div className="flex items-center gap-3 text-[var(--admin-ink-faint)]">
+        <div className="w-2 h-2 rounded-full bg-[var(--admin-line-hard)]" />
+        <span className="text-xs">{label}</span>
+        <span className="text-xs">—</span>
+      </div>
+    );
   return (
-    <div className="flex items-center gap-3 text-emerald-400">
-      <div className="w-2 h-2 rounded-full bg-emerald-400" />
+    <div className="flex items-center gap-3 text-[var(--admin-green)]">
+      <div className="w-2 h-2 rounded-full bg-[var(--admin-green)]" />
       <span className="text-xs font-medium">{label}</span>
-      <span className="text-xs text-gray-400">{new Date(time).toLocaleString()}</span>
+      <span className="text-xs text-[var(--admin-ink-dim)]">{new Date(time).toLocaleString()}</span>
     </div>
   );
 }
@@ -1171,11 +1355,11 @@ export function AdminIntake() {
   return (
     <div className="max-w-xl mx-auto px-4 py-6">
       <div className="text-center mb-8">
-        <ScanLine size={40} className="text-[#D4AF37] mx-auto mb-3" />
-        <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-intake-title">
+        <ScanLine size={40} className="text-[var(--admin-gold)] mx-auto mb-3" />
+        <h1 className="text-2xl font-bold text-[var(--admin-gold-hi)] tracking-widest" data-testid="text-intake-title">
           INTAKE SCANNER
         </h1>
-        <p className="text-gray-500 text-sm">Scan or enter a Submission ID to mark as received</p>
+        <p className="text-[var(--admin-ink-faint)] text-sm">Scan or enter a Submission ID to mark as received</p>
       </div>
 
       <div className="flex gap-2 mb-6">
@@ -1185,14 +1369,15 @@ export function AdminIntake() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleLookup()}
           placeholder="MV-SUB-000001"
-          className="flex-1 bg-transparent border-2 border-[#D4AF37]/40 rounded px-4 py-3 text-white text-lg font-mono tracking-wider placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors text-center"
+          className="flex-1 bg-transparent border-2 border-[var(--admin-line)] rounded px-4 py-3 text-[var(--admin-ink)] text-lg tracking-wider placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)] transition-colors text-center"
+          style={{ fontFamily: "var(--admin-mono)" }}
           autoFocus
           data-testid="input-intake-scan"
         />
         <button
           onClick={handleLookup}
           disabled={loading}
-          className="border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-6 rounded font-medium transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50"
+          className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-6 rounded font-medium transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] disabled:opacity-50"
           data-testid="button-intake-lookup"
         >
           {loading ? "..." : "Lookup"}
@@ -1200,16 +1385,23 @@ export function AdminIntake() {
       </div>
 
       {error && (
-        <div className="text-center py-8 border border-red-500/20 rounded-lg bg-red-500/5 mb-4">
-          <p className="text-red-400" data-testid="text-intake-error">{error}</p>
+        <div className="text-center py-8 border border-[color-mix(in_srgb,var(--admin-red)_30%,transparent)] rounded-lg bg-[color-mix(in_srgb,var(--admin-red)_5%,transparent)] mb-4">
+          <p className="text-[var(--admin-red)]" data-testid="text-intake-error">
+            {error}
+          </p>
         </div>
       )}
 
       {result && (
-        <div className="border border-[#D4AF37]/30 rounded-lg overflow-hidden">
-          <div className="bg-[#D4AF37]/5 p-4 border-b border-[#D4AF37]/20 flex items-center justify-between">
+        <div className="border border-[var(--admin-line)] rounded-lg overflow-hidden">
+          <div className="bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)] p-4 border-b border-[var(--admin-line)] flex items-center justify-between">
             <div>
-              <span className="text-[#D4AF37] font-mono font-bold text-lg">{result.submissionId}</span>
+              <span
+                className="text-[var(--admin-gold-hi)] font-bold text-lg"
+                style={{ fontFamily: "var(--admin-mono)" }}
+              >
+                {result.submissionId}
+              </span>
               <span className={`ml-3 text-xs px-2 py-0.5 rounded border ${statusColor(result.status)}`}>
                 {SUBMISSION_STATUS_LABELS[result.status?.toLowerCase()] || result.status}
               </span>
@@ -1219,41 +1411,46 @@ export function AdminIntake() {
           <div className="p-4 space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
-                <p className="text-gray-500 text-xs">Customer</p>
-                <p className="text-white font-medium">{result.customerFirstName} {result.customerLastName}</p>
+                <p className="text-[var(--admin-ink-faint)] text-xs">Customer</p>
+                <p className="text-[var(--admin-ink)] font-medium">
+                  {result.customerFirstName} {result.customerLastName}
+                </p>
               </div>
               <div>
-                <p className="text-gray-500 text-xs">Cards</p>
-                <p className="text-white font-medium">{result.cardCount || 0}</p>
+                <p className="text-[var(--admin-ink-faint)] text-xs">Cards</p>
+                <p className="text-[var(--admin-ink)] font-medium">{result.cardCount || 0}</p>
               </div>
               <div>
-                <p className="text-gray-500 text-xs">Email</p>
-                <p className="text-white text-sm">{result.customerEmail}</p>
+                <p className="text-[var(--admin-ink-faint)] text-xs">Email</p>
+                <p className="text-[var(--admin-ink)] text-sm">{result.customerEmail}</p>
               </div>
               {result.phone && (
                 <div>
-                  <p className="text-gray-500 text-xs">Phone</p>
-                  <p className="text-white text-sm">{result.phone}</p>
+                  <p className="text-[var(--admin-ink-faint)] text-xs">Phone</p>
+                  <p className="text-[var(--admin-ink)] text-sm">{result.phone}</p>
                 </div>
               )}
             </div>
 
-            <div className="border-t border-[#D4AF37]/10 pt-3">
-              <p className="text-gray-500 text-xs mb-1">Return Address</p>
-              <div className="text-white text-sm" data-testid="text-intake-address">
+            <div className="border-t border-[var(--admin-line)] pt-3">
+              <p className="text-[var(--admin-ink-faint)] text-xs mb-1">Return Address</p>
+              <div className="text-[var(--admin-ink)] text-sm" data-testid="text-intake-address">
                 <p>{result.returnAddressLine1}</p>
                 {result.returnAddressLine2 && <p>{result.returnAddressLine2}</p>}
-                <p>{result.returnCity}{result.returnCounty ? `, ${result.returnCounty}` : ""}</p>
+                <p>
+                  {result.returnCity}
+                  {result.returnCounty ? `, ${result.returnCounty}` : ""}
+                </p>
                 <p className="font-bold">{result.returnPostcode}</p>
               </div>
             </div>
 
             {(result.status?.toLowerCase() === "new" || result.status?.toLowerCase() === "paid") && (
-              <div className="border-t border-[#D4AF37]/10 pt-3">
+              <div className="border-t border-[var(--admin-line)] pt-3">
                 <button
                   onClick={() => markReceivedMutation.mutate(result.submissionId)}
                   disabled={markReceivedMutation.isPending}
-                  className="w-full border-2 border-emerald-500 bg-emerald-500/10 text-emerald-400 py-3 rounded font-bold tracking-widest text-sm transition-all hover:bg-emerald-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="w-full border-2 border-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_10%,transparent)] text-[var(--admin-green)] py-3 rounded font-bold tracking-widest text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-green)_20%,transparent)] disabled:opacity-50 flex items-center justify-center gap-2"
                   data-testid="button-intake-received"
                 >
                   <CheckCircle size={18} />
@@ -1263,8 +1460,11 @@ export function AdminIntake() {
             )}
 
             {result.status?.toLowerCase() === "received" && (
-              <div className="border-t border-[#D4AF37]/10 pt-3 text-center">
-                <p className="text-emerald-400 font-medium flex items-center justify-center gap-2" data-testid="text-already-received">
+              <div className="border-t border-[var(--admin-line)] pt-3 text-center">
+                <p
+                  className="text-[var(--admin-green)] font-medium flex items-center justify-center gap-2"
+                  data-testid="text-already-received"
+                >
                   <CheckCircle size={16} /> Already marked as received
                 </p>
               </div>
