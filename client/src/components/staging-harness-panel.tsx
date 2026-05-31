@@ -2,13 +2,29 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { FlaskConical, Loader2, AlertTriangle, X } from "lucide-react";
+import { adminButtonClass } from "@/components/admin";
 
-interface SeedCounts { customers: number; certs: number; transfers: number; vaultClubRows: number; }
+interface SeedCounts {
+  customers: number;
+  certs: number;
+  transfers: number;
+  vaultClubRows: number;
+}
 interface ResetCounts {
-  transfers: number; claimVerifications: number; labelPrints: number; labelOverrides: number;
-  reprintLog: number; ownershipHistory: number; stolenReports: number; certificates: number;
-  customerMagicLinkTokens: number; passwordResetTokens: number; emailVerificationTokens: number;
-  accountMagicLinkTokens: number; users: number; total: number;
+  transfers: number;
+  claimVerifications: number;
+  labelPrints: number;
+  labelOverrides: number;
+  reprintLog: number;
+  ownershipHistory: number;
+  stolenReports: number;
+  certificates: number;
+  customerMagicLinkTokens: number;
+  passwordResetTokens: number;
+  emailVerificationTokens: number;
+  accountMagicLinkTokens: number;
+  users: number;
+  total: number;
 }
 
 type ResultState =
@@ -37,7 +53,10 @@ export default function StagingHarnessPanel() {
     },
     onError: async (err: any) => {
       let msg = "Seed failed. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
+      try {
+        const b = await err.json?.();
+        if (b?.error) msg = b.error;
+      } catch {}
       setConfirming(null);
       setResult({ kind: "error", message: msg });
     },
@@ -54,7 +73,10 @@ export default function StagingHarnessPanel() {
     },
     onError: async (err: any) => {
       let msg = "Reset failed. Please try again.";
-      try { const b = await err.json?.(); if (b?.error) msg = b.error; } catch {}
+      try {
+        const b = await err.json?.();
+        if (b?.error) msg = b.error;
+      } catch {}
       setConfirming(null);
       setResult({ kind: "error", message: msg });
     },
@@ -64,14 +86,22 @@ export default function StagingHarnessPanel() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 pt-4">
-      <div className="border border-amber-400 bg-amber-50 rounded-lg p-4">
+      <div
+        className="rounded-lg p-4"
+        style={{
+          background: "color-mix(in srgb, var(--admin-amber) 8%, var(--admin-panel))",
+          border: "1px solid color-mix(in srgb, var(--admin-amber) 38%, transparent)",
+        }}
+      >
         <div className="flex items-start gap-3 mb-3">
-          <FlaskConical size={18} className="text-amber-700 shrink-0 mt-0.5" />
+          <FlaskConical size={18} className="shrink-0 mt-0.5" style={{ color: "var(--admin-amber)" }} />
           <div className="flex-1">
-            <p className="text-sm font-bold text-amber-900">🧪 Staging test harness</p>
-            <p className="text-xs text-amber-800 mt-0.5">
-              Affects test data only — certs MV900xxx + emails @staging-test.mintvault.dev.
-              Real data protected by triple-guard + 50-row safety limit.
+            <p className="text-sm font-bold" style={{ color: "var(--admin-amber)" }}>
+              🧪 Staging test harness
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: "var(--admin-ink-dim)" }}>
+              Affects test data only — certs MV900xxx + emails @staging-test.mintvault.dev. Real data protected by
+              triple-guard + 50-row safety limit.
             </p>
           </div>
         </div>
@@ -79,18 +109,28 @@ export default function StagingHarnessPanel() {
         <div className="flex items-center gap-3 flex-wrap">
           <button
             type="button"
-            onClick={() => { setConfirming("seed"); setResult({ kind: "idle" }); }}
+            onClick={() => {
+              setConfirming("seed");
+              setResult({ kind: "idle" });
+            }}
             disabled={anyPending}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            className={adminButtonClass({ size: "sm" })}
           >
             {seedMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
             Seed E2E Test Data
           </button>
           <button
             type="button"
-            onClick={() => { setConfirming("reset"); setResult({ kind: "idle" }); }}
+            onClick={() => {
+              setConfirming("reset");
+              setResult({ kind: "idle" });
+            }}
             disabled={anyPending}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 border border-amber-700 bg-white hover:bg-amber-100 px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            className={adminButtonClass({ size: "sm" })}
+            style={{
+              color: "var(--admin-amber)",
+              borderColor: "color-mix(in srgb, var(--admin-amber) 50%, transparent)",
+            }}
           >
             {resetMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <AlertTriangle size={12} />}
             Reset Test Data
@@ -98,20 +138,26 @@ export default function StagingHarnessPanel() {
 
           {/* Result display */}
           {result.kind === "seeded" && (
-            <span className="text-xs text-green-700">
-              ✅ Seeded: {result.inserted.customers} customers · {result.inserted.certs} certs · {result.inserted.transfers} transfers · {result.inserted.vaultClubRows} Vault Club rows
+            <span className="text-xs" style={{ color: "var(--admin-green)" }}>
+              ✅ Seeded: {result.inserted.customers} customers · {result.inserted.certs} certs ·{" "}
+              {result.inserted.transfers} transfers · {result.inserted.vaultClubRows} Vault Club rows
             </span>
           )}
           {result.kind === "already-seeded" && (
-            <span className="text-xs text-amber-900">⚠️ Already seeded — run Reset first.</span>
+            <span className="text-xs" style={{ color: "var(--admin-amber)" }}>
+              ⚠️ Already seeded — run Reset first.
+            </span>
           )}
           {result.kind === "reset" && (
-            <span className="text-xs text-green-700">
-              ✅ Reset: {result.deleted.total} rows deleted ({result.deleted.certificates} certs, {result.deleted.users} users, {result.deleted.transfers} transfers…)
+            <span className="text-xs" style={{ color: "var(--admin-green)" }}>
+              ✅ Reset: {result.deleted.total} rows deleted ({result.deleted.certificates} certs, {result.deleted.users}{" "}
+              users, {result.deleted.transfers} transfers…)
             </span>
           )}
           {result.kind === "error" && (
-            <span className="text-xs text-red-600">❌ {result.message}</span>
+            <span className="text-xs" style={{ color: "var(--admin-red)" }}>
+              ❌ {result.message}
+            </span>
           )}
         </div>
       </div>
@@ -122,10 +168,7 @@ export default function StagingHarnessPanel() {
           className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50"
           onClick={anyPending ? undefined : () => setConfirming(null)}
         >
-          <div
-            className="bg-white rounded-xl max-w-md w-full mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="bg-white rounded-xl max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-3 border-b border-[#E8E4DC]">
               <h3 className="text-sm font-bold text-[#1A1A1A]">
                 {confirming === "seed" ? "Seed E2E Test Data" : "Reset Test Data"}
