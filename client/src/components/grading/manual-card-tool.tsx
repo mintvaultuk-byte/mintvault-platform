@@ -1217,69 +1217,123 @@ export default function ManualCardTool({
               {phase === "capture" && mode === "full" && renderDots(innerPts, "inner", palette.inner)}
 
               {/* ── Defect pins (defects phase) ─────────────────────────────
-                  Committed pins: rendered as numbered red circles, parity with
-                  image-viewer.tsx markers. Pending batch pins: smaller dashed
-                  circles showing localId — get committed in batch on picker
-                  commit. pointer-events:none on both so clicks fall through to
-                  the container's defect-area handler (drop next pin / open
-                  picker on double-click). */}
+                  Both committed and pending pins render as TRANSPARENT rings
+                  so the defect underneath stays visible. Visual parity with
+                  image-viewer.tsx's marker pattern (see :770-873): tier-
+                  coloured outline + 4 px centre dot + small numbered badge
+                  offset above-right. The ring carries a 1 px dark halo
+                  (boxShadow) so it reads on both light and dark card areas —
+                  same approach the 8-dot crosshair markers use. The hit area
+                  is the surrounding container (44 px range stays in tact);
+                  only the VISIBLE marker is see-through. pointer-events:none
+                  so clicks fall through to the defect-area handler (drop next
+                  pin / open picker on double-click). */}
               {phase === "defects" && (
                 <>
-                  {committedDefects.map((d) => (
-                    <div
-                      key={`committed-${d.id}`}
-                      className="absolute pointer-events-none"
-                      style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, zIndex: 28 }}
-                      aria-hidden="true"
-                    >
+                  {committedDefects.map((d) => {
+                    // Tier-coloured ring, matching image-viewer.tsx:785-791
+                    // — D1 red / D2 amber / D3 green. Undefined-tier pins
+                    // (legacy or AI-promoted without classification) fall back
+                    // to red as a "needs review" cue.
+                    const col = d.tier === "D2" ? "#F59E0B" : d.tier === "D3" ? "#16A34A" : "#DC2626";
+                    return (
                       <div
+                        key={`committed-${d.id}`}
+                        className="absolute pointer-events-none"
                         style={{
-                          position: "relative",
-                          width: 22,
-                          height: 22,
+                          left: `${d.x_percent}%`,
+                          top: `${d.y_percent}%`,
                           transform: "translate(-50%, -50%)",
-                          borderRadius: "9999px",
-                          background: "#DC2626",
-                          color: "white",
-                          fontSize: 10,
-                          fontWeight: 700,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          boxShadow: "0 0 0 2px white, 0 1px 4px rgba(0,0,0,0.4)",
+                          width: 28,
+                          height: 28,
+                          zIndex: 28,
                         }}
+                        aria-hidden="true"
                       >
-                        {d.id}
+                        <div
+                          className="w-full h-full rounded-full"
+                          style={{
+                            border: `2px solid ${col}`,
+                            background: "transparent",
+                            boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
+                          }}
+                        />
+                        {/* Centre dot — 4 px in the tier colour so the exact
+                            captured pixel stays identifiable through the
+                            otherwise-empty ring. */}
+                        <span
+                          className="absolute pointer-events-none rounded-full"
+                          style={{
+                            left: "50%",
+                            top: "50%",
+                            transform: "translate(-50%, -50%)",
+                            width: 4,
+                            height: 4,
+                            background: col,
+                          }}
+                        />
+                        {/* Number badge sits OUTSIDE the ring (above-right) so
+                            it doesn't cover the defect pixel. Coloured fill +
+                            dark halo for legibility on every card. */}
+                        <span
+                          className="absolute -top-1 -right-1 text-[9px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
+                          style={{
+                            background: col,
+                            color: "#fff",
+                            boxShadow: "0 0 0 1px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
+                          }}
+                        >
+                          {d.id}
+                        </span>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {defectBatch.map((p, i) => (
                     <div
                       key={`batch-${i}`}
                       className="absolute pointer-events-none"
-                      style={{ left: `${p.x}%`, top: `${p.y}%`, zIndex: 29 }}
+                      style={{
+                        left: `${p.x}%`,
+                        top: `${p.y}%`,
+                        transform: "translate(-50%, -50%)",
+                        width: 28,
+                        height: 28,
+                        zIndex: 29,
+                      }}
                       aria-hidden="true"
                     >
+                      {/* Pending pins use a dashed gold ring (still untiered)
+                          + the same transparent centre so the defect under the
+                          pin is visible BEFORE it's even labelled. */}
                       <div
+                        className="w-full h-full rounded-full"
                         style={{
-                          position: "relative",
-                          width: 22,
-                          height: 22,
-                          transform: "translate(-50%, -50%)",
-                          borderRadius: "9999px",
-                          background: "#FBF8EE",
-                          color: "#1A1400",
-                          fontSize: 10,
-                          fontWeight: 700,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
                           border: "2px dashed #D4AF37",
-                          boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                          background: "transparent",
+                          boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
+                        }}
+                      />
+                      <span
+                        className="absolute pointer-events-none rounded-full"
+                        style={{
+                          left: "50%",
+                          top: "50%",
+                          transform: "translate(-50%, -50%)",
+                          width: 4,
+                          height: 4,
+                          background: "#D4AF37",
+                        }}
+                      />
+                      <span
+                        className="absolute -top-1 -right-1 text-[9px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
+                        style={{
+                          background: "#D4AF37",
+                          color: "#1A1400",
+                          boxShadow: "0 0 0 1px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
                         }}
                       >
                         {i + 1}
-                      </div>
+                      </span>
                     </div>
                   ))}
                 </>
