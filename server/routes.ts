@@ -29,6 +29,7 @@ import {
   serviceTierToPricingTier,
   auditLog,
 } from "@shared/schema";
+import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
 import { centeringAxisGrade } from "@shared/centering";
@@ -431,7 +432,7 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
     variant: variantDisplayLabel(c.variant, (c as any).variantOther) || c.variant || null,
     collection: collectionDisplayLabel((c as any).collectionCode, (c as any).collectionOther, (c as any).collection),
     language: c.language,
-    grade: gradeLabelFull(gradeType, c.gradeOverall || "0"),
+    grade: isNonNum ? gradeLabelFull(gradeType, c.gradeOverall || "0") : mvgsTierName(grade).toUpperCase(),
     gradeNumeric: grade,
     gradeCentering: c.gradeCentering != null ? String(c.gradeCentering) : null,
     gradeCorners: c.gradeCorners != null ? String(c.gradeCorners) : null,
@@ -2009,7 +2010,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         cardYear: dbCert.year || null,
         cardNumber: dbCert.cardNumber || null,
         language: dbCert.language || null,
-        grade: gradeLabelFull(gradeType, dbCert.gradeOverall || "0"),
+        grade: isNonNum
+          ? gradeLabelFull(gradeType, dbCert.gradeOverall || "0")
+          : mvgsTierName(gradeNumeric as number).toUpperCase(),
         gradeNumeric,
         gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
         ownershipStatus: dbCert.ownershipStatus || "unclaimed",
@@ -2114,7 +2117,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         cardSet: c.setName || "",
         cardYear: c.year || "",
         cardNumber: c.cardNumber || "",
-        grade: gradeLabelFull(gradeType, c.gradeOverall || "0"),
+        grade: isNonNum ? gradeLabelFull(gradeType, c.gradeOverall || "0") : mvgsTierName(grade).toUpperCase(),
         gradeNumeric: grade,
         gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
         status: c.status,
@@ -3467,7 +3470,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         },
         grade: {
           overall: isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : gradeNum,
-          label: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
+          label: isNonNum ? gradeLabelFull(gradeType, "0") : mvgsTierName(gradeNum).toUpperCase(),
           labelType,
           isBlackLabel: isBlack,
           explanation: stripEmailsR(c.gradeExplanation || ai.grade_explanation || ""),
@@ -3544,7 +3547,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ? gradeType === "authentic_altered"
           ? "AUTHENTIC ALTERED"
           : "NOT ORIGINAL"
-        : gradeLabel(gradeNum);
+        : mvgsTierName(gradeNum).toUpperCase();
 
       const PDFDocument = (await import("pdfkit")).default;
       const doc = new PDFDocument({ size: "A4", margin: 50, autoFirstPage: true });
@@ -4194,7 +4197,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           surface: c.gradeSurface ? parseFloat(c.gradeSurface) : null,
           isBlackLabel: isBlack,
           isNonNumeric: isNonNum,
-          gradeLabel: isNonNum ? gradeLabelFull(gradeType, "0") : gradeLabel(gradeNum),
+          gradeLabel: isNonNum ? gradeLabelFull(gradeType, "0") : mvgsTierName(gradeNum).toUpperCase(),
           gradeStrengthScore: typeof c.gradeStrengthScore === "number" ? c.gradeStrengthScore : null,
         },
         centering: {
