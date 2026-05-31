@@ -61,10 +61,10 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
       }}
       className={`flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-2 rounded-lg transition-all mt-1 ${
         status === "done"
-          ? "border border-emerald-600/40 text-emerald-600 bg-emerald-50"
+          ? "border border-[var(--admin-green)]/40 text-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)]"
           : status === "loading"
-            ? "border border-[#D4AF37]/40 text-[#D4AF37] bg-[#D4AF37]/5"
-            : "border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
+            ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] bg-[var(--admin-gold)]/5"
+            : "border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40"
       }`}
     >
       {status === "loading" ? (
@@ -1115,9 +1115,11 @@ export default function GradingPanel({
   const urls = imageData?.urls || {};
 
   return (
-    <div className="bg-white border border-[#E8E4DC] rounded-xl p-4 space-y-5">
+    <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Grading Workstation</p>
+        <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
+          Manual Grading Workstation
+        </p>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -1130,8 +1132,8 @@ export default function GradingPanel({
             }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
               aiAnalysis
-                ? "text-[#555555] border border-[#D4D0C8] hover:text-[#D4AF37] hover:border-[#D4AF37]/40"
-                : "text-[#999999] border border-[#E8E4DC] opacity-60 cursor-not-allowed"
+                ? "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40"
+                : "text-[var(--admin-ink-faint)] border border-[var(--admin-line)] opacity-60 cursor-not-allowed"
             }`}
           >
             Revert to AI
@@ -1147,14 +1149,14 @@ export default function GradingPanel({
                 return next;
               })
             }
-            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[#D4AF37]/20 text-[#D4AF37] border border-[#D4AF37]/40" : "text-[#555555] border border-[#D4D0C8] hover:text-[#333333]"}`}
+            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[var(--admin-gold)]/20 text-[var(--admin-gold)] border border-[var(--admin-gold)]/40" : "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-ink-dim)]"}`}
             title="Toggle quick-grade mode (Q)"
           >
             <Zap size={10} />
             Quick
           </button>
           {approved && (
-            <span className="flex items-center gap-1.5 text-emerald-600 text-xs">
+            <span className="flex items-center gap-1.5 text-[var(--admin-green)] text-xs">
               <CheckCircle2 size={13} />
               Grade approved
             </span>
@@ -1169,7 +1171,9 @@ export default function GradingPanel({
       {!approved && (
         <label
           className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
-            deionizationComplete ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-300"
+            deionizationComplete
+              ? "bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]"
+              : "bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)]"
           }`}
           data-testid="check-deionization-complete"
         >
@@ -1177,10 +1181,12 @@ export default function GradingPanel({
             type="checkbox"
             checked={deionizationComplete}
             onChange={() => setDeionizationComplete((v) => !v)}
-            className="accent-[#D4AF37] h-4 w-4"
+            className="accent-[var(--admin-gold)] h-4 w-4"
           />
-          <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Deionization complete</span>
-          <span className="text-[10px] text-[#555] ml-auto">Required before approve</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-[var(--admin-ink)]">
+            Deionization complete
+          </span>
+          <span className="text-[10px] text-[var(--admin-ink-dim)] ml-auto">Required before approve</span>
         </label>
       )}
 
@@ -1260,10 +1266,10 @@ export default function GradingPanel({
                       data-testid={`btn-side-${s}`}
                       className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                         isActive
-                          ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                          ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
                           : hasImage
-                            ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
-                            : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
+                            ? "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
+                            : "border-[var(--admin-line)] text-[var(--admin-ink-faint)] cursor-not-allowed"
                       }`}
                     >
                       {s}
@@ -1288,7 +1294,7 @@ export default function GradingPanel({
                             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
                           } catch {}
                         }}
-                        className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                        className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all"
                       >
                         <Trash2 size={10} />
                       </button>
@@ -1356,9 +1362,9 @@ export default function GradingPanel({
             </div>
             {/* Bottom corner/edge selectors removed — MVGS-driven. */}
           </div>
-          <div className="bg-[#F7F7F5] border border-[#E8E4DC] rounded-lg p-3 space-y-2">
+          <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+              <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
               <div className="flex items-center gap-2">
                 {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
                   <button
@@ -1379,7 +1385,7 @@ export default function GradingPanel({
                         }))
                       );
                     }}
-                    className="flex items-center gap-1 text-[#B8960C] hover:text-[#D4AF37] text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors"
                     data-testid="btn-recalc-zones"
                     title="Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
                   >
@@ -1394,7 +1400,7 @@ export default function GradingPanel({
                       if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
                       setDefects([]);
                     }}
-                    className="flex items-center gap-1 text-[#888888] hover:text-red-600 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors"
                     data-testid="btn-clear-defects"
                     title="Delete all defect pins"
                   >
@@ -1423,12 +1429,12 @@ export default function GradingPanel({
               disabled post-approval (see autoSave useEffect gate) so any
               edit-mode change requires the SAVE CHANGES button below. */}
           {gradeApprovedAt && !editMode && (
-            <div className="bg-[#16A34A]/10 border border-[#16A34A]/40 rounded-lg p-3 flex items-start justify-between gap-3">
+            <div className="bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 rounded-lg p-3 flex items-start justify-between gap-3">
               <div className="space-y-1 min-w-0">
-                <p className="text-[#16A34A] text-xs font-bold uppercase tracking-widest">
+                <p className="text-[var(--admin-green)] text-xs font-bold uppercase tracking-widest">
                   ✓ Approved &amp; Live · {certIdStr || ""}
                 </p>
-                <p className="text-[#16A34A]/80 text-[10px] leading-relaxed">
+                <p className="text-[var(--admin-green)]/80 text-[10px] leading-relaxed">
                   Approved {gradeApprovedAt ? new Date(gradeApprovedAt).toLocaleString() : ""}
                   {gradeApprovedBy ? ` by ${gradeApprovedBy}` : ""}.
                 </p>
@@ -1436,7 +1442,7 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={enterEditMode}
-                className="shrink-0 border border-[#D4AF37]/60 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-colors"
+                className="shrink-0 border border-[var(--admin-gold)]/60 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded transition-colors"
                 data-testid="btn-edit-grade"
               >
                 ✏️ Edit Grade
@@ -1444,13 +1450,13 @@ export default function GradingPanel({
             </div>
           )}
           {gradeApprovedAt && editMode && (
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+            <div className="bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] rounded-lg p-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 min-w-0">
-                  <p className="text-amber-800 text-xs font-bold uppercase tracking-widest">
+                  <p className="text-[var(--admin-amber)] text-xs font-bold uppercase tracking-widest">
                     ✏️ Edit mode · {certIdStr || ""}
                   </p>
-                  <p className="text-amber-700/90 text-[10px] leading-relaxed">
+                  <p className="text-[var(--admin-amber)]/90 text-[10px] leading-relaxed">
                     Changes are not saved until you click Save · all saves recorded in audit log.
                   </p>
                 </div>
@@ -1460,7 +1466,7 @@ export default function GradingPanel({
                   type="button"
                   onClick={saveEditedGrade}
                   disabled={editSaving}
-                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                  className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-all hover:opacity-90 disabled:opacity-40"
                   data-testid="btn-save-edit"
                 >
                   {editSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -1470,7 +1476,7 @@ export default function GradingPanel({
                   type="button"
                   onClick={cancelEdit}
                   disabled={editSaving}
-                  className="border border-zinc-300 text-zinc-600 hover:bg-zinc-100 text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-colors disabled:opacity-40"
+                  className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)] text-xs font-bold uppercase tracking-widest px-3 py-2 rounded transition-colors disabled:opacity-40"
                   data-testid="btn-cancel-edit"
                 >
                   Cancel
@@ -1508,20 +1514,20 @@ export default function GradingPanel({
                       key={key}
                       className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${
                         isManual
-                          ? "bg-blue-950/30 text-blue-400 border-blue-800/40"
-                          : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border-[#D4AF37]/20"
+                          ? "bg-[var(--admin-blue)]/30 text-[var(--admin-blue)] border-[var(--admin-blue)]/40"
+                          : "bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]/70 border-[var(--admin-gold)]/20"
                       }`}
                     >
                       <span className="uppercase font-bold">{key.slice(0, 1).toUpperCase()}</span>
                       <span>{isManual ? `Manual (AI: ${aiVal})` : `AI ${aiVal}`}</span>
-                      <span className="text-[#D4AF37]/50">·</span>
+                      <span className="text-[var(--admin-gold)]/50">·</span>
                       <span
                         className={`font-bold ${
                           aiAnalysis.confidence[key] === "high"
-                            ? "text-emerald-600"
+                            ? "text-[var(--admin-green)]"
                             : aiAnalysis.confidence[key] === "medium"
-                              ? "text-amber-600"
-                              : "text-red-600"
+                              ? "text-[var(--admin-amber)]"
+                              : "text-[var(--admin-red)]"
                         }`}
                       >
                         {aiAnalysis.confidence[key]}
@@ -1553,43 +1559,49 @@ export default function GradingPanel({
                 });
                 return (
                   <div
-                    className="bg-[#FAF5E0] border border-[#D4AF37]/40 rounded-lg p-3 space-y-3"
+                    className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
                     data-testid="mvgs-controls"
                   >
                     <div className="flex items-baseline justify-between">
-                      <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">MVGS</span>
+                      <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">
+                        MVGS
+                      </span>
                       <span className="text-[#1A1400] text-sm font-bold" data-testid="text-mvgs-score">
                         {mvgs.score}/100 · {mvgs.grade}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="flex flex-col gap-1.5">
-                        <span className="text-[10px] uppercase tracking-wider text-[#555]">Dark border</span>
+                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)]">
+                          Dark border
+                        </span>
                         <div className="flex gap-3">
                           <label className="flex items-center gap-1.5 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={darkBorderFront}
                               onChange={() => setDarkBorderFront((v) => !v)}
-                              className="accent-[#D4AF37] h-4 w-4"
+                              className="accent-[var(--admin-gold)] h-4 w-4"
                               data-testid="check-dark-border-front"
                             />
-                            <span className="text-[10px] text-[#555]">Front</span>
+                            <span className="text-[10px] text-[var(--admin-ink-dim)]">Front</span>
                           </label>
                           <label className="flex items-center gap-1.5 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={darkBorderBack}
                               onChange={() => setDarkBorderBack((v) => !v)}
-                              className="accent-[#D4AF37] h-4 w-4"
+                              className="accent-[var(--admin-gold)] h-4 w-4"
                               data-testid="check-dark-border-back"
                             />
-                            <span className="text-[10px] text-[#555]">Back</span>
+                            <span className="text-[10px] text-[var(--admin-ink-dim)]">Back</span>
                           </label>
                         </div>
                       </div>
                       <div>
-                        <span className="text-[10px] uppercase tracking-wider text-[#555] block mb-1">Eye appeal</span>
+                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-dim)] block mb-1">
+                          Eye appeal
+                        </span>
                         <div className="flex gap-1">
                           {[-2, -1, 0, 1, 2].map((n) => (
                             <button
@@ -1598,8 +1610,8 @@ export default function GradingPanel({
                               onClick={() => setEyeAppealModifier(n)}
                               className={`flex-1 text-[10px] font-bold px-1.5 py-1 rounded border transition-colors ${
                                 eyeAppealModifier === n
-                                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                                  : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                                  ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]"
+                                  : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"
                               }`}
                               data-testid={`btn-eye-appeal-${n >= 0 ? "p" + n : "m" + Math.abs(n)}`}
                             >
@@ -1610,11 +1622,13 @@ export default function GradingPanel({
                       </div>
                     </div>
                     {Object.keys(mvgs.deductions).length > 0 && (
-                      <div className="text-[10px] text-[#555] font-mono">
+                      <div className="text-[10px] text-[var(--admin-ink-dim)] font-mono">
                         {Object.entries(mvgs.deductions).map(([k, v]) => (
                           <span key={k} className="inline-block mr-2 whitespace-nowrap">
                             {k}:{" "}
-                            <span className={v > 0 ? "text-emerald-700" : "text-red-700"}>{v > 0 ? `+${v}` : v}</span>
+                            <span className={v > 0 ? "text-[var(--admin-green)]" : "text-[var(--admin-red)]"}>
+                              {v > 0 ? `+${v}` : v}
+                            </span>
                           </span>
                         ))}
                       </div>
@@ -1666,9 +1680,11 @@ export default function GradingPanel({
             )}
 
             {isNonNumeric && (
-              <div className="rounded-xl p-4 bg-amber-50 border border-amber-200 text-center">
-                <p className="text-amber-600 text-2xl font-black">{authStatus === "authentic_altered" ? "AA" : "NO"}</p>
-                <p className="text-amber-600 text-xs mt-1">
+              <div className="rounded-xl p-4 bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] text-center">
+                <p className="text-[var(--admin-amber)] text-2xl font-black">
+                  {authStatus === "authentic_altered" ? "AA" : "NO"}
+                </p>
+                <p className="text-[var(--admin-amber)] text-xs mt-1">
                   {authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL"}
                 </p>
               </div>
@@ -1679,14 +1695,14 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={() => setManualCardToolSide("front")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4AF37]/60 bg-[#D4AF37]/5 text-[#9A7B1E] hover:bg-[#D4AF37]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:bg-[var(--admin-gold)]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
               >
                 Card Tool (Front)
               </button>
               <button
                 type="button"
                 onClick={() => setManualCardToolSide("back")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4AF37]/60 bg-[#D4AF37]/5 text-[#9A7B1E] hover:bg-[#D4AF37]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:bg-[var(--admin-gold)]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
               >
                 Card Tool (Back)
               </button>
@@ -1697,27 +1713,27 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={() => setManualCenteringSide("front")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
               >
                 Manual Centering (Front)
               </button>
               <button
                 type="button"
                 onClick={() => setManualCenteringSide("back")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[#D4D0C8] text-[#333333] hover:text-[#D4AF37] hover:border-[#D4AF37]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
               >
                 Manual Centering (Back)
               </button>
               {centeringMethod && (
                 <span
-                  className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-[#D4AF37]/10 text-[#D4AF37]/70 border border-[#D4AF37]/20"}`}
+                  className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] text-[var(--admin-green)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]" : "bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]/70 border border-[var(--admin-gold)]/20"}`}
                 >
                   {centeringMethod}
                 </span>
               )}
             </div>
 
-            <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-2">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2">
               <CenteringInput
                 frontLR={frontLR}
                 frontTB={frontTB}
@@ -1779,8 +1795,8 @@ export default function GradingPanel({
                   <span
                     className={
                       active
-                        ? "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#D4AF37] text-[#1A1400] font-bold"
-                        : "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded border border-[#D4D0C8] text-[#777777]"
+                        ? "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--admin-gold)] text-[#1A1400] font-bold"
+                        : "inline-flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--admin-line)] text-[var(--admin-ink-faint)]"
                     }
                   >
                     <span>{label}</span>
@@ -1791,13 +1807,17 @@ export default function GradingPanel({
                 return (
                   <div className="space-y-1 pt-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Front</span>
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
+                        Front
+                      </span>
                       {FRONT_CHIPS.map((c) => (
                         <Chip key={c.label} label={c.label} grade={c.grade} active={frontHits.has(c.grade)} />
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-[#555555] w-10">Back</span>
+                      <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-dim)] w-10">
+                        Back
+                      </span>
                       {BACK_CHIPS.map((c) => (
                         <Chip key={c.label} label={c.label} grade={c.grade} active={backHits.has(c.grade)} />
                       ))}
@@ -1850,7 +1870,7 @@ export default function GradingPanel({
                         : "Compute centering subgrade from the four ratios using MVGS standard"
                     }
                     data-testid="btn-mvgs-calc"
-                    className="text-[10px] font-bold uppercase tracking-widest border border-[#D4AF37]/50 text-[#D4AF37] hover:bg-[#D4AF37]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="text-[10px] font-bold uppercase tracking-widest border border-[var(--admin-gold)]/50 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 px-2 py-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
                     MVGS Calc
                   </button>
@@ -1859,13 +1879,13 @@ export default function GradingPanel({
             </div>
 
             {/* Corners — MVGS-driven when locked, override when unlocked */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
               <div className="flex items-center justify-between">
-                <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Corners</p>
+                <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Corners</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold text-[#1A1A1A]">{sub.corners || "—"}</span>
+                  <span className="text-lg font-bold text-[var(--admin-ink)]">{sub.corners || "—"}</span>
                   {hasMvgsPins ? (
-                    <span className="w-20 text-xs text-center text-[#888888] italic">MVGS auto</span>
+                    <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                   ) : (
                     <input
                       type="number"
@@ -1879,7 +1899,7 @@ export default function GradingPanel({
                         clearOverallOverrideIfSet();
                       }}
                       placeholder="Override"
-                      className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                      className="w-20 text-xs border border-[var(--admin-line)] rounded px-2 py-1 text-center bg-[var(--admin-panel)]"
                     />
                   )}
                 </div>
@@ -1887,13 +1907,13 @@ export default function GradingPanel({
             </div>
 
             {/* Edges — MVGS-driven when locked, override when unlocked */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
               <div className="flex items-center justify-between">
-                <p className="text-[#B8960C] text-[10px] uppercase tracking-widest font-bold">Edges</p>
+                <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Edges</p>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold text-[#1A1A1A]">{sub.edges || "—"}</span>
+                  <span className="text-lg font-bold text-[var(--admin-ink)]">{sub.edges || "—"}</span>
                   {hasMvgsPins ? (
-                    <span className="w-20 text-xs text-center text-[#888888] italic">MVGS auto</span>
+                    <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                   ) : (
                     <input
                       type="number"
@@ -1907,7 +1927,7 @@ export default function GradingPanel({
                         clearOverallOverrideIfSet();
                       }}
                       placeholder="Override"
-                      className="w-20 text-xs border border-[#E8E4DC] rounded px-2 py-1 text-center bg-white"
+                      className="w-20 text-xs border border-[var(--admin-line)] rounded px-2 py-1 text-center bg-[var(--admin-panel)]"
                     />
                   )}
                 </div>
@@ -1919,22 +1939,26 @@ export default function GradingPanel({
                 from computeMvgsScore (mvgsSurfaceGrade) with the override
                 stepper layered on top. Condition checkboxes still drive
                 hasCrease / hasTear caps. */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3 space-y-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-3">
               <div className="flex items-center gap-2">
-                <Eye size={14} className="text-[#D4AF37]" />
-                <h3 className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Surface</h3>
+                <Eye size={14} className="text-[var(--admin-gold)]" />
+                <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Surface</h3>
               </div>
 
               {surface.hasCrease && (
-                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded px-3 py-2">
-                  <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
-                  <p className="text-red-600 text-xs">Crease detected — maximum overall grade capped at 5.0</p>
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Crease detected — maximum overall grade capped at 5.0
+                  </p>
                 </div>
               )}
               {surface.hasTear && (
-                <div className="flex items-center gap-2 bg-red-100 border border-red-400 rounded px-3 py-2">
-                  <AlertTriangle size={12} className="text-red-600 flex-shrink-0" />
-                  <p className="text-red-600 text-xs">Tear or missing material — maximum overall grade capped at 3.0</p>
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Tear or missing material — maximum overall grade capped at 3.0
+                  </p>
                 </div>
               )}
 
@@ -1951,16 +1975,20 @@ export default function GradingPanel({
                         setSurface({ ...surface, [issue.key]: e.target.checked });
                         clearOverallOverrideIfSet();
                       }}
-                      className="mt-0.5 accent-[#D4AF37]"
+                      className="mt-0.5 accent-[var(--admin-gold)]"
                     />
                     <span
-                      className={`text-xs group-hover:text-[#1A1A1A] transition-colors ${
-                        issue.warning ? "text-red-300" : "text-[#888888]"
+                      className={`text-xs group-hover:text-[var(--admin-ink)] transition-colors ${
+                        issue.warning
+                          ? "text-[color-mix(in_srgb,var(--admin-red)_50%,transparent)]"
+                          : "text-[var(--admin-ink-faint)]"
                       }`}
                     >
                       {issue.warning && "⚠️ "}
                       {issue.label}
-                      {issue.warning && <span className="text-red-600 text-[10px] block ml-1">{issue.warning}</span>}
+                      {issue.warning && (
+                        <span className="text-[var(--admin-red)] text-[10px] block ml-1">{issue.warning}</span>
+                      )}
                     </span>
                   </label>
                 ))}
@@ -1970,17 +1998,17 @@ export default function GradingPanel({
                   stepper. Mirrors the visual treatment of the old SurfaceGrading
                   component's subgrade row. */}
               <div>
-                <p className="text-[#333333] text-[10px]">
+                <p className="text-[var(--admin-ink-dim)] text-[10px]">
                   Surface:{" "}
                   <span className="font-bold text-sm" style={{ color: surfaceGradeColor(surfaceGrade) }}>
                     {surfaceGrade}
                   </span>
-                  <span className="text-[#555555]"> (MVGS — from defect pins)</span>
-                  {surfaceOverride !== null && <span className="text-[#333333]"> (manual)</span>}
+                  <span className="text-[var(--admin-ink-dim)]"> (MVGS — from defect pins)</span>
+                  {surfaceOverride !== null && <span className="text-[var(--admin-ink-dim)]"> (manual)</span>}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   {hasMvgsPins ? (
-                    <span className="text-xs text-[#888888] italic">MVGS auto</span>
+                    <span className="text-xs text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                   ) : (
                     <>
                       <select
@@ -1991,7 +2019,7 @@ export default function GradingPanel({
                           clearOverallOverrideIfSet();
                         }}
                         data-testid="select-surface-override"
-                        className="bg-[#F7F7F5] border border-[#D4D0C8] text-[#1A1A1A] text-xs rounded px-2 py-1"
+                        className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1"
                       >
                         <option value="">Override (auto)</option>
                         {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
@@ -2007,7 +2035,7 @@ export default function GradingPanel({
                             setSurfaceOverride(null);
                             clearOverallOverrideIfSet();
                           }}
-                          className="text-[#555555] text-[10px] hover:text-[#333333]"
+                          className="text-[var(--admin-ink-dim)] text-[10px] hover:text-[var(--admin-ink-dim)]"
                         >
                           clear
                         </button>
@@ -2019,7 +2047,7 @@ export default function GradingPanel({
             </div>
 
             {/* Authentication */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
               <Authentication
                 status={authStatus}
                 notes={authNotes}
@@ -2042,7 +2070,7 @@ export default function GradingPanel({
                     ? "Set all four subgrades first"
                     : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
                 }
-                className="w-full flex items-center justify-center gap-2 border border-[#D4AF37]/30 text-[#D4AF37] hover:border-[#D4AF37]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="btn-generate-description"
               >
                 {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -2051,7 +2079,7 @@ export default function GradingPanel({
             </div>
 
             {/* Notes */}
-            <div className="bg-[#F7F7F5] rounded-lg p-3">
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
               <GradingNotes
                 privateNotes={privateNotes}
                 gradeExplanation={gradeExplanation}
@@ -2067,24 +2095,24 @@ export default function GradingPanel({
               present + overall > 0 + (post-approve, always enabled because
               the cert is live and we want edits to flow through). The auto-
               save status pip sits to the left of the button. */}
-            <div className="sticky bottom-0 pb-2 pt-1 bg-white space-y-2">
+            <div className="sticky bottom-0 pb-2 pt-1 bg-[var(--admin-panel)] space-y-2">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
-                <span className="text-[#888888]">
+                <span className="text-[var(--admin-ink-faint)]">
                   {autoSaveStatus === "saving" && (
                     <span className="flex items-center gap-1.5">
                       <Loader2 size={10} className="animate-spin" /> Saving…
                     </span>
                   )}
                   {autoSaveStatus === "saved" && (
-                    <span className="flex items-center gap-1.5 text-[#16A34A]">
+                    <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
                       <CheckCircle2 size={10} /> Saved
                     </span>
                   )}
                   {autoSaveStatus === "error" && (
-                    <span className="text-red-600">Save failed — retrying on next change</span>
+                    <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
                   )}
                 </span>
-                {gradeApprovedAt && <span className="text-[#16A34A]">✓ Live</span>}
+                {gradeApprovedAt && <span className="text-[var(--admin-green)]">✓ Live</span>}
               </div>
               {!approved ? (
                 <button
@@ -2099,7 +2127,7 @@ export default function GradingPanel({
                         : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
                 >
                   {approving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   {subgradesIncomplete
@@ -2109,7 +2137,7 @@ export default function GradingPanel({
                       : "Approve & Publish"}
                 </button>
               ) : (
-                <div className="w-full flex items-center justify-center gap-2 bg-[#16A34A]/10 border border-[#16A34A]/40 text-[#16A34A] text-xs font-bold uppercase px-4 py-2.5 rounded">
+                <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
                   <CheckCircle2 size={13} />
                   Approved & Live · {certIdStr || ""}
                 </div>
@@ -2209,9 +2237,11 @@ export default function GradingPanel({
       {/* Confirm modal */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
-          <div className="bg-[#111111] border border-[#333333] rounded-xl p-6 max-w-sm w-full space-y-4">
-            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Approve &amp; Publish</p>
-            <p className="text-[#CCCCCC] text-sm">
+          <div className="bg-[var(--admin-panel)] border border-[var(--admin-line-hard)] rounded-xl p-6 max-w-sm w-full space-y-4">
+            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
+              Approve &amp; Publish
+            </p>
+            <p className="text-[var(--admin-ink-dim)] text-sm">
               Publish grade of{" "}
               <strong className="text-white">
                 {finalGradeOverall} —{" "}
@@ -2219,12 +2249,12 @@ export default function GradingPanel({
               </strong>{" "}
               for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
-            <p className="text-[#555555] text-xs">
+            <p className="text-[var(--admin-ink-dim)] text-xs">
               The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to
               subgrades or notes will be live immediately (recorded in the audit log).
             </p>
             {isBlack && (
-              <div className="flex items-center gap-2 text-[#D4AF37] text-xs">
+              <div className="flex items-center gap-2 text-[var(--admin-gold)] text-xs">
                 <span className="text-lg">★</span>
                 <span>This card qualifies for PRISTINE 10P — all subgrades are perfect 10.0</span>
               </div>
@@ -2233,7 +2263,7 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={() => setShowConfirm(false)}
-                className="border border-[#333333] text-[#555555] text-xs py-2 px-3 rounded hover:bg-[#1A1A1A]"
+                className="border border-[var(--admin-line-hard)] text-[var(--admin-ink-dim)] text-xs py-2 px-3 rounded hover:bg-[var(--admin-panel2)]"
               >
                 Cancel
               </button>
@@ -2241,7 +2271,7 @@ export default function GradingPanel({
                 type="button"
                 onClick={() => approveGrade()}
                 disabled={approving}
-                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
+                className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
                 {approving ? "Publishing…" : "Approve & Publish"}
               </button>

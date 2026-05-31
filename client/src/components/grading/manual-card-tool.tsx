@@ -893,14 +893,14 @@ export default function ManualCardTool({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] bg-[#F7F7F5] flex flex-col select-none">
+    <div className="fixed inset-0 z-[100] bg-[var(--admin-panel2)] flex flex-col select-none">
       {/* Top bar */}
-      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[#D4D0C8]">
+      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[var(--admin-line)]">
         <div>
-          <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+          <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Card Tool — {side}
           </p>
-          <p className="text-[#555555] text-[10px]">
+          <p className="text-[var(--admin-ink-dim)] text-[10px]">
             <span style={{ color: palette.outer }}>●</span> Outer = card edge &middot;{" "}
             <span style={{ color: palette.inner }}>●</span> Inner = border → artwork
           </p>
@@ -909,32 +909,32 @@ export default function ManualCardTool({
           {/* Mode toggle — capture phase only (8-dot vs outer-only is for the
               centering capture, not relevant once we've moved on to defects). */}
           {phase === "capture" && (
-            <div className="flex rounded-lg overflow-hidden border border-[#D4D0C8] text-[10px] font-bold uppercase">
+            <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line)] text-[10px] font-bold uppercase">
               <button
                 type="button"
                 onClick={() => setModeSafe("full")}
-                className={`px-2 py-1 ${mode === "full" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
+                className={`px-2 py-1 ${mode === "full" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
               >
                 8-Dot
               </button>
               <button
                 type="button"
                 onClick={() => setModeSafe("outer-only")}
-                className={`px-2 py-1 ${mode === "outer-only" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
+                className={`px-2 py-1 ${mode === "outer-only" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
               >
                 Outer-only
               </button>
             </div>
           )}
           {phase === "defects" && (
-            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">
+            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] text-[var(--admin-red)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)]">
               Defects
             </span>
           )}
           <button
             type="button"
             onClick={phase === "defects" ? onDone : onCancel}
-            className="text-[#555555] hover:text-[#1A1A1A] p-1"
+            className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] p-1"
             title={phase === "defects" ? "Done — close" : "Cancel"}
           >
             <X size={20} />
@@ -947,7 +947,7 @@ export default function ManualCardTool({
           Defects phase swaps the side diagram for a target icon, the chip
           + step prompt for defect-marking guidance, and the per-point undo
           for a cancel-batch button. */}
-      <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[#D4D0C8] bg-white flex items-center gap-2 sm:gap-3">
+      <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)] flex items-center gap-2 sm:gap-3">
         {phase === "capture" ? (
           <SideDiagram
             activeSide={canCompute ? -1 : activeSide}
@@ -958,7 +958,7 @@ export default function ManualCardTool({
           />
         ) : (
           <div
-            className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-red-600"
+            className="flex-shrink-0 w-10 h-10 rounded-full bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] flex items-center justify-center text-[var(--admin-red)]"
             aria-hidden="true"
           >
             <Target size={20} />
@@ -974,14 +974,14 @@ export default function ManualCardTool({
                 {activePass === "outer" ? "Outer" : "Inner"}
               </span>
             )}
-            <p className="text-[#1A1A1A] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
+            <p className="text-[var(--admin-ink)] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
           </div>
           {phase === "capture" ? (
-            <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
+            <p className="text-[var(--admin-ink-faint)] text-[11px] sm:text-xs mt-0.5 font-mono">
               {totalPlaced} of {target} points placed
             </p>
           ) : (
-            <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
+            <p className="text-[var(--admin-ink-faint)] text-[11px] sm:text-xs mt-0.5 font-mono">
               {committedDefects.length} committed &middot; {defectBatch.length} pending
             </p>
           )}
@@ -992,7 +992,7 @@ export default function ManualCardTool({
             onClick={undoLast}
             disabled={totalPlaced === 0}
             title="Undo last point (Backspace)"
-            className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-shrink-0 flex items-center gap-1 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Undo2 size={13} /> Undo
           </button>
@@ -1002,7 +1002,7 @@ export default function ManualCardTool({
             onClick={() => setDefectBatch([])}
             disabled={defectBatch.length === 0}
             title="Clear pending pins (Esc)"
-            className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-shrink-0 flex items-center gap-1 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)] disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Undo2 size={13} /> Clear pins
           </button>
@@ -1046,7 +1046,7 @@ export default function ManualCardTool({
                 == the visible card. Dots are absolute children (same box). */}
             <div
               ref={containerRef}
-              className="relative rounded-lg bg-[#F7F7F5] flex-shrink-0"
+              className="relative rounded-lg bg-[var(--admin-panel2)] flex-shrink-0"
               onMouseDown={onContainerMouseDown}
               onMouseMove={onContainerMouseMove}
               onMouseLeave={onContainerMouseLeave}
@@ -1408,13 +1408,13 @@ export default function ManualCardTool({
             stay accurate at any zoom; the visual crosshair stays 44px on
             screen and gets relatively smaller on the bigger image — exactly
             what's needed to drop a dot on a single border pixel. */}
-        <div className="absolute top-2 right-2 sm:top-6 sm:right-6 z-40 flex flex-col items-stretch gap-1 bg-white/95 backdrop-blur-sm rounded-lg border border-[#D4D0C8] shadow-md p-1">
+        <div className="absolute top-2 right-2 sm:top-6 sm:right-6 z-40 flex flex-col items-stretch gap-1 bg-[var(--admin-panel)]/95 backdrop-blur-sm rounded-lg border border-[var(--admin-line)] shadow-md p-1">
           <button
             type="button"
             onClick={zoomInBtn}
             disabled={zoom >= MAX_ZOOM}
             title="Zoom in (+)"
-            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+            className="p-1.5 rounded hover:bg-[var(--admin-panel3)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--admin-ink)]"
           >
             <ZoomIn size={16} />
           </button>
@@ -1423,7 +1423,7 @@ export default function ManualCardTool({
             onClick={zoomOutBtn}
             disabled={zoom <= MIN_ZOOM}
             title="Zoom out (-)"
-            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+            className="p-1.5 rounded hover:bg-[var(--admin-panel3)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--admin-ink)]"
           >
             <ZoomOut size={16} />
           </button>
@@ -1432,11 +1432,11 @@ export default function ManualCardTool({
             onClick={zoomFit}
             disabled={zoom === 1}
             title="Fit to area (0)"
-            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+            className="p-1.5 rounded hover:bg-[var(--admin-panel3)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--admin-ink)]"
           >
             <Maximize size={16} />
           </button>
-          <span className="text-[9px] font-mono text-[#555555] text-center pt-0.5 border-t border-[#D4D0C8]">
+          <span className="text-[9px] font-mono text-[var(--admin-ink-dim)] text-center pt-0.5 border-t border-[var(--admin-line)]">
             {Math.round(zoom * 100)}%
           </span>
           {/* Line-colour swatch picker — switches the crosshair, reticle, and
@@ -1445,7 +1445,7 @@ export default function ManualCardTool({
               ring-highlighted. State is React-only (no localStorage) per spec.
               The default swatch shows the brand gold/green split so the
               "default" pick is visually distinct from the single-hue options. */}
-          <div className="border-t border-[#D4D0C8] pt-1 flex flex-col gap-1">
+          <div className="border-t border-[var(--admin-line)] pt-1 flex flex-col gap-1">
             {LINE_PALETTES.map((p) => {
               const selected = paletteId === p.id;
               const bg =
@@ -1460,8 +1460,8 @@ export default function ManualCardTool({
                   aria-pressed={selected}
                   className={`w-7 h-7 rounded-full mx-auto transition-shadow ${
                     selected
-                      ? "ring-2 ring-[#1A1A1A] ring-offset-2 ring-offset-white"
-                      : "ring-1 ring-[#D4D0C8] hover:ring-[#999999]"
+                      ? "ring-2 ring-[var(--admin-gold)] ring-offset-2 ring-offset-[var(--admin-panel)]"
+                      : "ring-1 ring-[var(--admin-line-hard)] hover:ring-[var(--admin-ink-faint)]"
                   }`}
                   style={{ background: bg }}
                 />
@@ -1472,7 +1472,7 @@ export default function ManualCardTool({
       </div>
 
       {/* Controls */}
-      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[#D4D0C8] space-y-1.5 sm:space-y-3">
+      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[var(--admin-line)] space-y-1.5 sm:space-y-3">
         {phase === "capture" ? (
           <>
             {/* Row 1: dot status + clear + live readout */}
@@ -1484,7 +1484,7 @@ export default function ManualCardTool({
                 <button
                   type="button"
                   onClick={clearOuter}
-                  className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
+                  className="text-[10px] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] underline"
                 >
                   clear
                 </button>
@@ -1498,7 +1498,7 @@ export default function ManualCardTool({
                     <button
                       type="button"
                       onClick={clearInner}
-                      className="text-[10px] text-[#555555] hover:text-[#16A34A] underline"
+                      className="text-[10px] text-[var(--admin-ink-dim)] hover:text-[var(--admin-green)] underline"
                     >
                       clear
                     </button>
@@ -1507,10 +1507,10 @@ export default function ManualCardTool({
               )}
               <div className="flex-1" />
               {previewCentering && (
-                <span className="text-xs font-mono text-[#333333]">
+                <span className="text-xs font-mono text-[var(--admin-ink-dim)]">
                   {previewCentering.lr} L/R &middot; {previewCentering.tb} T/B →{" "}
                   <span
-                    className={`font-black ${previewCentering.subgrade >= 9 ? "text-[#D4AF37]" : previewCentering.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}
+                    className={`font-black ${previewCentering.subgrade >= 9 ? "text-[var(--admin-gold)]" : previewCentering.subgrade >= 7 ? "text-[var(--admin-green)]" : "text-[var(--admin-amber)]"}`}
                   >
                     {previewCentering.subgrade}
                   </span>
@@ -1520,7 +1520,7 @@ export default function ManualCardTool({
 
             {/* Row 2: deskew override */}
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-[#555555]">Deskew override</span>
+              <span className="text-[var(--admin-ink-dim)]">Deskew override</span>
               <input
                 type="range"
                 min="-5"
@@ -1528,15 +1528,17 @@ export default function ManualCardTool({
                 step="0.25"
                 value={rotation}
                 onChange={(e) => setRotation(Number(e.target.value))}
-                className="flex-1 max-w-[200px] accent-[#D4AF37]"
+                className="flex-1 max-w-[200px] accent-[var(--admin-gold)]"
               />
-              <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(2)}°</span>
-              <span className="text-[#999999] text-[10px]">{rotation === 0 ? "(auto from dots)" : "(manual)"}</span>
+              <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(2)}°</span>
+              <span className="text-[var(--admin-ink-faint)] text-[10px]">
+                {rotation === 0 ? "(auto from dots)" : "(manual)"}
+              </span>
               {rotation !== 0 && (
                 <button
                   type="button"
                   onClick={() => setRotation(0)}
-                  className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
+                  className="text-[10px] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] underline"
                 >
                   auto
                 </button>
@@ -1548,15 +1550,15 @@ export default function ManualCardTool({
               <button
                 type="button"
                 onClick={onCancel}
-                className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]"
+                className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[var(--admin-panel3)]"
               >
-                Cancel <span className="text-[#555555] text-[9px]">Esc</span>
+                Cancel <span className="text-[var(--admin-ink-dim)] text-[9px]">Esc</span>
               </button>
               <button
                 type="button"
                 onClick={handleCompute}
                 disabled={saving || !canCompute}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40"
+                className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40"
               >
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                 {saving ? "Applying..." : mode === "full" ? "Compute crop + centering" : "Compute crop"}
@@ -1573,13 +1575,13 @@ export default function ManualCardTool({
           // / Enter, kept visible so the affordance is obvious.
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-[#1A1A1A] font-mono">
+              <span className="text-[var(--admin-ink)] font-mono">
                 Defects: <strong>{committedDefects.length}</strong>
               </span>
               {defectBatch.length > 0 && (
-                <span className="text-[#D4AF37] font-mono">+{defectBatch.length} pending</span>
+                <span className="text-[var(--admin-gold)] font-mono">+{defectBatch.length} pending</span>
               )}
-              <span className="text-[#999999] text-[10px]">
+              <span className="text-[var(--admin-ink-faint)] text-[10px]">
                 Click to pin · double-click or ↵ to label · Esc to discard
               </span>
             </div>
@@ -1588,14 +1590,14 @@ export default function ManualCardTool({
                 type="button"
                 onClick={openDefectPicker}
                 disabled={defectBatch.length === 0}
-                className="border border-[#D4D0C8] text-[#1A1A1A] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[var(--admin-panel3)] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Label batch ({defectBatch.length})
               </button>
               <button
                 type="button"
                 onClick={onDone}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90"
+                className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90"
               >
                 <Check size={13} />
                 Done
