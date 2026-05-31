@@ -5,8 +5,8 @@
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
-import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
-import { mvgsGradeLabel } from "@shared/mvgs-scoring";
+import { isNonNumericGrade } from "@shared/schema";
+import { mvgsGradeLabel, mvgsTierName } from "@shared/mvgs-scoring";
 import { getOwnerChain } from "./ownership-service";
 import { APP_BASE_URL } from "./app-url";
 import { db } from "./db";
@@ -134,7 +134,10 @@ export async function buildLogbookData(certIdInput: string) {
           ? "PRISTINE 10P"
           : typeof c.gradeStrengthScore === "number" && c.gradeStrengthScore >= 1
             ? mvgsGradeLabel(c.gradeStrengthScore).toUpperCase()
-            : gradeLabelFull("numeric", String(gradeNum)),
+            : // Legacy certs (no MVGS score): use the MVGS tier table, not the
+              // rounding gradeLabelFull, so the name agrees with the exact
+              // half-grade number and with the slab (8.5 → "NM-MINT+ 8.5").
+              `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase(),
       centering: c.gradeCentering ? parseFloat(c.gradeCentering) : null,
       corners: c.gradeCorners ? parseFloat(c.gradeCorners) : null,
       edges: c.gradeEdges ? parseFloat(c.gradeEdges) : null,

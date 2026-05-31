@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
 import { isNonNumericGrade } from "@shared/schema";
-import { mvgsGradeLabel, mvgsTierName } from "@shared/mvgs-scoring";
+import { mvgsGradeLabel } from "@shared/mvgs-scoring";
 import SeoHead, { SITE_URL } from "@/components/seo-head";
 
 const CERT_URL_BASE = "https://mintvaultuk.com/cert/";
@@ -415,24 +415,18 @@ export default function CertDetailPage() {
               )}
               <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
                 {displayedGrade != null
-                  ? // Black Label short-circuit: any cert flagged as "black" is
-                    // PRISTINE 10P regardless of whether MVGS scoring ran
-                    // (covers pre-MVGS quad-10 legacy certs). MVGS-scored
-                    // numeric certs get the full MVGS ladder from the score.
-                    // Legacy numeric certs (no score) derive the SAME MVGS tier
-                    // vocabulary from the grade number itself \u2014 so the name and
-                    // number agree and match the slab (8.5 \u2192 "NM-MINT+ 8.5",
-                    // not the rounded "MINT"). Non-numeric (NO/AA) keep
-                    // cert.grade ("AUTHENTIC" / "AUTHENTIC ALTERED").
+                  ? // Black Label short-circuit: any cert flagged as "black"
+                    // is PRISTINE 10P regardless of whether MVGS scoring ran
+                    // (covers pre-MVGS quad-10 legacy certs). Numeric grades
+                    // with a score get the full MVGS ladder; everything else
+                    // falls back to cert.grade ("GEM MINT" etc.).
                     cert.labelType === "black"
                     ? "PRISTINE 10P"
                     : cert.gradeType === "numeric" &&
                         typeof cert.gradeStrengthScore === "number" &&
                         cert.gradeStrengthScore >= 1
                       ? mvgsGradeLabel(cert.gradeStrengthScore).toUpperCase()
-                      : cert.gradeType === "numeric"
-                        ? `${mvgsTierName(cert.gradeNumeric)} ${cert.gradeNumeric}`.toUpperCase()
-                        : cert.grade
+                      : cert.grade
                   : "\u00a0"}
               </div>
 
