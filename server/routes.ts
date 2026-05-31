@@ -9265,16 +9265,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       // Return a signed URL for the just-written display image so the Card
       // Tool can swap its <img src> directly into the defects phase without
-      // racing a TanStack refetch. Includes a cache-buster suffix on top of
-      // the signed-url expiry so the browser doesn't keep the pre-recrop
-      // bytes if the URL ever happens to match. 5-min expiry matches the
-      // origKey signing above. Falls back to undefined on signing failure
-      // — the client treats absent URL as "use the rawImageUrl instead".
+      // racing a TanStack refetch. 5-min expiry matches the origKey signing
+      // above. Falls back to undefined on signing failure — the client treats
+      // absent URL as "use the rawImageUrl instead".
+      //
+      // No cache-buster query string appended: getR2SignedUrl uses SigV4
+      // (server/r2.ts → @aws-sdk/s3-request-presigner) whose signature covers
+      // every query parameter. Appending `?v=<ts>` AFTER signing breaks the
+      // canonical-request hash and R2 returns 403 SignatureDoesNotMatch (the
+      // v819 broken-image regression). A cache-buster wasn't needed anyway —
+      // each /recrop call produces a brand-new signed URL (signing timestamp
+      // and signature both change), so the browser can't cache-hit a prior
+      // version. Other working URL sites in this file (e.g. :404, :412, :2047,
+      // :3392, :4053, :8665) all use this bare-signed-URL pattern.
       let displayUrl: string | undefined;
       try {
-        const signed = await getR2SignedUrl(displayKey, 300);
-        const sep = signed.includes("?") ? "&" : "?";
-        displayUrl = `${signed}${sep}v=${Date.now()}`;
+        displayUrl = await getR2SignedUrl(displayKey, 300);
       } catch {
         // Non-fatal — the crop is saved; the client just won't auto-advance.
       }
