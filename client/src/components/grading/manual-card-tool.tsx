@@ -628,6 +628,27 @@ export default function ManualCardTool({
     // eslint-disable-next-line
   }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom, phase, defectBatch, defectPickerOpen]);
 
+  // Defensive guard against losing placed-but-uncomputed dots to an
+  // accidental browser-back (trackpad swipe, Cmd+Left, etc.) or tab close.
+  // overscroll-contain on the scroll viewport stops the swipe from
+  // navigating in the first place; this is the belt to that braces, covering
+  // any other navigation source (back button, link click, refresh). Only
+  // fires in capture phase with at least one dot down — defects phase has
+  // already persisted the crop + centering, so navigating away there only
+  // loses an in-progress defect batch (which is a smaller risk and not in
+  // this fix's scope per spec). Modern browsers show their own confirmation
+  // text; the empty returnValue is the canonical activation incantation.
+  useEffect(() => {
+    const hasUncomputed = phase === "capture" && outerPts.length + innerPts.length > 0;
+    if (!hasUncomputed) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [phase, outerPts.length, innerPts.length]);
+
   function clearOuter() {
     setOuterPts([]);
   }
@@ -995,7 +1016,14 @@ export default function ManualCardTool({
           enforces min-w-full/min-h-full so the container stays centred when
           smaller than the viewport ("safe centre" pattern, scroll-safe). */}
       <div className="flex-1 min-h-0 p-0 sm:p-4 overflow-hidden relative">
-        <div ref={fitRef} className="w-full h-full overflow-auto">
+        {/* overscroll-contain stops a horizontal trackpad/touch swipe at the
+            scroll boundary from propagating to the browser's history-back
+            gesture (Chrome + Safari respect this on the scroller). Without
+            it, the operator swiping left to reach the card's left edge at
+            high zoom navigates away from /admin and loses all placed dots
+            (component state). Combined with the beforeunload guard above
+            for defensive coverage on any other navigation source. */}
+        <div ref={fitRef} className="w-full h-full overflow-auto overscroll-contain">
           <div className="min-w-full min-h-full flex items-center justify-center">
             {/* Capture container — shrink-wraps the (scaled) image, so its box
                 == the visible card. Dots are absolute children (same box). */}
