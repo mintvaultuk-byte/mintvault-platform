@@ -49,8 +49,23 @@ const ZOOM_STEP = 1.5;
 // Thin mat margin (0–100 units) added around the outer bbox before cropping, so
 // a deskew rotation doesn't clip the card corners.
 const CROP_MARGIN_PCT = 1.0;
-const OUTER_COLOR = "#D4AF37"; // gold — card-edge dots
-const INNER_COLOR = "#16A34A"; // green — border→art dots
+// Line-colour palette — switches the crosshair markers, cursor reticle, full-
+// length alignment guides, banner chip, edge-rect strokes and count labels.
+// All pass-coloured indicators move together so the operator can dial the
+// crosshair into something that reads on grey/silver/foil/holo cards where
+// the brand gold/green disappears. Two shades per entry so outer vs inner
+// retains a colour distinction (the brighter saturated tone for OUTER edges,
+// a lighter same-hue for INNER). The brand surfaces (mode toggle, Compute
+// button, "clear" link hovers, subgrade text colour) are deliberately NOT
+// driven by this palette — they stay MintVault gold regardless of pick.
+type LinePalette = { id: string; label: string; outer: string; inner: string };
+const LINE_PALETTES: LinePalette[] = [
+  { id: "default", label: "Default — gold / green", outer: "#D4AF37", inner: "#16A34A" },
+  { id: "magenta", label: "Magenta — high contrast on grey/silver", outer: "#FF00AA", inner: "#FF66CC" },
+  { id: "cyan", label: "Cyan — high contrast on yellow holos", outer: "#00CCFF", inner: "#66E5FF" },
+  { id: "lime", label: "Lime — high contrast on dark / red cards", outer: "#00FF66", inner: "#CCFF66" },
+  { id: "red", label: "Red — high contrast on cyan / blue / silver", outer: "#FF2A2A", inner: "#FF8888" },
+];
 
 type DotPass = "outer" | "inner";
 
@@ -107,13 +122,14 @@ function Crosshair({ color }: { color: string }) {
  */
 function SideDiagram({
   activeSide,
-  activePass,
+  activeColor,
   outerCount,
   innerCount,
   mode,
 }: {
   activeSide: number;
-  activePass: DotPass;
+  // Driven by the parent so the diagram follows the user-selected line palette.
+  activeColor: string;
   outerCount: number;
   innerCount: number;
   mode: CardToolMode;
@@ -126,7 +142,6 @@ function SideDiagram({
     { x1: 12, y1: 72, x2: 44, y2: 72 }, // BOTTOM
     { x1: 6, y1: 12, x2: 6, y2: 66 }, // LEFT
   ];
-  const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
   return (
     <svg width={40} height={56} viewBox="0 0 56 78" className="flex-shrink-0" aria-hidden="true">
       {/* Card body + faint inner frame */}
@@ -162,6 +177,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const [rotation, setRotation] = useState(0);
   const [imgDims, setImgDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
+  // Crosshair / reticle / guide colour palette — session-scoped (React state,
+  // no localStorage per spec). Default = brand gold/green; swatch picker in
+  // the floating panel lets the operator switch to high-contrast hues for
+  // grey/silver/foil/holo cards. Outer keeps a saturated tone, inner a lighter
+  // same-hue so outer vs inner stay distinguishable on every palette.
+  const [paletteId, setPaletteId] = useState<string>("default");
   // Cursor position in % while hovering the image in placement mode; drives the
   // live targeting reticle. Null when not hovering / not placing.
   const [hover, setHover] = useState<Point | null>(null);
@@ -227,7 +248,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const canCompute = outerReady && (mode === "outer-only" || innerReady);
   // Still placing points in the active pass → show the cursor reticle + guides.
   const placing = activeArr.length < 4;
-  const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
+  // Resolved palette (default-safe). Drives every pass-coloured line element
+  // — crosshair markers, cursor reticle, live cursor sniper guides, per-
+  // placed-point guides, banner chip, side diagram, edge rectangles, and the
+  // Outer/Inner count labels in the controls row.
+  const palette = LINE_PALETTES.find((p) => p.id === paletteId) ?? LINE_PALETTES[0];
+  const activeColor = activePass === "outer" ? palette.outer : palette.inner;
   // Guidance: total points down, target, and the side index (0..3) we're on.
   const totalPlaced = outerPts.length + innerPts.length;
   const target = mode === "outer-only" ? 4 : 8;
@@ -611,8 +637,8 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             <Crop size={14} /> Card Tool — {side}
           </p>
           <p className="text-[#555555] text-[10px]">
-            <span style={{ color: OUTER_COLOR }}>●</span> Outer = card edge &middot;{" "}
-            <span style={{ color: INNER_COLOR }}>●</span> Inner = border → artwork
+            <span style={{ color: palette.outer }}>●</span> Outer = card edge &middot;{" "}
+            <span style={{ color: palette.inner }}>●</span> Inner = border → artwork
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -644,7 +670,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[#D4D0C8] bg-white flex items-center gap-2 sm:gap-3">
         <SideDiagram
           activeSide={canCompute ? -1 : activeSide}
-          activePass={activePass}
+          activeColor={activeColor}
           outerCount={outerPts.length}
           innerCount={innerPts.length}
           mode={mode}
@@ -741,7 +767,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                     width={outerEdgeRect.right - outerEdgeRect.left}
                     height={outerEdgeRect.bottom - outerEdgeRect.top}
                     fill="none"
-                    stroke={OUTER_COLOR}
+                    stroke={palette.outer}
                     strokeWidth="0.4"
                     opacity="0.9"
                   />
@@ -754,7 +780,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                     width={innerEdgeRect.right - innerEdgeRect.left}
                     height={innerEdgeRect.bottom - innerEdgeRect.top}
                     fill="none"
-                    stroke={INNER_COLOR}
+                    stroke={palette.inner}
                     strokeWidth="0.4"
                     opacity="0.9"
                   />
@@ -810,8 +836,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                         vectorEffect="non-scaling-stroke"
                       />
                     </g>
-                    {/* White full-length guides */}
-                    <g stroke="rgba(255,255,255,0.6)">
+                    {/* Coloured full-length guides — track the chosen palette
+                        so the sniper guides match the crosshair on whatever
+                        background hue the operator is fighting. Dark halo
+                        above (rgba(0,0,0,0.4)) keeps them visible against
+                        the same-hue card areas. */}
+                    <g stroke={activeColor} opacity={0.7}>
                       <line
                         x1={0}
                         y1={hover.y}
@@ -835,8 +865,8 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
 
               {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
                 capture container. Large invisible hit area, small visible dot. */}
-              {renderDots(outerPts, "outer", OUTER_COLOR)}
-              {mode === "full" && renderDots(innerPts, "inner", INNER_COLOR)}
+              {renderDots(outerPts, "outer", palette.outer)}
+              {mode === "full" && renderDots(innerPts, "inner", palette.inner)}
 
               {/* Live targeting reticle — follows the cursor in placement mode,
                 centred on where the next dot will land. pointer-events:none so
@@ -892,6 +922,35 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           <span className="text-[9px] font-mono text-[#555555] text-center pt-0.5 border-t border-[#D4D0C8]">
             {Math.round(zoom * 100)}%
           </span>
+          {/* Line-colour swatch picker — switches the crosshair, reticle, and
+              guide colours for contrast against the card under the lens (e.g.
+              magenta on grey/silver, cyan on yellow holos). Selected swatch is
+              ring-highlighted. State is React-only (no localStorage) per spec.
+              The default swatch shows the brand gold/green split so the
+              "default" pick is visually distinct from the single-hue options. */}
+          <div className="border-t border-[#D4D0C8] pt-1 flex flex-col gap-1">
+            {LINE_PALETTES.map((p) => {
+              const selected = paletteId === p.id;
+              const bg =
+                p.id === "default" ? `linear-gradient(135deg, ${p.outer} 0 50%, ${p.inner} 50% 100%)` : p.outer;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPaletteId(p.id)}
+                  title={p.label}
+                  aria-label={p.label}
+                  aria-pressed={selected}
+                  className={`w-7 h-7 rounded-full mx-auto transition-shadow ${
+                    selected
+                      ? "ring-2 ring-[#1A1A1A] ring-offset-2 ring-offset-white"
+                      : "ring-1 ring-[#D4D0C8] hover:ring-[#999999]"
+                  }`}
+                  style={{ background: bg }}
+                />
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -899,7 +958,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[#D4D0C8] space-y-1.5 sm:space-y-3">
         {/* Row 1: dot status + clear + live readout */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-mono" style={{ color: OUTER_COLOR }}>
+          <span className="text-xs font-mono" style={{ color: palette.outer }}>
             Outer {outerPts.length}/4
           </span>
           {outerPts.length > 0 && (
@@ -913,7 +972,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           )}
           {mode === "full" && (
             <>
-              <span className="text-xs font-mono ml-2" style={{ color: INNER_COLOR }}>
+              <span className="text-xs font-mono ml-2" style={{ color: palette.inner }}>
                 Inner {innerPts.length}/4
               </span>
               {innerPts.length > 0 && (
