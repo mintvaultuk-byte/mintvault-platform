@@ -914,14 +914,14 @@ export default function CertificateForm({
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-[#D4AF37] tracking-widest mb-1" data-testid="text-form-title">
+      <h2 className="text-xl font-bold text-[var(--admin-gold)] tracking-widest mb-1" data-testid="text-form-title">
         {isEdit
           ? !certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)"
             ? `NEW ${certificate.certId}`
             : `EDIT ${certificate.certId}`
           : "NEW CERTIFICATE"}
       </h2>
-      <p className="text-[#999999] text-sm mb-6">
+      <p className="text-[var(--admin-ink-faint)] text-sm mb-6">
         {isEdit
           ? "Update certificate details"
           : "Fill in card details and click Save. A cert number will be assigned automatically."}
@@ -950,7 +950,7 @@ export default function CertificateForm({
         )}
         {/* AI actions — Identify and Grade are independent and gated separately */}
         {isEdit && certificate?.id && (
-          <div className="border border-[#D4AF37]/30 rounded-lg p-4 bg-[#D4AF37]/5 space-y-3">
+          <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Identify */}
               <button
@@ -958,7 +958,7 @@ export default function CertificateForm({
                 onClick={runIdentify}
                 disabled={!identifyEnabled || identifyLoading}
                 title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
               >
                 <span className="flex items-center gap-2">
                   {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
@@ -973,7 +973,7 @@ export default function CertificateForm({
                 onClick={runGrade}
                 disabled={!fullGradeEnabled || gradeLoading}
                 title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[#D4AF37]/40 bg-[#1A1A1A] text-[#D4AF37] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#2A2A2A] transition-all"
+                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
               >
                 <span className="flex items-center gap-2">
                   {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
@@ -984,7 +984,7 @@ export default function CertificateForm({
             </div>
 
             {(!identifyEnabled || !fullGradeEnabled) && (
-              <p className="text-[10px] text-[#888888]">
+              <p className="text-[10px] text-[var(--admin-ink-faint)]">
                 {!identifyEnabled && !fullGradeEnabled
                   ? "Both AI actions disabled — toggle in /admin → AI Learning."
                   : !identifyEnabled
@@ -996,15 +996,15 @@ export default function CertificateForm({
             {identifyConfidence && (
               <div className="flex items-center gap-2 text-xs">
                 <span
-                  className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-emerald-400" : identifyConfidence === "medium" ? "bg-yellow-400" : "bg-red-400"}`}
+                  className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
                 />
                 <span
                   className={
                     identifyConfidence === "high"
-                      ? "text-emerald-600"
+                      ? "text-[var(--admin-green)]"
                       : identifyConfidence === "medium"
-                        ? "text-yellow-600"
-                        : "text-red-600"
+                        ? "text-[var(--admin-amber)]"
+                        : "text-[var(--admin-red)]"
                   }
                 >
                   {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
@@ -1014,7 +1014,7 @@ export default function CertificateForm({
                     type="button"
                     onClick={runIdentify}
                     disabled={identifyLoading}
-                    className="text-[#D4AF37] text-[10px] hover:underline"
+                    className="text-[var(--admin-gold)] text-[10px] hover:underline"
                   >
                     Retry
                   </button>
@@ -1024,12 +1024,12 @@ export default function CertificateForm({
           </div>
         )}
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
+        <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
 
           {/* TCG search + manual entry helpers */}
           <div className="flex items-center gap-3 text-[10px]">
-            <span className="text-[#888888]">Can't find the right card?</span>
+            <span className="text-[var(--admin-ink-faint)]">Can't find the right card?</span>
             <button
               type="button"
               onClick={() => {
@@ -1038,14 +1038,14 @@ export default function CertificateForm({
                 setTcgResults([]);
               }}
               disabled={!form.cardGame}
-              className="flex items-center gap-1 text-[#D4AF37] hover:text-[#B8960C] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1 text-[var(--admin-gold)] hover:text-[var(--admin-gold-deep)] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               <Database size={10} />
               Search TCG
             </button>
-            {!form.cardGame && <span className="text-[#AAAAAA] italic">Select card game first</span>}
+            {!form.cardGame && <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>}
             {manuallyVerified && (
-              <span className="flex items-center gap-1 text-emerald-600">
+              <span className="flex items-center gap-1 text-[var(--admin-green)]">
                 <CheckCircle2 size={10} />
                 Manually verified
               </span>
@@ -1055,29 +1055,33 @@ export default function CertificateForm({
           {/* TCG Search Dialog */}
           <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
             <DialogContent className="max-w-lg p-0 overflow-hidden">
-              <div className="p-4 pb-2 border-b border-[#E8E4DC]">
-                <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest mb-2">Search TCG Database</p>
-                <div className="flex items-center gap-2 border border-[#D4AF37]/30 rounded-lg px-3 py-2 focus-within:border-[#D4AF37] transition-colors">
-                  <Search size={14} className="text-[#D4AF37]/50 shrink-0" />
+              <div className="p-4 pb-2 border-b border-[var(--admin-line)]">
+                <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest mb-2">
+                  Search TCG Database
+                </p>
+                <div className="flex items-center gap-2 border border-[var(--admin-gold)]/30 rounded-lg px-3 py-2 focus-within:border-[var(--admin-gold)] transition-colors">
+                  <Search size={14} className="text-[var(--admin-gold)]/50 shrink-0" />
                   <input
                     type="text"
                     value={tcgQuery}
                     onChange={(e) => handleTcgSearch(e.target.value)}
                     placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
-                    className="flex-1 bg-transparent text-sm text-[#1A1A1A] placeholder:text-[#AAAAAA] outline-none"
+                    className="flex-1 bg-transparent text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] outline-none"
                     autoFocus
                   />
-                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[#D4AF37]" />}
+                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[var(--admin-gold)]" />}
                 </div>
-                <p className="text-[#AAAAAA] text-[9px] mt-1">
+                <p className="text-[var(--admin-ink-faint)] text-[9px] mt-1">
                   Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
                 </p>
               </div>
               <div className="max-h-[320px] overflow-y-auto">
                 {tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
                   <div className="py-8 text-center">
-                    <p className="text-[#888888] text-sm">No cards found</p>
-                    <p className="text-[#AAAAAA] text-[10px] mt-1">Check spelling or enter details manually</p>
+                    <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
+                    <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
+                      Check spelling or enter details manually
+                    </p>
                   </div>
                 )}
                 {tcgResults.map((card) => (
@@ -1085,22 +1089,22 @@ export default function CertificateForm({
                     key={card.id}
                     type="button"
                     onClick={() => selectTcgCard(card)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#D4AF37]/5 transition-colors border-b border-[#F7F7F5] last:border-0"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
                   >
                     {card.imageUrl ? (
                       <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
                     ) : (
-                      <div className="w-10 h-14 bg-[#F7F7F5] rounded shrink-0 flex items-center justify-center">
-                        <Search size={12} className="text-[#AAAAAA]" />
+                      <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
+                        <Search size={12} className="text-[var(--admin-ink-faint)]" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-[#1A1A1A] text-sm font-bold truncate">{card.name}</p>
-                      <p className="text-[#555555] text-xs truncate">
+                      <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
+                      <p className="text-[var(--admin-ink-dim)] text-xs truncate">
                         {card.setName}
                         {card.number ? ` · #${card.number}` : ""}
                       </p>
-                      <p className="text-[#AAAAAA] text-[10px]">
+                      <p className="text-[var(--admin-ink-faint)] text-[10px]">
                         {[card.rarity, card.year].filter(Boolean).join(" · ")}
                       </p>
                     </div>
@@ -1128,7 +1132,7 @@ export default function CertificateForm({
                 testId="input-set-name"
               />
               <div className="mt-1.5">
-                <label className="text-[#D4AF37]/40 text-[10px] uppercase tracking-wider block mb-1">
+                <label className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-wider block mb-1">
                   Set ID (for autofill)
                 </label>
                 <input
@@ -1136,7 +1140,7 @@ export default function CertificateForm({
                   value={setId}
                   onChange={(e) => setSetId(e.target.value)}
                   placeholder="e.g. sv3pt5"
-                  className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/15 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
+                  className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/15 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
                   data-testid="input-set-id"
                 />
               </div>
@@ -1153,16 +1157,18 @@ export default function CertificateForm({
               highlight={autofillRan && manuallyEdited.has("cardName")}
             />
             <div>
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Card Number *</label>
+              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                Card Number *
+              </label>
               <div className="flex gap-2">
-                <div className="flex-1 flex items-center bg-transparent border border-[#D4AF37]/30 rounded overflow-hidden focus-within:border-[#D4AF37] transition-colors">
-                  <span className="pl-3 text-[#D4AF37]/50 text-sm select-none">#</span>
+                <div className="flex-1 flex items-center bg-transparent border border-[var(--admin-gold)]/30 rounded overflow-hidden focus-within:border-[var(--admin-gold)] transition-colors">
+                  <span className="pl-3 text-[var(--admin-gold)]/50 text-sm select-none">#</span>
                   <input
                     type="text"
                     value={form.cardNumber}
                     onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
                     placeholder="e.g. 125/198"
-                    className="flex-1 bg-transparent px-2 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none"
+                    className="flex-1 bg-transparent px-2 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none"
                     data-testid="input-card-number"
                   />
                 </div>
@@ -1170,7 +1176,7 @@ export default function CertificateForm({
                   type="button"
                   disabled={!canAutofill || autofillLoading}
                   onClick={() => handleAutofill(false)}
-                  className="px-3 py-2 border border-[#D4AF37]/30 rounded text-[#D4AF37] text-sm hover:bg-[#D4AF37]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  className="px-3 py-2 border border-[var(--admin-gold)]/30 rounded text-[var(--admin-gold)] text-sm hover:bg-[var(--admin-gold)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
                   data-testid="button-autofill"
                   title="Auto-fill card details"
                 >
@@ -1181,10 +1187,12 @@ export default function CertificateForm({
 
               {suggestions.length > 0 && (
                 <div
-                  className="mt-2 border border-[#D4AF37]/20 rounded bg-white max-h-40 border border-[#E8E4DC] overflow-y-auto"
+                  className="mt-2 border border-[var(--admin-gold)]/20 rounded bg-[var(--admin-panel)] max-h-40 border border-[var(--admin-line)] overflow-y-auto"
                   data-testid="autofill-suggestions"
                 >
-                  <p className="text-[#D4AF37]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">Suggestions</p>
+                  <p className="text-[var(--admin-gold)]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">
+                    Suggestions
+                  </p>
                   {suggestions.map((s) => (
                     <button
                       key={s.id}
@@ -1194,19 +1202,19 @@ export default function CertificateForm({
                         applyCardData(s, null);
                         toast({ title: "Card details auto-filled" });
                       }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A] transition-colors"
+                      className="w-full text-left px-3 py-1.5 text-sm text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)] transition-colors"
                       data-testid={`suggestion-${s.id}`}
                     >
-                      <span className="text-[#D4AF37]">{s.cardNumber}</span>
+                      <span className="text-[var(--admin-gold)]">{s.cardNumber}</span>
                       {" – "}
                       {s.cardName}
-                      {s.rarity && <span className="text-[#999999]"> ({s.rarity})</span>}
+                      {s.rarity && <span className="text-[var(--admin-ink-faint)]"> ({s.rarity})</span>}
                     </button>
                   ))}
                   <button
                     type="button"
                     onClick={() => setSuggestions([])}
-                    className="w-full text-center text-[10px] text-[#999999] py-1 hover:text-[#666666]"
+                    className="w-full text-center text-[10px] text-[var(--admin-ink-faint)] py-1 hover:text-[var(--admin-ink-dim)]"
                     data-testid="button-dismiss-suggestions"
                   >
                     Dismiss
@@ -1216,22 +1224,22 @@ export default function CertificateForm({
 
               {fallbackMatch && (
                 <div
-                  className="mt-2 border border-amber-500/40 bg-amber-500/5 rounded p-3"
+                  className="mt-2 border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
                   data-testid="fallback-banner"
                 >
                   <div className="flex items-start gap-2">
-                    <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                    <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
                     <div className="flex-1">
-                      <p className="text-amber-400 text-sm font-medium">Match found in different language</p>
-                      <p className="text-[#666666] text-xs mt-1">
-                        Found: <span className="text-[#1A1A1A]">{fallbackMatch.cardName}</span> (
+                      <p className="text-[var(--admin-amber)] text-sm font-medium">Match found in different language</p>
+                      <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                        Found: <span className="text-[var(--admin-ink)]">{fallbackMatch.cardName}</span> (
                         {fallbackMatch.language})
                       </p>
                       <div className="flex gap-2 mt-2">
                         <button
                           type="button"
                           onClick={applyFallback}
-                          className="px-3 py-1 text-xs border border-amber-500/40 text-amber-400 rounded hover:bg-amber-500/10 transition-colors flex items-center gap-1"
+                          className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors flex items-center gap-1"
                           data-testid="button-apply-fallback"
                         >
                           <Check size={12} /> Apply Anyway
@@ -1239,7 +1247,7 @@ export default function CertificateForm({
                         <button
                           type="button"
                           onClick={() => setFallbackMatch(null)}
-                          className="px-3 py-1 text-xs text-[#999999] hover:text-[#666666] transition-colors flex items-center gap-1"
+                          className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors flex items-center gap-1"
                           data-testid="button-dismiss-fallback"
                         >
                           <X size={12} /> Dismiss
@@ -1256,7 +1264,7 @@ export default function CertificateForm({
             <button
               type="button"
               onClick={() => handleAutofill(true)}
-              className="text-[10px] text-[#D4AF37]/40 hover:text-[#D4AF37]/70 transition-colors underline"
+              className="text-[10px] text-[var(--admin-gold)]/40 hover:text-[var(--admin-gold)]/70 transition-colors underline"
               data-testid="button-search-other-languages"
             >
               Search other languages
@@ -1264,17 +1272,22 @@ export default function CertificateForm({
           )}
 
           {overwriteConfirm && (
-            <div className="border border-amber-500/40 bg-amber-500/5 rounded p-3" data-testid="overwrite-confirm">
+            <div
+              className="border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
+              data-testid="overwrite-confirm"
+            >
               <div className="flex items-start gap-2">
-                <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
+                <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
                 <div className="flex-1">
-                  <p className="text-amber-400 text-sm font-medium">Overwrite manually edited fields?</p>
-                  <p className="text-[#666666] text-xs mt-1">You edited: {overwriteConfirm.fields.join(", ")}</p>
+                  <p className="text-[var(--admin-amber)] text-sm font-medium">Overwrite manually edited fields?</p>
+                  <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                    You edited: {overwriteConfirm.fields.join(", ")}
+                  </p>
                   <div className="flex gap-2 mt-2">
                     <button
                       type="button"
                       onClick={confirmOverwrite}
-                      className="px-3 py-1 text-xs border border-amber-500/40 text-amber-400 rounded hover:bg-amber-500/10 transition-colors"
+                      className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors"
                       data-testid="button-confirm-overwrite"
                     >
                       Yes, overwrite
@@ -1282,7 +1295,7 @@ export default function CertificateForm({
                     <button
                       type="button"
                       onClick={() => setOverwriteConfirm(null)}
-                      className="px-3 py-1 text-xs text-[#999999] hover:text-[#666666] transition-colors"
+                      className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
                       data-testid="button-cancel-overwrite"
                     >
                       Cancel
@@ -1333,31 +1346,33 @@ export default function CertificateForm({
 
             return (
               <div ref={unifiedRef} className="relative">
-                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Variant</label>
+                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                  Variant
+                </label>
                 <button
                   type="button"
                   onClick={() => {
                     setUnifiedOpen(!unifiedOpen);
                     setUnifiedSearch("");
                   }}
-                  className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[#D4AF37] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
+                  className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[var(--admin-gold)] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
                   data-testid="select-unified"
                 >
-                  <span className={form.unifiedSelect ? "text-[#1A1A1A]" : "text-[#D4AF37]/20"}>
+                  <span className={form.unifiedSelect ? "text-[var(--admin-ink)]" : "text-[var(--admin-gold)]/20"}>
                     {form.unifiedSelect
                       ? form.unifiedSelect === "OTHER"
                         ? "OTHER (manual)"
                         : getUnifiedDisplayLabel(form.unifiedSelect)
                       : "Select or type a variant..."}
                   </span>
-                  <ChevronDown size={14} className="text-[#D4AF37]/50" />
+                  <ChevronDown size={14} className="text-[var(--admin-gold)]/50" />
                 </button>
                 {unifiedOpen && (
                   <div
-                    className="absolute z-50 left-0 right-0 mt-1 border border-[#D4AF37]/30 bg-white rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
+                    className="absolute z-50 left-0 right-0 mt-1 border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
                     data-testid="unified-dropdown"
                   >
-                    <div className="p-2 border-b border-[#D4AF37]/10">
+                    <div className="p-2 border-b border-[var(--admin-gold)]/10">
                       <input
                         type="text"
                         value={unifiedSearch}
@@ -1376,7 +1391,7 @@ export default function CertificateForm({
                           if (e.key === "Escape") setUnifiedOpen(false);
                         }}
                         placeholder="Type to filter or add a new variant..."
-                        className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-2 py-1.5 text-[#1A1A1A] text-xs placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50"
+                        className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50"
                         autoFocus
                         data-testid="input-unified-search"
                       />
@@ -1389,7 +1404,7 @@ export default function CertificateForm({
                             applyUnifiedSelection("");
                             setUnifiedOpen(false);
                           }}
-                          className="w-full text-left px-3 py-2 text-xs text-[#999999] hover:bg-[#D4AF37]/10 hover:text-[#666666] transition-colors border-b border-[#D4AF37]/10"
+                          className="w-full text-left px-3 py-2 text-xs text-[var(--admin-ink-faint)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink-dim)] transition-colors border-b border-[var(--admin-gold)]/10"
                           data-testid="unified-clear"
                         >
                           Clear selection
@@ -1399,7 +1414,7 @@ export default function CertificateForm({
                         <button
                           type="button"
                           onClick={() => addCustomVariant(unifiedSearch)}
-                          className="w-full text-left px-3 py-2 text-sm text-[#D4AF37] hover:bg-[#D4AF37]/10 transition-colors flex items-center gap-2 border-b border-[#D4AF37]/10"
+                          className="w-full text-left px-3 py-2 text-sm text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 transition-colors flex items-center gap-2 border-b border-[var(--admin-gold)]/10"
                           data-testid="unified-add-custom"
                         >
                           <Plus size={13} />
@@ -1415,12 +1430,12 @@ export default function CertificateForm({
                             setUnifiedOpen(false);
                             setUnifiedSearch("");
                           }}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[#D4AF37]/15 text-[#D4AF37]" : "text-[#666666] hover:bg-[#D4AF37]/10 hover:text-[#1A1A1A]"}`}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[var(--admin-gold)]/15 text-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)]"}`}
                           data-testid={`unified-option-${o.value}`}
                         >
                           <span className="block">{o.label}</span>
                           {o.help && (
-                            <span className="block text-[10px] text-[#999999] group-hover:text-[#666666] mt-0.5">
+                            <span className="block text-[10px] text-[var(--admin-ink-faint)] group-hover:text-[var(--admin-ink-dim)] mt-0.5">
                               {o.help}
                             </span>
                           )}
@@ -1434,7 +1449,7 @@ export default function CertificateForm({
                     const opt = allOptions.find((o) => o.value === form.unifiedSelect);
                     return opt?.help ? (
                       <p
-                        className="text-[#999999] text-[10px] mt-1 flex items-center gap-1"
+                        className="text-[var(--admin-ink-faint)] text-[10px] mt-1 flex items-center gap-1"
                         data-testid="text-unified-help"
                       >
                         <HelpCircle size={10} className="shrink-0" /> {opt.help}
@@ -1451,7 +1466,7 @@ export default function CertificateForm({
                         setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
                       }}
                       placeholder="Enter custom rarity / variant / collection..."
-                      className="w-full bg-transparent border border-[#D4AF37]/20 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37]/50 transition-colors"
+                      className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
                       data-testid="input-other-text"
                     />
                     {dbRarityOthers.length > 0 && (
@@ -1463,7 +1478,7 @@ export default function CertificateForm({
                               key={v}
                               type="button"
                               onClick={() => setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))}
-                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#666666] hover:border-[#D4AF37]/40 hover:text-[#1A1A1A]"}`}
+                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40 hover:text-[var(--admin-ink)]"}`}
                               data-testid={`rarity-other-chip-${v}`}
                             >
                               {v}
@@ -1478,7 +1493,9 @@ export default function CertificateForm({
           })()}
 
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Designations</label>
+            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+              Designations
+            </label>
             <div className="flex flex-wrap gap-2" data-testid="designations-chips">
               {DESIGNATION_OPTIONS.map((d) => {
                 const active = designations.includes(d.code);
@@ -1487,7 +1504,7 @@ export default function CertificateForm({
                     key={d.code}
                     type="button"
                     onClick={() => toggleDesignation(d.code)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[#D4AF37]/20 border-[#D4AF37]/60 text-[#D4AF37]" : "bg-transparent border-[#D4AF37]/15 text-[#999999] hover:border-[#D4AF37]/30 hover:text-[#666666]"}`}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
                     data-testid={`designation-${d.code}`}
                     title={d.help}
                   >
@@ -1498,7 +1515,7 @@ export default function CertificateForm({
               })}
             </div>
             {designations.length > 0 && (
-              <p className="text-[#999999] text-[10px] mt-1.5" data-testid="text-designations-summary">
+              <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1.5" data-testid="text-designations-summary">
                 Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
               </p>
             )}
@@ -1517,7 +1534,7 @@ export default function CertificateForm({
                 highlight={languageChangedByFallback}
               />
               {languageChangedByFallback && (
-                <p className="text-amber-400 text-[10px] mt-1" data-testid="text-language-fallback-notice">
+                <p className="text-[var(--admin-amber)] text-[10px] mt-1" data-testid="text-language-fallback-notice">
                   Changed by fallback match
                 </p>
               )}
@@ -1533,22 +1550,24 @@ export default function CertificateForm({
           </div>
 
           {/* Grader Notes with preset helper */}
-          <div className="border border-[#D4AF37]/20 rounded-lg p-3 space-y-3 bg-[#D4AF37]/[0.02]">
+          <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
             <div className="flex items-center gap-2">
-              <FileText size={13} className="text-[#D4AF37]/60 shrink-0" />
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider">Grader Notes</label>
+              <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
+              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
             </div>
 
             {/* Template buttons */}
             <div>
-              <p className="text-[#D4AF37]/40 text-[10px] uppercase tracking-widest mb-1.5">Insert template</p>
+              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
+                Insert template
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {NOTE_TEMPLATES.map((t) => (
                   <button
                     key={t.label}
                     type="button"
                     onClick={() => updateField("notes", t.text)}
-                    className="text-xs px-2.5 py-1 rounded border border-[#D4AF37]/30 text-[#D4AF37]/70 hover:border-[#D4AF37]/60 hover:text-[#D4AF37] hover:bg-[#D4AF37]/5 transition-all"
+                    className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
                     data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
                   >
                     {t.label} Notes
@@ -1563,13 +1582,13 @@ export default function CertificateForm({
               onChange={(e) => updateField("notes", e.target.value)}
               rows={4}
               placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors resize-none"
+              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
               data-testid="input-cert-notes"
             />
 
             {/* Preset chips */}
             <div>
-              <p className="text-[#D4AF37]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
+              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
               <div className="flex flex-wrap gap-1.5">
                 {PRESET_NOTES.map((preset) => {
                   const lines = form.notes
@@ -1588,8 +1607,8 @@ export default function CertificateForm({
                       }}
                       className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
                         alreadyAdded
-                          ? "border-[#D4AF37]/15 text-[#D4AF37]/25 cursor-default"
-                          : "border-[#D4AF37]/25 text-[#666666] hover:border-[#D4AF37]/50 hover:text-[#1A1A1A] hover:bg-[#D4AF37]/5 cursor-pointer"
+                          ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
+                          : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
                       }`}
                       data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
                     >
@@ -1603,11 +1622,13 @@ export default function CertificateForm({
           </div>
         </fieldset>
 
-        <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
+        <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
 
           <div>
-            <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Grade Type *</label>
+            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+              Grade Type *
+            </label>
             <select
               value={form.gradeType}
               onChange={(e) => {
@@ -1628,14 +1649,14 @@ export default function CertificateForm({
                       }),
                 }));
               }}
-              className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
               data-testid="select-grade-type"
             >
-              <option value="numeric" className="bg-white">
+              <option value="numeric" className="bg-[var(--admin-panel)]">
                 Numeric (1–10)
               </option>
               {NON_NUMERIC_GRADES.map((ng) => (
-                <option key={ng.value} value={ng.value} className="bg-white">
+                <option key={ng.value} value={ng.value} className="bg-[var(--admin-panel)]">
                   {ng.value} – {ng.description}
                 </option>
               ))}
@@ -1643,11 +1664,11 @@ export default function CertificateForm({
           </div>
 
           {isNonNum && (
-            <div className="bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3">
-              <p className="text-[#D4AF37] text-sm font-semibold">
+            <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
+              <p className="text-[var(--admin-gold)] text-sm font-semibold">
                 {form.gradeType === "NO" ? "AUTHENTIC – No Numerical Grade" : "AUTHENTIC ALTERED – No Numerical Grade"}
               </p>
-              <p className="text-[#666666] text-xs mt-1">
+              <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
                 {form.gradeType === "NO"
                   ? "Card verified as authentic. No numerical grade or subgrades assigned."
                   : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
@@ -1658,7 +1679,7 @@ export default function CertificateForm({
           {!isNonNum && (
             <>
               <div>
-                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">
+                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
                   Overall Grade *
                 </label>
                 <select
@@ -1671,17 +1692,17 @@ export default function CertificateForm({
                       setForm((f) => ({ ...f, gradeOverall: v, labelType: "standard" }));
                     }
                   }}
-                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
                   data-testid="select-grade-overall"
                 >
-                  <option value="" className="bg-white">
+                  <option value="" className="bg-[var(--admin-panel)]">
                     Select grade...
                   </option>
-                  <option value="black_label" className="bg-white">
+                  <option value="black_label" className="bg-[var(--admin-panel)]">
                     ★ 10 — BLACK LABEL (Gem Mint)
                   </option>
                   {NUMERIC_GRADES.map((g) => (
-                    <option key={g.value} value={String(g.value)} className="bg-white">
+                    <option key={g.value} value={String(g.value)} className="bg-[var(--admin-panel)]">
                       {g.value} – {g.label} ({g.description})
                     </option>
                   ))}
@@ -1689,23 +1710,25 @@ export default function CertificateForm({
               </div>
 
               <div>
-                <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Service Tier</label>
+                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                  Service Tier
+                </label>
                 <select
                   value={form.serviceTier}
                   onChange={(e) => updateField("serviceTier", e.target.value)}
-                  className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
                   data-testid="select-service-tier"
                 >
-                  <option value="" className="bg-white">
+                  <option value="" className="bg-[var(--admin-panel)]">
                     Standard (default)
                   </option>
-                  <option value="vault-queue" className="bg-white">
+                  <option value="vault-queue" className="bg-[var(--admin-panel)]">
                     Vault Queue — £19
                   </option>
-                  <option value="standard" className="bg-white">
+                  <option value="standard" className="bg-[var(--admin-panel)]">
                     Standard — £25
                   </option>
-                  <option value="express" className="bg-white">
+                  <option value="express" className="bg-[var(--admin-panel)]">
                     Express — £45
                   </option>
                 </select>
@@ -1718,13 +1741,13 @@ export default function CertificateForm({
 
         {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
         {false && isEdit && (
-          <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-4">
-            <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+          <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+            <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Upload size={12} />
               Grading Images
             </legend>
 
-            <p className="text-[#666666] text-xs">
+            <p className="text-[var(--admin-ink-dim)] text-xs">
               Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed
               into analysis variants.
             </p>
@@ -1748,7 +1771,7 @@ export default function CertificateForm({
                   <label
                     key={angle}
                     className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
-                      ${gradingImages[angle] ? "border-[#D4AF37]/60 bg-[#D4AF37]/5" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
+                      ${gradingImages[angle] ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
                   >
                     <input
                       type="file"
@@ -1762,15 +1785,20 @@ export default function CertificateForm({
                     {displayUrl ? (
                       <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
                     ) : (
-                      <Upload size={20} className={isRequired ? "text-[#D4AF37]/60" : "text-[#CCCCCC]"} />
+                      <Upload
+                        size={20}
+                        className={isRequired ? "text-[var(--admin-gold)]/60" : "text-[var(--admin-ink-dim)]"}
+                      />
                     )}
                     <span
-                      className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[#666666] font-semibold" : "text-[#AAAAAA]"}`}
+                      className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[var(--admin-ink-dim)] font-semibold" : "text-[var(--admin-ink-faint)]"}`}
                     >
                       {label}
                     </span>
                     {gradingImages[angle] && (
-                      <span className="text-[9px] text-[#D4AF37] truncate w-full">{gradingImages[angle]!.name}</span>
+                      <span className="text-[9px] text-[var(--admin-gold)] truncate w-full">
+                        {gradingImages[angle]!.name}
+                      </span>
                     )}
                   </label>
                 );
@@ -1783,13 +1811,13 @@ export default function CertificateForm({
                 type="button"
                 onClick={uploadGradingImages}
                 disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
-                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-40"
+                className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-40"
               >
                 {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
                 {gradingUploading ? "Uploading…" : "Upload & Process"}
               </button>
               {gradingUploadDone && (
-                <span className="text-emerald-600 text-xs flex items-center gap-1">
+                <span className="text-[var(--admin-green)] text-xs flex items-center gap-1">
                   <CheckCircle2 size={12} /> Uploaded — variants generating in background
                 </span>
               )}
@@ -1798,24 +1826,29 @@ export default function CertificateForm({
             {/* Quality check results */}
             {Object.keys(gradingQuality).length > 0 && (
               <div className="space-y-2">
-                <p className="text-[#666666] text-[10px] uppercase tracking-widest">Image Quality Checks</p>
+                <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
+                  Image Quality Checks
+                </p>
                 {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
-                  <div key={angle} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3">
-                    <p className="text-[#1A1A1A] text-[10px] font-bold uppercase mb-1">
+                  <div
+                    key={angle}
+                    className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3"
+                  >
+                    <p className="text-[var(--admin-ink)] text-[10px] font-bold uppercase mb-1">
                       {angle} —{" "}
                       {q.overall === "pass" ? (
-                        <span className="text-emerald-600">PASS</span>
+                        <span className="text-[var(--admin-green)]">PASS</span>
                       ) : q.overall === "warn" ? (
-                        <span className="text-amber-600">WARN</span>
+                        <span className="text-[var(--admin-amber)]">WARN</span>
                       ) : (
-                        <span className="text-red-600">FAIL</span>
+                        <span className="text-[var(--admin-red)]">FAIL</span>
                       )}
                     </p>
                     <div className="space-y-0.5">
                       {(q.checks || []).map((c: any, i: number) => (
                         <p
                           key={i}
-                          className={`text-[10px] ${c.status === "pass" ? "text-[#888888]" : c.status === "warn" ? "text-amber-600" : "text-red-600"}`}
+                          className={`text-[10px] ${c.status === "pass" ? "text-[var(--admin-ink-faint)]" : c.status === "warn" ? "text-[var(--admin-amber)]" : "text-[var(--admin-red)]"}`}
                         >
                           {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
                         </p>
@@ -1827,13 +1860,13 @@ export default function CertificateForm({
             )}
 
             {/* Card database lookup */}
-            <div className="space-y-2 pt-2 border-t border-[#E8E4DC]">
-              <p className="text-[#666666] text-[10px] uppercase tracking-widest">Verify Card Identity</p>
+            <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
+              <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">Verify Card Identity</p>
               <div className="flex gap-2">
                 <select
                   value={cardLookupGame}
                   onChange={(e) => setCardLookupGame(e.target.value)}
-                  className="bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[#D4AF37]"
+                  className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[var(--admin-gold)]"
                 >
                   <option value="pokemon">Pokémon</option>
                   <option value="mtg">MTG</option>
@@ -1845,19 +1878,19 @@ export default function CertificateForm({
                   onChange={(e) => setCardLookupQuery(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
                   placeholder="Card name…"
-                  className="flex-1 bg-white border border-[#E8E4DC] text-[#1A1A1A] text-xs rounded px-3 py-1.5 placeholder-[#AAAAAA] focus:outline-none focus:border-[#D4AF37]"
+                  className="flex-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-3 py-1.5 placeholder-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
                 />
                 <button
                   type="button"
                   onClick={runCardLookup}
                   disabled={cardLookupLoading || !cardLookupQuery.trim()}
-                  className="flex items-center gap-1 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[#D4AF37]/20"
+                  className="flex items-center gap-1 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[var(--admin-gold)]/20"
                 >
                   {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
                 </button>
               </div>
               {cardLookupResults.length > 0 && (
-                <div className="bg-white rounded-lg border border-[#E8E4DC] max-h-48 overflow-y-auto">
+                <div className="bg-[var(--admin-panel)] rounded-lg border border-[var(--admin-line)] max-h-48 overflow-y-auto">
                   {cardLookupResults.map((r, i) => (
                     <button
                       key={i}
@@ -1871,26 +1904,28 @@ export default function CertificateForm({
                         setCardLookupResults([]);
                         toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
                       }}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0 flex items-start gap-3"
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
                     >
                       {r.imageUrl && (
                         <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />
                       )}
                       <div>
-                        <p className="text-[#1A1A1A] font-medium">{r.name}</p>
-                        <p className="text-[#666666] text-[10px]">
+                        <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
+                        <p className="text-[var(--admin-ink-dim)] text-[10px]">
                           {r.setName}
                           {r.number ? ` · #${r.number}` : ""}
                           {r.rarity ? ` · ${r.rarity}` : ""}
                         </p>
-                        <p className="text-[#AAAAAA] text-[9px]">{r.source}</p>
+                        <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
                       </div>
                     </button>
                   ))}
                 </div>
               )}
               {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
-                <p className="text-[#999999] text-[10px]">No results — check spelling or try a shorter name.</p>
+                <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                  No results — check spelling or try a shorter name.
+                </p>
               )}
             </div>
           </fieldset>
@@ -1898,21 +1933,21 @@ export default function CertificateForm({
 
         {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
         {false && isEdit && (
-          <fieldset className="border border-[#D4AF37]/30 rounded-lg p-4 space-y-4">
-            <legend className="text-[#D4AF37] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+          <fieldset className="border border-[var(--admin-gold)]/30 rounded-lg p-4 space-y-4">
+            <legend className="text-[var(--admin-gold)] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
               <Cpu size={12} />
               AI-Assisted Grading
             </legend>
 
             <div className="flex items-center justify-between">
-              <p className="text-[#666666] text-xs">
+              <p className="text-[var(--admin-ink-dim)] text-xs">
                 Analyze card photos with Claude Vision to generate a draft grade.
               </p>
               <button
                 type="button"
                 onClick={runAiAnalysis}
                 disabled={aiLoading}
-                className="flex items-center gap-2 bg-[#D4AF37]/10 border border-[#D4AF37]/40 text-[#D4AF37] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[#D4AF37]/20 disabled:opacity-50"
+                className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-50"
                 data-testid="button-analyze-ai"
               >
                 {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
@@ -1921,14 +1956,14 @@ export default function CertificateForm({
             </div>
 
             {aiLoading && (
-              <div className="flex items-center gap-3 text-[#D4AF37] text-xs bg-[#D4AF37]/5 border border-[#D4AF37]/20 rounded-lg p-3">
+              <div className="flex items-center gap-3 text-[var(--admin-gold)] text-xs bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
                 <Loader2 size={14} className="animate-spin shrink-0" />
                 Sending images to Claude Vision. This takes 15–30 seconds…
               </div>
             )}
 
             {aiError && (
-              <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 text-[var(--admin-red)] text-xs bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded-lg p-3">
                 <AlertTriangle size={14} className="shrink-0" />
                 {aiError}
               </div>
@@ -1939,8 +1974,11 @@ export default function CertificateForm({
                 {/* Subgrade cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
-                    <div key={cat} className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3 text-center">
-                      <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
+                    <div
+                      key={cat}
+                      className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
+                    >
+                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
                       <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
                         {aiDraft[cat] || "—"}
                       </p>
@@ -1951,9 +1989,9 @@ export default function CertificateForm({
                         step="0.5"
                         value={aiDraft[cat]}
                         onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
-                        className="w-full bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-xs text-center focus:outline-none focus:border-[#D4AF37]"
+                        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-xs text-center focus:outline-none focus:border-[var(--admin-gold)]"
                       />
-                      <p className="text-[#888888] text-[9px] leading-tight mt-1.5 line-clamp-2">
+                      <p className="text-[var(--admin-ink-faint)] text-[9px] leading-tight mt-1.5 line-clamp-2">
                         {aiAnalysis[cat]?.notes || ""}
                       </p>
                     </div>
@@ -1962,7 +2000,7 @@ export default function CertificateForm({
 
                 {/* Centering ratios */}
                 {aiAnalysis.centering && (
-                  <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       ["Front L/R", aiAnalysis.centering.front_left_right],
                       ["Front T/B", aiAnalysis.centering.front_top_bottom],
@@ -1970,8 +2008,8 @@ export default function CertificateForm({
                       ["Back T/B", aiAnalysis.centering.back_top_bottom],
                     ].map(([label, val]) => (
                       <div key={label}>
-                        <p className="text-[#AAAAAA] text-[9px] uppercase">{label}</p>
-                        <p className="text-[#1A1A1A] font-mono font-bold">{val || "—"}</p>
+                        <p className="text-[var(--admin-ink-faint)] text-[9px] uppercase">{label}</p>
+                        <p className="text-[var(--admin-ink)] font-mono font-bold">{val || "—"}</p>
                       </div>
                     ))}
                   </div>
@@ -1980,27 +2018,29 @@ export default function CertificateForm({
                 {/* Defects */}
                 {aiDefects.length > 0 && (
                   <div>
-                    <p className="text-[#666666] text-[10px] uppercase tracking-widest mb-2">Identified Defects</p>
+                    <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest mb-2">
+                      Identified Defects
+                    </p>
                     <div className="space-y-1.5">
                       {aiDefects.map((d, i) => (
                         <div
                           key={i}
-                          className="flex items-start gap-2 bg-[#FAFAF8] border border-[#E8E4DC] rounded px-3 py-2"
+                          className="flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-3 py-2"
                         >
                           <div className="flex-1 min-w-0">
-                            <span className="text-[#D4AF37] text-xs font-semibold uppercase">
+                            <span className="text-[var(--admin-gold)] text-xs font-semibold uppercase">
                               {d.type?.replace(/_/g, " ")}
                             </span>
-                            <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
-                            <span className="text-[#666666] text-xs">{d.location}</span>
-                            <span className="text-[#CCCCCC] text-xs mx-1.5">·</span>
-                            <span className="text-[#888888] text-xs italic">{d.severity}</span>
-                            <p className="text-[#666666] text-[11px] mt-0.5">{d.description}</p>
+                            <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                            <span className="text-[var(--admin-ink-dim)] text-xs">{d.location}</span>
+                            <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                            <span className="text-[var(--admin-ink-faint)] text-xs italic">{d.severity}</span>
+                            <p className="text-[var(--admin-ink-dim)] text-[11px] mt-0.5">{d.description}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
-                            className="text-[#CCCCCC] hover:text-red-500 transition-colors shrink-0 mt-0.5"
+                            className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] transition-colors shrink-0 mt-0.5"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -2011,17 +2051,21 @@ export default function CertificateForm({
                 )}
 
                 {/* Overall grade + explanation */}
-                <div className="bg-[#FAFAF8] border border-[#E8E4DC] rounded-lg p-4">
+                <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <p className="text-[#888888] text-[10px] uppercase tracking-widest">AI Draft Overall</p>
+                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest">
+                        AI Draft Overall
+                      </p>
                       <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
                         {aiDraft.overall || "—"}
                       </p>
-                      <p className="text-[#D4AF37] text-xs">{aiAnalysis.grade_label || ""}</p>
+                      <p className="text-[var(--admin-gold)] text-xs">{aiAnalysis.grade_label || ""}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[#888888] text-[10px] uppercase tracking-widest mb-1">Override Overall</p>
+                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
+                        Override Overall
+                      </p>
                       <input
                         type="number"
                         min="1"
@@ -2029,17 +2073,17 @@ export default function CertificateForm({
                         step="0.5"
                         value={aiDraft.overall}
                         onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
-                        className="w-24 bg-white border border-[#E8E4DC] rounded px-2 py-1 text-[#1A1A1A] text-sm text-center focus:outline-none focus:border-[#D4AF37]"
+                        className="w-24 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-sm text-center focus:outline-none focus:border-[var(--admin-gold)]"
                       />
                     </div>
                   </div>
                   {aiAnalysis.grade_explanation && (
-                    <p className="text-[#555555] text-xs leading-relaxed border-t border-[#E8E4DC] pt-3">
+                    <p className="text-[var(--admin-ink-dim)] text-xs leading-relaxed border-t border-[var(--admin-line)] pt-3">
                       {aiAnalysis.grade_explanation}
                     </p>
                   )}
                   {aiAnalysis.authentication_notes && (
-                    <p className="text-[#888888] text-[11px] leading-relaxed mt-2 italic">
+                    <p className="text-[var(--admin-ink-faint)] text-[11px] leading-relaxed mt-2 italic">
                       {aiAnalysis.authentication_notes}
                     </p>
                   )}
@@ -2051,14 +2095,14 @@ export default function CertificateForm({
                     type="button"
                     onClick={approveGrade}
                     disabled={approveLoading || !aiDraft.overall}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
                     data-testid="button-approve-grade"
                   >
                     {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                     {approveLoading ? "Approving…" : "Approve Grade"}
                   </button>
                 ) : (
-                  <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
                     <CheckCircle2 size={16} />
                     Grade approved
                   </div>
@@ -2066,7 +2110,7 @@ export default function CertificateForm({
               </div>
             )}
 
-            <p className="text-[#AAAAAA] text-[10px] leading-relaxed">
+            <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
               Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
               lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
             </p>
@@ -2074,7 +2118,7 @@ export default function CertificateForm({
         )}
 
         {error && (
-          <p className="text-red-400 text-sm" data-testid="text-form-error">
+          <p className="text-[var(--admin-red)] text-sm" data-testid="text-form-error">
             {error}
           </p>
         )}
@@ -2122,7 +2166,7 @@ function FormInput({
 }) {
   return (
     <div>
-      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <input
         type={type || "text"}
         value={value}
@@ -2132,7 +2176,7 @@ function FormInput({
         step={step}
         min={min}
         max={max}
-        className={`w-full bg-transparent border rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/20 focus:outline-none focus:border-[#D4AF37] transition-colors ${highlight ? "border-amber-500/50" : "border-[#D4AF37]/30"}`}
+        className={`w-full bg-transparent border rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors ${highlight ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
         data-testid={testId}
       />
     </div>
@@ -2156,11 +2200,11 @@ function FormSelect({
 }) {
   return (
     <div>
-      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
         data-testid={testId}
       >
         <option value="">Select...</option>
@@ -2201,10 +2245,10 @@ function FileUpload({
 
   return (
     <div>
-      <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
       <label
         className={`relative block border-2 border-dashed rounded-xl cursor-pointer transition-all overflow-hidden
-          ${dragging ? "border-[#D4AF37] bg-[#D4AF37]/5" : displaySrc ? "border-[#D4AF37]/40 bg-[#FAFAF8]" : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"}`}
+          ${dragging ? "border-[var(--admin-gold)] bg-[var(--admin-gold)]/5" : displaySrc ? "border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)]" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -2219,7 +2263,11 @@ function FileUpload({
       >
         {displaySrc ? (
           <div className="relative">
-            <img src={displaySrc} alt={label} className="w-full h-40 object-contain rounded-xl bg-white p-2" />
+            <img
+              src={displaySrc}
+              alt={label}
+              className="w-full h-40 object-contain rounded-xl bg-[var(--admin-panel)] p-2"
+            />
             <div className="absolute inset-0 flex items-center justify-center bg-black/0 hover:bg-black/20 transition-all rounded-xl">
               <span className="opacity-0 hover:opacity-100 text-white text-xs font-bold bg-black/50 px-2 py-1 rounded transition-opacity">
                 Replace
@@ -2228,9 +2276,9 @@ function FileUpload({
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center min-h-[140px]">
-            <Upload size={24} className="text-[#D4AF37]/50" />
-            <p className="text-[#666666] text-xs font-medium">Drag & drop or click to upload</p>
-            <p className="text-[#AAAAAA] text-[10px]">JPG, PNG, WEBP</p>
+            <Upload size={24} className="text-[var(--admin-gold)]/50" />
+            <p className="text-[var(--admin-ink-dim)] text-xs font-medium">Drag & drop or click to upload</p>
+            <p className="text-[var(--admin-ink-faint)] text-[10px]">JPG, PNG, WEBP</p>
           </div>
         )}
         <input
@@ -2256,11 +2304,14 @@ function SubmissionItemLink({ value, onChange }: { value: string; onChange: (id:
   });
 
   return (
-    <fieldset className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-2" data-testid="fieldset-submission-link">
-      <legend className="text-[#D4AF37]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
+    <fieldset
+      className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-2"
+      data-testid="fieldset-submission-link"
+    >
+      <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-1.5">
         <Link2 size={12} /> Link to Submission
       </legend>
-      <p className="text-[#999999] text-xs">
+      <p className="text-[var(--admin-ink-faint)] text-xs">
         Optionally link this certificate to a customer submission item. Fields will auto-populate.
       </p>
       <select
@@ -2274,7 +2325,7 @@ function SubmissionItemLink({ value, onChange }: { value: string; onChange: (id:
           const item = items?.find((i: any) => String(i.id) === id);
           onChange(id, item);
         }}
-        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#D4AF37] transition-colors"
+        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
         data-testid="select-submission-item"
       >
         <option value="">No link (standalone certificate)</option>
@@ -2397,7 +2448,7 @@ function PokemonSetPicker({
 
   return (
     <div ref={ref} className="relative">
-      <label className="text-[#D4AF37]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
+      <label className="text-[var(--admin-gold)]/60 text-[10px] uppercase tracking-wider block mb-1">Set Name *</label>
       <input
         type="text"
         value={query}
@@ -2409,10 +2460,10 @@ function PokemonSetPicker({
         onFocus={() => setOpen(true)}
         placeholder="Type to search sets…"
         data-testid={testId}
-        className="w-full bg-white border border-[#D4AF37]/30 rounded px-3 py-2 text-sm text-[#1A1A1A] placeholder:text-[#999999] focus:outline-none focus:border-[#D4AF37]"
+        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
       />
       {open && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-[#E8E4DC] rounded-lg shadow-lg max-h-72 overflow-y-auto">
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
           {filtered.map((s) => (
             <button
               key={s.id}
@@ -2422,16 +2473,16 @@ function PokemonSetPicker({
                 setQuery(s.name);
                 setOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-xs hover:bg-[#D4AF37]/5 border-b border-[#F0EDE8] last:border-0"
+              className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
             >
-              <span className="font-mono text-[#D4AF37] text-[10px] mr-2">{s.id}</span>
-              <span className="text-[#1A1A1A] font-medium">{s.name}</span>
+              <span className="font-mono text-[var(--admin-gold)] text-[10px] mr-2">{s.id}</span>
+              <span className="text-[var(--admin-ink)] font-medium">{s.name}</span>
               {(s as any).source === "custom" && (
-                <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded ml-1 font-bold uppercase">
+                <span className="text-[8px] bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)] px-1 py-0.5 rounded ml-1 font-bold uppercase">
                   Custom
                 </span>
               )}
-              <span className="text-[#999999] ml-2">
+              <span className="text-[var(--admin-ink-faint)] ml-2">
                 · {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}
               </span>
             </button>
@@ -2443,7 +2494,7 @@ function PokemonSetPicker({
               setShowAddForm(true);
               setAddForm((f) => ({ ...f, setId: query, setName: "" }));
             }}
-            className="w-full text-left px-3 py-2.5 text-xs text-[#D4AF37] font-bold hover:bg-[#D4AF37]/5 border-t border-[#E8E4DC] flex items-center gap-1"
+            className="w-full text-left px-3 py-2.5 text-xs text-[var(--admin-gold)] font-bold hover:bg-[var(--admin-gold)]/5 border-t border-[var(--admin-line)] flex items-center gap-1"
           >
             <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
           </button>
@@ -2456,54 +2507,54 @@ function PokemonSetPicker({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowAddForm(false)}
         >
-          <div className="bg-white rounded-lg p-5 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
+          <div className="bg-[var(--admin-panel)] rounded-lg p-5 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Add Custom Set</p>
             <div>
-              <label className="text-[#666666] text-[10px] block mb-0.5">Set Code *</label>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Code *</label>
               <input
                 value={addForm.setId}
                 onChange={(e) => setAddForm((f) => ({ ...f, setId: e.target.value }))}
                 placeholder="e.g. M24 EN"
-                className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
               />
             </div>
             <div>
-              <label className="text-[#666666] text-[10px] block mb-0.5">Set Name *</label>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Name *</label>
               <input
                 value={addForm.setName}
                 onChange={(e) => setAddForm((f) => ({ ...f, setName: e.target.value }))}
                 placeholder="e.g. McDonald's Match Battle 2024"
-                className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-[#666666] text-[10px] block mb-0.5">Series</label>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Series</label>
                 <input
                   value={addForm.series}
                   onChange={(e) => setAddForm((f) => ({ ...f, series: e.target.value }))}
                   placeholder="Promo"
-                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
                 />
               </div>
               <div>
-                <label className="text-[#666666] text-[10px] block mb-0.5">Year</label>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Year</label>
                 <input
                   type="number"
                   value={addForm.releaseYear}
                   onChange={(e) => setAddForm((f) => ({ ...f, releaseYear: e.target.value }))}
                   placeholder="2024"
-                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
                 />
               </div>
               <div>
-                <label className="text-[#666666] text-[10px] block mb-0.5">Total Cards</label>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Total Cards</label>
                 <input
                   type="number"
                   value={addForm.totalCards}
                   onChange={(e) => setAddForm((f) => ({ ...f, totalCards: e.target.value }))}
                   placeholder="15"
-                  className="w-full border border-[#E8E4DC] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
                 />
               </div>
             </div>
@@ -2511,7 +2562,7 @@ function PokemonSetPicker({
               <button
                 type="button"
                 onClick={() => setShowAddForm(false)}
-                className="flex-1 border border-[#E8E4DC] text-[#888888] text-xs py-2 rounded hover:bg-[#F5F5F3]"
+                className="flex-1 border border-[var(--admin-line)] text-[var(--admin-ink-faint)] text-xs py-2 rounded hover:bg-[var(--admin-panel2)]"
               >
                 Cancel
               </button>
@@ -2519,7 +2570,7 @@ function PokemonSetPicker({
                 type="button"
                 onClick={saveNewSet}
                 disabled={addSaving || !addForm.setId || !addForm.setName}
-                className="flex-1 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
+                className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
               >
                 {addSaving ? "Saving…" : "Add Set"}
               </button>

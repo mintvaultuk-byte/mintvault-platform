@@ -60,23 +60,25 @@ export default function DefectTypePicker({ anchor, tier, onTierChange, onPick, o
     <>
       <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={onCancel} />
       <div
-        className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
+        className="fixed bg-[var(--admin-panel)] border border-[var(--admin-gold)]/60 rounded-lg shadow-2xl overflow-hidden"
         style={{ zIndex: 9999, left: clampedLeft, top: clampedTop, width: DROPDOWN_W, maxHeight: DROPDOWN_H }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-          <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect ({pinCount})</span>
+        <div className="px-3 py-2 border-b border-[var(--admin-line)] bg-[var(--admin-panel2)] flex items-center justify-between">
+          <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">
+            Defect ({pinCount})
+          </span>
           <button
             type="button"
             onClick={onCancel}
-            className="text-[#888888] hover:text-red-600 transition-colors"
+            className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors"
             aria-label="Cancel"
           >
             <X size={12} />
           </button>
         </div>
-        <div className="px-3 py-2 border-b border-[#E8E4DC] bg-white">
-          <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">Tier</div>
+        <div className="px-3 py-2 border-b border-[var(--admin-line)] bg-[var(--admin-panel)]">
+          <div className="text-[9px] uppercase tracking-widest text-[var(--admin-ink-faint)] mb-1">Tier</div>
           <div className="flex gap-1">
             {(["D1", "D2", "D3"] as const).map((t) => (
               <button
@@ -85,8 +87,8 @@ export default function DefectTypePicker({ anchor, tier, onTierChange, onPick, o
                 onClick={() => onTierChange(t)}
                 className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
                   tier === t
-                    ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                    : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                    ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]"
+                    : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"
                 }`}
                 data-testid={`btn-tier-${t}`}
               >
@@ -101,11 +103,11 @@ export default function DefectTypePicker({ anchor, tier, onTierChange, onPick, o
               key={t.code}
               type="button"
               onClick={() => onPick({ mvgsCode: t.code, label: t.label, tier })}
-              className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors flex items-center justify-between gap-2"
+              className="w-full text-left px-3 py-1.5 text-[var(--admin-ink)] text-xs hover:bg-[var(--admin-gold)]/10 border-b border-[var(--admin-line)] last:border-b-0 transition-colors flex items-center justify-between gap-2"
               data-testid={`mvgs-pick-${t.code}`}
             >
               <span>{t.label}</span>
-              <span className="font-mono text-[10px] text-[#888]">{t.code}</span>
+              <span className="font-mono text-[10px] text-[var(--admin-ink-faint)]">{t.code}</span>
             </button>
           ))}
         </div>

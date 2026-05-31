@@ -6,17 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Shield,
-  UserCheck,
-  RefreshCw,
-  Loader2,
-  Copy,
-  Check,
-  UserPlus,
-  Clock,
-  Printer,
-} from "lucide-react";
+import { Shield, UserCheck, RefreshCw, Loader2, Copy, Check, UserPlus, Clock, Printer } from "lucide-react";
 
 interface OwnershipData {
   certId: string;
@@ -111,16 +101,16 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
   });
 
   const statusColor: Record<string, string> = {
-    unclaimed: "bg-gray-500/20 text-[#666666]",
-    pending: "bg-yellow-500/20 text-yellow-400",
-    claimed: "bg-emerald-500/20 text-emerald-400",
-    transferred: "bg-blue-500/20 text-blue-400",
+    unclaimed: "bg-[color-mix(in_srgb,var(--admin-ink-faint)_15%,transparent)] text-[var(--admin-ink-faint)]",
+    pending: "bg-[color-mix(in_srgb,var(--admin-amber)_18%,transparent)] text-[var(--admin-amber)]",
+    claimed: "bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)]",
+    transferred: "bg-[color-mix(in_srgb,var(--admin-blue)_18%,transparent)] text-[var(--admin-blue)]",
   };
 
   if (isLoading) {
     return (
-      <div className="border border-[#D4AF37]/20 rounded-lg p-6">
-        <div className="flex items-center gap-2 text-[#D4AF37]/60">
+      <div className="border border-[var(--admin-gold)]/20 rounded-lg p-6">
+        <div className="flex items-center gap-2 text-[var(--admin-gold)]/60">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span className="text-sm">Loading ownership info...</span>
         </div>
@@ -129,39 +119,50 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
   }
 
   return (
-    <div className="border border-[#D4AF37]/20 rounded-lg p-5 space-y-4" data-testid="section-ownership">
+    <div className="border border-[var(--admin-gold)]/20 rounded-lg p-5 space-y-4" data-testid="section-ownership">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-[#D4AF37]" />
-          <h3 className="text-sm font-bold text-[#D4AF37] tracking-wide">OWNERSHIP</h3>
+          <Shield className="w-4 h-4 text-[var(--admin-gold)]" />
+          <h3 className="text-sm font-bold text-[var(--admin-gold)] tracking-wide">OWNERSHIP</h3>
         </div>
-        <Badge className={statusColor[data?.ownershipStatus || "unclaimed"] || statusColor.unclaimed} data-testid="badge-ownership-status">
+        <Badge
+          className={statusColor[data?.ownershipStatus || "unclaimed"] || statusColor.unclaimed}
+          data-testid="badge-ownership-status"
+        >
           {data?.ownershipStatus || "unclaimed"}
         </Badge>
       </div>
 
       {data?.ownerEmail && (
         <div className="flex items-center gap-2 text-sm">
-          <UserCheck className="w-4 h-4 text-emerald-400" />
-          <span className="text-[#666666]">Owner:</span>
-          <span className="text-[#1A1A1A] font-medium" data-testid="text-owner-email">{data.ownerEmail}</span>
+          <UserCheck className="w-4 h-4 text-[var(--admin-green)]" />
+          <span className="text-[var(--admin-ink-dim)]">Owner:</span>
+          <span className="text-[var(--admin-ink)] font-medium" data-testid="text-owner-email">
+            {data.ownerEmail}
+          </span>
         </div>
       )}
 
       {/* Ownership Token */}
-      <div className="rounded-md border border-[#D4AF37]/20 bg-[#FAFAF8] p-3 space-y-2">
+      <div className="rounded-md border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-[#D4AF37]/70 tracking-widest uppercase">Ownership Token</span>
+          <span className="text-xs font-semibold text-[var(--admin-gold)]/70 tracking-widest uppercase">
+            Ownership Token
+          </span>
           {data?.ownershipToken ? (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400">Active</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--admin-green)_22%,transparent)] text-[var(--admin-green)]">
+              Active
+            </span>
           ) : (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]">None</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--admin-panel3)] text-[var(--admin-ink-faint)]">
+              None
+            </span>
           )}
         </div>
         {data?.ownershipToken ? (
           <div className="flex items-center gap-2">
             <code
-              className="flex-1 font-mono text-xs tracking-widest text-[#D4AF37] bg-gray-50 px-3 py-2 rounded border border-[#D4AF37]/30 select-all overflow-x-auto"
+              className="flex-1 font-mono text-xs tracking-widest text-[var(--admin-gold)] bg-[var(--admin-bg2)] px-3 py-2 rounded border border-[var(--admin-gold)]/30 select-all overflow-x-auto"
               data-testid="text-ownership-token"
             >
               {data.ownershipToken}
@@ -172,33 +173,48 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
               onClick={() => {
                 navigator.clipboard.writeText(data.ownershipToken!);
               }}
-              className="border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/15 shrink-0"
+              className="border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15 shrink-0"
               data-testid="button-copy-ownership-token"
             >
               <Copy className="w-3.5 h-3.5" />
             </Button>
           </div>
         ) : (
-          <p className="text-xs text-[#999999]">Generated automatically when ownership is registered or transferred.</p>
+          <p className="text-xs text-[var(--admin-ink-faint)]">
+            Generated automatically when ownership is registered or transferred.
+          </p>
         )}
         {data?.ownershipTokenGeneratedAt && (
-          <p className="text-xs text-[#999999]">
-            Generated {new Date(data.ownershipTokenGeneratedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+          <p className="text-xs text-[var(--admin-ink-faint)]">
+            Generated{" "}
+            {new Date(data.ownershipTokenGeneratedAt).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
           </p>
         )}
       </div>
 
       {/* Claim code display */}
-      <div className="rounded-md border border-[#D4AF37]/20 bg-[#FAFAF8] p-3 space-y-2">
+      <div className="rounded-md border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-[#D4AF37]/70 tracking-widest uppercase">Claim Code</span>
+          <span className="text-xs font-semibold text-[var(--admin-gold)]/70 tracking-widest uppercase">
+            Claim Code
+          </span>
           <div className="flex items-center gap-1.5">
             {data?.claimCodeUsedAt ? (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-900/40 text-emerald-400">Used</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--admin-green)_22%,transparent)] text-[var(--admin-green)]">
+                Used
+              </span>
             ) : data?.hasClaimCode ? (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/10 text-[#D4AF37]">Active</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]">
+                Active
+              </span>
             ) : (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]">None</span>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--admin-panel3)] text-[var(--admin-ink-faint)]">
+                None
+              </span>
             )}
           </div>
         </div>
@@ -206,7 +222,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
         {visibleCode ? (
           <div className="flex items-center gap-2">
             <code
-              className="flex-1 font-mono text-lg font-bold tracking-[0.2em] text-[#D4AF37] bg-gray-50 px-3 py-2 rounded border border-[#D4AF37]/30 select-all"
+              className="flex-1 font-mono text-lg font-bold tracking-[0.2em] text-[var(--admin-gold)] bg-[var(--admin-bg2)] px-3 py-2 rounded border border-[var(--admin-gold)]/30 select-all"
               data-testid="text-visible-claim-code"
             >
               {visibleCode}
@@ -219,19 +235,22 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
                 setCopiedCode(true);
                 setTimeout(() => setCopiedCode(false), 2000);
               }}
-              className="border-[#D4AF37]/40 text-[#D4AF37] hover:bg-[#D4AF37]/15 shrink-0"
+              className="border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15 shrink-0"
               data-testid="button-copy-claim-code"
             >
               {copiedCode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
             </Button>
           </div>
         ) : (
-          <div className="text-xs text-[#999999]">
+          <div className="text-xs text-[var(--admin-ink-faint)]">
             {data?.hasClaimCode ? (
               <>
-                Code generated {data.claimCodeCreatedAt ? new Date(data.claimCodeCreatedAt).toLocaleDateString("en-GB") : ""}
+                Code generated{" "}
+                {data.claimCodeCreatedAt ? new Date(data.claimCodeCreatedAt).toLocaleDateString("en-GB") : ""}
                 {data.claimCodeUsedAt ? ` · claimed ${new Date(data.claimCodeUsedAt).toLocaleDateString("en-GB")}` : ""}
-                <span className="block mt-0.5 text-[#999999]">Click "Regenerate" to reveal a new code for dispatch.</span>
+                <span className="block mt-0.5 text-[var(--admin-ink-faint)]">
+                  Click "Regenerate" to reveal a new code for dispatch.
+                </span>
               </>
             ) : (
               "No claim code generated yet. Generate one before dispatching the card."
@@ -246,7 +265,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           variant="outline"
           onClick={() => regenMutation.mutate()}
           disabled={regenMutation.isPending}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 text-xs"
           data-testid="button-regenerate-claim-code"
         >
           {regenMutation.isPending ? (
@@ -262,7 +281,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           variant="outline"
           onClick={() => insertMutation.mutate()}
           disabled={insertMutation.isPending}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 text-xs"
           data-testid="button-print-claim-insert"
         >
           {insertMutation.isPending ? (
@@ -277,7 +296,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
           size="sm"
           variant="outline"
           onClick={() => setShowAssign(!showAssign)}
-          className="border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#D4AF37]/10 text-xs"
+          className="border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 text-xs"
           data-testid="button-manual-assign"
         >
           <UserPlus className="w-3 h-3 mr-1.5" />
@@ -286,19 +305,19 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       </div>
 
       {showAssign && (
-        <div className="border border-[#D4AF37]/10 rounded p-3 space-y-3 bg-[#0a0a0a]">
+        <div className="border border-[var(--admin-gold)]/10 rounded p-3 space-y-3 bg-[var(--admin-panel2)]">
           <Input
             placeholder="Owner email address"
             value={assignEmail}
             onChange={(e) => setAssignEmail(e.target.value)}
-            className="bg-gray-50 border-[#E8E4DC] text-[#1A1A1A] text-sm"
+            className="bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)] text-sm focus:border-[var(--admin-gold)]"
             data-testid="input-assign-email"
           />
           <Input
             placeholder="Notes (optional)"
             value={assignNotes}
             onChange={(e) => setAssignNotes(e.target.value)}
-            className="bg-gray-50 border-[#E8E4DC] text-[#1A1A1A] text-sm"
+            className="bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)] text-sm focus:border-[var(--admin-gold)]"
             data-testid="input-assign-notes"
           />
           <div className="flex gap-2">
@@ -306,7 +325,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
               size="sm"
               onClick={() => assignMutation.mutate()}
               disabled={assignMutation.isPending || !assignEmail.trim()}
-              className="bg-[#D4AF37] hover:bg-[#B8962E] text-black text-xs"
+              className="bg-[var(--admin-gold)] hover:bg-[var(--admin-gold-hi)] text-[#1c1607] text-xs"
               data-testid="button-confirm-assign"
             >
               {assignMutation.isPending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
@@ -316,7 +335,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
               size="sm"
               variant="ghost"
               onClick={() => setShowAssign(false)}
-              className="text-[#666666] text-xs"
+              className="text-[var(--admin-ink-dim)] text-xs"
             >
               Cancel
             </Button>
@@ -325,19 +344,19 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
       )}
 
       {data?.history && data.history.length > 0 && (
-        <div className="space-y-2 pt-2 border-t border-[#D4AF37]/10">
-          <h4 className="text-xs font-semibold text-[#999999] tracking-wide">HISTORY</h4>
+        <div className="space-y-2 pt-2 border-t border-[var(--admin-gold)]/10">
+          <h4 className="text-xs font-semibold text-[var(--admin-ink-faint)] tracking-wide">HISTORY</h4>
           <div className="space-y-1.5 max-h-40 overflow-y-auto">
             {data.history.map((h) => (
               <div key={h.id} className="flex items-start gap-2 text-xs">
-                <Clock className="w-3 h-3 text-[#999999] mt-0.5 shrink-0" />
+                <Clock className="w-3 h-3 text-[var(--admin-ink-faint)] mt-0.5 shrink-0" />
                 <div>
-                  <span className="text-[#666666]">{h.eventType}</span>
-                  {h.toEmail && <span className="text-[#1A1A1A] ml-1">{h.toEmail}</span>}
-                  <span className="text-[#999999] ml-2">
+                  <span className="text-[var(--admin-ink-dim)]">{h.eventType}</span>
+                  {h.toEmail && <span className="text-[var(--admin-ink)] ml-1">{h.toEmail}</span>}
+                  <span className="text-[var(--admin-ink-faint)] ml-2">
                     {new Date(h.createdAt).toLocaleDateString("en-GB")}
                   </span>
-                  {h.notes && <span className="text-[#999999] ml-1">— {h.notes}</span>}
+                  {h.notes && <span className="text-[var(--admin-ink-faint)] ml-1">— {h.notes}</span>}
                 </div>
               </div>
             ))}

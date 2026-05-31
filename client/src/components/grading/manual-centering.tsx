@@ -294,36 +294,40 @@ export default function ManualCentering({
       onMouseLeave={onMouseUp}
     >
       {/* Top bar: live stats */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
+      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[var(--admin-line-hard)]">
         <div className="flex items-center gap-6">
           <div>
-            <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">Manual Centering — {side}</p>
-            <p className="text-[#888888] text-[10px]">
-              Drag the <span className="text-[#EF4444]">red outer</span> rect to card edges,{" "}
-              <span className="text-[#16A34A]">green inner</span> rect to border interior
+            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
+              Manual Centering — {side}
+            </p>
+            <p className="text-[var(--admin-ink-faint)] text-[10px]">
+              Drag the <span className="text-[var(--admin-red)]">red outer</span> rect to card edges,{" "}
+              <span className="text-[var(--admin-green)]">green inner</span> rect to border interior
             </p>
             {rectSource === "ai" && (
-              <p className="text-[#D4AF37]/70 text-[10px] mt-0.5">
+              <p className="text-[var(--admin-gold)]/70 text-[10px] mt-0.5">
                 Pre-loaded from AI centering ({aiRatios?.lr} L/R, {aiRatios?.tb} T/B) — drag to adjust
               </p>
             )}
             {rectSource === "saved" && (
-              <p className="text-[#16A34A]/70 text-[10px] mt-0.5">Loaded from previous manual pass — drag to adjust</p>
+              <p className="text-[var(--admin-green)]/70 text-[10px] mt-0.5">
+                Loaded from previous manual pass — drag to adjust
+              </p>
             )}
           </div>
           <div className="flex items-center gap-4">
             <div className="text-center">
-              <p className="text-[#555555] text-[9px] uppercase">L/R</p>
+              <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase">L/R</p>
               <p className="text-white text-lg font-bold font-mono leading-none">{result.lr}</p>
             </div>
             <div className="text-center">
-              <p className="text-[#555555] text-[9px] uppercase">T/B</p>
+              <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase">T/B</p>
               <p className="text-white text-lg font-bold font-mono leading-none">{result.tb}</p>
             </div>
             <div className="text-center">
-              <p className="text-[#555555] text-[9px] uppercase">Grade</p>
+              <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase">Grade</p>
               <p
-                className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[#D4AF37]" : result.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}
+                className={`text-lg font-black leading-none ${result.subgrade >= 9 ? "text-[var(--admin-gold)]" : result.subgrade >= 7 ? "text-[var(--admin-green)]" : "text-[var(--admin-amber)]"}`}
               >
                 {result.subgrade}
               </p>
@@ -335,7 +339,7 @@ export default function ManualCentering({
             type="button"
             onClick={zoomOut}
             disabled={zoom <= 1}
-            className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"
+            className="w-8 h-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)]"
           >
             <ZoomOut size={16} />
           </button>
@@ -344,11 +348,11 @@ export default function ManualCentering({
             type="button"
             onClick={zoomIn}
             disabled={zoom >= 6}
-            className="w-8 h-8 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555]"
+            className="w-8 h-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)]"
           >
             <ZoomIn size={16} />
           </button>
-          <button type="button" onClick={onCancel} className="ml-4 text-[#888888] hover:text-white">
+          <button type="button" onClick={onCancel} className="ml-4 text-[var(--admin-ink-faint)] hover:text-white">
             <X size={20} />
           </button>
         </div>
@@ -356,7 +360,7 @@ export default function ManualCentering({
 
       {/* Image area with rects */}
       <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-        <div className="relative w-full h-full max-w-[85vh] overflow-hidden rounded-lg bg-[#0A0A0A]">
+        <div className="relative w-full h-full max-w-[85vh] overflow-hidden rounded-lg bg-[var(--admin-bg2)]">
           <div
             className="relative w-full h-full"
             style={{ transform: zoom > 1 ? `scale(${zoom})` : "none", transition: "transform 0.15s" }}
@@ -413,7 +417,7 @@ export default function ManualCentering({
       </div>
 
       {/* Bottom toolbar */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
+      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[var(--admin-line-hard)]">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -421,7 +425,7 @@ export default function ManualCentering({
               setOuter({ left: 1, top: 1, right: 99, bottom: 99 });
               setInner({ left: 5, top: 4, right: 95, bottom: 96 });
             }}
-            className="flex items-center gap-1 text-[#888888] hover:text-white text-xs"
+            className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-white text-xs"
           >
             <RotateCcw size={12} /> Reset
           </button>
@@ -430,7 +434,7 @@ export default function ManualCentering({
           <button
             type="button"
             onClick={onCancel}
-            className="border border-[#333333] text-[#888888] text-xs px-4 py-2 rounded-lg hover:bg-[#1A1A1A]"
+            className="border border-[var(--admin-line-hard)] text-[var(--admin-ink-faint)] text-xs px-4 py-2 rounded-lg hover:bg-[var(--admin-panel2)]"
           >
             Cancel
           </button>
@@ -438,7 +442,7 @@ export default function ManualCentering({
             type="button"
             onClick={save}
             disabled={saving}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
+            className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
           >
             <Save size={13} /> {saving ? "Saving…" : "Save Centering"}
           </button>
