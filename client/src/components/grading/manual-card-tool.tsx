@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { Loader2, Crop, X, Check, Undo2 } from "lucide-react";
+import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
 import {
@@ -32,9 +32,20 @@ interface Props {
 const SIDE_LABELS = ["T", "R", "B", "L"] as const;
 // Plain-English side names for the guidance banner (index → name).
 const SIDE_NAMES = ["TOP", "RIGHT", "BOTTOM", "LEFT"] as const;
-// Near-miss grab radius (screen px): a click within this of an already-placed
-// dot grabs the nearest dot for dragging instead of doing nothing.
+// Near-miss grab radius (screen px) — POST-PLACEMENT ONLY. A click within this
+// of an already-placed dot grabs the nearest dot for fine-tune dragging. During
+// placement (any of the 8 still missing) the grab path is disabled entirely so
+// adjacent placement (e.g. top-outer + top-inner on the same vertical line)
+// never gets diverted into a drag.
 const GRAB_PX = 40;
+// Zoom — 1× = fit-to-area (whole card visible). Max raised well past native
+// pixel density so the operator can place crosshairs precisely on the border
+// line. Viewport-center anchored so the user keeps looking at the same content
+// across zoom changes. Capture math is dimensionless (% of containerRef rect)
+// so it stays accurate at any zoom.
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+const ZOOM_STEP = 1.5;
 // Thin mat margin (0–100 units) added around the outer bbox before cropping, so
 // a deskew rotation doesn't clip the card corners.
 const CROP_MARGIN_PCT = 1.0;
@@ -163,8 +174,42 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   // math reads the rendered box at click time and is unaffected by this).
   const fitRef = useRef<HTMLDivElement>(null);
   const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
   const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
+
+  // Zoom anchored at viewport centre — keep the content under the centre of
+  // the scroll viewport fixed across the transition. Scroll position is set
+  // in rAF after React commits the new size.
+  function zoomBy(factor: number) {
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    if (newZoom === zoom) return;
+    const el = fitRef.current;
+    if (!el) {
+      setZoom(newZoom);
+      return;
+    }
+    const cx = el.scrollLeft + el.clientWidth / 2;
+    const cy = el.scrollTop + el.clientHeight / 2;
+    const ratio = newZoom / zoom;
+    setZoom(newZoom);
+    requestAnimationFrame(() => {
+      const e2 = fitRef.current;
+      if (!e2) return;
+      e2.scrollLeft = cx * ratio - e2.clientWidth / 2;
+      e2.scrollTop = cy * ratio - e2.clientHeight / 2;
+    });
+  }
+  function zoomInBtn() {
+    zoomBy(ZOOM_STEP);
+  }
+  function zoomOutBtn() {
+    zoomBy(1 / ZOOM_STEP);
+  }
+  function zoomFit() {
+    if (zoom === 1) return;
+    zoomBy(1 / zoom);
+  }
 
   // Side-by-side capture: work clockwise TOP → RIGHT → BOTTOM → LEFT, placing
   // this side's OUTER then its INNER before moving on. The next click's pass is
@@ -380,12 +425,21 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       else if ((e.key === "Backspace" || e.key === "Delete") && outerPts.length + innerPts.length > 0) {
         e.preventDefault();
         undoLast();
+      } else if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomInBtn();
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomOutBtn();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        zoomFit();
       }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line
-  }, [outerPts, innerPts, mode, rotation, canCompute, saving]);
+  }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom]);
 
   function clearOuter() {
     setOuterPts([]);
@@ -477,6 +531,20 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     }
   }
 
+  // Image render size — at zoom=1 the image is "contained" within fitBox
+  // (whole card visible, current behaviour); at zoom>1 it grows by `zoom×`
+  // and the scroll viewport scrolls. Null until both fitBox + imgDims are
+  // known; the <img> falls back to viewport CSS caps in that initial window.
+  const baseFit =
+    fitBox && imgDims.w > 0 && imgDims.h > 0
+      ? (() => {
+          const s = Math.min(fitBox.w / imgDims.w, fitBox.h / imgDims.h);
+          return { w: imgDims.w * s, h: imgDims.h * s };
+        })()
+      : null;
+  const renderW = baseFit ? baseFit.w * zoom : null;
+  const renderH = baseFit ? baseFit.h * zoom : null;
+
   // Live preview geometry (only meaningful once outer is placed).
   const previewCrop = outerReady ? cropBoxForEdges(outerPts, CROP_MARGIN_PCT) : null;
   const outerCentroid = outerReady ? centroid(outerPts) : null;
@@ -492,14 +560,28 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     return pts.map((p, i) => (
       <div
         key={`${pass}-${i}`}
-        style={{ position: "absolute", left: `${p.x}%`, top: `${p.y}%`, zIndex: 30, pointerEvents: "auto" }}
+        style={{
+          position: "absolute",
+          left: `${p.x}%`,
+          top: `${p.y}%`,
+          zIndex: 30,
+          // Placement-vs-grab separation. While any of the 8 points is still
+          // missing, the dot hit area is click-through so a click adjacent to
+          // an existing dot (e.g. inner-top just below outer-top on the same
+          // vertical line) places the next point at the click location — it
+          // never gets diverted into a drag. Once all 8 are down, hit areas
+          // re-arm and drag-to-fine-tune is available.
+          pointerEvents: placing ? "none" : "auto",
+        }}
       >
-        {/* Invisible 44px hit target (Apple HIG / Material min touch size) */}
+        {/* Invisible 44px hit target (Apple HIG / Material min touch size).
+            Handlers are nulled during placement to remove the listener entirely
+            — belt-and-braces alongside the parent's pointer-events:none. */}
         <div
-          className="cursor-grab active:cursor-grabbing touch-none"
+          className={placing ? "" : "cursor-grab active:cursor-grabbing touch-none"}
           style={{ width: 44, height: 44, transform: "translate(-50%, -50%)", position: "relative" }}
-          onMouseDown={(e) => onDotMouseDown(pass, i, e)}
-          onTouchStart={(e) => onDotTouchStart(pass, i, e)}
+          onMouseDown={placing ? undefined : (e) => onDotMouseDown(pass, i, e)}
+          onTouchStart={placing ? undefined : (e) => onDotTouchStart(pass, i, e)}
         >
           {/* Visible crosshair marker (shared with the cursor reticle). Thin
               "+" with an open centre so the exact captured pixel stays visible;
@@ -590,149 +672,222 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
         </button>
       </div>
 
-      {/* Image area — the card is scaled to FIT this measured box (fitRef) so
-          all four corners, incl. the TOP edge, are visible below the banner
-          without scrolling. overflow-hidden on the outer stops the tool itself
-          scrolling; the inner is scroll-safe (m-auto) as a short-screen fallback. */}
-      <div className="flex-1 min-h-0 p-0 sm:p-4 overflow-hidden">
-        <div ref={fitRef} className="w-full h-full flex overflow-auto">
-          {/* Capture container — shrink-wraps the natural-aspect image, so its
-              box == the visible card. Dots are absolute children (same box).
-              Centred with m-auto (scroll-safe, unlike align-items:center). */}
-          <div
-            ref={containerRef}
-            className="relative rounded-lg bg-[#F7F7F5] m-auto"
-            onMouseDown={onContainerMouseDown}
-            onMouseMove={onContainerMouseMove}
-            onMouseLeave={onContainerMouseLeave}
-            onTouchStart={onContainerTouchStart}
-          >
-            <img
-              src={rawImageUrl}
-              alt={`${side} raw`}
-              className="block max-h-[80vh] max-w-[100vw] w-auto cursor-crosshair"
-              style={{ maxWidth: fitBox?.w, maxHeight: fitBox?.h }}
-              draggable={false}
-              onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-            />
+      {/* Image area — the card is scaled to FIT this measured box (fitRef) at
+          zoom=1 so all four corners, incl. the TOP edge, are visible below the
+          banner without scrolling. At zoom>1 the image grows beyond fitRef and
+          the scroll viewport (fitRef) shows scrollbars; the inner middle div
+          enforces min-w-full/min-h-full so the container stays centred when
+          smaller than the viewport ("safe centre" pattern, scroll-safe). */}
+      <div className="flex-1 min-h-0 p-0 sm:p-4 overflow-hidden relative">
+        <div ref={fitRef} className="w-full h-full overflow-auto">
+          <div className="min-w-full min-h-full flex items-center justify-center">
+            {/* Capture container — shrink-wraps the (scaled) image, so its box
+                == the visible card. Dots are absolute children (same box). */}
+            <div
+              ref={containerRef}
+              className="relative rounded-lg bg-[#F7F7F5] flex-shrink-0"
+              onMouseDown={onContainerMouseDown}
+              onMouseMove={onContainerMouseMove}
+              onMouseLeave={onContainerMouseLeave}
+              onTouchStart={onContainerTouchStart}
+            >
+              <img
+                src={rawImageUrl}
+                alt={`${side} raw`}
+                className="block cursor-crosshair"
+                style={
+                  renderW != null && renderH != null
+                    ? { width: renderW, height: renderH }
+                    : { maxWidth: fitBox?.w ?? "100vw", maxHeight: fitBox?.h ?? "80vh", width: "auto" }
+                }
+                draggable={false}
+                onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+              />
 
-            {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
+              {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
                 AspectRatio="none" is safe here — pointer-events:none, never
                 hit-tested. */}
-            <svg
-              className="absolute inset-0 w-full h-full"
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              style={{ pointerEvents: "none", zIndex: 10 }}
-            >
-              {/* Crop box preview (outer bbox + margin) */}
-              {previewCrop && (
-                <rect
-                  x={previewCrop.left_pct}
-                  y={previewCrop.top_pct}
-                  width={previewCrop.width_pct}
-                  height={previewCrop.height_pct}
-                  fill="none"
-                  stroke="#1A1A1A"
-                  strokeWidth="0.25"
-                  strokeDasharray="1,0.8"
-                  opacity="0.4"
-                />
-              )}
-              {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
+              <svg
+                className="absolute inset-0 w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{ pointerEvents: "none", zIndex: 10 }}
+              >
+                {/* Crop box preview (outer bbox + margin) */}
+                {previewCrop && (
+                  <rect
+                    x={previewCrop.left_pct}
+                    y={previewCrop.top_pct}
+                    width={previewCrop.width_pct}
+                    height={previewCrop.height_pct}
+                    fill="none"
+                    stroke="#1A1A1A"
+                    strokeWidth="0.25"
+                    strokeDasharray="1,0.8"
+                    opacity="0.4"
+                  />
+                )}
+                {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
                   x, right = RIGHT-outer x, top = TOP-outer y, bottom = BOTTOM-
                   outer y), drawn once all four outer edge points are down. */}
-              {outerEdgeRect && (
-                <rect
-                  x={outerEdgeRect.left}
-                  y={outerEdgeRect.top}
-                  width={outerEdgeRect.right - outerEdgeRect.left}
-                  height={outerEdgeRect.bottom - outerEdgeRect.top}
-                  fill="none"
-                  stroke={OUTER_COLOR}
-                  strokeWidth="0.4"
-                  opacity="0.9"
-                />
-              )}
-              {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
-              {mode === "full" && innerEdgeRect && (
-                <rect
-                  x={innerEdgeRect.left}
-                  y={innerEdgeRect.top}
-                  width={innerEdgeRect.right - innerEdgeRect.left}
-                  height={innerEdgeRect.bottom - innerEdgeRect.top}
-                  fill="none"
-                  stroke={INNER_COLOR}
-                  strokeWidth="0.4"
-                  opacity="0.9"
-                />
-              )}
-              {/* Crosshair at outer centroid */}
-              {outerCentroid && (
-                <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
-                  <line x1={0} y1={outerCentroid.y} x2={100} y2={outerCentroid.y} />
-                  <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
-                </g>
-              )}
-              {/* Full-length guides through each placed point in the ACTIVE
+                {outerEdgeRect && (
+                  <rect
+                    x={outerEdgeRect.left}
+                    y={outerEdgeRect.top}
+                    width={outerEdgeRect.right - outerEdgeRect.left}
+                    height={outerEdgeRect.bottom - outerEdgeRect.top}
+                    fill="none"
+                    stroke={OUTER_COLOR}
+                    strokeWidth="0.4"
+                    opacity="0.9"
+                  />
+                )}
+                {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
+                {mode === "full" && innerEdgeRect && (
+                  <rect
+                    x={innerEdgeRect.left}
+                    y={innerEdgeRect.top}
+                    width={innerEdgeRect.right - innerEdgeRect.left}
+                    height={innerEdgeRect.bottom - innerEdgeRect.top}
+                    fill="none"
+                    stroke={INNER_COLOR}
+                    strokeWidth="0.4"
+                    opacity="0.9"
+                  />
+                )}
+                {/* Crosshair at outer centroid */}
+                {outerCentroid && (
+                  <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
+                    <line x1={0} y1={outerCentroid.y} x2={100} y2={outerCentroid.y} />
+                    <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
+                  </g>
+                )}
+                {/* Full-length guides through each placed point in the ACTIVE
                   pass — line the next dot up exactly above/below/beside a
                   committed corner. Faint pass-coloured over a dark underlay,
                   true 1px dashes via non-scaling-stroke. The brighter white
                   cursor guides below paint over these. */}
-              {placing &&
-                activeArr.map((p, i) => (
-                  <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
-                    <g stroke="rgba(0,0,0,0.3)">
-                      <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
-                      <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
+                {placing &&
+                  activeArr.map((p, i) => (
+                    <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
+                      <g stroke="rgba(0,0,0,0.3)">
+                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
+                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
+                      </g>
+                      <g stroke={activeColor} opacity={0.4}>
+                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                      </g>
                     </g>
-                    <g stroke={activeColor} opacity={0.4}>
-                      <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                      <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                    </g>
-                  </g>
-                ))}
-              {/* Live cursor guide lines (placement mode) — full-span sniper-
+                  ))}
+                {/* Live cursor guide lines (placement mode) — full-span sniper-
                   scope crosshairs through the cursor for edge alignment. White
                   ~0.6 alpha over a thin dark underlay so they read on light and
                   dark cards. non-scaling-stroke → true 1px + uniform dashes on
                   screen despite the preserveAspectRatio="none" stretch. */}
-              {placing && hover && !drag && (
-                <g strokeDasharray="5,4">
-                  {/* Dark underlay so the white guides read on light borders */}
-                  <g stroke="rgba(0,0,0,0.4)">
-                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                {placing && hover && !drag && (
+                  <g strokeDasharray="5,4">
+                    {/* Dark underlay so the white guides read on light borders */}
+                    <g stroke="rgba(0,0,0,0.4)">
+                      <line
+                        x1={0}
+                        y1={hover.y}
+                        x2={100}
+                        y2={hover.y}
+                        strokeWidth={2}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1={hover.x}
+                        y1={0}
+                        x2={hover.x}
+                        y2={100}
+                        strokeWidth={2}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                    {/* White full-length guides */}
+                    <g stroke="rgba(255,255,255,0.6)">
+                      <line
+                        x1={0}
+                        y1={hover.y}
+                        x2={100}
+                        y2={hover.y}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1={hover.x}
+                        y1={0}
+                        x2={hover.x}
+                        y2={100}
+                        strokeWidth={1}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
                   </g>
-                  {/* White full-length guides */}
-                  <g stroke="rgba(255,255,255,0.6)">
-                    <line x1={0} y1={hover.y} x2={100} y2={hover.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                    <line x1={hover.x} y1={0} x2={hover.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                  </g>
-                </g>
-              )}
-            </svg>
+                )}
+              </svg>
 
-            {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
+              {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
                 capture container. Large invisible hit area, small visible dot. */}
-            {renderDots(outerPts, "outer", OUTER_COLOR)}
-            {mode === "full" && renderDots(innerPts, "inner", INNER_COLOR)}
+              {renderDots(outerPts, "outer", OUTER_COLOR)}
+              {mode === "full" && renderDots(innerPts, "inner", INNER_COLOR)}
 
-            {/* Live targeting reticle — follows the cursor in placement mode,
+              {/* Live targeting reticle — follows the cursor in placement mode,
                 centred on where the next dot will land. pointer-events:none so
                 clicks fall through to the capture container below. */}
-            {placing && hover && !drag && (
-              <div
-                className="absolute pointer-events-none"
-                style={{ left: `${hover.x}%`, top: `${hover.y}%`, zIndex: 25 }}
-                aria-hidden="true"
-              >
-                <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
-                  <Crosshair color={activeColor} />
+              {placing && hover && !drag && (
+                <div
+                  className="absolute pointer-events-none"
+                  style={{ left: `${hover.x}%`, top: `${hover.y}%`, zIndex: 25 }}
+                  aria-hidden="true"
+                >
+                  <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
+                    <Crosshair color={activeColor} />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+        </div>
+        {/* Floating zoom panel — anchored to the image area, NOT inside the
+            scroll viewport, so it stays in place while the user pans. The
+            capture math uses getBoundingClientRect on containerRef, so % coords
+            stay accurate at any zoom; the visual crosshair stays 44px on
+            screen and gets relatively smaller on the bigger image — exactly
+            what's needed to drop a dot on a single border pixel. */}
+        <div className="absolute top-2 right-2 sm:top-6 sm:right-6 z-40 flex flex-col items-stretch gap-1 bg-white/95 backdrop-blur-sm rounded-lg border border-[#D4D0C8] shadow-md p-1">
+          <button
+            type="button"
+            onClick={zoomInBtn}
+            disabled={zoom >= MAX_ZOOM}
+            title="Zoom in (+)"
+            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+          >
+            <ZoomIn size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={zoomOutBtn}
+            disabled={zoom <= MIN_ZOOM}
+            title="Zoom out (-)"
+            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+          >
+            <ZoomOut size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={zoomFit}
+            disabled={zoom === 1}
+            title="Fit to area (0)"
+            className="p-1.5 rounded hover:bg-[#E8E4DC] disabled:opacity-30 disabled:cursor-not-allowed text-[#1A1A1A]"
+          >
+            <Maximize size={16} />
+          </button>
+          <span className="text-[9px] font-mono text-[#555555] text-center pt-0.5 border-t border-[#D4D0C8]">
+            {Math.round(zoom * 100)}%
+          </span>
         </div>
       </div>
 
