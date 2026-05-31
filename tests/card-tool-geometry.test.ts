@@ -9,6 +9,7 @@ import {
   outerEdgesToBboxQuad,
   routePlacement,
   nextPass,
+  axisLockInner,
   TOP,
   RIGHT,
   BOTTOM,
@@ -277,5 +278,86 @@ describe("clockwise side-by-side capture builds [TOP,RIGHT,BOTTOM,LEFT]", () => 
     });
     expect(outer).toEqual([O.TOP, O.RIGHT, O.BOTTOM, O.LEFT]);
     expect(inner).toEqual([]);
+  });
+});
+
+describe("axis-lock: inner point constrained to its outer partner's measurement axis", () => {
+  it("shares the outer's cross-axis per side — X for TOP/BOTTOM, Y for LEFT/RIGHT", () => {
+    // TOP/BOTTOM (even slot) → share X: keep the clicked y, take the outer x.
+    expect(axisLockInner(TOP, { x: 50, y: 10 }, { x: 57, y: 20 })).toEqual({ x: 50, y: 20 });
+    expect(axisLockInner(BOTTOM, { x: 50, y: 90 }, { x: 44, y: 80 })).toEqual({ x: 50, y: 80 });
+    // RIGHT/LEFT (odd slot) → share Y: keep the clicked x, take the outer y.
+    expect(axisLockInner(RIGHT, { x: 90, y: 50 }, { x: 80, y: 43 })).toEqual({ x: 80, y: 50 });
+    expect(axisLockInner(LEFT, { x: 10, y: 50 }, { x: 30, y: 58 })).toEqual({ x: 30, y: 50 });
+  });
+
+  it("snaps sloppy off-axis inner clicks onto the rail → left20/right10 = 67/33, top10/bottom10 = 50/50, front subgrade 7", () => {
+    // The operator clicks the correct border DEPTH but is sloppy on the cross-
+    // axis. The lock pins each inner to its outer partner's axis (OUTER_SQUARE).
+    const lockedInner = [
+      axisLockInner(TOP, OUTER_SQUARE[TOP], { x: 57, y: 20 }), // → (50,20)  top gap 10
+      axisLockInner(RIGHT, OUTER_SQUARE[RIGHT], { x: 80, y: 43 }), // → (80,50)  right gap 10
+      axisLockInner(BOTTOM, OUTER_SQUARE[BOTTOM], { x: 44, y: 80 }), // → (50,80)  bottom gap 10
+      axisLockInner(LEFT, OUTER_SQUARE[LEFT], { x: 30, y: 58 }), // → (30,50)  left gap 20
+    ];
+    const r = computeCardTool("full", OUTER_SQUARE, lockedInner, "front", 0, 0, 600, 900);
+    expect(r.centering!.lr).toBe("67/33");
+    expect(r.centering!.tb).toBe("50/50");
+    expect(r.centering!.subgrade).toBe(7);
+
+    // The locked result is byte-for-byte the clean on-axis click (zero regression).
+    const cleanInner = edges([50, 20], [80, 50], [50, 80], [30, 50]);
+    const clean = computeCardTool("full", OUTER_SQUARE, cleanInner, "front", 0, 0, 600, 900);
+    expect(r.centering!.lr).toBe(clean.centering!.lr);
+    expect(r.centering!.tb).toBe(clean.centering!.tb);
+    expect(r.centering!.subgrade).toBe(clean.centering!.subgrade);
+  });
+
+  it("interleaved capture WITH the lock (mirrors placePoint) builds [TOP,RIGHT,BOTTOM,LEFT] and grades identically to direct placement", () => {
+    // Mirror the component's placePoint: when the next pass is INNER, lock the
+    // click to outer[inner.length] before routing. Inner clicks are off-axis.
+    const O = { TOP: { x: 50, y: 10 }, RIGHT: { x: 90, y: 50 }, BOTTOM: { x: 50, y: 90 }, LEFT: { x: 10, y: 50 } };
+    const innerClicks = {
+      TOP: { x: 61, y: 18 },
+      RIGHT: { x: 78, y: 41 },
+      BOTTOM: { x: 39, y: 82 },
+      LEFT: { x: 22, y: 63 },
+    };
+    const seq = [
+      O.TOP,
+      innerClicks.TOP,
+      O.RIGHT,
+      innerClicks.RIGHT,
+      O.BOTTOM,
+      innerClicks.BOTTOM,
+      O.LEFT,
+      innerClicks.LEFT,
+    ];
+    let outer: Point[] = [];
+    let inner: Point[] = [];
+    for (const pt of seq) {
+      let p = pt;
+      if (nextPass("full", outer, inner) === "inner") {
+        p = axisLockInner(inner.length, outer[inner.length], pt);
+      }
+      const next = routePlacement("full", outer, inner, p);
+      outer = next.outer;
+      inner = next.inner;
+    }
+    // Each inner snapped onto its outer's cross-axis, others coords preserved.
+    const expectedInner = [
+      { x: 50, y: 18 }, // TOP    → x = outer 50
+      { x: 78, y: 50 }, // RIGHT  → y = outer 50
+      { x: 50, y: 82 }, // BOTTOM → x = outer 50
+      { x: 22, y: 50 }, // LEFT   → y = outer 50
+    ];
+    expect(inner).toEqual(expectedInner);
+    expect(outer).toEqual([O.TOP, O.RIGHT, O.BOTTOM, O.LEFT]);
+
+    const locked = computeCardTool("full", outer, inner, "front", 0, 0, 600, 900);
+    const direct = computeCardTool("full", [O.TOP, O.RIGHT, O.BOTTOM, O.LEFT], expectedInner, "front", 0, 0, 600, 900);
+    expect(locked.centering!.lr).toBe(direct.centering!.lr);
+    expect(locked.centering!.tb).toBe(direct.centering!.tb);
+    expect(locked.centering!.subgrade).toBe(direct.centering!.subgrade);
   });
 });

@@ -9,6 +9,7 @@ import {
   outerEdgesToBboxQuad,
   routePlacement,
   nextPass,
+  axisLockInner,
   type CardToolMode,
 } from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
@@ -244,6 +245,10 @@ export default function ManualCardTool({
     index: number;
     startMouse: Point;
     startPts: Point[];
+    // Outer partner to axis-lock against while dragging an INNER dot. Captured
+    // at drag start because the drag effect's deps are [drag] only and can't
+    // read live outerPts. Null for outer dots (they drag freely).
+    lockOuter: Point | null;
   }>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Available image-area box (px) the card is scaled to fit, so the whole card
@@ -311,6 +316,14 @@ export default function ManualCardTool({
   const totalPlaced = outerPts.length + innerPts.length;
   const target = mode === "outer-only" ? 4 : 8;
   const activeSide = mode === "outer-only" ? outerPts.length : Math.floor(totalPlaced / 2);
+  // During INNER placement the next dot is axis-locked to its outer partner: we
+  // draw a solid rail through that outer point and snap the reticle + cursor
+  // guides onto it so the lock is visible before the click. Null otherwise.
+  const innerLockOuter =
+    placing && mode === "full" && activePass === "inner" ? (outerPts[innerPts.length] ?? null) : null;
+  // Where the inner dot will actually land (snapped to the rail). Reticle +
+  // cursor guides read this so the preview matches the locked placement.
+  const lockedHover = hover && innerLockOuter ? axisLockInner(innerPts.length, innerLockOuter, hover) : hover;
   // Large step prompt shown in the guidance banner (replaces the old 10px text).
   // In the defects phase the prompt changes to defect-marking guidance.
   const bannerText =
@@ -335,9 +348,17 @@ export default function ManualCardTool({
   }
 
   function placePoint(pt: Point) {
+    // Axis-lock the INNER point to its outer partner (placed first this side) so
+    // the pair differs only on the measurement axis. No-op for the centering
+    // math — edgesToRect already reads one axis per point — it just snaps the
+    // dot onto the rail the math uses. Outer points stay free.
+    let p = pt;
+    if (mode === "full" && nextPass(mode, outerPts, innerPts) === "inner") {
+      p = axisLockInner(innerPts.length, outerPts[innerPts.length], pt);
+    }
     // Route by corner-by-corner parity. routePlacement returns the unchanged
     // array by reference, so the matching setState bails out (no extra render).
-    const next = routePlacement(mode, outerPts, innerPts, pt);
+    const next = routePlacement(mode, outerPts, innerPts, p);
     setOuterPts(next.outer);
     setInnerPts(next.inner);
   }
@@ -381,7 +402,10 @@ export default function ManualCardTool({
 
   function startDotDrag(pass: DotPass, index: number, clientX: number, clientY: number) {
     const startPts = (pass === "outer" ? outerPts : innerPts).map((p) => ({ ...p }));
-    setDrag({ pass, index, startMouse: { x: clientX, y: clientY }, startPts });
+    // Inner dots stay axis-locked to their outer partner (same [TOP,RIGHT,
+    // BOTTOM,LEFT] slot) while dragging — capture it now for the drag effect.
+    const lockOuter = pass === "inner" && mode === "full" ? (outerPts[index] ?? null) : null;
+    setDrag({ pass, index, startMouse: { x: clientX, y: clientY }, startPts, lockOuter });
   }
 
   // Container press: in the capture phase, place the next dot (or grab a
@@ -493,7 +517,11 @@ export default function ManualCardTool({
       const dy = ((clientY - drag!.startMouse.y) / ch) * 100;
       const next = drag!.startPts.map((p) => ({ ...p }));
       const base = drag!.startPts[drag!.index];
-      next[drag!.index] = { x: clamp(base.x + dx), y: clamp(base.y + dy) };
+      let moved = { x: clamp(base.x + dx), y: clamp(base.y + dy) };
+      // Inner dots slide only along the measurement axis — re-lock the cross-axis
+      // to the outer partner captured at drag start (same rule as placement).
+      if (drag!.lockOuter) moved = axisLockInner(drag!.index, drag!.lockOuter, moved);
+      next[drag!.index] = moved;
       if (drag!.pass === "outer") setOuterPts(next);
       else setInnerPts(next);
     }
@@ -1076,27 +1104,79 @@ export default function ManualCardTool({
                         </g>
                       </g>
                     ))}
+                  {/* Locked-axis rail — during INNER placement the dot is
+                  constrained to the outer partner's measurement axis. Draw that
+                  axis through the outer point (SOLID, so it reads distinctly
+                  from the dashed cursor/placed guides) — the rail the inner can
+                  only slide along. Vertical for TOP/BOTTOM, horizontal for
+                  LEFT/RIGHT (parity of the side index). */}
+                  {innerLockOuter &&
+                    (innerPts.length % 2 === 0 ? (
+                      <g>
+                        <line
+                          x1={innerLockOuter.x}
+                          y1={0}
+                          x2={innerLockOuter.x}
+                          y2={100}
+                          stroke="rgba(0,0,0,0.4)"
+                          strokeWidth={1.6}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={innerLockOuter.x}
+                          y1={0}
+                          x2={innerLockOuter.x}
+                          y2={100}
+                          stroke={palette.inner}
+                          strokeWidth={0.8}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
+                    ) : (
+                      <g>
+                        <line
+                          x1={0}
+                          y1={innerLockOuter.y}
+                          x2={100}
+                          y2={innerLockOuter.y}
+                          stroke="rgba(0,0,0,0.4)"
+                          strokeWidth={1.6}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={0}
+                          y1={innerLockOuter.y}
+                          x2={100}
+                          y2={innerLockOuter.y}
+                          stroke={palette.inner}
+                          strokeWidth={0.8}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
+                    ))}
                   {/* Live cursor guide lines (placement mode) — full-span sniper-
                   scope crosshairs through the cursor for edge alignment. White
                   ~0.6 alpha over a thin dark underlay so they read on light and
                   dark cards. non-scaling-stroke → true 1px + uniform dashes on
-                  screen despite the preserveAspectRatio="none" stretch. */}
-                  {placing && hover && !drag && (
+                  screen despite the preserveAspectRatio="none" stretch. The
+                  reticle + these guides follow lockedHover so they snap onto the
+                  rail during inner placement (free hover otherwise). */}
+                  {placing && lockedHover && !drag && (
                     <g strokeDasharray="5,4">
                       {/* Dark underlay so the white guides read on light borders */}
                       <g stroke="rgba(0,0,0,0.4)">
                         <line
                           x1={0}
-                          y1={hover.y}
+                          y1={lockedHover.y}
                           x2={100}
-                          y2={hover.y}
+                          y2={lockedHover.y}
                           strokeWidth={1}
                           vectorEffect="non-scaling-stroke"
                         />
                         <line
-                          x1={hover.x}
+                          x1={lockedHover.x}
                           y1={0}
-                          x2={hover.x}
+                          x2={lockedHover.x}
                           y2={100}
                           strokeWidth={1}
                           vectorEffect="non-scaling-stroke"
@@ -1110,16 +1190,16 @@ export default function ManualCardTool({
                       <g stroke={activeColor} opacity={0.7}>
                         <line
                           x1={0}
-                          y1={hover.y}
+                          y1={lockedHover.y}
                           x2={100}
-                          y2={hover.y}
+                          y2={lockedHover.y}
                           strokeWidth={0.5}
                           vectorEffect="non-scaling-stroke"
                         />
                         <line
-                          x1={hover.x}
+                          x1={lockedHover.x}
                           y1={0}
-                          x2={hover.x}
+                          x2={lockedHover.x}
                           y2={100}
                           strokeWidth={0.5}
                           vectorEffect="non-scaling-stroke"
@@ -1209,10 +1289,10 @@ export default function ManualCardTool({
                 mode AND the defects phase, so the operator gets a precise
                 crosshair when dropping defect pins too. pointer-events:none so
                 clicks fall through to the capture container below. */}
-              {((placing && phase === "capture") || phase === "defects") && hover && !drag && (
+              {((placing && phase === "capture") || phase === "defects") && lockedHover && !drag && (
                 <div
                   className="absolute pointer-events-none"
-                  style={{ left: `${hover.x}%`, top: `${hover.y}%`, zIndex: 25 }}
+                  style={{ left: `${lockedHover.x}%`, top: `${lockedHover.y}%`, zIndex: 25 }}
                   aria-hidden="true"
                 >
                   <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>

@@ -81,6 +81,28 @@ export function edgesToRect(pts: Point[]): Rect {
 }
 
 /**
+ * Constrain an INNER edge point to its OUTER partner's cross-axis, so the two
+ * points of one side differ ONLY along the measurement axis. The capture flow
+ * places each side's OUTER first (it defines the line); the INNER then rides it:
+ *   - TOP(0) / BOTTOM(2) — horizontal card edges → share X (vertical rail):
+ *     inner.x = outer.x, the inner slides only UP/DOWN. Border = vertical gap.
+ *   - RIGHT(1) / LEFT(3) — vertical card edges → share Y (horizontal rail):
+ *     inner.y = outer.y, the inner slides only LEFT/RIGHT. Border = horizontal gap.
+ *
+ * `sideIndex` is the [TOP,RIGHT,BOTTOM,LEFT] slot; its parity picks the axis
+ * (even → share X, odd → share Y).
+ *
+ * This is a NO-OP for every centering number: edgesToRect already reads only
+ * left=LEFT.x, top=TOP.y, right=RIGHT.x, bottom=BOTTOM.y, so each point's
+ * cross-axis was ALWAYS discarded. Locking merely snaps the placed dot onto the
+ * coordinate the math already uses — same L/R, T/B and subgrade as a free click.
+ */
+export function axisLockInner(sideIndex: number, outer: Point, clicked: Point): Point {
+  const sharesX = sideIndex % 2 === 0; // TOP/BOTTOM → vertical rail (share X)
+  return sharesX ? { x: outer.x, y: clicked.y } : { x: clicked.x, y: outer.y };
+}
+
+/**
  * Axis-aligned bounding quad from the outer edge points, for the (server-side
  * unused) `quad` field of the recrop request — kept so the request shape is
  * stable. Built from edgesToRect so it never implies a perspective transform.
