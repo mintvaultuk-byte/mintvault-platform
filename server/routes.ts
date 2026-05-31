@@ -9263,8 +9263,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
       }
 
+      // Return a signed URL for the just-written display image so the Card
+      // Tool can swap its <img src> directly into the defects phase without
+      // racing a TanStack refetch. Includes a cache-buster suffix on top of
+      // the signed-url expiry so the browser doesn't keep the pre-recrop
+      // bytes if the URL ever happens to match. 5-min expiry matches the
+      // origKey signing above. Falls back to undefined on signing failure
+      // — the client treats absent URL as "use the rawImageUrl instead".
+      let displayUrl: string | undefined;
+      try {
+        const signed = await getR2SignedUrl(displayKey, 300);
+        const sep = signed.includes("?") ? "&" : "?";
+        displayUrl = `${signed}${sep}v=${Date.now()}`;
+      } catch {
+        // Non-fatal — the crop is saved; the client just won't auto-advance.
+      }
+
       console.log(`[recrop] ${certIdStr} ${side}: manual crop applied, ${w}x${h}px, variants regenerated`);
-      res.json({ success: true, side, width: w, height: h });
+      res.json({ success: true, side, width: w, height: h, displayUrl });
     } catch (err: any) {
       console.error("[recrop] error:", err.message);
       res.status(500).json({ error: err.message });

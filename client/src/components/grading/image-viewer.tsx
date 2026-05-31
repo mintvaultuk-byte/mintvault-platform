@@ -18,6 +18,7 @@ import {
 const ManualCrop = lazy(() => import("./manual-crop"));
 import { MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
 import type { Defect, MvgsCode } from "./defect-annotation";
+import DefectTypePicker from "./defect-type-picker";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -1034,88 +1035,16 @@ export default function ImageViewer({
             </div>
           </div>
         </div>
-        {pickerOpen &&
-          pickerAnchor &&
-          (() => {
-            // Portal into document.body — bypasses any ancestor transform
-            // (image container has transform: scale(...) for zoom which would
-            // otherwise break position: fixed positioning). Anchor is the LAST
-            // pin in the batch; flip logic uses its image-relative percent.
-            const DROPDOWN_W = 180;
-            const DROPDOWN_H = 360;
-            const GAP = 6;
-            const flipLeft = pickerAnchor.xPct > 70;
-            const flipUp = pickerAnchor.yPct > 70;
-            const left = flipLeft ? pickerAnchor.pxX - GAP - DROPDOWN_W : pickerAnchor.pxX + GAP;
-            const top = flipUp ? pickerAnchor.pxY - GAP - DROPDOWN_H : pickerAnchor.pxY + GAP;
-            const clampedLeft = Math.max(8, Math.min(window.innerWidth - DROPDOWN_W - 8, left));
-            const clampedTop = Math.max(8, Math.min(window.innerHeight - DROPDOWN_H - 8, top));
-            return createPortal(
-              <>
-                <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={cancelBatch} />
-                <div
-                  className="fixed bg-white border border-[#D4AF37]/60 rounded-lg shadow-2xl overflow-hidden"
-                  style={{
-                    zIndex: 9999,
-                    left: clampedLeft,
-                    top: clampedTop,
-                    width: DROPDOWN_W,
-                    maxHeight: DROPDOWN_H,
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="px-3 py-2 border-b border-[#E8E4DC] bg-[#F7F7F5] flex items-center justify-between">
-                    <span className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">
-                      Defect ({pendingBatch.length})
-                    </span>
-                    <button
-                      type="button"
-                      onClick={cancelBatch}
-                      className="text-[#888888] hover:text-red-600 transition-colors"
-                      aria-label="Cancel"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                  <div className="px-3 py-2 border-b border-[#E8E4DC] bg-white">
-                    <div className="text-[9px] uppercase tracking-widest text-[#888] mb-1">Tier</div>
-                    <div className="flex gap-1">
-                      {(["D1", "D2", "D3"] as const).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => setPickerTier(t)}
-                          className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
-                            pickerTier === t
-                              ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                              : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
-                          }`}
-                          data-testid={`btn-tier-${t}`}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="overflow-y-auto" style={{ maxHeight: DROPDOWN_H - 90 }}>
-                    {MVGS_DEFECT_TYPES.map((t) => (
-                      <button
-                        key={t.code}
-                        type="button"
-                        onClick={() => commitBatch({ mvgsCode: t.code, label: t.label, tier: pickerTier })}
-                        className="w-full text-left px-3 py-1.5 text-[#1A1A1A] text-xs hover:bg-[#D4AF37]/10 border-b border-[#F0EEE8] last:border-b-0 transition-colors flex items-center justify-between gap-2"
-                        data-testid={`mvgs-pick-${t.code}`}
-                      >
-                        <span>{t.label}</span>
-                        <span className="font-mono text-[10px] text-[#888]">{t.code}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>,
-              document.body
-            );
-          })()}
+        {pickerOpen && pickerAnchor && (
+          <DefectTypePicker
+            anchor={pickerAnchor}
+            tier={pickerTier}
+            onTierChange={setPickerTier}
+            onPick={commitBatch}
+            onCancel={cancelBatch}
+            pinCount={pendingBatch.length}
+          />
+        )}
       </>
     );
   }

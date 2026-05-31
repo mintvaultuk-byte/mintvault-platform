@@ -2169,7 +2169,11 @@ export default function GradingPanel({
         />
       )}
 
-      {/* 8-dot Card Tool — crop + deskew + centering on the RAW original */}
+      {/* 8-dot Card Tool — crop + deskew + centering on the RAW original.
+          After Compute the tool stays open in the defects phase against the
+          freshly-cropped display image, using the same `onDefectAdded`
+          handler that image-viewer mark mode uses (so the auto-save path
+          is identical — no new server route, no divergent save semantics). */}
       {manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
         <ManualCardTool
           certId={certId}
@@ -2191,6 +2195,8 @@ export default function GradingPanel({
             setCenteringMethod("manual");
             clearOverallOverrideIfSet();
           }}
+          onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
+          existingDefects={defects}
           onDone={() => {
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });

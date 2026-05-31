@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize, Target } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
 import {
@@ -12,6 +12,8 @@ import {
   type CardToolMode,
 } from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
+import { deriveZone, type Defect, type MvgsCode } from "./defect-annotation";
+import DefectTypePicker, { type DefectPickerAnchor, type DefectTier } from "./defect-type-picker";
 
 interface Props {
   side: "front" | "back";
@@ -26,6 +28,16 @@ interface Props {
   /** In full mode, fired with the centering result so the panel updates its
    *  L/R, T/B, outer/inner and method state (same shape as ManualCentering). */
   onCentering?: (result: CenteringResult) => void;
+  /** Wired by the grading panel — same handler image-viewer's mark mode uses.
+   *  Pushes each committed defect into the panel's defects state, which the
+   *  panel's debounced auto-save (PUT /grade) picks up. Omitting it disables
+   *  the defects phase: the tool reverts to closing immediately on Compute. */
+  onDefectAdded?: (defect: Defect) => void;
+  /** Pre-existing defects for THIS side — already on the cert (from prior
+   *  marking sessions or AI auto-detect promotion). Drawn under the cursor
+   *  so the operator can see what's already pinned and avoid duplicates.
+   *  Numbering for new pins starts at max(existing.id) + 1. */
+  existingDefects?: Defect[];
 }
 
 // Points are captured clockwise, one SIDE at a time. Index → short label.
@@ -167,7 +179,16 @@ function SideDiagram({
   );
 }
 
-export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCancel, onCentering }: Props) {
+export default function ManualCardTool({
+  side,
+  certId,
+  rawImageUrl,
+  onDone,
+  onCancel,
+  onCentering,
+  onDefectAdded,
+  existingDefects,
+}: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
   const [innerPts, setInnerPts] = useState<Point[]>([]);
@@ -183,6 +204,38 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   // grey/silver/foil/holo cards. Outer keeps a saturated tone, inner a lighter
   // same-hue so outer vs inner stay distinguishable on every palette.
   const [paletteId, setPaletteId] = useState<string>("default");
+  // Phase machine — "capture" (the 8-dot flow, unchanged) followed by an
+  // optional "defects" phase that engages automatically after Compute saves
+  // the crop + centering. The defects phase reuses the same fullscreen
+  // overlay, zoom, scroll-pan, crosshair, and colour picker; only the click
+  // handler + banner change. Cancelling out of defects doesn't lose anything
+  // — the crop and centering are already durably saved by handleCompute.
+  // No `onDefectAdded` prop → phase stays "capture" forever and the tool
+  // closes on Compute as it did pre-merge.
+  const [phase, setPhase] = useState<"capture" | "defects">("capture");
+  // After Compute: the cache-busted signed URL of the freshly-cropped display
+  // image, returned by /recrop's response. Becomes the <img src> for the
+  // defects phase so the operator marks pins on the new crop (not the raw).
+  const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(null);
+  // Defect-marking batch state (mirrors image-viewer.tsx's pendingBatch +
+  // pickerOpen + pickerAnchor + pickerTier shape so behaviour stays identical
+  // across both call sites). Each click in the defects phase drops a pin
+  // into `defectBatch`; double-click or Enter opens the shared picker;
+  // commit assigns the chosen MVGS code + tier to the whole batch and fires
+  // `onDefectAdded` per pin — same callback the panel wires to image-viewer.
+  type DefectPin = { x: number; y: number; pxX: number; pxY: number };
+  const [defectBatch, setDefectBatch] = useState<DefectPin[]>([]);
+  const [defectPickerOpen, setDefectPickerOpen] = useState(false);
+  const [defectPickerAnchor, setDefectPickerAnchor] = useState<DefectPickerAnchor | null>(null);
+  const [defectPickerTier, setDefectPickerTier] = useState<DefectTier>("D2");
+  // Local mirror of just-committed defects, used to render their pins inside
+  // the tool. Parent state is the source of truth via onDefectAdded — the
+  // panel's auto-save then persists. This mirror exists because the parent's
+  // updated defects don't flow back into the overlay (the panel is hidden
+  // beneath this fixed-inset overlay), so without it the operator would not
+  // see pins they just committed. Seeded from props.existingDefects.
+  const [committedDefects, setCommittedDefects] = useState<Defect[]>([]);
+  const lastDefectClickAtRef = useRef<number>(0);
   // Cursor position in % while hovering the image in placement mode; drives the
   // live targeting reticle. Null when not hovering / not placing.
   const [hover, setHover] = useState<Point | null>(null);
@@ -259,11 +312,17 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const target = mode === "outer-only" ? 4 : 8;
   const activeSide = mode === "outer-only" ? outerPts.length : Math.floor(totalPlaced / 2);
   // Large step prompt shown in the guidance banner (replaces the old 10px text).
-  const bannerText = canCompute
-    ? "Ready — drag any dot to fine-tune, then Compute"
-    : activePass === "outer"
-      ? `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the OUTER edge (card edge).`
-      : `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the INNER edge (border meets artwork).`;
+  // In the defects phase the prompt changes to defect-marking guidance.
+  const bannerText =
+    phase === "defects"
+      ? defectBatch.length > 0
+        ? `Mark defects — ${defectBatch.length} pin${defectBatch.length === 1 ? "" : "s"} placed. Double-click or press Enter to label.`
+        : "Mark defects — click the image to drop pins. Place multiple, then double-click or Enter to label them all."
+      : canCompute
+        ? "Ready — drag any dot to fine-tune, then Compute"
+        : activePass === "outer"
+          ? `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the OUTER edge (card edge).`
+          : `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the INNER edge (border meets artwork).`;
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
     const el = containerRef.current;
@@ -325,10 +384,15 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     setDrag({ pass, index, startMouse: { x: clientX, y: clientY }, startPts });
   }
 
-  // Container press: place the next dot, or — when the active pass is full —
-  // grab the nearest dot within GRAB_PX for a near-miss fine-tune.
+  // Container press: in the capture phase, place the next dot (or grab a
+  // nearby dot for fine-tune drag). In the defects phase, route to the
+  // defect-area click handler — drops a pin into the batch.
   function onContainerMouseDown(e: React.MouseEvent) {
     if (Date.now() - lastTouchAtRef.current < 500) return; // ignore synthetic touch
+    if (phase === "defects") {
+      onDefectAreaClick(e);
+      return;
+    }
     if (activeArr.length < 4) {
       const pt = toPct(e);
       if (pt) placePoint(pt);
@@ -341,11 +405,19 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     }
   }
 
-  // Track the cursor for the live targeting reticle — placement mode only,
-  // never while dragging. Purely visual (the reticle is pointer-events:none);
-  // the capture handlers above are untouched.
+  // Track the cursor for the live targeting reticle — placement mode AND
+  // defects phase (so the operator gets a precise crosshair when dropping
+  // defect pins too). Never while dragging.
   function onContainerMouseMove(e: React.MouseEvent) {
-    if (drag || !placing) {
+    if (drag) {
+      if (hover) setHover(null);
+      return;
+    }
+    if (phase === "defects") {
+      setHover(toPct(e));
+      return;
+    }
+    if (!placing) {
       if (hover) setHover(null);
       return;
     }
@@ -359,6 +431,28 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     lastTouchAtRef.current = Date.now();
     const t = e.touches[0];
     if (!t) return;
+    if (phase === "defects") {
+      const el = containerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const now = Date.now();
+      const isDouble = now - lastDefectClickAtRef.current < 280;
+      lastDefectClickAtRef.current = now;
+      if (isDouble && defectBatch.length > 0) {
+        openDefectPicker();
+        return;
+      }
+      setDefectBatch((prev) => [
+        ...prev,
+        {
+          x: clamp(((t.clientX - r.left) / r.width) * 100),
+          y: clamp(((t.clientY - r.top) / r.height) * 100),
+          pxX: t.clientX,
+          pxY: t.clientY,
+        },
+      ]);
+      return;
+    }
     if (activeArr.length < 4) {
       const el = containerRef.current;
       if (!el) return;
@@ -450,6 +544,41 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement) return;
+      // ── Defects phase ─────────────────────────────────────────────────
+      // Escape unwinds in order: open picker → pending batch → close tool.
+      // Enter on a non-empty batch opens the picker (matches image-viewer
+      // mark mode behaviour at image-viewer.tsx:319-336).
+      if (phase === "defects") {
+        if (e.key === "Escape") {
+          if (defectPickerOpen) {
+            cancelDefectBatch();
+            return;
+          }
+          if (defectBatch.length > 0) {
+            setDefectBatch([]);
+            return;
+          }
+          onDone();
+          return;
+        }
+        if (e.key === "Enter" && defectBatch.length > 0 && !defectPickerOpen) {
+          e.preventDefault();
+          openDefectPicker();
+          return;
+        }
+        if (e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          zoomInBtn();
+        } else if (e.key === "-" || e.key === "_") {
+          e.preventDefault();
+          zoomOutBtn();
+        } else if (e.key === "0") {
+          e.preventDefault();
+          zoomFit();
+        }
+        return;
+      }
+      // ── Capture phase (unchanged) ─────────────────────────────────────
       if (e.key === "Escape") onCancel();
       else if (e.key === "Enter" && canCompute && !saving) handleCompute();
       else if ((e.key === "Backspace" || e.key === "Delete") && outerPts.length + innerPts.length > 0) {
@@ -469,7 +598,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line
-  }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom]);
+  }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom, phase, defectBatch, defectPickerOpen]);
 
   function clearOuter() {
     setOuterPts([]);
@@ -553,12 +682,98 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             ? `${side}: cropped + centered ${centering.lr} / ${centering.tb} → grade ${centering.subgrade}${deskewNote}`
             : `${side}: cropped${deskewNote}`,
       });
-      onDone();
+
+      // Phase transition — if a defect-add handler is wired AND /recrop gave
+      // us the freshly-cropped display URL, stay open and switch to the
+      // defects phase against the new image. Centering is already durably
+      // saved (above), so cancelling out of defects loses nothing. If either
+      // is missing we fall back to the pre-merge behaviour: close on Compute.
+      if (onDefectAdded && typeof cropJson.displayUrl === "string" && cropJson.displayUrl.length > 0) {
+        setCroppedDisplayUrl(cropJson.displayUrl);
+        // Reset placement-phase derived state. The 8-dot capture state
+        // (outerPts/innerPts) is intentionally KEPT so a subsequent close
+        // + reopen still shows it — but `placing` derives from activeArr
+        // and is now irrelevant in the defects phase.
+        setHover(null);
+        setDrag(null);
+        // Seed the in-tool defect mirror from existing pins on this side
+        // (passed by the parent). Pins committed in this session are
+        // appended via the local onLocalDefectCommit path below.
+        setCommittedDefects((existingDefects ?? []).filter((d) => d.image_side === side));
+        setPhase("defects");
+      } else {
+        onDone();
+      }
     } catch (e: any) {
       toast({ title: "Card tool failed", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
+  }
+
+  // ── Defect-marking phase handlers ─────────────────────────────────────────
+  // Click flow mirrors image-viewer.tsx mark mode for behavioural parity:
+  // single click → pin into batch; double-click within 280ms → open picker;
+  // commit → onDefectAdded per pin (panel auto-save), clear batch.
+  function locationFromPercent(x: number, y: number): string {
+    // Short human-readable region tag — parity with image-viewer.tsx.
+    const vert = y < 33 ? "top" : y > 66 ? "bottom" : "middle";
+    const horiz = x < 33 ? "left" : x > 66 ? "right" : "centre";
+    return `${vert} ${horiz}`;
+  }
+  function onDefectAreaClick(e: React.MouseEvent) {
+    if (phase !== "defects") return;
+    const now = Date.now();
+    const isDouble = now - lastDefectClickAtRef.current < 280;
+    lastDefectClickAtRef.current = now;
+    if (isDouble && defectBatch.length > 0) {
+      openDefectPicker();
+      return;
+    }
+    const el = containerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const x = clamp(((e.clientX - r.left) / r.width) * 100);
+    const y = clamp(((e.clientY - r.top) / r.height) * 100);
+    setDefectBatch((prev) => [...prev, { x, y, pxX: e.clientX, pxY: e.clientY }]);
+  }
+  function openDefectPicker() {
+    const last = defectBatch[defectBatch.length - 1];
+    if (!last) return;
+    setDefectPickerAnchor({ pxX: last.pxX, pxY: last.pxY, xPct: last.x, yPct: last.y });
+    setDefectPickerOpen(true);
+  }
+  function cancelDefectBatch() {
+    setDefectBatch([]);
+    setDefectPickerOpen(false);
+    setDefectPickerAnchor(null);
+  }
+  function commitDefectBatch(opts: { mvgsCode: MvgsCode; label: string; tier: DefectTier }) {
+    // Numbering continues from the highest existing id so legacy pins keep
+    // their identity. Mirrors image-viewer.tsx:425.
+    let nextId = [...committedDefects].reduce((m, d) => Math.max(m, d.id), 0) + 1 || 1;
+    for (const pin of defectBatch) {
+      const zone = deriveZone({ xPercent: pin.x, yPercent: pin.y, imageSide: side });
+      const defect: Defect = {
+        id: nextId++,
+        type: opts.label,
+        severity: "moderate",
+        description: "",
+        location: locationFromPercent(pin.x, pin.y),
+        image_side: side,
+        x_percent: pin.x,
+        y_percent: pin.y,
+        mvgsCode: opts.mvgsCode,
+        tier: opts.tier,
+        zone,
+      };
+      onDefectAdded?.(defect);
+      setCommittedDefects((prev) => [...prev, defect]);
+    }
+    setDefectBatch([]);
+    setDefectPickerOpen(false);
+    setDefectPickerAnchor(null);
+    setDefectPickerTier("D2");
   }
 
   // Image render size — at zoom=1 the image is "contained" within fitBox
@@ -642,42 +857,67 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Mode toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-[#D4D0C8] text-[10px] font-bold uppercase">
-            <button
-              type="button"
-              onClick={() => setModeSafe("full")}
-              className={`px-2 py-1 ${mode === "full" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
-            >
-              8-Dot
-            </button>
-            <button
-              type="button"
-              onClick={() => setModeSafe("outer-only")}
-              className={`px-2 py-1 ${mode === "outer-only" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
-            >
-              Outer-only
-            </button>
-          </div>
-          <button type="button" onClick={onCancel} className="text-[#555555] hover:text-[#1A1A1A] p-1">
+          {/* Mode toggle — capture phase only (8-dot vs outer-only is for the
+              centering capture, not relevant once we've moved on to defects). */}
+          {phase === "capture" && (
+            <div className="flex rounded-lg overflow-hidden border border-[#D4D0C8] text-[10px] font-bold uppercase">
+              <button
+                type="button"
+                onClick={() => setModeSafe("full")}
+                className={`px-2 py-1 ${mode === "full" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
+              >
+                8-Dot
+              </button>
+              <button
+                type="button"
+                onClick={() => setModeSafe("outer-only")}
+                className={`px-2 py-1 ${mode === "outer-only" ? "bg-[#D4AF37] text-[#1A1400]" : "text-[#555555] hover:bg-[#E8E4DC]"}`}
+              >
+                Outer-only
+              </button>
+            </div>
+          )}
+          {phase === "defects" && (
+            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200">
+              Defects
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={phase === "defects" ? onDone : onCancel}
+            className="text-[#555555] hover:text-[#1A1A1A] p-1"
+            title={phase === "defects" ? "Done — close" : "Cancel"}
+          >
             <X size={20} />
           </button>
         </div>
       </div>
 
       {/* Guidance banner — corner map + large step prompt + progress + undo.
-          Replaces the old 10px instruction so the next action is unmissable. */}
+          Replaces the old 10px instruction so the next action is unmissable.
+          Defects phase swaps the side diagram for a target icon, the chip
+          + step prompt for defect-marking guidance, and the per-point undo
+          for a cancel-batch button. */}
       <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[#D4D0C8] bg-white flex items-center gap-2 sm:gap-3">
-        <SideDiagram
-          activeSide={canCompute ? -1 : activeSide}
-          activeColor={activeColor}
-          outerCount={outerPts.length}
-          innerCount={innerPts.length}
-          mode={mode}
-        />
+        {phase === "capture" ? (
+          <SideDiagram
+            activeSide={canCompute ? -1 : activeSide}
+            activeColor={activeColor}
+            outerCount={outerPts.length}
+            innerCount={innerPts.length}
+            mode={mode}
+          />
+        ) : (
+          <div
+            className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-red-600"
+            aria-hidden="true"
+          >
+            <Target size={20} />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {!canCompute && (
+            {phase === "capture" && !canCompute && (
               <span
                 className="text-[10px] sm:text-xs font-black uppercase tracking-wide px-2 py-0.5 rounded"
                 style={{ background: activeColor, color: activePass === "outer" ? "#1A1400" : "#FFFFFF" }}
@@ -687,19 +927,37 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             )}
             <p className="text-[#1A1A1A] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
           </div>
-          <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
-            {totalPlaced} of {target} points placed
-          </p>
+          {phase === "capture" ? (
+            <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
+              {totalPlaced} of {target} points placed
+            </p>
+          ) : (
+            <p className="text-[#777777] text-[11px] sm:text-xs mt-0.5 font-mono">
+              {committedDefects.length} committed &middot; {defectBatch.length} pending
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={undoLast}
-          disabled={totalPlaced === 0}
-          title="Undo last point (Backspace)"
-          className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Undo2 size={13} /> Undo
-        </button>
+        {phase === "capture" ? (
+          <button
+            type="button"
+            onClick={undoLast}
+            disabled={totalPlaced === 0}
+            title="Undo last point (Backspace)"
+            className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Undo2 size={13} /> Undo
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setDefectBatch([])}
+            disabled={defectBatch.length === 0}
+            title="Clear pending pins (Esc)"
+            className="flex-shrink-0 flex items-center gap-1 border border-[#D4D0C8] text-[#555555] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[#E8E4DC] hover:text-[#1A1A1A] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Undo2 size={13} /> Clear pins
+          </button>
+        )}
       </div>
 
       {/* Image area — the card is scaled to FIT this measured box (fitRef) at
@@ -722,8 +980,14 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
               onTouchStart={onContainerTouchStart}
             >
               <img
-                src={rawImageUrl}
-                alt={`${side} raw`}
+                // In defects phase, swap to the freshly-cropped display image
+                // returned by /recrop. The cache-buster on the signed URL
+                // ensures the browser doesn't keep pre-recrop bytes (server
+                // appends `?v={Date.now()}` in the recrop response). imgDims
+                // re-measures via onLoad so coordinate capture stays accurate
+                // against the new image's natural pixels.
+                src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
+                alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
                 className="block cursor-crosshair"
                 style={
                   renderW != null && renderH != null
@@ -736,149 +1000,223 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
 
               {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
                 AspectRatio="none" is safe here — pointer-events:none, never
-                hit-tested. */}
-              <svg
-                className="absolute inset-0 w-full h-full"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                style={{ pointerEvents: "none", zIndex: 10 }}
-              >
-                {/* Crop box preview (outer bbox + margin) */}
-                {previewCrop && (
-                  <rect
-                    x={previewCrop.left_pct}
-                    y={previewCrop.top_pct}
-                    width={previewCrop.width_pct}
-                    height={previewCrop.height_pct}
-                    fill="none"
-                    stroke="#1A1A1A"
-                    strokeWidth="0.25"
-                    strokeDasharray="1,0.8"
-                    opacity="0.4"
-                  />
-                )}
-                {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
+                hit-tested. Capture-phase only — defects phase replaces these
+                visuals with pin markers and skips the crop/edge geometry. */}
+              {phase === "capture" && (
+                <svg
+                  className="absolute inset-0 w-full h-full"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  style={{ pointerEvents: "none", zIndex: 10 }}
+                >
+                  {/* Crop box preview (outer bbox + margin) */}
+                  {previewCrop && (
+                    <rect
+                      x={previewCrop.left_pct}
+                      y={previewCrop.top_pct}
+                      width={previewCrop.width_pct}
+                      height={previewCrop.height_pct}
+                      fill="none"
+                      stroke="#1A1A1A"
+                      strokeWidth="0.25"
+                      strokeDasharray="1,0.8"
+                      opacity="0.4"
+                    />
+                  )}
+                  {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
                   x, right = RIGHT-outer x, top = TOP-outer y, bottom = BOTTOM-
                   outer y), drawn once all four outer edge points are down. */}
-                {outerEdgeRect && (
-                  <rect
-                    x={outerEdgeRect.left}
-                    y={outerEdgeRect.top}
-                    width={outerEdgeRect.right - outerEdgeRect.left}
-                    height={outerEdgeRect.bottom - outerEdgeRect.top}
-                    fill="none"
-                    stroke={palette.outer}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                )}
-                {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
-                {mode === "full" && innerEdgeRect && (
-                  <rect
-                    x={innerEdgeRect.left}
-                    y={innerEdgeRect.top}
-                    width={innerEdgeRect.right - innerEdgeRect.left}
-                    height={innerEdgeRect.bottom - innerEdgeRect.top}
-                    fill="none"
-                    stroke={palette.inner}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                )}
-                {/* Crosshair at outer centroid */}
-                {outerCentroid && (
-                  <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
-                    <line x1={0} y1={outerCentroid.y} x2={100} y2={outerCentroid.y} />
-                    <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
-                  </g>
-                )}
-                {/* Full-length guides through each placed point in the ACTIVE
+                  {outerEdgeRect && (
+                    <rect
+                      x={outerEdgeRect.left}
+                      y={outerEdgeRect.top}
+                      width={outerEdgeRect.right - outerEdgeRect.left}
+                      height={outerEdgeRect.bottom - outerEdgeRect.top}
+                      fill="none"
+                      stroke={palette.outer}
+                      strokeWidth="0.4"
+                      opacity="0.9"
+                    />
+                  )}
+                  {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
+                  {mode === "full" && innerEdgeRect && (
+                    <rect
+                      x={innerEdgeRect.left}
+                      y={innerEdgeRect.top}
+                      width={innerEdgeRect.right - innerEdgeRect.left}
+                      height={innerEdgeRect.bottom - innerEdgeRect.top}
+                      fill="none"
+                      stroke={palette.inner}
+                      strokeWidth="0.4"
+                      opacity="0.9"
+                    />
+                  )}
+                  {/* Crosshair at outer centroid */}
+                  {outerCentroid && (
+                    <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
+                      <line x1={0} y1={outerCentroid.y} x2={100} y2={outerCentroid.y} />
+                      <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
+                    </g>
+                  )}
+                  {/* Full-length guides through each placed point in the ACTIVE
                   pass — line the next dot up exactly above/below/beside a
                   committed corner. Faint pass-coloured over a dark underlay,
                   true 1px dashes via non-scaling-stroke. The brighter white
                   cursor guides below paint over these. */}
-                {placing &&
-                  activeArr.map((p, i) => (
-                    <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
-                      <g stroke="rgba(0,0,0,0.3)">
-                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  {placing &&
+                    activeArr.map((p, i) => (
+                      <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
+                        <g stroke="rgba(0,0,0,0.3)">
+                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                        </g>
+                        <g stroke={activeColor} opacity={0.4}>
+                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                        </g>
                       </g>
-                      <g stroke={activeColor} opacity={0.4}>
-                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                      </g>
-                    </g>
-                  ))}
-                {/* Live cursor guide lines (placement mode) — full-span sniper-
+                    ))}
+                  {/* Live cursor guide lines (placement mode) — full-span sniper-
                   scope crosshairs through the cursor for edge alignment. White
                   ~0.6 alpha over a thin dark underlay so they read on light and
                   dark cards. non-scaling-stroke → true 1px + uniform dashes on
                   screen despite the preserveAspectRatio="none" stretch. */}
-                {placing && hover && !drag && (
-                  <g strokeDasharray="5,4">
-                    {/* Dark underlay so the white guides read on light borders */}
-                    <g stroke="rgba(0,0,0,0.4)">
-                      <line
-                        x1={0}
-                        y1={hover.y}
-                        x2={100}
-                        y2={hover.y}
-                        strokeWidth={1}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <line
-                        x1={hover.x}
-                        y1={0}
-                        x2={hover.x}
-                        y2={100}
-                        strokeWidth={1}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </g>
-                    {/* Coloured full-length guides — track the chosen palette
+                  {placing && hover && !drag && (
+                    <g strokeDasharray="5,4">
+                      {/* Dark underlay so the white guides read on light borders */}
+                      <g stroke="rgba(0,0,0,0.4)">
+                        <line
+                          x1={0}
+                          y1={hover.y}
+                          x2={100}
+                          y2={hover.y}
+                          strokeWidth={1}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={hover.x}
+                          y1={0}
+                          x2={hover.x}
+                          y2={100}
+                          strokeWidth={1}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
+                      {/* Coloured full-length guides — track the chosen palette
                         so the sniper guides match the crosshair on whatever
                         background hue the operator is fighting. Dark halo
                         above (rgba(0,0,0,0.4)) keeps them visible against
                         the same-hue card areas. */}
-                    <g stroke={activeColor} opacity={0.7}>
-                      <line
-                        x1={0}
-                        y1={hover.y}
-                        x2={100}
-                        y2={hover.y}
-                        strokeWidth={0.5}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <line
-                        x1={hover.x}
-                        y1={0}
-                        x2={hover.x}
-                        y2={100}
-                        strokeWidth={0.5}
-                        vectorEffect="non-scaling-stroke"
-                      />
+                      <g stroke={activeColor} opacity={0.7}>
+                        <line
+                          x1={0}
+                          y1={hover.y}
+                          x2={100}
+                          y2={hover.y}
+                          strokeWidth={0.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={hover.x}
+                          y1={0}
+                          x2={hover.x}
+                          y2={100}
+                          strokeWidth={0.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
                     </g>
-                  </g>
-                )}
-              </svg>
+                  )}
+                </svg>
+              )}
 
               {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
-                capture container. Large invisible hit area, small visible dot. */}
-              {renderDots(outerPts, "outer", palette.outer)}
-              {mode === "full" && renderDots(innerPts, "inner", palette.inner)}
+                capture container. Capture phase only; defects phase replaces
+                these with defect pins below. */}
+              {phase === "capture" && renderDots(outerPts, "outer", palette.outer)}
+              {phase === "capture" && mode === "full" && renderDots(innerPts, "inner", palette.inner)}
 
-              {/* Live targeting reticle — follows the cursor in placement mode,
-                centred on where the next dot will land. pointer-events:none so
+              {/* ── Defect pins (defects phase) ─────────────────────────────
+                  Committed pins: rendered as numbered red circles, parity with
+                  image-viewer.tsx markers. Pending batch pins: smaller dashed
+                  circles showing localId — get committed in batch on picker
+                  commit. pointer-events:none on both so clicks fall through to
+                  the container's defect-area handler (drop next pin / open
+                  picker on double-click). */}
+              {phase === "defects" && (
+                <>
+                  {committedDefects.map((d) => (
+                    <div
+                      key={`committed-${d.id}`}
+                      className="absolute pointer-events-none"
+                      style={{ left: `${d.x_percent}%`, top: `${d.y_percent}%`, zIndex: 28 }}
+                      aria-hidden="true"
+                    >
+                      <div
+                        style={{
+                          position: "relative",
+                          width: 22,
+                          height: 22,
+                          transform: "translate(-50%, -50%)",
+                          borderRadius: "9999px",
+                          background: "#DC2626",
+                          color: "white",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxShadow: "0 0 0 2px white, 0 1px 4px rgba(0,0,0,0.4)",
+                        }}
+                      >
+                        {d.id}
+                      </div>
+                    </div>
+                  ))}
+                  {defectBatch.map((p, i) => (
+                    <div
+                      key={`batch-${i}`}
+                      className="absolute pointer-events-none"
+                      style={{ left: `${p.x}%`, top: `${p.y}%`, zIndex: 29 }}
+                      aria-hidden="true"
+                    >
+                      <div
+                        style={{
+                          position: "relative",
+                          width: 22,
+                          height: 22,
+                          transform: "translate(-50%, -50%)",
+                          borderRadius: "9999px",
+                          background: "#FBF8EE",
+                          color: "#1A1400",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          border: "2px dashed #D4AF37",
+                          boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                        }}
+                      >
+                        {i + 1}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Live targeting reticle — follows the cursor in BOTH placement
+                mode AND the defects phase, so the operator gets a precise
+                crosshair when dropping defect pins too. pointer-events:none so
                 clicks fall through to the capture container below. */}
-              {placing && hover && !drag && (
+              {((placing && phase === "capture") || phase === "defects") && hover && !drag && (
                 <div
                   className="absolute pointer-events-none"
                   style={{ left: `${hover.x}%`, top: `${hover.y}%`, zIndex: 25 }}
                   aria-hidden="true"
                 >
                   <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
-                    <Crosshair color={activeColor} />
+                    <Crosshair color={phase === "defects" ? palette.outer : activeColor} />
                   </div>
                 </div>
               )}
@@ -956,95 +1294,151 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
 
       {/* Controls */}
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[#D4D0C8] space-y-1.5 sm:space-y-3">
-        {/* Row 1: dot status + clear + live readout */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-mono" style={{ color: palette.outer }}>
-            Outer {outerPts.length}/4
-          </span>
-          {outerPts.length > 0 && (
-            <button
-              type="button"
-              onClick={clearOuter}
-              className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
-            >
-              clear
-            </button>
-          )}
-          {mode === "full" && (
-            <>
-              <span className="text-xs font-mono ml-2" style={{ color: palette.inner }}>
-                Inner {innerPts.length}/4
+        {phase === "capture" ? (
+          <>
+            {/* Row 1: dot status + clear + live readout */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-mono" style={{ color: palette.outer }}>
+                Outer {outerPts.length}/4
               </span>
-              {innerPts.length > 0 && (
+              {outerPts.length > 0 && (
                 <button
                   type="button"
-                  onClick={clearInner}
-                  className="text-[10px] text-[#555555] hover:text-[#16A34A] underline"
+                  onClick={clearOuter}
+                  className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
                 >
                   clear
                 </button>
               )}
-            </>
-          )}
-          <div className="flex-1" />
-          {previewCentering && (
-            <span className="text-xs font-mono text-[#333333]">
-              {previewCentering.lr} L/R &middot; {previewCentering.tb} T/B →{" "}
-              <span
-                className={`font-black ${previewCentering.subgrade >= 9 ? "text-[#D4AF37]" : previewCentering.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}
+              {mode === "full" && (
+                <>
+                  <span className="text-xs font-mono ml-2" style={{ color: palette.inner }}>
+                    Inner {innerPts.length}/4
+                  </span>
+                  {innerPts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearInner}
+                      className="text-[10px] text-[#555555] hover:text-[#16A34A] underline"
+                    >
+                      clear
+                    </button>
+                  )}
+                </>
+              )}
+              <div className="flex-1" />
+              {previewCentering && (
+                <span className="text-xs font-mono text-[#333333]">
+                  {previewCentering.lr} L/R &middot; {previewCentering.tb} T/B →{" "}
+                  <span
+                    className={`font-black ${previewCentering.subgrade >= 9 ? "text-[#D4AF37]" : previewCentering.subgrade >= 7 ? "text-[#16A34A]" : "text-[#D97706]"}`}
+                  >
+                    {previewCentering.subgrade}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {/* Row 2: deskew override */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-[#555555]">Deskew override</span>
+              <input
+                type="range"
+                min="-5"
+                max="5"
+                step="0.25"
+                value={rotation}
+                onChange={(e) => setRotation(Number(e.target.value))}
+                className="flex-1 max-w-[200px] accent-[#D4AF37]"
+              />
+              <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(2)}°</span>
+              <span className="text-[#999999] text-[10px]">{rotation === 0 ? "(auto from dots)" : "(manual)"}</span>
+              {rotation !== 0 && (
+                <button
+                  type="button"
+                  onClick={() => setRotation(0)}
+                  className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
+                >
+                  auto
+                </button>
+              )}
+            </div>
+
+            {/* Row 3: cancel + compute */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]"
               >
-                {previewCentering.subgrade}
+                Cancel <span className="text-[#555555] text-[9px]">Esc</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCompute}
+                disabled={saving || !canCompute}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                {saving ? "Applying..." : mode === "full" ? "Compute crop + centering" : "Compute crop"}
+                <span className="text-[#1A1400]/50 text-[9px] normal-case">↵</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          // ── Defects phase ──────────────────────────────────────────────
+          // Single row: defects summary on the left, Label-batch + Done on
+          // the right. Crop + centering are already saved (durably), so the
+          // bar shows what the operator has done in this session and how to
+          // finish. Label-batch is a click target equivalent to double-click
+          // / Enter, kept visible so the affordance is obvious.
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-[#1A1A1A] font-mono">
+                Defects: <strong>{committedDefects.length}</strong>
               </span>
-            </span>
-          )}
-        </div>
-
-        {/* Row 2: deskew override */}
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-[#555555]">Deskew override</span>
-          <input
-            type="range"
-            min="-5"
-            max="5"
-            step="0.25"
-            value={rotation}
-            onChange={(e) => setRotation(Number(e.target.value))}
-            className="flex-1 max-w-[200px] accent-[#D4AF37]"
-          />
-          <span className="text-[#D4AF37] font-mono w-14 text-right">{rotation.toFixed(2)}°</span>
-          <span className="text-[#999999] text-[10px]">{rotation === 0 ? "(auto from dots)" : "(manual)"}</span>
-          {rotation !== 0 && (
-            <button
-              type="button"
-              onClick={() => setRotation(0)}
-              className="text-[10px] text-[#555555] hover:text-[#D4AF37] underline"
-            >
-              auto
-            </button>
-          )}
-        </div>
-
-        {/* Row 3: cancel + compute */}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="border border-[#D4D0C8] text-[#555555] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC]"
-          >
-            Cancel <span className="text-[#555555] text-[9px]">Esc</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleCompute}
-            disabled={saving || !canCompute}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-40"
-          >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-            {saving ? "Applying..." : mode === "full" ? "Compute crop + centering" : "Compute crop"}
-            <span className="text-[#1A1400]/50 text-[9px] normal-case">↵</span>
-          </button>
-        </div>
+              {defectBatch.length > 0 && (
+                <span className="text-[#D4AF37] font-mono">+{defectBatch.length} pending</span>
+              )}
+              <span className="text-[#999999] text-[10px]">
+                Click to pin · double-click or ↵ to label · Esc to discard
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openDefectPicker}
+                disabled={defectBatch.length === 0}
+                className="border border-[#D4D0C8] text-[#1A1A1A] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[#E8E4DC] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Label batch ({defectBatch.length})
+              </button>
+              <button
+                type="button"
+                onClick={onDone}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90"
+              >
+                <Check size={13} />
+                Done
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Shared defect picker portal — rendered at root so it escapes the
+          overlay's stacking context. Only mounted when a batch is awaiting
+          a label. Same component image-viewer mark mode uses. */}
+      {phase === "defects" && defectPickerOpen && defectPickerAnchor && (
+        <DefectTypePicker
+          anchor={defectPickerAnchor}
+          tier={defectPickerTier}
+          onTierChange={setDefectPickerTier}
+          onPick={commitDefectBatch}
+          onCancel={cancelDefectBatch}
+          pinCount={defectBatch.length}
+        />
+      )}
     </div>
   );
 }
