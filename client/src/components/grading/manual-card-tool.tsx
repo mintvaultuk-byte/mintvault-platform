@@ -4,8 +4,9 @@ import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
 import {
   computeCardTool,
-  ptsToQuad,
-  cropBoxForOuter,
+  cropBoxForEdges,
+  edgesToRect,
+  outerEdgesToBboxQuad,
   routePlacement,
   nextPass,
   type CardToolMode,
@@ -27,10 +28,10 @@ interface Props {
   onCentering?: (result: CenteringResult) => void;
 }
 
-// Dots are captured in corner order. Index → label.
-const CORNER_LABELS = ["TL", "TR", "BR", "BL"] as const;
-// Plain-English corner names for the guidance banner (index → name).
-const CORNER_NAMES = ["TOP-LEFT", "TOP-RIGHT", "BOTTOM-RIGHT", "BOTTOM-LEFT"] as const;
+// Points are captured clockwise, one SIDE at a time. Index → short label.
+const SIDE_LABELS = ["T", "R", "B", "L"] as const;
+// Plain-English side names for the guidance banner (index → name).
+const SIDE_NAMES = ["TOP", "RIGHT", "BOTTOM", "LEFT"] as const;
 // Near-miss grab radius (screen px): a click within this of an already-placed
 // dot grabs the nearest dot for dragging instead of doing nothing.
 const GRAB_PX = 40;
@@ -44,10 +45,6 @@ type DotPass = "outer" | "inner";
 
 function clamp(v: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, v));
-}
-
-function polyPoints(pts: Point[]): string {
-  return pts.map((p) => `${p.x},${p.y}`).join(" ");
 }
 
 function centroid(pts: Point[]): Point {
@@ -87,52 +84,52 @@ function Crosshair({ color }: { color: string }) {
 }
 
 /**
- * Mini card-shape map showing WHICH corner is active (so the operator doesn't
- * have to decode TL/TR/BR/BL). The active corner is a large ring in the current
- * pass colour (gold = placing OUTER, green = placing INNER); already-placed
- * corners are solid grey; pending corners are hollow. `activeCorner` is -1 when
- * every point is down. Corner order matches CORNER_LABELS: [TL, TR, BR, BL].
+ * Mini card-shape map showing WHICH side is active (so the operator doesn't have
+ * to decode T/R/B/L). The active side glows a thick line in the current pass
+ * colour (gold = placing OUTER, green = placing INNER); already-measured sides
+ * are solid grey; pending sides are faint. `activeSide` is -1 when every point
+ * is down. Side order matches SIDE_LABELS: [TOP, RIGHT, BOTTOM, LEFT].
  */
-function CornerDiagram({
-  activeCorner,
+function SideDiagram({
+  activeSide,
   activePass,
   outerCount,
   innerCount,
   mode,
 }: {
-  activeCorner: number;
+  activeSide: number;
   activePass: DotPass;
   outerCount: number;
   innerCount: number;
   mode: CardToolMode;
 }) {
-  const CX = [13, 43, 43, 13]; // TL, TR, BR, BL
-  const CY = [13, 13, 65, 65];
+  // Edge endpoints on the mini card body (x6 y6 w44 h66 → right 50, bottom 72),
+  // in [TOP, RIGHT, BOTTOM, LEFT] order to match the capture sequence.
+  const EDGES = [
+    { x1: 12, y1: 6, x2: 44, y2: 6 }, // TOP
+    { x1: 50, y1: 12, x2: 50, y2: 66 }, // RIGHT
+    { x1: 12, y1: 72, x2: 44, y2: 72 }, // BOTTOM
+    { x1: 6, y1: 12, x2: 6, y2: 66 }, // LEFT
+  ];
   const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
   return (
     <svg width={40} height={56} viewBox="0 0 56 78" className="flex-shrink-0" aria-hidden="true">
       {/* Card body + faint inner frame */}
       <rect x={6} y={6} width={44} height={66} rx={4} fill="#F7F7F5" stroke="#C9C5BD" strokeWidth={2} />
       <rect x={14} y={14} width={28} height={50} rx={2} fill="none" stroke="#E2DED6" strokeWidth={1.25} />
-      {[0, 1, 2, 3].map((i) => {
+      {EDGES.map((e, i) => {
         const done = mode === "outer-only" ? i < outerCount : i < innerCount;
-        if (i === activeCorner) {
-          return (
-            <g key={i}>
-              <circle cx={CX[i]} cy={CY[i]} r={7} fill="none" stroke={activeColor} strokeWidth={2.5} />
-              <circle cx={CX[i]} cy={CY[i]} r={3} fill={activeColor} />
-            </g>
-          );
-        }
+        const isActive = i === activeSide;
         return (
-          <circle
+          <line
             key={i}
-            cx={CX[i]}
-            cy={CY[i]}
-            r={3.5}
-            fill={done ? "#9CA3AF" : "none"}
-            stroke={done ? "#9CA3AF" : "#C9C5BD"}
-            strokeWidth={1.5}
+            x1={e.x1}
+            y1={e.y1}
+            x2={e.x2}
+            y2={e.y2}
+            stroke={isActive ? activeColor : done ? "#9CA3AF" : "#D8D4CC"}
+            strokeWidth={isActive ? 5 : done ? 4 : 2.5}
+            strokeLinecap="round"
           />
         );
       })}
@@ -169,11 +166,11 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   const lastTouchAtRef = useRef<number>(0);
   const { toast } = useToast();
 
-  // Corner-by-corner capture: work TL → TR → BR → BL, placing this corner's
-  // OUTER then its INNER before moving on. The next click's pass is decided by
-  // parity (arrays level → OUTER, outer one ahead → INNER). The arrays still end
-  // ordered [TL,TR,BR,BL], so all downstream geometry is unchanged. Once both
-  // are full, clicks become near-miss grabs.
+  // Side-by-side capture: work clockwise TOP → RIGHT → BOTTOM → LEFT, placing
+  // this side's OUTER then its INNER before moving on. The next click's pass is
+  // decided by parity (arrays level → OUTER, outer one ahead → INNER). The
+  // arrays end ordered [TOP,RIGHT,BOTTOM,LEFT], read by the edge geometry. Once
+  // both are full, clicks become near-miss grabs.
   const activePass: DotPass = nextPass(mode, outerPts, innerPts);
   const activeArr = activePass === "outer" ? outerPts : innerPts;
   const outerReady = outerPts.length === 4;
@@ -182,16 +179,16 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   // Still placing points in the active pass → show the cursor reticle + guides.
   const placing = activeArr.length < 4;
   const activeColor = activePass === "outer" ? OUTER_COLOR : INNER_COLOR;
-  // Guidance: total points down, target, and the corner index (0..3) we're on.
+  // Guidance: total points down, target, and the side index (0..3) we're on.
   const totalPlaced = outerPts.length + innerPts.length;
   const target = mode === "outer-only" ? 4 : 8;
-  const activeCorner = mode === "outer-only" ? outerPts.length : Math.floor(totalPlaced / 2);
+  const activeSide = mode === "outer-only" ? outerPts.length : Math.floor(totalPlaced / 2);
   // Large step prompt shown in the guidance banner (replaces the old 10px text).
   const bannerText = canCompute
     ? "Ready — drag any dot to fine-tune, then Compute"
     : activePass === "outer"
-      ? `Corner ${activeCorner + 1} of 4 — ${CORNER_NAMES[activeCorner]}. Click the OUTER corner (card edge).`
-      : `Corner ${activeCorner + 1} of 4 — ${CORNER_NAMES[activeCorner]}. Click the INNER corner (where border meets artwork).`;
+      ? `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the OUTER edge (card edge).`
+      : `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the INNER edge (border meets artwork).`;
 
   function toPct(e: MouseEvent | React.MouseEvent): Point | null {
     const el = containerRef.current;
@@ -412,12 +409,11 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
     }
     setSaving(true);
     try {
-      const outerQuad = ptsToQuad(outerPts);
-      const innerQuad = mode === "full" ? ptsToQuad(innerPts) : null;
+      const outerQuad = outerEdgesToBboxQuad(outerPts);
       const { crop, deskewDeg, centering } = computeCardTool(
         mode,
-        outerQuad,
-        innerQuad,
+        outerPts,
+        mode === "full" ? innerPts : null,
         side,
         rotation,
         CROP_MARGIN_PCT,
@@ -482,20 +478,14 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
   }
 
   // Live preview geometry (only meaningful once outer is placed).
-  const previewCrop = outerReady ? cropBoxForOuter(ptsToQuad(outerPts), CROP_MARGIN_PCT) : null;
+  const previewCrop = outerReady ? cropBoxForEdges(outerPts, CROP_MARGIN_PCT) : null;
   const outerCentroid = outerReady ? centroid(outerPts) : null;
+  // Edge rectangles drawn once a pass's four points are all down.
+  const outerEdgeRect = outerReady ? edgesToRect(outerPts) : null;
+  const innerEdgeRect = mode === "full" && innerReady ? edgesToRect(innerPts) : null;
   const previewCentering =
     mode === "full" && outerReady && innerReady
-      ? computeCardTool(
-          "full",
-          ptsToQuad(outerPts),
-          ptsToQuad(innerPts),
-          side,
-          rotation,
-          CROP_MARGIN_PCT,
-          imgDims.w,
-          imgDims.h
-        ).centering
+      ? computeCardTool("full", outerPts, innerPts, side, rotation, CROP_MARGIN_PCT, imgDims.w, imgDims.h).centering
       : null;
 
   function renderDots(pts: Point[], pass: DotPass, color: string) {
@@ -519,7 +509,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
             className="absolute -top-3 left-1/2 -translate-x-1/2 text-[8px] font-bold pointer-events-none select-none"
             style={{ color }}
           >
-            {CORNER_LABELS[i]}
+            {SIDE_LABELS[i]}
           </span>
         </div>
       </div>
@@ -566,8 +556,8 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
       {/* Guidance banner — corner map + large step prompt + progress + undo.
           Replaces the old 10px instruction so the next action is unmissable. */}
       <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[#D4D0C8] bg-white flex items-center gap-2 sm:gap-3">
-        <CornerDiagram
-          activeCorner={canCompute ? -1 : activeCorner}
+        <SideDiagram
+          activeSide={canCompute ? -1 : activeSide}
           activePass={activePass}
           outerCount={outerPts.length}
           innerCount={innerPts.length}
@@ -649,45 +639,34 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                   opacity="0.4"
                 />
               )}
-              {/* Outer quad */}
-              {outerPts.length >= 2 &&
-                (outerReady ? (
-                  <polygon
-                    points={polyPoints(outerPts)}
-                    fill="none"
-                    stroke={OUTER_COLOR}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                ) : (
-                  <polyline
-                    points={polyPoints(outerPts)}
-                    fill="none"
-                    stroke={OUTER_COLOR}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                ))}
-              {/* Inner quad */}
-              {mode === "full" &&
-                innerPts.length >= 2 &&
-                (innerReady ? (
-                  <polygon
-                    points={polyPoints(innerPts)}
-                    fill="none"
-                    stroke={INNER_COLOR}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                ) : (
-                  <polyline
-                    points={polyPoints(innerPts)}
-                    fill="none"
-                    stroke={INNER_COLOR}
-                    strokeWidth="0.4"
-                    opacity="0.9"
-                  />
-                ))}
+              {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
+                  x, right = RIGHT-outer x, top = TOP-outer y, bottom = BOTTOM-
+                  outer y), drawn once all four outer edge points are down. */}
+              {outerEdgeRect && (
+                <rect
+                  x={outerEdgeRect.left}
+                  y={outerEdgeRect.top}
+                  width={outerEdgeRect.right - outerEdgeRect.left}
+                  height={outerEdgeRect.bottom - outerEdgeRect.top}
+                  fill="none"
+                  stroke={OUTER_COLOR}
+                  strokeWidth="0.4"
+                  opacity="0.9"
+                />
+              )}
+              {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
+              {mode === "full" && innerEdgeRect && (
+                <rect
+                  x={innerEdgeRect.left}
+                  y={innerEdgeRect.top}
+                  width={innerEdgeRect.right - innerEdgeRect.left}
+                  height={innerEdgeRect.bottom - innerEdgeRect.top}
+                  fill="none"
+                  stroke={INNER_COLOR}
+                  strokeWidth="0.4"
+                  opacity="0.9"
+                />
+              )}
               {/* Crosshair at outer centroid */}
               {outerCentroid && (
                 <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
