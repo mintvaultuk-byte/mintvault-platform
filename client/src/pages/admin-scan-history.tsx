@@ -29,15 +29,21 @@ interface ScanHistoryResponse {
 }
 
 function gradeColor(g: number | null): string {
-  if (g == null) return "text-[#888888]";
-  if (g >= 10) return "text-[#D4AF37]";
-  if (g >= 8) return "text-[#16A34A]";
-  if (g >= 6) return "text-[#CA8A04]";
-  return "text-[#DC2626]";
+  if (g == null) return "text-[var(--admin-ink-faint)]";
+  if (g >= 10) return "text-[var(--admin-gold-hi)]";
+  if (g >= 8) return "text-[var(--admin-green)]";
+  if (g >= 6) return "text-[var(--admin-amber)]";
+  return "text-[var(--admin-red)]";
 }
 
 function formatDate(d: string): string {
-  return new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return new Date(d).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function AdminScanHistory() {
@@ -60,16 +66,24 @@ export default function AdminScanHistory() {
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <ScanLine className="w-5 h-5 text-[#D4AF37]" />
-          <h2 className="text-lg font-bold text-[#1A1A1A] tracking-tight">Scan History</h2>
-          {data && <span className="text-xs text-[#888888]">{data.total} scans</span>}
+          <ScanLine className="w-5 h-5 text-[var(--admin-gold)]" />
+          <h2 className="text-lg font-bold text-[var(--admin-ink)] tracking-tight">Scan History</h2>
+          {data && <span className="text-xs text-[var(--admin-ink-faint)]">{data.total} scans</span>}
         </div>
         <div className="flex items-center gap-2">
-          {["all", "graded", "pending"].map(s => (
-            <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
+          {["all", "graded", "pending"].map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setStatusFilter(s);
+                setPage(1);
+              }}
               className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded transition-colors ${
-                statusFilter === s ? "bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/30" : "text-[#888888] border border-[#E8E4DC] hover:border-[#D4AF37]/30"
-              }`}>
+                statusFilter === s
+                  ? "bg-[color-mix(in_srgb,var(--admin-gold)_18%,transparent)] text-[var(--admin-gold-hi)] border border-[var(--admin-line)]"
+                  : "text-[var(--admin-ink-faint)] border border-[var(--admin-line-soft)] hover:border-[color-mix(in_srgb,var(--admin-gold)_30%,transparent)]"
+              }`}
+            >
               {s}
             </button>
           ))}
@@ -78,16 +92,16 @@ export default function AdminScanHistory() {
 
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 text-[#D4AF37] animate-spin" />
+          <Loader2 className="w-6 h-6 text-[var(--admin-gold)] animate-spin" />
         </div>
       )}
 
       {data && (
         <>
-          <div className="bg-white border border-[#E8E4DC] rounded-lg overflow-hidden">
+          <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-[#F7F7F5] text-left text-[10px] uppercase tracking-wider text-[#888888]">
+                <tr className="bg-[var(--admin-panel2)] text-left text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
                   <th className="px-4 py-2 w-16">Image</th>
                   <th className="px-4 py-2">Cert</th>
                   <th className="px-4 py-2">Card</th>
@@ -99,60 +113,82 @@ export default function AdminScanHistory() {
               </thead>
               <tbody>
                 {data.scans.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-8 text-[#888888] text-xs">No scans found</td></tr>
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 text-[var(--admin-ink-faint)] text-xs">
+                      No scans found
+                    </td>
+                  </tr>
                 )}
-                {data.scans.map(s => (
-                  <tr key={s.id} className="border-t border-[#E8E4DC] hover:bg-[#FAFAF8] transition-colors cursor-pointer"
-                    onClick={() => { window.location.hash = `grading-${s.id}`; }}>
+                {data.scans.map((s) => (
+                  <tr
+                    key={s.id}
+                    className="border-t border-[var(--admin-line)] hover:bg-[var(--admin-panel2)] transition-colors cursor-pointer"
+                    onClick={() => {
+                      window.location.hash = `grading-${s.id}`;
+                    }}
+                  >
                     <td className="px-4 py-2">
                       {s.frontImagePath ? (
-                        <div className="w-10 h-14 bg-[#F7F7F5] rounded overflow-hidden">
-                          <img src={`/api/admin/certificates/${s.id}/label/front?format=png&preview=1`} alt="" className="w-full h-full object-contain" />
+                        <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded overflow-hidden">
+                          <img
+                            src={`/api/admin/certificates/${s.id}/label/front?format=png&preview=1`}
+                            alt=""
+                            className="w-full h-full object-contain"
+                          />
                         </div>
                       ) : (
-                        <div className="w-10 h-14 bg-[#F7F7F5] rounded flex items-center justify-center">
-                          <ScanLine size={14} className="text-[#E8E4DC]" />
+                        <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded flex items-center justify-center">
+                          <ScanLine size={14} className="text-[var(--admin-ink-faint)]" />
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs text-[#D4AF37]">{s.certId}</td>
+                    <td
+                      className="px-4 py-2 font-mono text-xs text-[var(--admin-gold-hi)]"
+                      style={{ fontFamily: "var(--admin-mono)" }}
+                    >
+                      {s.certId}
+                    </td>
                     <td className="px-4 py-2">
-                      <p className="text-[#1A1A1A] text-xs font-medium truncate max-w-[200px]">{s.cardName || "Pending identification"}</p>
-                      {s.cardGame && <p className="text-[10px] text-[#888888]">{s.cardGame}</p>}
+                      <p className="text-[var(--admin-ink)] text-xs font-medium truncate max-w-[200px]">
+                        {s.cardName || "Pending identification"}
+                      </p>
+                      {s.cardGame && <p className="text-[10px] text-[var(--admin-ink-faint)]">{s.cardGame}</p>}
                     </td>
                     <td className="px-4 py-2 text-center">
                       {s.grade != null ? (
                         <span className={`text-xl font-black ${gradeColor(s.grade)}`}>{s.grade}</span>
                       ) : s.aiDraftGrade != null ? (
-                        <span className="text-sm font-bold text-[#888888]">{s.aiDraftGrade} <span className="text-[9px]">(AI)</span></span>
+                        <span className="text-sm font-bold text-[var(--admin-ink-faint)]">
+                          {s.aiDraftGrade} <span className="text-[9px]">(AI)</span>
+                        </span>
                       ) : (
-                        <Clock size={14} className="text-[#E8E4DC] mx-auto" />
+                        <Clock size={14} className="text-[var(--admin-ink-faint)] mx-auto" />
                       )}
                     </td>
                     <td className="px-4 py-2 text-center">
                       {s.centering != null ? (
-                        <div className="flex items-center justify-center gap-1 text-[10px] text-[#555555]">
+                        <div className="flex items-center justify-center gap-1 text-[10px] text-[var(--admin-ink-dim)]">
                           <span>C{s.centering}</span>
                           <span>Co{s.corners}</span>
                           <span>E{s.edges}</span>
                           <span>S{s.surface}</span>
                         </div>
                       ) : (
-                        <span className="text-[10px] text-[#E8E4DC]">—</span>
+                        <span className="text-[10px] text-[var(--admin-ink-faint)]">—</span>
                       )}
                     </td>
                     <td className="px-4 py-2">
                       {s.grader ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-green-600">
+                        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--admin-green)]">
                           <CheckCircle size={10} /> Graded
                         </span>
                       ) : s.aiDraftGrade != null ? (
-                        <span className="text-[10px] text-amber-600">AI draft</span>
+                        <span className="text-[10px] text-[var(--admin-amber)]">AI draft</span>
                       ) : (
-                        <span className="text-[10px] text-[#888888]">Processing</span>
+                        <span className="text-[10px] text-[var(--admin-ink-faint)]">Processing</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-xs text-[#888888]">{formatDate(s.createdAt)}</td>
+                    <td className="px-4 py-2 text-xs text-[var(--admin-ink-faint)]">{formatDate(s.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -162,14 +198,22 @@ export default function AdminScanHistory() {
           {/* Pagination */}
           {data.totalPages > 1 && (
             <div className="flex items-center justify-between">
-              <p className="text-xs text-[#888888]">Page {data.page} of {data.totalPages}</p>
+              <p className="text-xs text-[var(--admin-ink-faint)]">
+                Page {data.page} of {data.totalPages}
+              </p>
               <div className="flex items-center gap-1">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
-                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#D4AF37] disabled:opacity-30 transition-colors">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="p-1.5 rounded border border-[var(--admin-line)] text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)] disabled:opacity-30 transition-colors"
+                >
                   <ChevronLeft size={14} />
                 </button>
-                <button onClick={() => setPage(p => Math.min(data.totalPages, p + 1))} disabled={page >= data.totalPages}
-                  className="p-1.5 rounded border border-[#E8E4DC] text-[#888888] hover:border-[#D4AF37] disabled:opacity-30 transition-colors">
+                <button
+                  onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+                  disabled={page >= data.totalPages}
+                  className="p-1.5 rounded border border-[var(--admin-line)] text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)] disabled:opacity-30 transition-colors"
+                >
                   <ChevronRight size={14} />
                 </button>
               </div>

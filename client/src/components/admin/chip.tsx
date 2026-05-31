@@ -8,6 +8,7 @@ export default function Chip({
   children,
   className = "",
   title,
+  testId,
 }: {
   active?: boolean;
   count?: number | string;
@@ -15,12 +16,14 @@ export default function Chip({
   children: ReactNode;
   className?: string;
   title?: string;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
+      data-testid={testId}
       className={`admin-chip ${active ? "is-on" : ""} ${className}`.trim()}
     >
       {children}

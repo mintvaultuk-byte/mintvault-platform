@@ -1,11 +1,9 @@
 import { useState, useEffect } from "react";
-import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
-import { gradeLabel, gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import {
-  LogOut,
   Plus,
   Edit,
   Download,
@@ -20,28 +18,29 @@ import {
   Tag,
   Clock,
   FileDown,
-  LayoutDashboard,
-  List,
   Database,
   Shield,
   Ban,
   AlertTriangle,
-  Package,
-  ScanLine,
-  DollarSign,
   Save,
   ArrowRight,
-  ArrowRightLeft,
   Copy,
   Check,
   Loader2,
-  Brain,
-  Activity,
-  TrendingUp,
-  Film,
 } from "lucide-react";
 import StagingHarnessPanel from "@/components/staging-harness-panel";
-import GradientButton from "@/components/ui/gradient-button";
+import {
+  AdminShell,
+  type AdminTab,
+  StatCard,
+  Panel,
+  Chip,
+  Badge,
+  type AdminBadgeVariant,
+  AdminButton,
+  adminButtonClass,
+  GoldShader,
+} from "@/components/admin";
 
 const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
 
@@ -72,12 +71,12 @@ const GRADING_STATUS_LABEL: Record<GradingStatus, string> = {
   awaiting_images: "Awaiting images",
 };
 
-// Match the existing badge palette in CertRow (bg-green-50 / bg-[#D4AF37]/20 / etc).
-const GRADING_STATUS_BADGE_CLASS: Record<GradingStatus, string> = {
-  graded: "bg-green-50 text-green-600",
-  in_progress: "bg-yellow-50 text-yellow-700",
-  awaiting_grade: "bg-[#D4AF37]/20 text-[#D4AF37]",
-  awaiting_images: "bg-[#E8E4DC] text-[#999999]",
+// Map grading status onto the admin Badge variants (status palette).
+const GRADING_STATUS_VARIANT: Record<GradingStatus, AdminBadgeVariant> = {
+  graded: "act",
+  in_progress: "prog",
+  awaiting_grade: "gold",
+  awaiting_images: "neu",
 };
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
@@ -123,21 +122,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<
-    | "dashboard"
-    | "certs"
-    | "submissions"
-    | "intake"
-    | "pricing"
-    | "capacity"
-    | "printing"
-    | "grading"
-    | "learning"
-    | "capture-health"
-    | "divergence"
-    | "transfers"
-    | "scans"
-  >("dashboard");
+  const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -221,12 +206,11 @@ export default function AdminDashboard({ onLogout }: Props) {
 
   if (showForm) {
     return (
-      <div className="min-h-screen bg-white">
-        <AdminHeader onLogout={handleLogout} activeTab={activeTab} onTabChange={setActiveTab} />
-        <div className="max-w-3xl mx-auto px-4 py-6">
+      <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout}>
+        <div className="max-w-3xl mx-auto">
           <button
             onClick={handleFormClose}
-            className="text-[#D4AF37]/60 hover:text-[#D4AF37] text-sm mb-4 transition-colors"
+            className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm mb-4 transition-colors"
             data-testid="button-back-list"
           >
             &larr; Back to list
@@ -292,14 +276,17 @@ export default function AdminDashboard({ onLogout }: Props) {
             </div>
           )}
         </div>
-      </div>
+      </AdminShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <AdminHeader onLogout={handleLogout} activeTab={activeTab} onTabChange={setActiveTab} />
-
+    <AdminShell
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onLogout={handleLogout}
+      search={{ value: searchQuery, onChange: setSearchQuery }}
+    >
       {isStagingHost && <StagingHarnessPanel />}
 
       {activeTab === "dashboard" && (
@@ -351,10 +338,15 @@ export default function AdminDashboard({ onLogout }: Props) {
                 {gradingCert ? (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-[#D4AF37] text-xs font-bold uppercase tracking-widest">
+                      <span
+                        className="text-xs font-bold uppercase tracking-widest"
+                        style={{ fontFamily: "var(--admin-mono)", color: "var(--admin-gold-hi)" }}
+                      >
                         {gradingCert.certId}
                       </span>
-                      <span className="text-[#555555] text-xs">{gradingCert.cardName}</span>
+                      <span className="text-xs" style={{ color: "var(--admin-ink-dim)" }}>
+                        {gradingCert.cardName}
+                      </span>
                     </div>
                     <GradingPanel
                       certId={gradingCert.id}
@@ -369,8 +361,16 @@ export default function AdminDashboard({ onLogout }: Props) {
                     />
                   </div>
                 ) : (
-                  <div className="bg-white border border-[#E8E4DC] rounded-xl p-8 text-center">
-                    <p className="text-[#555555] text-sm">Select a certificate from the queue to begin grading</p>
+                  <div
+                    className="rounded-xl p-8 text-center"
+                    style={{
+                      background: "var(--admin-panel)",
+                      border: "1px solid var(--admin-line)",
+                    }}
+                  >
+                    <p className="text-sm" style={{ color: "var(--admin-ink-dim)" }}>
+                      Select a certificate from the queue to begin grading
+                    </p>
                   </div>
                 )}
               </div>
@@ -388,238 +388,7 @@ export default function AdminDashboard({ onLogout }: Props) {
           onCancel={() => setVoidTarget(null)}
         />
       )}
-    </div>
-  );
-}
-
-function AdminHeader({
-  onLogout,
-  activeTab,
-  onTabChange,
-}: {
-  onLogout: () => void;
-  activeTab:
-    | "dashboard"
-    | "certs"
-    | "submissions"
-    | "intake"
-    | "pricing"
-    | "capacity"
-    | "printing"
-    | "grading"
-    | "learning"
-    | "capture-health"
-    | "divergence"
-    | "transfers"
-    | "scans";
-  onTabChange: (
-    t:
-      | "dashboard"
-      | "certs"
-      | "submissions"
-      | "intake"
-      | "pricing"
-      | "capacity"
-      | "printing"
-      | "grading"
-      | "learning"
-      | "capture-health"
-      | "divergence"
-      | "transfers"
-      | "scans"
-  ) => void;
-}) {
-  const { data: dbInfo } = useQuery<DbInfo>({
-    queryKey: ["/api/admin/db-info"],
-    refetchInterval: 60000,
-  });
-
-  const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
-  const envLabel = isStagingHost ? "STAGING" : dbInfo?.env === "production" ? "PRODUCTION" : "DEVELOPMENT";
-  const envIsGreen = !isStagingHost && dbInfo?.env === "production";
-  const shortHost = dbInfo?.neon_host ? dbInfo.neon_host.split(".")[0].slice(0, 12) : "...";
-
-  return (
-    <header className="border-b border-[#D4AF37]/20 bg-white/95 px-4 py-3">
-      <div className="max-w-5xl mx-auto flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <span className="text-[#D4AF37] font-bold tracking-widest text-sm">MINTVAULT</span>
-              <span className="text-[#D4AF37]/30 text-xs">ADMIN</span>
-            </div>
-            <nav className="flex gap-1">
-              <button
-                onClick={() => onTabChange("dashboard")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "dashboard"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-dashboard"
-              >
-                <LayoutDashboard size={12} /> Overview
-              </button>
-              <button
-                onClick={() => onTabChange("certs")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "certs" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-certs"
-              >
-                <List size={12} /> Certificates
-              </button>
-              <button
-                onClick={() => onTabChange("submissions")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "submissions"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-submissions"
-              >
-                <Package size={12} /> Submissions
-              </button>
-              <button
-                onClick={() => onTabChange("intake")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "intake" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-intake"
-              >
-                <ScanLine size={12} /> Intake
-              </button>
-              <button
-                onClick={() => onTabChange("pricing")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "pricing" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-pricing"
-              >
-                <DollarSign size={12} /> Pricing
-              </button>
-              <button
-                onClick={() => onTabChange("capacity")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "capacity" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-capacity"
-              >
-                <Database size={12} /> Capacity
-              </button>
-              <button
-                onClick={() => onTabChange("printing")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "printing" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-printing"
-              >
-                <Printer size={12} /> Printing
-              </button>
-              {/* Standalone nav — Weekly Reel lives at its own route, not as a
-                  dashboard tab, so this is a Link not a tab-switch button. */}
-              <Link
-                href="/admin/weekly-reel"
-                className="text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 text-[#D4AF37]/50 hover:text-[#D4AF37] no-underline"
-                data-testid="link-weekly-reel"
-              >
-                <Film size={12} /> Weekly Reel
-              </Link>
-              <button
-                onClick={() => onTabChange("grading")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "grading" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-grading"
-              >
-                <BarChart3 size={12} /> Grading
-              </button>
-              <button
-                onClick={() => onTabChange("learning")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "learning" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-learning"
-              >
-                <Brain size={12} /> AI Learning
-              </button>
-              <button
-                onClick={() => onTabChange("capture-health")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "capture-health"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-capture-health"
-              >
-                <Activity size={12} /> Capture Health
-              </button>
-              <button
-                onClick={() => onTabChange("divergence")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "divergence"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-divergence"
-              >
-                <TrendingUp size={12} /> AI Divergence
-              </button>
-              <button
-                onClick={() => onTabChange("transfers")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "transfers"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37]"
-                    : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-transfers"
-              >
-                <ArrowRightLeft size={12} /> Transfers
-              </button>
-              <button
-                onClick={() => onTabChange("scans")}
-                className={`text-xs px-3 py-1.5 rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === "scans" ? "bg-[#D4AF37]/20 text-[#D4AF37]" : "text-[#D4AF37]/50 hover:text-[#D4AF37]"
-                }`}
-                data-testid="tab-scans"
-              >
-                <ScanLine size={12} /> Scans
-              </button>
-            </nav>
-          </div>
-          <button
-            onClick={onLogout}
-            className="text-[#D4AF37]/50 hover:text-[#D4AF37] text-sm flex items-center gap-1.5 transition-colors"
-            data-testid="button-logout"
-          >
-            <LogOut size={14} /> Logout
-          </button>
-        </div>
-        {dbInfo && (
-          <div className="flex items-center gap-3 text-[10px] font-mono" data-testid="env-banner">
-            <span
-              className={`px-2 py-0.5 rounded font-bold tracking-wider uppercase ${
-                envIsGreen
-                  ? "bg-green-600/20 text-green-400 border border-green-600/40"
-                  : "bg-orange-600/20 text-orange-400 border border-orange-600/40"
-              }`}
-              data-testid="badge-env"
-            >
-              <Shield size={10} className="inline mr-1 -mt-px" />
-              ENV: {envLabel}
-            </span>
-            <span className="text-[#999999] flex items-center gap-1" data-testid="badge-db">
-              <Database size={10} />
-              DB: {shortHost}/{dbInfo.db_name}
-            </span>
-            <span className="text-[#999999]" data-testid="text-db-counts">
-              CM:{dbInfo.card_master_active_count} · CS:{dbInfo.card_sets_active_count} · Certs:
-              {dbInfo.certificates_count}
-            </span>
-          </div>
-        )}
-      </div>
-    </header>
+    </AdminShell>
   );
 }
 
@@ -668,12 +437,17 @@ function CapacitySection() {
   };
 
   return (
-    <div className="border border-[#D4AF37]/20 rounded-lg p-5 mb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase">Capacity &amp; Queue</h3>
-        {saveMsg && <span className="text-xs text-emerald-400">{saveMsg}</span>}
-      </div>
-
+    <Panel
+      className="mt-[14px]"
+      title="Capacity & Queue"
+      actions={
+        saveMsg ? (
+          <span className="text-xs" style={{ color: "var(--admin-green)" }}>
+            {saveMsg}
+          </span>
+        ) : undefined
+      }
+    >
       <div className="space-y-4">
         {tiers.map(({ slug, label }) => {
           const cap = data?.[slug as keyof CapacityData];
@@ -682,72 +456,74 @@ function CapacitySection() {
           const full = cap?.full ?? false;
           const forceOpen = cap?.forceOpen ?? false;
           const pct = max > 0 ? Math.min(100, Math.round((active / max) * 100)) : 0;
+          const fillColor = pct >= 90 ? "var(--admin-red)" : pct >= 70 ? "var(--admin-amber)" : "var(--admin-gold)";
           const isEdit = editing?.slug === slug;
 
           return (
             <div key={slug} className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
-                  <span className="text-[#D4AF37] font-bold uppercase tracking-wider">{label}</span>
-                  {full && !forceOpen && (
-                    <span className="bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                      Full
-                    </span>
-                  )}
-                  {forceOpen && (
-                    <span className="bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                      Force Open
-                    </span>
-                  )}
+                  <span
+                    style={{
+                      fontFamily: "var(--admin-mono)",
+                      fontSize: 11,
+                      letterSpacing: "1px",
+                      textTransform: "uppercase",
+                      color: "var(--admin-gold-hi)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {label}
+                  </span>
+                  {full && !forceOpen && <Badge variant="red">Full</Badge>}
+                  {forceOpen && <Badge variant="prog">Force Open</Badge>}
                 </div>
-                <span className="text-[#999999]">
+                <span style={{ fontFamily: "var(--admin-mono)", color: "var(--admin-ink-faint)" }}>
                   {active} / {max} active
                 </span>
               </div>
-              <div className="h-2 bg-[#E8E0C8] rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-[#D4AF37]"}`}
-                  style={{ width: `${pct}%` }}
-                />
+              <div className="admin-track" style={{ height: 8 }}>
+                <i style={{ width: `${pct}%`, background: fillColor }} />
               </div>
 
               {isEdit ? (
-                <div className="flex items-center gap-3 pt-1">
-                  <label className="text-xs text-[#999999]">Max:</label>
+                <div className="flex items-center gap-3 pt-1 flex-wrap">
+                  <label className="text-xs" style={{ color: "var(--admin-ink-faint)" }}>
+                    Max
+                  </label>
                   <input
                     type="number"
                     value={editing.max}
                     min={0}
                     onChange={(e) => setEditing({ ...editing, max: parseInt(e.target.value) || 0 })}
-                    className="w-20 bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37]"
+                    className="admin-input"
+                    style={{ width: 90 }}
                   />
-                  <label className="flex items-center gap-1.5 text-xs text-[#999999] cursor-pointer">
+                  <label
+                    className="flex items-center gap-1.5 text-xs cursor-pointer"
+                    style={{ color: "var(--admin-ink-dim)" }}
+                  >
                     <input
                       type="checkbox"
                       checked={editing.forceOpen}
                       onChange={(e) => setEditing({ ...editing, forceOpen: e.target.checked })}
-                      className="accent-amber-500"
+                      style={{ accentColor: "var(--admin-gold)" }}
                     />
                     Force open
                   </label>
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    className="text-xs border border-[#D4AF37] text-[#D4AF37] rounded px-3 py-1 hover:bg-[#D4AF37]/10 disabled:opacity-50 transition-colors"
-                  >
+                  <AdminButton variant="gold" size="sm" onClick={handleSave} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
-                  </button>
-                  <button
-                    onClick={() => setEditing(null)}
-                    className="text-xs text-[#999999] hover:text-[#D4AF37] transition-colors"
-                  >
+                  </AdminButton>
+                  <AdminButton size="sm" onClick={() => setEditing(null)}>
                     Cancel
-                  </button>
+                  </AdminButton>
                 </div>
               ) : (
                 <button
+                  type="button"
                   onClick={() => setEditing({ slug, max: max, forceOpen })}
-                  className="text-[10px] text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors"
+                  className="text-[10px] transition-colors"
+                  style={{ color: "var(--admin-ink-faint)" }}
                 >
                   Edit limits
                 </button>
@@ -756,7 +532,7 @@ function CapacitySection() {
           );
         })}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -800,48 +576,46 @@ function StolenReportsSection() {
   if (reports.length === 0) return null;
 
   return (
-    <div className="border border-red-200 rounded-lg p-5 mb-6 bg-red-50/30">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-red-600 font-bold tracking-widest text-xs uppercase flex items-center gap-2">
-          <AlertTriangle size={13} />
-          Stolen Reports ({reports.length} active)
-        </h3>
-        {msg && <span className="text-xs text-emerald-600">{msg}</span>}
-      </div>
-      <div className="space-y-2">
+    <Panel
+      className="mt-[14px]"
+      title={
+        <span className="flex items-center gap-2" style={{ color: "var(--admin-red)" }}>
+          <AlertTriangle size={14} />
+          Stolen Reports
+        </span>
+      }
+      sub={`${reports.length} active`}
+      actions={msg ? <span style={{ color: "var(--admin-green)", fontSize: 12 }}>{msg}</span> : undefined}
+    >
+      <div className="admin-recent">
         {reports.map((r) => (
-          <div
-            key={r.id}
-            className="flex items-center justify-between py-2 border-b border-red-100 last:border-0 text-sm gap-4"
-          >
-            <div className="flex-1 min-w-0">
-              <span className="text-[#D4AF37] font-mono text-xs font-bold mr-2">{r.cert_id}</span>
-              <span className="text-[#1A1A1A]">{r.reporter_name}</span>
-              <span className="text-[#999999] ml-2 text-xs">&lt;{r.reporter_email}&gt;</span>
-              {!r.verified_at && (
-                <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-bold uppercase">
-                  Unverified
-                </span>
-              )}
-              {r.verified_at && (
-                <span className="ml-2 text-[10px] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5 font-bold uppercase">
-                  Verified
-                </span>
-              )}
+          <div key={r.id} className="admin-recent-row">
+            <div className="admin-recent-row__l" style={{ flexWrap: "wrap", minWidth: 0 }}>
+              <span className="admin-recent-row__id">{r.cert_id}</span>
+              <span className="admin-recent-row__nm">{r.reporter_name}</span>
+              <span style={{ fontFamily: "var(--admin-mono)", fontSize: 11, color: "var(--admin-ink-faint)" }}>
+                &lt;{r.reporter_email}&gt;
+              </span>
+              {r.verified_at ? <Badge variant="red">Verified</Badge> : <Badge variant="prog">Unverified</Badge>}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="admin-recent-row__r">
               <a
                 href={`/vault/${r.cert_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors"
+                className={adminButtonClass({ variant: "ghost", size: "sm" })}
               >
                 View
               </a>
               <button
+                type="button"
                 onClick={() => handleClear(r.cert_id, r.id)}
                 disabled={clearing === r.id}
-                className="text-xs border border-red-300 text-red-600 rounded px-2 py-0.5 hover:bg-red-100 disabled:opacity-50 transition-colors"
+                className={adminButtonClass({ variant: "ghost", size: "sm" })}
+                style={{
+                  color: "var(--admin-red)",
+                  borderColor: "color-mix(in srgb, var(--admin-red) 45%, transparent)",
+                }}
               >
                 {clearing === r.id ? "Clearing…" : "Clear Flag"}
               </button>
@@ -849,7 +623,7 @@ function StolenReportsSection() {
           </div>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -959,170 +733,158 @@ function DashboardView({
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest mb-6" data-testid="text-dashboard-title">
-        DASHBOARD
-      </h1>
+    <>
+      {/* Hero band — the Overview's only gold-shader surface */}
+      <div className="admin-hero">
+        <GoldShader className="admin-hero__fx" />
+        <div className="admin-hero__in">
+          <button
+            type="button"
+            className="admin-hero__stat is-clickable"
+            onClick={() => onGoToCerts({})}
+            data-testid="stat-total"
+          >
+            <div className="admin-hero__k" data-testid="text-dashboard-title">
+              Total Certificates
+            </div>
+            <div className="admin-hero__num">{stats?.totalCerts ?? 0}</div>
+            <div className="admin-hero__sub">
+              <b>{dbInfo?.last_issued_mv ?? "…"}</b> last issued · <b>{stats?.thisWeek ?? 0}</b> graded this week
+            </div>
+          </button>
+          <div className="admin-hero__side">
+            <span className="admin-hero__tag">◆ Vault Live</span>
+            <AdminButton variant="gold" onClick={onNewCert} data-testid="button-quick-new-cert">
+              <Plus size={16} /> Create New Cert
+            </AdminButton>
+          </div>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <StatTile
-          label="Total Certificates"
-          value={stats?.totalCerts ?? 0}
-          icon={<FileText size={20} />}
-          testId="stat-total"
-          onClick={() => onGoToCerts({})}
-        />
-        <StatTile
+      <div className="admin-grid admin-grid--g7" style={{ marginTop: 14 }}>
+        <StatCard
           label="Graded This Week"
           value={stats?.thisWeek ?? 0}
-          icon={<Clock size={20} />}
+          icon={<Clock />}
           testId="stat-week"
           onClick={() => onGoToCerts({ range: "week" })}
         />
-        <StatTile
+        <StatCard
           label="Graded This Month"
           value={stats?.thisMonth ?? 0}
-          icon={<BarChart3 size={20} />}
+          icon={<BarChart3 />}
           testId="stat-month"
           onClick={() => onGoToCerts({ range: "month" })}
         />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <StatTile
+        <StatCard
           label="Card Master Active"
           value={dbInfo?.card_master_active_count ?? 0}
-          icon={<Database size={20} />}
+          icon={<Database />}
           testId="stat-cm-active"
         />
-        <StatTile
+        <StatCard
           label="Card Sets Active"
           value={dbInfo?.card_sets_active_count ?? 0}
-          icon={<Database size={20} />}
+          icon={<Database />}
           testId="stat-cs-active"
         />
-        <StatTile
-          label="Last Issued MV Number"
-          value={dbInfo?.last_issued_mv ?? "..."}
-          icon={<FileText size={20} />}
+        <StatCard
+          label="Last Issued MV"
+          value={dbInfo?.last_issued_mv ?? "…"}
+          mono
+          icon={<FileText />}
           testId="stat-last-mv"
           onClick={dbInfo?.last_issued_mv ? () => window.open(`/cert/${dbInfo.last_issued_mv}`, "_blank") : undefined}
         />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <StatTile
+        <StatCard
           label="Active Certificates"
           value={dbInfo?.certificates_count ?? 0}
-          icon={<Shield size={20} />}
+          icon={<Shield />}
           testId="stat-cert-count"
           onClick={() => onGoToCerts({ status: "active" })}
         />
-        <StatTile
+        <StatCard
           label="Voided Certificates"
           value={dbInfo?.voided_count ?? 0}
-          icon={<Ban size={20} />}
+          icon={<Ban />}
           testId="stat-voided"
           onClick={() => onGoToCerts({ status: "voided" })}
         />
-        <StatTile
+        <StatCard
           label="Authentic Only"
           value={stats?.authenticOnlyCount ?? 0}
-          icon={<Tag size={20} />}
+          icon={<Tag />}
           testId="stat-auth-only"
           onClick={() => onGoToCerts({ gradeType: "authentic" })}
         />
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-8">
-        <GradientButton as="button" onClick={onNewCert} height="40px" data-testid="button-quick-new-cert">
-          <Plus size={16} /> Create New Cert
-        </GradientButton>
+      <div className="admin-toolbar" style={{ marginTop: 22 }}>
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={certSearch}
             onChange={(e) => setCertSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCertSearch()}
-            placeholder="Search Cert ID..."
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors w-48"
+            placeholder="Cert ID…"
+            className="admin-input"
+            style={{ width: 160 }}
             data-testid="input-quick-search"
           />
-          <button
-            onClick={handleCertSearch}
-            className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-3 py-2 rounded transition-colors"
-            data-testid="button-quick-search"
-          >
+          <AdminButton iconOnly onClick={handleCertSearch} data-testid="button-quick-search">
             <Search size={14} />
-          </button>
+          </AdminButton>
         </div>
-        <a
-          href="/api/admin/certificates/export-csv"
-          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
-          data-testid="button-export-csv"
-        >
+        <a href="/api/admin/certificates/export-csv" className={adminButtonClass()} data-testid="button-export-csv">
           <FileDown size={14} /> Export CSV
         </a>
-        <a
-          href="/api/admin/ownership-export"
-          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors"
-          data-testid="button-export-ownership-csv"
-        >
+        <a href="/api/admin/ownership-export" className={adminButtonClass()} data-testid="button-export-ownership-csv">
           <Shield size={14} /> Ownership CSV
         </a>
-        <button
+        <AdminButton
           onClick={() => backfillClaimMutation.mutate()}
           disabled={backfillClaimMutation.isPending}
-          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
           data-testid="button-backfill-claim-codes"
         >
           {backfillClaimMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Shield size={14} />}
           Backfill Claim Codes
-        </button>
-        <button
+        </AdminButton>
+        <AdminButton
           onClick={handleBulkReprocess}
           disabled={bulkReprocessMutation.isPending}
-          className="border border-[#D4AF37]/30 text-[#D4AF37]/60 hover:text-[#D4AF37] px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors disabled:opacity-50"
           data-testid="button-bulk-reprocess"
         >
           {bulkReprocessMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
           Bulk Reprocess All
-        </button>
+        </AdminButton>
       </div>
       {backfillStatus && (
-        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-backfill-status">
+        <p className="text-xs mt-2" style={{ color: "var(--admin-gold-hi)" }} data-testid="text-backfill-status">
           {backfillStatus}
         </p>
       )}
       {bulkReprocessStatus && (
-        <p className="text-xs text-[#D4AF37]/80 -mt-6 mb-6" data-testid="text-bulk-reprocess-status">
+        <p className="text-xs mt-2" style={{ color: "var(--admin-gold-hi)" }} data-testid="text-bulk-reprocess-status">
           {bulkReprocessStatus}
         </p>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div className="border border-[#D4AF37]/20 rounded-lg p-5">
-          <h3
-            className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase"
-            data-testid="text-grade-dist-title"
-          >
-            Grade Distribution
-          </h3>
+      <div className="admin-cols">
+        <Panel title={<span data-testid="text-grade-dist-title">Grade Distribution</span>}>
           {stats?.gradeDistribution ? (
             <GradeChart data={stats.gradeDistribution} onGradeClick={(g) => onGoToCerts({ grade: g })} />
           ) : (
-            <div className="h-40 flex items-center justify-center text-[#999999] text-sm">No data</div>
+            <div
+              className="flex items-center justify-center text-sm"
+              style={{ height: 170, color: "var(--admin-ink-faint)" }}
+            >
+              No data
+            </div>
           )}
-        </div>
+        </Panel>
 
-        <div className="border border-[#D4AF37]/20 rounded-lg p-5">
-          <h3
-            className="text-[#D4AF37] font-bold tracking-widest text-xs mb-4 uppercase"
-            data-testid="text-grade-type-title"
-          >
-            By Grade Type
-          </h3>
-          <div className="space-y-1 mb-5">
+        <Panel title={<span data-testid="text-grade-type-title">By Grade Type</span>}>
+          <div className="admin-tin">
             {[
               {
                 label: "Numeric (1–10)",
@@ -1143,52 +905,50 @@ function DashboardView({
                 filter: { gradeType: "altered" as const },
                 testId: "grade-type-auth-altered",
               },
-            ].map(({ label, count, filter, testId }) => (
-              <div
-                key={testId}
-                onClick={() => onGoToCerts(filter)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && onGoToCerts(filter)}
-                className="flex items-center justify-between px-3 py-2 rounded cursor-pointer
-                  hover:bg-[#D4AF37]/8 hover:border hover:border-[#D4AF37]/20 border border-transparent
-                  active:scale-[0.98] active:bg-[#D4AF37]/12 transition-all select-none group"
-                data-testid={testId}
-              >
-                <div className="flex items-center gap-2">
-                  <Tag size={14} className="text-[#D4AF37]/50 group-hover:text-[#D4AF37]/80 transition-colors" />
-                  <span className="text-[#1A1A1A] text-sm group-hover:text-[#D4AF37]/90 transition-colors">
-                    {label}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[#D4AF37] font-bold text-sm">{count}</span>
-                  <ArrowRight size={12} className="text-[#D4AF37]/20 group-hover:text-[#D4AF37]/50 transition-colors" />
-                </div>
-              </div>
-            ))}
+            ].map(({ label, count, filter, testId }) => {
+              const total = stats?.totalCerts ?? 0;
+              const pct = total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0;
+              return (
+                <button
+                  key={testId}
+                  type="button"
+                  className="admin-tin-row is-clickable"
+                  onClick={() => onGoToCerts(filter)}
+                  data-testid={testId}
+                >
+                  <div className="admin-tin-row__top">
+                    <span className="admin-tin-row__nm">{label}</span>
+                    <span className="admin-tin-row__ct">{count}</span>
+                  </div>
+                  <div className="admin-track">
+                    <i style={{ width: `${pct}%` }} />
+                  </div>
+                </button>
+              );
+            })}
           </div>
-        </div>
+        </Panel>
       </div>
 
       <CapacitySection />
       <StolenReportsSection />
 
-      <div className="border border-[#D4AF37]/20 rounded-lg p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[#D4AF37] font-bold tracking-widest text-xs uppercase" data-testid="text-recent-title">
-            Recent Activity
-          </h3>
+      <Panel
+        className="mt-[14px]"
+        title={<span data-testid="text-recent-title">Recent Activity</span>}
+        actions={
           <button
+            type="button"
             onClick={() => onGoToCerts({})}
-            className="text-[#D4AF37]/50 hover:text-[#D4AF37] text-xs transition-colors flex items-center gap-1"
+            className={adminButtonClass({ variant: "ghost", size: "sm" })}
             data-testid="button-view-all"
           >
             View All Certificates <ArrowRight size={11} />
           </button>
-        </div>
+        }
+      >
         {stats?.recentCerts && stats.recentCerts.length > 0 ? (
-          <div className="space-y-0">
+          <div className="admin-recent">
             {stats.recentCerts.map((cert) => {
               const gt = (cert as any).gradeType || "numeric";
               const isNN = isNonNumericGrade(gt);
@@ -1198,10 +958,12 @@ function DashboardView({
             })}
           </div>
         ) : (
-          <p className="text-[#999999] text-sm text-center py-8">No certificates yet</p>
+          <p className="text-center text-sm" style={{ padding: "32px 0", color: "var(--admin-ink-faint)" }}>
+            No certificates yet
+          </p>
         )}
-      </div>
-    </div>
+      </Panel>
+    </>
   );
 }
 
@@ -1220,93 +982,40 @@ function RecentCertRow({ cert, gradeDisplay }: { cert: CertificateRecord; gradeD
     window.open(`/cert/${cert.certId}`, "_blank");
   };
 
+  const statusVariant: AdminBadgeVariant =
+    cert.status === "active" || cert.status === "published" ? "act" : cert.status === "voided" ? "red" : "neu";
+
   return (
     <div
       onClick={handleOpen}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && handleOpen()}
-      className="flex items-center justify-between py-2.5 px-2 -mx-2 rounded border border-transparent
-        cursor-pointer hover:bg-[#D4AF37]/5 hover:border-[#D4AF37]/15 active:scale-[0.99] active:bg-[#D4AF37]/8
-        border-b border-b-[#D4AF37]/5 last:border-b-0 transition-all select-none group"
+      className="admin-recent-row"
       data-testid={`recent-cert-${cert.id}`}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex items-center gap-1 shrink-0">
-          <span className="text-[#D4AF37] font-mono text-xs font-bold">{cert.certId}</span>
-          <button
-            onClick={handleCopy}
-            title="Copy cert ID"
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-[#D4AF37]/40 hover:text-[#D4AF37] p-0.5 rounded"
-            data-testid={`button-copy-certid-${cert.id}`}
-          >
-            {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-          </button>
-        </div>
-        <span className="text-[#1A1A1A] text-sm truncate">{cert.cardName}</span>
-        <span className="text-[#D4AF37]/40 text-xs shrink-0 hidden sm:inline">{cert.setName}</span>
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-[#1A1A1A] font-bold text-sm">{gradeDisplay}</span>
-        <span
-          className={`text-xs px-1.5 py-0.5 rounded ${
-            cert.status === "active" || cert.status === "published"
-              ? "bg-green-50 text-green-600"
-              : cert.status === "voided"
-                ? "bg-red-50 text-red-600"
-                : "bg-gray-500/20 text-[#333333]"
-          }`}
+      <div className="admin-recent-row__l">
+        <span className="admin-recent-row__id">{cert.certId}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Copy cert ID"
+          className="admin-recent-copy"
+          data-testid={`button-copy-certid-${cert.id}`}
         >
-          {cert.status}
-        </span>
-        <span className="text-[#999999] text-xs hidden sm:inline">
+          {copied ? <Check size={11} style={{ color: "var(--admin-green)" }} /> : <Copy size={11} />}
+        </button>
+        <span className="admin-recent-row__nm">{cert.cardName}</span>
+        <span className="admin-recent-row__set hidden sm:inline">{cert.setName}</span>
+      </div>
+      <div className="admin-recent-row__r">
+        <span className="admin-recent-row__gr">{gradeDisplay}</span>
+        <Badge variant={statusVariant}>{cert.status}</Badge>
+        <span className="admin-recent-row__dt hidden sm:inline">
           {cert.createdAt ? new Date(cert.createdAt).toLocaleDateString("en-GB") : ""}
         </span>
-        <ArrowRight size={12} className="text-[#D4AF37]/15 group-hover:text-[#D4AF37]/40 transition-colors" />
+        <ArrowRight size={12} style={{ color: "var(--admin-ink-faint)" }} />
       </div>
-    </div>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  icon,
-  testId,
-  onClick,
-}: {
-  label: string;
-  value: number | string;
-  icon: React.ReactNode;
-  testId: string;
-  onClick?: () => void;
-}) {
-  const isString = typeof value === "string";
-  const clickable = !!onClick;
-  return (
-    <div
-      onClick={onClick}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e) => e.key === "Enter" && onClick?.() : undefined}
-      className={`border border-[#D4AF37]/20 rounded-lg p-5 flex items-center gap-4 relative transition-all select-none
-        ${
-          clickable
-            ? "cursor-pointer hover:border-[#D4AF37]/50 hover:bg-[#D4AF37]/5 hover:shadow-[0_0_14px_rgba(212,175,55,0.12)] active:scale-[0.98] active:bg-[#D4AF37]/10"
-            : ""
-        }`}
-      data-testid={testId}
-    >
-      <div className="w-10 h-10 rounded-full border border-[#D4AF37]/30 flex items-center justify-center text-[#D4AF37]/60 shrink-0">
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className={`font-bold text-[#D4AF37] ${isString ? "text-sm font-mono tracking-wide" : "text-3xl"}`}>
-          {value}
-        </p>
-        <p className="text-[#999999] text-xs uppercase tracking-wider">{label}</p>
-      </div>
-      {clickable && <ArrowRight size={13} className="text-[#D4AF37]/25 shrink-0" aria-hidden />}
     </div>
   );
 }
@@ -1321,7 +1030,7 @@ function GradeChart({
   const maxCount = Math.max(...data.map((d) => d.count), 1);
 
   return (
-    <div className="flex items-end gap-2 h-40" data-testid="chart-grade-distribution">
+    <div className="admin-bars" data-testid="chart-grade-distribution">
       {data.map((d) => {
         const clickable = !!onGradeClick && d.count > 0;
         return (
@@ -1332,24 +1041,16 @@ function GradeChart({
             tabIndex={clickable ? 0 : undefined}
             onKeyDown={clickable ? (e) => e.key === "Enter" && onGradeClick!(d.grade) : undefined}
             title={clickable ? `View grade ${d.grade} certificates` : undefined}
-            className={`flex-1 flex flex-col items-center gap-1 h-full justify-end group select-none
-              ${clickable ? "cursor-pointer" : ""}`}
+            className={`admin-bar ${d.count > 0 ? "" : "is-dim"} ${clickable ? "is-clickable" : ""}`
+              .replace(/\s+/g, " ")
+              .trim()}
           >
-            <span className="text-[#D4AF37] text-xs font-bold">{d.count > 0 ? d.count : ""}</span>
+            <span className="admin-bar__val">{d.count > 0 ? d.count : ""}</span>
             <div
-              className={`w-full rounded-t transition-all
-                ${
-                  clickable
-                    ? "bg-[#D4AF37]/30 group-hover:bg-[#D4AF37]/60 group-active:bg-[#D4AF37]/80 group-hover:shadow-[0_0_8px_rgba(212,175,55,0.25)]"
-                    : "bg-[#D4AF37]/15"
-                }`}
+              className="admin-bar__col"
               style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
             />
-            <span
-              className={`text-xs transition-colors ${clickable ? "text-[#999999] group-hover:text-[#D4AF37]" : "text-[#999999]"}`}
-            >
-              {d.grade}
-            </span>
+            <span className="admin-bar__gr">{d.grade}</span>
           </div>
         );
       })}
@@ -1494,150 +1195,117 @@ function CertsView({
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest" data-testid="text-certs-title">
-            CERTIFICATES
-          </h1>
-          <p className="text-[#999999] text-sm">
-            {totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}
-            {hasActiveFilters ? " (filtered)" : ""}
-          </p>
-        </div>
-        <GradientButton as="button" onClick={onNewCert} height="40px" data-testid="button-new-cert">
+    <>
+      <div className="admin-list-head">
+        <h1 className="admin-list-head__t" data-testid="text-certs-title">
+          Certificates
+        </h1>
+        <AdminButton variant="gold" onClick={onNewCert} data-testid="button-new-cert">
           <Plus size={16} /> New Certificate
-        </GradientButton>
+        </AdminButton>
+      </div>
+      <div className="admin-records">
+        {totalCount} total records{voidedCount > 0 ? ` · ${voidedCount} voided` : ""}
+        {hasActiveFilters ? " (filtered)" : ""}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/40" size={16} />
+      <div className="admin-filters">
+        <div className="relative" style={{ flex: 1, minWidth: 200, maxWidth: 360 }}>
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2"
+            size={15}
+            style={{ color: "var(--admin-ink-faint)" }}
+          />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search cert ID, card name, set..."
-            className="w-full bg-transparent border border-[#D4AF37]/30 rounded px-4 py-2 pl-9 text-[#1A1A1A] text-sm placeholder:text-[#D4AF37]/30 focus:outline-none focus:border-[#D4AF37] transition-colors"
+            placeholder="Search cert ID, card name, set…"
+            className="admin-input"
+            style={{ paddingLeft: 34 }}
             data-testid="input-search-certs"
           />
         </div>
-        <div className="flex gap-1 flex-wrap">
-          {(["all", "active", "voided"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setStatusFilter(f)}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
-                statusFilter === f
-                  ? f === "voided"
-                    ? "bg-red-50 text-red-600 border-red-200"
-                    : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
-              }`}
-              data-testid={`filter-${f}`}
-            >
-              {f}
-              {f === "voided" && voidedCount > 0 ? ` (${voidedCount})` : ""}
-            </button>
-          ))}
-          {(["numeric", "authentic", "altered"] as const).map((gt) => (
-            <button
-              key={gt}
-              onClick={() => setGradeTypeFilter(gradeTypeFilter === gt ? "all" : gt)}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
-                gradeTypeFilter === gt
-                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
-              }`}
-              data-testid={`filter-gradetype-${gt}`}
-            >
-              {gt === "numeric" ? "Numeric" : gt === "authentic" ? "Auth Only" : "Altered"}
-            </button>
-          ))}
-          <div className="w-px h-5 bg-[#D4AF37]/10" />
-          {(["all", "claimed", "unclaimed"] as const).map((o) => (
-            <button
-              key={o}
-              onClick={() => setOwnershipFilter(o)}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors flex items-center gap-1 ${
-                ownershipFilter === o
-                  ? o === "claimed"
-                    ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                    : o === "unclaimed"
-                      ? "bg-gray-700 text-[#333333] border-gray-600"
-                      : "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
-              }`}
-              data-testid={`filter-ownership-${o}`}
-            >
-              {o === "claimed" && <Shield size={9} />}
-              {o === "claimed" ? `Claimed (${claimedCount})` : o === "unclaimed" ? "Unclaimed" : "All Ownership"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <label className="text-[#999999] text-xs">Grading:</label>
-        <div className="flex gap-1 flex-wrap">
-          {(["all", "awaiting_images", "awaiting_grade", "in_progress", "graded"] as const).map((g) => (
-            <button
-              key={g}
-              onClick={() => setGradingStatusFilter(g)}
-              className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                gradingStatusFilter === g
-                  ? "bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/40"
-                  : "text-[#999999] border-[#E8E4DC] hover:text-[#333333]"
-              }`}
-              data-testid={`filter-grading-${g}`}
-            >
-              {g === "all" ? "All" : `${GRADING_STATUS_LABEL[g]} (${gradingCounts[g]})`}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          <label className="text-[#999999] text-xs">Grade:</label>
-          <select
-            value={gradeFilter}
-            onChange={(e) => setGradeFilter(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
-            data-testid="select-grade-filter"
+        {(["all", "active", "voided"] as const).map((f) => (
+          <Chip
+            key={f}
+            active={statusFilter === f}
+            count={f === "voided" && voidedCount > 0 ? voidedCount : undefined}
+            onClick={() => setStatusFilter(f)}
+            className="capitalize"
+            testId={`filter-${f}`}
           >
-            <option value="" className="bg-white">
-              All grades
+            {f}
+          </Chip>
+        ))}
+        <span className="admin-filters__div" />
+        {(["numeric", "authentic", "altered"] as const).map((gt) => (
+          <Chip
+            key={gt}
+            active={gradeTypeFilter === gt}
+            onClick={() => setGradeTypeFilter(gradeTypeFilter === gt ? "all" : gt)}
+            testId={`filter-gradetype-${gt}`}
+          >
+            {gt === "numeric" ? "Numeric" : gt === "authentic" ? "Auth Only" : "Altered"}
+          </Chip>
+        ))}
+        <span className="admin-filters__div" />
+        {(["all", "claimed", "unclaimed"] as const).map((o) => (
+          <Chip
+            key={o}
+            active={ownershipFilter === o}
+            count={o === "claimed" ? claimedCount : undefined}
+            onClick={() => setOwnershipFilter(o)}
+            testId={`filter-ownership-${o}`}
+          >
+            {o === "claimed" && <Shield size={11} style={{ marginRight: 5 }} />}
+            {o === "claimed" ? "Claimed" : o === "unclaimed" ? "Unclaimed" : "All Ownership"}
+          </Chip>
+        ))}
+      </div>
+
+      <div className="admin-filters">
+        <span className="admin-filters__lab">Grading</span>
+        {(["all", "awaiting_images", "awaiting_grade", "in_progress", "graded"] as const).map((g) => (
+          <Chip
+            key={g}
+            active={gradingStatusFilter === g}
+            count={g === "all" ? undefined : gradingCounts[g]}
+            onClick={() => setGradingStatusFilter(g)}
+            testId={`filter-grading-${g}`}
+          >
+            {g === "all" ? "All" : GRADING_STATUS_LABEL[g]}
+          </Chip>
+        ))}
+      </div>
+
+      <div className="admin-daterow">
+        <span className="admin-filters__lab">Grade</span>
+        <select value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)} data-testid="select-grade-filter">
+          <option value="">All grades</option>
+          {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+            <option key={g} value={String(g)}>
+              {g}
             </option>
-            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
-              <option key={g} value={String(g)} className="bg-white">
-                {g}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-[#999999] text-xs">From:</label>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
-            data-testid="input-date-from-certs"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-[#999999] text-xs">To:</label>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="bg-transparent border border-[#D4AF37]/30 rounded px-2 py-1.5 text-[#1A1A1A] text-xs focus:outline-none focus:border-[#D4AF37] transition-colors"
-            data-testid="input-date-to-certs"
-          />
-        </div>
+          ))}
+        </select>
+        <span className="admin-filters__lab">From</span>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          data-testid="input-date-from-certs"
+        />
+        <span className="admin-filters__lab">To</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          data-testid="input-date-to-certs"
+        />
         {hasActiveFilters && (
           <button
+            type="button"
             onClick={() => {
               setStatusFilter("all");
               setGradeTypeFilter("all");
@@ -1648,7 +1316,7 @@ function CertsView({
               setOwnershipFilter("all");
               setGradingStatusFilter("all");
             }}
-            className="text-xs text-[#999999] hover:text-[#D4AF37] flex items-center gap-1 transition-colors"
+            className={adminButtonClass({ variant: "ghost", size: "sm" })}
             data-testid="button-clear-filters-certs"
           >
             <X size={12} /> Clear filters
@@ -1657,15 +1325,18 @@ function CertsView({
       </div>
 
       {isLoading ? (
-        <div className="animate-pulse space-y-3">
+        <div className="animate-pulse" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-16 bg-[#D4AF37]/5 rounded" />
+            <div key={i} style={{ height: 84, borderRadius: "var(--admin-r)", background: "var(--admin-line-soft)" }} />
           ))}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 border border-[#D4AF37]/10 rounded-lg">
-          <FileText className="mx-auto text-[#D4AF37]/20 mb-3" size={40} />
-          <p className="text-[#999999]">
+        <div
+          className="text-center"
+          style={{ padding: "64px 0", border: "1px solid var(--admin-line-soft)", borderRadius: "var(--admin-r)" }}
+        >
+          <FileText className="mx-auto mb-3" size={40} style={{ color: "var(--admin-ink-faint)", opacity: 0.55 }} />
+          <p style={{ color: "var(--admin-ink-dim)" }}>
             {searchQuery
               ? "No matching certificates"
               : statusFilter === "voided"
@@ -1674,7 +1345,7 @@ function CertsView({
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div>
           {filtered.map((cert) => (
             <CertRow
               key={cert.id}
@@ -1686,7 +1357,7 @@ function CertsView({
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -1736,184 +1407,134 @@ function CertRow({
     }
   }
 
+  const gs = gradingStatus(cert);
+  const labelLinkClass = adminButtonClass({ variant: "ghost", size: "sm" });
+
   return (
-    <div className="border border-[#D4AF37]/15 rounded-lg p-4 flex flex-col gap-3" data-testid={`cert-row-${cert.id}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-4 min-w-0 flex-1">
+    <div className="admin-cert" data-testid={`cert-row-${cert.id}`}>
+      <div className="admin-cert__top">
+        <div className="admin-thumb">
           {(cert as any).frontImageUrl || cert.frontImagePath ? (
-            <img
-              src={(cert as any).frontImageUrl || cert.frontImagePath}
-              alt={cert.cardName ?? ""}
-              className="w-10 h-14 object-cover rounded border border-[#D4AF37]/20"
-            />
+            <img src={(cert as any).frontImageUrl || cert.frontImagePath} alt={cert.cardName ?? ""} />
           ) : (
-            <div className="w-10 h-14 rounded border border-[#D4AF37]/10 flex items-center justify-center">
-              <Image size={14} className="text-[#D4AF37]/20" />
-            </div>
+            <Image />
           )}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[#D4AF37] font-mono text-xs font-bold" data-testid={`text-cert-id-${cert.id}`}>
-                {cert.certId}
-              </span>
-              <span
-                className={`text-xs px-1.5 py-0.5 rounded ${
-                  cert.status === "active" || cert.status === "published"
-                    ? "bg-green-50 text-green-600"
-                    : cert.status === "voided"
-                      ? "bg-red-50 text-red-600"
-                      : "bg-gray-500/20 text-[#333333]"
-                }`}
-              >
-                {cert.status === "active" || cert.status === "published" ? (
-                  <Eye size={10} className="inline mr-0.5" />
-                ) : (
-                  <EyeOff size={10} className="inline mr-0.5" />
-                )}
-                {cert.status}
-              </span>
-              {(cert as any).ownershipStatus === "claimed" ? (
-                <span
-                  className="text-xs px-1.5 py-0.5 rounded bg-[#D4AF37]/20 text-[#D4AF37] flex items-center gap-0.5"
-                  data-testid={`badge-owned-${cert.id}`}
-                >
-                  <Shield size={9} className="inline" /> claimed
-                </span>
-              ) : (
-                <span
-                  className="text-xs px-1.5 py-0.5 rounded bg-[#E8E4DC] text-[#999999]"
-                  data-testid={`badge-unclaimed-${cert.id}`}
-                >
-                  unclaimed
-                </span>
-              )}
-              {(() => {
-                const gs = gradingStatus(cert);
-                return (
-                  <span
-                    className={`text-xs px-1.5 py-0.5 rounded ${GRADING_STATUS_BADGE_CLASS[gs]}`}
-                    data-testid={`badge-grading-status-${cert.id}`}
-                  >
-                    {GRADING_STATUS_LABEL[gs]}
-                  </span>
-                );
-              })()}
-              <span className="text-[#1A1A1A] font-bold text-sm">{isNonNum ? label : `${grade} ${label}`}</span>
-            </div>
-            <p className="text-[#1A1A1A] text-sm font-medium truncate" data-testid={`text-cert-name-${cert.id}`}>
-              {cert.cardName}
-            </p>
-            <p className="text-[#999999] text-xs truncate">
-              {cert.cardGame} · {cert.setName} · {cert.cardNumber}
-              {cert.variant ? ` · ${cert.variant}` : ""}
-            </p>
-            <p
-              className="text-[#999999] text-[10px] mt-1 flex items-center gap-1.5 flex-wrap"
-              data-testid={`text-embed-status-${cert.id}`}
+        </div>
+        <div className="admin-cert__info">
+          <div className="admin-cid-row">
+            <span className="admin-cid" data-testid={`text-cert-id-${cert.id}`}>
+              {cert.certId}
+            </span>
+            <Badge
+              variant={
+                cert.status === "active" || cert.status === "published"
+                  ? "act"
+                  : cert.status === "voided"
+                    ? "red"
+                    : "neu"
+              }
             >
-              <Database size={9} className="text-[#D4AF37]/60" />
-              <span>
-                Last embedded:{" "}
-                {embeddedAt
-                  ? embeddedAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-                  : "never"}
-              </span>
-              {isStaleEmbedding && (
-                <span
-                  className="text-[9px] uppercase tracking-wider bg-orange-50 text-orange-600 border border-orange-200 px-1 py-px rounded font-bold"
-                  data-testid={`badge-embed-stale-${cert.id}`}
-                >
-                  STALE
-                </span>
-              )}
-            </p>
+              {cert.status === "active" || cert.status === "published" ? <Eye size={10} /> : <EyeOff size={10} />}
+              {cert.status}
+            </Badge>
+            {(cert as any).ownershipStatus === "claimed" ? (
+              <Badge variant="gold" testId={`badge-owned-${cert.id}`}>
+                <Shield size={9} /> claimed
+              </Badge>
+            ) : (
+              <Badge variant="neu" testId={`badge-unclaimed-${cert.id}`}>
+                unclaimed
+              </Badge>
+            )}
+            <Badge variant={GRADING_STATUS_VARIANT[gs]} testId={`badge-grading-status-${cert.id}`}>
+              {GRADING_STATUS_LABEL[gs]}
+            </Badge>
+            <span className="admin-gradechip">{isNonNum ? label : `${grade} ${label}`}</span>
+          </div>
+          <div className="admin-cname" data-testid={`text-cert-name-${cert.id}`}>
+            {cert.cardName}
+          </div>
+          <div className="admin-cmeta">
+            {cert.cardGame} · {cert.setName} · {cert.cardNumber}
+            {cert.variant ? ` · ${cert.variant}` : ""}
+          </div>
+          <div
+            className="admin-cmeta"
+            style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}
+            data-testid={`text-embed-status-${cert.id}`}
+          >
+            <Database size={9} style={{ color: "var(--admin-gold)" }} />
+            <span>
+              Last embedded:{" "}
+              {embeddedAt
+                ? embeddedAt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                : "never"}
+            </span>
+            {isStaleEmbedding && (
+              <Badge variant="prog" testId={`badge-embed-stale-${cert.id}`}>
+                STALE
+              </Badge>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={onEdit}
-            className="text-[#D4AF37]/50 hover:text-[#D4AF37] p-1.5 border border-[#D4AF37]/20 rounded transition-colors"
-            title="Edit"
-            data-testid={`button-edit-${cert.id}`}
-          >
+        <div className="admin-cert__acts">
+          <AdminButton iconOnly onClick={onEdit} title="Edit" data-testid={`button-edit-${cert.id}`}>
             <Edit size={12} />
-          </button>
+          </AdminButton>
           {cert.status !== "voided" && (
-            <button
-              onClick={onVoid}
-              className="text-orange-400/50 hover:text-orange-400 p-1.5 border border-orange-400/20 rounded transition-colors"
-              title="Void certificate"
-              data-testid={`button-void-${cert.id}`}
-            >
+            <AdminButton iconOnly onClick={onVoid} title="Void certificate" data-testid={`button-void-${cert.id}`}>
               <Ban size={12} />
-            </button>
+            </AdminButton>
           )}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-[#D4AF37]/10 pt-3">
-        <span className="text-[#D4AF37]/40 text-xs uppercase tracking-wider mr-1">Labels:</span>
-
-        <button
-          onClick={onPreview}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
-          data-testid={`button-preview-${cert.id}`}
-        >
+      <div className="admin-labels">
+        <span className="admin-labels__lab">Labels</span>
+        <button type="button" onClick={onPreview} className={labelLinkClass} data-testid={`button-preview-${cert.id}`}>
           <Eye size={10} /> Preview
         </button>
-
-        <span className="text-[#D4AF37]/20">|</span>
-
         <a
           href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className={labelLinkClass}
           data-testid={`button-dl-front-pdf-${cert.id}`}
         >
           <Download size={10} /> Front PDF
         </a>
         <a
           href={`/api/admin/certificates/${cert.id}/label/front?format=png`}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className={labelLinkClass}
           data-testid={`button-dl-front-png-${cert.id}`}
         >
           <Download size={10} /> Front PNG
         </a>
-
-        <span className="text-[#D4AF37]/20">|</span>
-
         <a
           href={`/api/admin/certificates/${cert.id}/label/back?format=pdf`}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className={labelLinkClass}
           data-testid={`button-dl-back-pdf-${cert.id}`}
         >
           <Download size={10} /> Back PDF
         </a>
         <a
           href={`/api/admin/certificates/${cert.id}/label/back?format=png`}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className={labelLinkClass}
           data-testid={`button-dl-back-png-${cert.id}`}
         >
           <Download size={10} /> Back PNG
         </a>
-
-        <span className="text-[#D4AF37]/20">|</span>
-
         <a
           href={`/api/admin/certificates/${cert.id}/label/both?format=pdf`}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors"
+          className={labelLinkClass}
           data-testid={`button-dl-both-pdf-${cert.id}`}
         >
           <Printer size={10} /> Both PDF
         </a>
-
-        <span className="text-[#D4AF37]/20">|</span>
-
         <button
           type="button"
           onClick={handleReembed}
           disabled={reembedBusy}
-          className="text-xs text-[#D4AF37]/60 hover:text-[#D4AF37] border border-[#D4AF37]/20 hover:border-[#D4AF37]/40 rounded px-2 py-1 flex items-center gap-1 transition-colors disabled:opacity-60"
+          className={labelLinkClass}
           title={
             isStaleEmbedding ? "Re-embed: cert has changed since last embed" : "Re-embed: force regenerate RAG vector"
           }
@@ -1922,7 +1543,7 @@ function CertRow({
           <Database size={10} /> {reembedBusy ? "…" : "Re-embed"}
         </button>
         {reembedMsg && (
-          <span className="text-[10px] text-[#666666]" data-testid={`text-reembed-msg-${cert.id}`}>
+          <span style={{ fontSize: 10, color: "var(--admin-ink-faint)" }} data-testid={`text-reembed-msg-${cert.id}`}>
             {reembedMsg}
           </span>
         )}
@@ -1946,62 +1567,67 @@ function VoidConfirmationModal({
   const [reason, setReason] = useState("");
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" data-testid="modal-void">
-      <div className="bg-white border border-red-500/30 rounded-lg max-w-md w-full p-6">
+    <div className="admin-modal-overlay" data-testid="modal-void">
+      <div className="admin-modal">
         <div className="flex items-center gap-3 mb-4">
-          <AlertTriangle className="text-red-400 shrink-0" size={24} />
-          <h3 className="text-red-400 font-bold tracking-wider text-sm uppercase">Void Certificate</h3>
+          <AlertTriangle style={{ color: "var(--admin-red)", flexShrink: 0 }} size={24} />
+          <h3 className="font-bold tracking-wider text-sm uppercase" style={{ color: "var(--admin-red)" }}>
+            Void Certificate
+          </h3>
         </div>
-        <p className="text-[#333333] text-sm mb-2">
-          You are about to void certificate <span className="text-[#1A1A1A] font-mono font-bold">{cert.certId}</span>.
+        <p className="text-sm mb-2" style={{ color: "var(--admin-ink-dim)" }}>
+          You are about to void certificate{" "}
+          <span style={{ fontFamily: "var(--admin-mono)", fontWeight: 700, color: "var(--admin-ink)" }}>
+            {cert.certId}
+          </span>
+          .
         </p>
-        <p className="text-[#333333] text-xs mb-4">
+        <p className="text-xs mb-4" style={{ color: "var(--admin-ink-faint)" }}>
           This action is permanent. The certificate will be marked as VOIDED and will display as voided on the public
           lookup page. The certificate ID will be preserved.
         </p>
 
         <div className="mb-3">
-          <label className="text-[#333333] text-xs block mb-1">Reason (optional)</label>
+          <label className="admin-field-label">Reason (optional)</label>
           <input
             type="text"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. Issued in error, duplicate entry..."
-            className="w-full bg-transparent border border-[#E8E4DC] rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-red-500/50 transition-colors"
+            placeholder="e.g. Issued in error, duplicate entry…"
+            className="admin-input"
             data-testid="input-void-reason"
           />
         </div>
 
         <div className="mb-5">
-          <label className="text-[#333333] text-xs block mb-1">
-            Type <span className="text-red-400 font-bold">VOID</span> to confirm
+          <label className="admin-field-label">
+            Type <span style={{ color: "var(--admin-red)", fontWeight: 700 }}>VOID</span> to confirm
           </label>
           <input
             type="text"
             value={typed}
             onChange={(e) => setTyped(e.target.value.toUpperCase())}
             placeholder="VOID"
-            className="w-full bg-transparent border border-[#E8E4DC] rounded px-3 py-2 text-[#1A1A1A] text-sm placeholder:text-[#999999] focus:outline-none focus:border-red-500/50 transition-colors font-mono tracking-wider"
+            className="admin-input"
+            style={{ fontFamily: "var(--admin-mono)", letterSpacing: "0.12em" }}
             data-testid="input-void-confirm"
           />
         </div>
 
         <div className="flex items-center gap-3 justify-end">
-          <button
-            onClick={onCancel}
-            className="text-[#333333] hover:text-[#1A1A1A] text-sm px-4 py-2 rounded border border-[#E8E4DC] hover:border-gray-500 transition-colors"
-            data-testid="button-void-cancel"
-          >
+          <AdminButton onClick={onCancel} data-testid="button-void-cancel">
             Cancel
-          </button>
+          </AdminButton>
           <button
+            type="button"
             onClick={() => onConfirm(reason)}
             disabled={typed !== "VOID" || isPending}
-            className="bg-red-600 hover:bg-red-500 disabled:bg-gray-700 disabled:text-[#999999] text-[#1A1A1A] text-sm px-4 py-2 rounded font-medium tracking-wide transition-colors flex items-center gap-2"
+            className="admin-btn"
+            style={{ background: "var(--admin-red)", color: "#1a0c0a", borderColor: "var(--admin-red)" }}
             data-testid="button-void-submit"
           >
             <Ban size={14} />
-            {isPending ? "Voiding..." : "Void Certificate"}
+            {isPending ? "Voiding…" : "Void Certificate"}
           </button>
         </div>
       </div>
@@ -2012,94 +1638,96 @@ function VoidConfirmationModal({
 function LabelPreviewModal({ cert, onClose }: { cert: CertificateRecord; onClose: () => void }) {
   const ts = Date.now();
 
+  const previewTileStyle: React.CSSProperties = {
+    background: "#FAFAF8",
+    borderRadius: 10,
+    padding: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+  const dlClass = adminButtonClass({ size: "sm" });
+
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white border border-[#D4AF37]/30 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-[#D4AF37]/20">
+    <div className="admin-modal-overlay" onClick={onClose}>
+      <div className="admin-modal admin-modal--wide" onClick={(e) => e.stopPropagation()}>
+        <div className="admin-panel__head">
           <div>
-            <h3 className="text-[#D4AF37] font-bold tracking-widest text-sm" data-testid="text-preview-title">
-              LABEL PREVIEW
-            </h3>
-            <p className="text-[#999999] text-xs mt-0.5">
+            <div className="admin-panel__title" data-testid="text-preview-title">
+              Label Preview
+            </div>
+            <div className="admin-panel__sub">
               {cert.certId} · {cert.cardName}
-            </p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-[#D4AF37]/50 hover:text-[#D4AF37] transition-colors"
-            data-testid="button-close-preview"
-          >
-            <X size={18} />
-          </button>
+          <AdminButton iconOnly onClick={onClose} data-testid="button-close-preview">
+            <X size={16} />
+          </AdminButton>
         </div>
 
-        <div className="p-4 space-y-6">
+        <div className="space-y-6">
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Front Label (70mm x 20mm)</p>
-            <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
+            <p className="admin-field-label">Front Label (70mm × 20mm)</p>
+            <div style={previewTileStyle}>
               <img
                 src={`/api/admin/certificates/${cert.id}/label/front?format=png&preview=1&t=${ts}`}
                 alt="Front label preview"
-                className="max-w-full h-auto border border-[#D4AF37]/20 rounded"
-                style={{ imageRendering: "auto" }}
+                className="max-w-full h-auto"
+                style={{ imageRendering: "auto", border: "1px solid var(--admin-line-soft)", borderRadius: 6 }}
                 data-testid="img-preview-front"
               />
             </div>
           </div>
 
           <div>
-            <p className="text-[#D4AF37]/60 text-xs uppercase tracking-wider mb-2">Back Label (70mm x 20mm)</p>
-            <div className="bg-[#FAFAF8] rounded-lg p-3 flex items-center justify-center">
+            <p className="admin-field-label">Back Label (70mm × 20mm)</p>
+            <div style={previewTileStyle}>
               <img
                 src={`/api/admin/certificates/${cert.id}/label/back?format=png&preview=1&t=${ts}`}
                 alt="Back label preview"
-                className="max-w-full h-auto border border-[#D4AF37]/20 rounded"
-                style={{ imageRendering: "auto" }}
+                className="max-w-full h-auto"
+                style={{ imageRendering: "auto", border: "1px solid var(--admin-line-soft)", borderRadius: 6 }}
                 data-testid="img-preview-back"
               />
             </div>
           </div>
 
-          <div className="border-t border-[#D4AF37]/10 pt-4">
-            <p className="text-[#999999] text-xs mb-3">Print specs: 826 x 236px at 300 DPI = 70mm x 20mm exact</p>
+          <div style={{ borderTop: "1px solid var(--admin-line-soft)", paddingTop: 16 }}>
+            <p className="text-xs mb-3" style={{ color: "var(--admin-ink-faint)" }}>
+              Print specs: 826 × 236px at 300 DPI = 70mm × 20mm exact
+            </p>
             <div className="flex flex-wrap gap-2">
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=pdf`}
-                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
+                className={dlClass}
                 data-testid="button-modal-dl-front-pdf"
               >
                 <Download size={11} /> Front PDF
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/front?format=png`}
-                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
+                className={dlClass}
                 data-testid="button-modal-dl-front-png"
               >
                 <Download size={11} /> Front PNG
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/back?format=pdf`}
-                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
+                className={dlClass}
                 data-testid="button-modal-dl-back-pdf"
               >
                 <Download size={11} /> Back PDF
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/back?format=png`}
-                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
+                className={dlClass}
                 data-testid="button-modal-dl-back-png"
               >
                 <Download size={11} /> Back PNG
               </a>
               <a
                 href={`/api/admin/certificates/${cert.id}/label/both?format=pdf`}
-                className="text-xs text-[#D4AF37] border border-[#D4AF37]/30 rounded px-3 py-1.5 flex items-center gap-1.5 hover:bg-[#D4AF37]/10 transition-colors"
+                className={dlClass}
                 data-testid="button-modal-dl-both-pdf"
               >
                 <Printer size={11} /> Both PDF
