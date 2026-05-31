@@ -9150,7 +9150,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // POST /api/admin/certificates/:id/recrop — manual crop override
   app.post("/api/admin/certificates/:id/recrop", requireAdmin, async (req, res) => {
     try {
-      const { generateVariants: gv } = await import("./image-processing");
+      const { generateVariants: gv, maskRoundedCorners } = await import("./image-processing");
       const sharpFn = (await import("sharp")).default;
 
       const id = parseInt(String(req.params.id), 10);
@@ -9203,12 +9203,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
 
-      const cropped = await sharpFn(workBuf)
-        .extract({ left, top, width: w, height: h })
-        // Belt-and-braces: flatten any residual alpha/transparency to white
-        // before JPEG encoding (which would otherwise default to black for
-        // transparent pixels — root cause of earlier black-corners bug).
-        .flatten({ background: "#ffffff" })
+      // Extract the operator-chosen crop as a lossless PNG intermediate so
+      // the rounded-corner mask below operates on un-recompressed pixels
+      // (avoids a JPEG round-trip on the very corners the operator just
+      // dialled in via the 8-dot tool).
+      const extracted = await sharpFn(workBuf).extract({ left, top, width: w, height: h }).png().toBuffer();
+
+      // Round corners to match a real Pokémon card — same maskRoundedCorners
+      // the auto-pipeline applies to upload-images / pre-grade / backfill
+      // outputs (CARD_CORNER_RADIUS_PCT = 3% of min(w,h), calibrated against
+      // real scans). The mask sets alpha=0 in the corner triangles with
+      // RGB=white underneath; the flatten below renders them as clean white.
+      // Centering is computed from the dot coordinates by /manual-centering
+      // (shared/centering.ts) on a separate call — this purely cosmetic
+      // rounding does NOT affect the measurement.
+      const masked = await maskRoundedCorners(extracted);
+
+      // Final flatten + JPEG. Same q85 mozjpeg progressive as the auto-crop
+      // pipeline (routes.ts:8782-8784) so manual + auto outputs share an
+      // encoding spec. Flatten-to-white also belt-and-braces against the
+      // earlier black-corners regression: any residual alpha (including the
+      // rounded corner triangles we just masked) renders as white, not the
+      // JPEG-default black.
+      const cropped = await sharpFn(masked)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
         .jpeg({ quality: 85, progressive: true, mozjpeg: true })
         .toBuffer();
 
