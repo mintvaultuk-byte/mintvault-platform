@@ -385,3 +385,27 @@ export function gradeFromMvgsScore(score: number): number {
   if (score >= 11) return 2; // Fair 2
   return 1; // Poor 1
 }
+
+/**
+ * MVGS tier NAME for a numeric 1-10 grade (no score, no trailing number).
+ * Single source of truth for grade→name on the physical slab and the cert
+ * page, so the two can never disagree. Mirrors the tier vocabulary in
+ * gradeLabelForScore / gradeFromMvgsScore but keyed by the grade itself, so a
+ * half-grade renders its TRUE tier (8.5 → "NM-Mint+", 7.5 → "NM+") instead of
+ * being rounded up into the next whole tier. Callers uppercase as needed.
+ */
+export function mvgsTierName(grade: number): string {
+  if (grade >= 10) return "Gem Mint";
+  if (grade >= 9.5) return "Mint+";
+  if (grade >= 9) return "Mint";
+  if (grade >= 8.5) return "NM-Mint+";
+  if (grade >= 8) return "NM-Mint";
+  if (grade >= 7.5) return "NM+";
+  if (grade >= 7) return "Near Mint";
+  if (grade >= 6) return "Excellent-Mint";
+  if (grade >= 5) return "Excellent";
+  if (grade >= 4) return "Very Good-Excellent";
+  if (grade >= 3) return "Good";
+  if (grade >= 2) return "Fair";
+  return "Poor";
+}

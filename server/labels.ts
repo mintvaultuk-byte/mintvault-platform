@@ -1,7 +1,8 @@
 import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
-import { gradeLabel, gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { mvgsTierName } from "@shared/mvgs-scoring";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
@@ -495,7 +496,11 @@ async function drawFront(
 ) {
   const gradeType = cert.gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
-  const grade = isNonNum ? 0 : Math.round(parseFloat(cert.gradeOverall || "0"));
+  // v-halfgrade: render the TRUE grade (no Math.round). A half-grade like 8.5
+  // must print "8.5" on the slab, matching the online cert — rounding to "9"
+  // overstated the grade by half a tier. String(8.5)="8.5", String(9)="9",
+  // String(10)="10" (no trailing .0).
+  const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
   const PANEL_W = 148; // right grade panel (≈ 18%, -5.7%)
@@ -557,7 +562,10 @@ async function drawFront(
     ctx.stroke();
 
     const gradeStr = String(grade);
-    const gradeAbbr = labelBg === "#000000" ? "PRISTINE" : gradeLabel(grade);
+    // Tier NAME from the MVGS table keyed by the grade itself, so the slab and
+    // the online cert page (which also uses the MVGS vocabulary) can never
+    // disagree. Half-grades get their TRUE tier: 8.5 → "NM-MINT+", 7.5 → "NM+".
+    const gradeAbbr = labelBg === "#000000" ? "PRISTINE" : mvgsTierName(grade).toUpperCase();
 
     // ── Three equal 52-px zones inside the panel ─────────────────────
     // Panel y=18 → y=174 (panelH=156); each zone centre is the middle
@@ -607,10 +615,18 @@ async function drawFront(
     ctx.shadowBlur = 0;
     ctx.shadowColor = "transparent";
 
-    // Element 3 — grade abbreviation (GEM MT) in zone 3 (bottom)
-    const abbrFontSize = 30;
+    // Element 3 — grade tier name in zone 3 (bottom). MVGS names vary in
+    // length ("NM+" → "NM-MINT+" → "EXCELLENT-MINT"), so spacing tightens and
+    // the font shrinks-to-fit the 140-px panel. Short names keep the original
+    // 30 px / 5 px-tracked look; longer ones step down so nothing clips.
+    const abbrLen = gradeAbbr.length;
+    const abbrLetterSpacing = abbrLen <= 6 ? 5 : abbrLen <= 9 ? 2 : 0;
+    // fitFontSize measures glyphs only, so reserve the inter-letter spacing up
+    // front by shrinking the width budget by (len-1)*spacing.
+    const abbrAvailW = PANEL_W - 8 - Math.max(0, abbrLen - 1) * abbrLetterSpacing;
+    const abbrFontSize = fitFontSize(ctx, gradeAbbr, abbrAvailW, 30, 12);
     try {
-      (ctx as any).letterSpacing = "5px";
+      (ctx as any).letterSpacing = `${abbrLetterSpacing}px`;
     } catch {}
     ctx.font = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
     ctx.fillStyle = "#1A1A1A";
