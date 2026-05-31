@@ -124,25 +124,26 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <SquareStack size={15} className="text-[#D4AF37]" />
-          <h3 className="text-[#1A1A1A] text-xs font-bold uppercase tracking-widest">Grading Queue</h3>
-          <span className="bg-[#D4AF37]/20 text-[#D4AF37] text-[10px] px-1.5 py-0.5 rounded font-bold">
+          <SquareStack size={15} className="text-[var(--admin-gold)]" />
+          <h3 className="text-[var(--admin-ink)] text-xs font-bold uppercase tracking-widest">Grading Queue</h3>
+          <span className="bg-[var(--admin-gold)]/20 text-[var(--admin-gold)] text-[10px] px-1.5 py-0.5 rounded font-bold">
             {ungradedCount}
           </span>
         </div>
         {sessionActive && (
           <div className="flex items-center gap-3 text-xs">
-            <span className="flex items-center gap-1 text-[#333333]">
+            <span className="flex items-center gap-1 text-[var(--admin-ink-dim)]">
               <Clock size={11} />
-              Session: <span className="text-[#D4AF37] font-mono font-bold">{formatTime(sessionSeconds)}</span>
+              Session:{" "}
+              <span className="text-[var(--admin-gold)] font-mono font-bold">{formatTime(sessionSeconds)}</span>
             </span>
             {currentCertId && (
-              <span className="flex items-center gap-1 text-[#333333]">
-                Card: <span className="text-[#1A1A1A] font-mono font-bold">{formatTime(cardSeconds)}</span>
+              <span className="flex items-center gap-1 text-[var(--admin-ink-dim)]">
+                Card: <span className="text-[var(--admin-ink)] font-mono font-bold">{formatTime(cardSeconds)}</span>
               </span>
             )}
             {currentIdx >= 0 && (
-              <span className="text-[#555555]">
+              <span className="text-[var(--admin-ink-dim)]">
                 Card {currentIdx + 1} of {queue.length + gradedCards.length}
               </span>
             )}
@@ -156,7 +157,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
           type="button"
           onClick={startSession}
           disabled={queue.length === 0}
-          className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-40 hover:opacity-90"
+          className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-40 hover:opacity-90"
         >
           <Play size={13} />
           Start Grading Session
@@ -167,7 +168,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
             type="button"
             onClick={() => goToCard(currentIdx - 1)}
             disabled={currentIdx <= 0}
-            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30"
+            className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] hover:border-[var(--admin-gold)]/40 p-1.5 rounded transition-colors disabled:opacity-30"
           >
             <ChevronLeft size={14} />
           </button>
@@ -175,7 +176,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
             type="button"
             onClick={() => goToCard(currentIdx + 1)}
             disabled={currentIdx >= queue.length - 1}
-            className="border border-[#E8E4DC] text-[#333333] hover:text-[#1A1A1A] hover:border-[#D4AF37]/40 p-1.5 rounded transition-colors disabled:opacity-30"
+            className="border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] hover:border-[var(--admin-gold)]/40 p-1.5 rounded transition-colors disabled:opacity-30"
           >
             <ChevronRight size={14} />
           </button>
@@ -185,7 +186,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
               setSessionActive(false);
               setShowSummary(true);
             }}
-            className="text-[#555555] text-xs hover:text-[#1A1A1A] ml-2 transition-colors"
+            className="text-[var(--admin-ink-dim)] text-xs hover:text-[var(--admin-ink)] ml-2 transition-colors"
           >
             End Session
           </button>
@@ -194,9 +195,9 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
 
       {/* Queue list */}
       {isLoading ? (
-        <p className="text-[#999999] text-xs">Loading queue…</p>
+        <p className="text-[var(--admin-ink-faint)] text-xs">Loading queue…</p>
       ) : queue.length === 0 ? (
-        <div className="flex items-center gap-2 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg px-3 py-2">
           <CheckCircle2 size={13} />
           All cards graded!
         </div>
@@ -211,34 +212,34 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
               }}
               className={`w-full text-left rounded-lg px-3 py-2.5 border transition-all text-xs ${
                 item.id === currentCertId
-                  ? "border-[#D4AF37] bg-[#D4AF37]/8 ring-1 ring-[#D4AF37]/30"
-                  : "border-[#E8E4DC] bg-[#FAFAF8] hover:border-[#D4AF37]/40 hover:bg-white"
+                  ? "border-[var(--admin-gold)] bg-[var(--admin-gold)]/8 ring-1 ring-[var(--admin-gold)]/30"
+                  : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#888888] text-[9px] font-mono">{item.certId}</span>
+                    <span className="text-[var(--admin-ink-faint)] text-[9px] font-mono">{item.certId}</span>
                     {item.id === currentCertId && (
-                      <span className="text-[#D4AF37] text-[9px] font-bold">● Current</span>
+                      <span className="text-[var(--admin-gold)] text-[9px] font-bold">● Current</span>
                     )}
                   </div>
                   <p
-                    className={`font-semibold truncate ${item.id === currentCertId ? "text-[#1A1A1A]" : "text-[#333333]"}`}
+                    className={`font-semibold truncate ${item.id === currentCertId ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-dim)]"}`}
                   >
                     {item.cardName || "Unnamed"}
                   </p>
-                  <p className="text-[#555555] text-[10px]">
+                  <p className="text-[var(--admin-ink-dim)] text-[10px]">
                     {item.cardSet} · {item.cardGame}
                   </p>
                 </div>
                 <div className="flex-shrink-0 text-right">
                   <div
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.hasImages ? "text-emerald-600 bg-emerald-50" : "text-[#999999] bg-[#F5F5F3]"}`}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.hasImages ? "text-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)]" : "text-[var(--admin-ink-faint)] bg-[var(--admin-panel2)]"}`}
                   >
                     {item.hasImages ? "Images ✓" : "No images"}
                   </div>
-                  <p className="text-[#888888] text-[9px] mt-0.5">
+                  <p className="text-[var(--admin-ink-faint)] text-[9px] mt-0.5">
                     {new Date(item.createdAt).toLocaleDateString("en-GB")}
                   </p>
                 </div>
@@ -250,12 +251,17 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
 
       {/* Graded this session */}
       {gradedCards.length > 0 && (
-        <div className="border-t border-[#E8E4DC] pt-3 space-y-1">
-          <p className="text-[#555555] text-[10px] uppercase tracking-widest">Graded this session</p>
+        <div className="border-t border-[var(--admin-line)] pt-3 space-y-1">
+          <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">Graded this session</p>
           {gradedCards.map((g) => (
-            <div key={g.certId} className="flex items-center justify-between text-xs text-[#333333] py-0.5">
+            <div
+              key={g.certId}
+              className="flex items-center justify-between text-xs text-[var(--admin-ink-dim)] py-0.5"
+            >
               <span className="truncate">{g.cardName}</span>
-              <span className={`font-bold ml-2 ${g.isBlackLabel ? "text-[#D4AF37]" : "text-[#1A1A1A]"}`}>
+              <span
+                className={`font-bold ml-2 ${g.isBlackLabel ? "text-[var(--admin-gold)]" : "text-[var(--admin-ink)]"}`}
+              >
                 {g.grade}
                 {g.isBlackLabel ? " ★" : ""}
               </span>

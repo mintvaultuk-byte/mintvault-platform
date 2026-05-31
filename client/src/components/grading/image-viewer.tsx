@@ -489,10 +489,10 @@ export default function ImageViewer({
                     disabled={!hasImage}
                     className={`flex-shrink-0 rounded-l px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${
                       side === s && !showReference
-                        ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10"
+                        ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
                         : hasImage
-                          ? "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"
-                          : "border-[#E8E4DC] text-[#888888] cursor-not-allowed"
+                          ? "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"
+                          : "border-[var(--admin-line)] text-[var(--admin-ink-faint)] cursor-not-allowed"
                     }`}
                   >
                     {s}
@@ -517,7 +517,7 @@ export default function ImageViewer({
                           onImageDeleted?.();
                         } catch {}
                       }}
-                      className="flex-shrink-0 rounded-r border border-l-0 border-[#D4D0C8] text-[#555555] hover:text-red-600 hover:border-red-400/40 px-1.5 py-1 transition-all"
+                      className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all"
                     >
                       <Trash2 size={10} />
                     </button>
@@ -529,7 +529,7 @@ export default function ImageViewer({
               <button
                 type="button"
                 onClick={() => setShowReference((v) => !v)}
-                className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10" : "border-[#D4D0C8] text-[#333333] hover:border-[#D4AF37]/40"}`}
+                className={`flex-shrink-0 rounded px-3 py-1 text-[10px] font-bold uppercase tracking-wider border transition-all ${showReference ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10" : "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"}`}
               >
                 Reference
               </button>
@@ -548,7 +548,7 @@ export default function ImageViewer({
               key={v.key}
               type="button"
               onClick={() => setVariant(v.key)}
-              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[#D4AF37] border-[#D4AF37]" : "text-[#555555] border-transparent hover:text-[#333333]"}`}
+              className={`flex-shrink-0 px-2.5 py-1 text-[10px] uppercase tracking-widest rounded transition-all border-b-2 ${variant === v.key ? "text-[var(--admin-gold)] border-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] border-transparent hover:text-[var(--admin-ink-dim)]"}`}
             >
               {v.label}
             </button>
@@ -830,7 +830,7 @@ export default function ImageViewer({
                             }}
                             title={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}`}
                             aria-label={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}. Click to edit or delete.`}
-                            className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/60"
+                            className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[var(--admin-gold)]/60"
                             style={{
                               border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
                               background: "transparent",
@@ -914,8 +914,8 @@ export default function ImageViewer({
                       height: 32,
                     }}
                   >
-                    <div className="w-full h-full rounded-full border-2 border-[#D4AF37] bg-transparent" />
-                    <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#555555] text-white px-1 rounded-full leading-none py-0.5">
+                    <div className="w-full h-full rounded-full border-2 border-[var(--admin-gold)] bg-transparent" />
+                    <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[var(--admin-ink-dim)] text-white px-1 rounded-full leading-none py-0.5">
                       {p.localId}
                     </span>
                   </div>
@@ -926,7 +926,7 @@ export default function ImageViewer({
             <InlineDropZone side={side} certId={certId} onUploaded={() => onImageDeleted?.()} />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-[#888888] text-xs">No image</p>
+              <p className="text-[var(--admin-ink-faint)] text-xs">No image</p>
             </div>
           )}
         </div>
@@ -935,7 +935,7 @@ export default function ImageViewer({
           art. Right-aligned row directly under the image, matching the
           existing "Mark Defects / Manual Crop" button row pattern. */}
         <div className="mt-2 flex items-center justify-end">
-          <div className="flex items-center gap-0.5 bg-[#1A1A1A] border border-[#333333] rounded-full px-1 py-0.5">
+          <div className="flex items-center gap-0.5 bg-[var(--admin-panel2)] border border-[var(--admin-line-hard)] rounded-full px-1 py-0.5">
             <button
               type="button"
               onClick={(e) => {
@@ -943,7 +943,7 @@ export default function ImageViewer({
                 zoomOut();
               }}
               disabled={zoom <= 1}
-              className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full"
+              className="w-7 h-7 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
             >
               <ZoomOut size={14} />
             </button>
@@ -957,7 +957,7 @@ export default function ImageViewer({
                 zoomIn();
               }}
               disabled={zoom >= 6}
-              className="w-7 h-7 flex items-center justify-center text-white hover:text-[#D4AF37] disabled:text-[#555555] transition-colors rounded-full"
+              className="w-7 h-7 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
             >
               <ZoomIn size={14} />
             </button>
@@ -968,7 +968,7 @@ export default function ImageViewer({
                   e.stopPropagation();
                   zoomReset();
                 }}
-                className="w-7 h-7 flex items-center justify-center text-[#555555] hover:text-white transition-colors rounded-full"
+                className="w-7 h-7 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
               >
                 <RotateCcw size={12} />
               </button>
@@ -986,12 +986,12 @@ export default function ImageViewer({
         <style>{PULSE_CSS}</style>
         <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
           {/* Top bar */}
-          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[#333333]">
+          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-[var(--admin-line-hard)]">
             <div className="flex-1">{renderTabs()}</div>
             <button
               type="button"
               onClick={exitMarkMode}
-              className="ml-4 text-[#555555] hover:text-white transition-colors p-1"
+              className="ml-4 text-[var(--admin-ink-dim)] hover:text-white transition-colors p-1"
             >
               <X size={20} />
             </button>
@@ -1008,10 +1008,10 @@ export default function ImageViewer({
               zoom, which would break position: fixed otherwise). */}
 
           {/* Bottom toolbar */}
-          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[#333333]">
-            <p className="text-[#555555] text-xs">
+          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[var(--admin-line-hard)]">
+            <p className="text-[var(--admin-ink-dim)] text-xs">
               {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
-              <span className="text-[#555555] ml-3">
+              <span className="text-[var(--admin-ink-dim)] ml-3">
                 Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit
               </span>
             </p>
@@ -1020,7 +1020,7 @@ export default function ImageViewer({
                 <button
                   type="button"
                   onClick={openTypePicker}
-                  className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:bg-[#B8960C] transition-all border border-[#B8960C]"
+                  className="bg-[var(--admin-gold)] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:bg-[var(--admin-gold-deep)] transition-all border border-[var(--admin-gold-deep)]"
                 >
                   Done — Assign Type ({pendingBatch.length})
                 </button>
@@ -1028,7 +1028,7 @@ export default function ImageViewer({
               <button
                 type="button"
                 onClick={exitMarkMode}
-                className="flex items-center gap-2 bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all"
+                className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-5 py-2 rounded-lg hover:opacity-90 transition-all"
               >
                 Done Marking
               </button>
@@ -1060,7 +1060,9 @@ export default function ImageViewer({
       {showReference && referenceImageUrl && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Your Scan (Front)</p>
+            <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-widest text-center">
+              Your Scan (Front)
+            </p>
             <div className="rounded-lg overflow-hidden" style={{ aspectRatio: "5/7" }}>
               {urls.front_cropped || urls.front_original ? (
                 <img
@@ -1070,14 +1072,19 @@ export default function ImageViewer({
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
-                  <p className="text-[#333333] text-xs">No scan</p>
+                  <p className="text-[var(--admin-ink-dim)] text-xs">No scan</p>
                 </div>
               )}
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-[#555555] text-[9px] uppercase tracking-widest text-center">Reference Image</p>
-            <div className="rounded-lg border border-[#D4AF37]/20 overflow-hidden" style={{ aspectRatio: "5/7" }}>
+            <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-widest text-center">
+              Reference Image
+            </p>
+            <div
+              className="rounded-lg border border-[var(--admin-gold)]/20 overflow-hidden"
+              style={{ aspectRatio: "5/7" }}
+            >
               <img src={referenceImageUrl} alt="reference" className="w-full h-full object-contain" />
             </div>
           </div>
@@ -1092,7 +1099,7 @@ export default function ImageViewer({
         <button
           type="button"
           onClick={enterMarkMode}
-          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10"
+          className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/40 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
         >
           <Maximize2 size={11} />
           Mark Defects
@@ -1101,7 +1108,7 @@ export default function ImageViewer({
           <button
             type="button"
             onClick={() => setManualCropSide(side as "front" | "back")}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[#D4AF37]/40 text-[#B8960C] hover:border-[#D4AF37] hover:bg-[#D4AF37]/10"
+            className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/40 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
           >
             <Crop size={11} />
             Manual Crop
@@ -1110,7 +1117,7 @@ export default function ImageViewer({
         <button
           type="button"
           onClick={() => setShowDefects(!showDefects)}
-          className="flex items-center gap-1.5 text-[10px] text-[#333333] hover:text-[#1A1A1A] border border-[#E8E4DC] px-3 py-1.5 rounded transition-all hover:border-[#D4AF37]/40"
+          className="flex items-center gap-1.5 text-[10px] text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] border border-[var(--admin-line)] px-3 py-1.5 rounded transition-all hover:border-[var(--admin-gold)]/40"
         >
           {showDefects ? <EyeOff size={11} /> : <Eye size={11} />}
           {showDefects ? "Hide Defects" : "Show Defects"}
@@ -1119,7 +1126,7 @@ export default function ImageViewer({
           <button
             type="button"
             onClick={() => setShowCentering(!showCentering)}
-            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[#D4AF37] text-[#B8960C] bg-[#D4AF37]/10" : "border-[#E8E4DC] text-[#333333] hover:border-[#D4AF37]/40"}`}
+            className={`flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all ${showCentering ? "border-[var(--admin-gold)] text-[var(--admin-gold-deep)] bg-[var(--admin-gold)]/10" : "border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40"}`}
           >
             {showCentering ? "Hide Centering" : "Show Centering"}
           </button>
@@ -1130,7 +1137,7 @@ export default function ImageViewer({
       {manualCropSide && certId && urls[`${manualCropSide}_original` as keyof ImageUrls] && (
         <Suspense
           fallback={
-            <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[#D4AF37] text-sm">
+            <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center text-[var(--admin-gold)] text-sm">
               Loading crop tool...
             </div>
           }
@@ -1179,7 +1186,7 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
 
   return (
     <div
-      className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[#D4AF37]/10" : ""}`}
+      className={`absolute inset-0 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${isDragging ? "bg-[var(--admin-gold)]/10" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setIsDragging(true);
@@ -1205,14 +1212,14 @@ function InlineDropZone({ side, certId, onUploaded }: { side: string; certId: nu
       />
       {uploading ? (
         <>
-          <Loader2 size={24} className="text-[#D4AF37] animate-spin" />
-          <p className="text-[#555555] text-xs">Uploading {side}…</p>
+          <Loader2 size={24} className="text-[var(--admin-gold)] animate-spin" />
+          <p className="text-[var(--admin-ink-dim)] text-xs">Uploading {side}…</p>
         </>
       ) : (
         <>
-          <Upload size={24} className="text-[#555555]" />
-          <p className="text-[#333333] text-xs font-bold">Drop new {side} image here</p>
-          <p className="text-[#555555] text-[10px]">or click to browse</p>
+          <Upload size={24} className="text-[var(--admin-ink-dim)]" />
+          <p className="text-[var(--admin-ink-dim)] text-xs font-bold">Drop new {side} image here</p>
+          <p className="text-[var(--admin-ink-dim)] text-[10px]">or click to browse</p>
         </>
       )}
     </div>
@@ -1322,17 +1329,17 @@ function DefectEditPopover({
       ref={ref}
       role="dialog"
       aria-label={`Edit defect ${badge}`}
-      className="fixed z-[10000] w-64 bg-white border border-[#D4AF37]/60 rounded-lg shadow-xl p-3 space-y-2 text-left"
+      className="fixed z-[10000] w-64 bg-[var(--admin-panel)] border border-[var(--admin-gold)]/60 rounded-lg shadow-xl p-3 space-y-2 text-left"
       style={{ left, top }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between">
-        <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-widest">Defect #{badge}</p>
+        <p className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">Defect #{badge}</p>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="text-[#888888] hover:text-[#1A1A1A] transition-colors"
+          className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] transition-colors"
         >
           <X size={12} />
         </button>
@@ -1344,7 +1351,7 @@ function DefectEditPopover({
           writes mvgsCode + tier + zone (+ syncs the legacy `type` field
           to the MVGS label so the side list keeps a readable label). */}
       <div className="space-y-1.5">
-        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Tier</label>
+        <label className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-wider block">Tier</label>
         <div className="flex gap-1">
           {(["D1", "D2", "D3"] as const).map((t) => (
             <button
@@ -1354,8 +1361,8 @@ function DefectEditPopover({
               data-testid={`edit-tier-${t}`}
               className={`flex-1 text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
                 localTier === t
-                  ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37]"
-                  : "bg-white text-[#555] border-[#E8E4DC] hover:border-[#D4AF37]"
+                  ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]"
+                  : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"
               }`}
             >
               {t}
@@ -1365,12 +1372,12 @@ function DefectEditPopover({
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Type (MVGS)</label>
+        <label className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-wider block">Type (MVGS)</label>
         <select
           value={localCode}
           onChange={(e) => setLocalCode(e.target.value as MvgsCode)}
           data-testid="edit-mvgs-code"
-          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+          className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
           autoFocus
         >
           {MVGS_DEFECT_TYPES.map((t) => (
@@ -1382,13 +1389,13 @@ function DefectEditPopover({
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-[#555555] text-[9px] uppercase tracking-wider block">Notes</label>
+        <label className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-wider block">Notes</label>
         <input
           type="text"
           value={defect.description ?? ""}
           onChange={(e) => onChangeField("description", e.target.value)}
           placeholder="Optional"
-          className="w-full bg-[#F7F7F5] border border-[#D4D0C8] rounded px-2 py-1 text-xs text-[#1A1A1A]"
+          className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
         />
       </div>
 
@@ -1396,14 +1403,14 @@ function DefectEditPopover({
         <button
           type="button"
           onClick={onDelete}
-          className="text-red-600 hover:text-red-700 hover:bg-red-50 text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors"
+          className="text-[var(--admin-red)] hover:text-[var(--admin-red)] hover:bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded transition-colors"
         >
           Delete
         </button>
         <button
           type="button"
           onClick={handleDone}
-          className="bg-gradient-to-r from-[#D4AF37] to-[#B8960C] text-[#1A1400] text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded hover:opacity-90 transition-opacity"
+          className="bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded hover:opacity-90 transition-opacity"
         >
           Done
         </button>

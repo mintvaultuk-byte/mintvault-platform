@@ -157,9 +157,12 @@ const DEFECT_TYPES = [
 ];
 
 const SEV_COLOR: Record<string, string> = {
-  minor: "bg-amber-50 text-amber-600 border-amber-200",
-  moderate: "bg-orange-50 text-orange-600 border-orange-200",
-  significant: "bg-red-50 text-red-600 border-red-200",
+  minor:
+    "bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] text-[var(--admin-amber)] border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)]",
+  moderate:
+    "bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] text-[var(--admin-amber)] border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)]",
+  significant:
+    "bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] text-[var(--admin-red)] border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)]",
 };
 
 /** Defect type list — used by image-viewer.tsx's anchored dropdown so admin
@@ -197,23 +200,23 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
               key={d.id}
               className={`flex items-start gap-2 rounded-lg px-3 py-2 border cursor-pointer transition-all ${
                 highlightId === d.id
-                  ? "border-[#D4AF37]/60 bg-[#D4AF37]/5"
-                  : "border-[#E8E4DC] bg-white hover:border-[#D4D0C8]"
+                  ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5"
+                  : "border-[var(--admin-line)] bg-[var(--admin-panel)] hover:border-[var(--admin-line)]"
               }`}
               onClick={() => onHighlight(highlightId === d.id ? null : d.id)}
             >
-              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-red-600 flex items-center justify-center text-white text-[9px] font-bold mt-0.5">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[var(--admin-red)] flex items-center justify-center text-white text-[9px] font-bold mt-0.5">
                 {d.id}
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[#1A1A1A] text-[10px] font-bold">{d.type}</span>
+                  <span className="text-[var(--admin-ink)] text-[10px] font-bold">{d.type}</span>
                   {d.mvgsCode && d.tier && (
-                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
+                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-[var(--admin-bg2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] font-bold">
                       {d.tier}
                     </span>
                   )}
-                  <span className="text-[#555555] text-[9px]">{d.location}</span>
+                  <span className="text-[var(--admin-ink-dim)] text-[9px]">{d.location}</span>
                 </div>
               </div>
               <button
@@ -222,7 +225,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
                   e.stopPropagation();
                   removeDefect(d.id);
                 }}
-                className="flex-shrink-0 text-[#888888] hover:text-red-600 transition-colors p-0.5"
+                className="flex-shrink-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors p-0.5"
               >
                 <X size={12} />
               </button>
@@ -235,27 +238,27 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
           their own defects via image clicks; AI suggestions are not promoted
           automatically and have no confirm/reject UI here. */}
       {candidates && candidates.length > 0 && (
-        <div className="space-y-1.5 border-t border-dashed border-[#D4AF37]/30 pt-2">
-          <p className="text-[#D4AF37]/70 text-[9px] uppercase tracking-widest font-bold">
+        <div className="space-y-1.5 border-t border-dashed border-[var(--admin-gold)]/30 pt-2">
+          <p className="text-[var(--admin-gold)]/70 text-[9px] uppercase tracking-widest font-bold">
             AI suggestions ({candidates.length}) — info only
           </p>
           {candidates.map((c, i) => (
             <div
               key={`cand-${i}`}
-              className="flex items-start gap-2 rounded-lg px-3 py-2 border border-dashed border-[#D4AF37]/40 bg-[#FBF8EE]"
+              className="flex items-start gap-2 rounded-lg px-3 py-2 border border-dashed border-[var(--admin-gold)]/40 bg-[var(--admin-panel3)]"
             >
-              <span className="flex-shrink-0 w-5 h-5 rounded-full border border-dashed border-[#D4AF37] bg-white flex items-center justify-center text-[#D4AF37] text-[9px] font-bold mt-0.5">
+              <span className="flex-shrink-0 w-5 h-5 rounded-full border border-dashed border-[var(--admin-gold)] bg-[var(--admin-panel)] flex items-center justify-center text-[var(--admin-gold)] text-[9px] font-bold mt-0.5">
                 ?
               </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[#1A1A1A] text-[10px] font-bold">{c.type}</span>
+                  <span className="text-[var(--admin-ink)] text-[10px] font-bold">{c.type}</span>
                   {c.mvgsCode && c.tier && (
-                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 font-bold">
+                    <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full border bg-[var(--admin-bg2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] font-bold">
                       {c.tier}
                     </span>
                   )}
-                  <span className="text-[#555555] text-[9px]">{c.location}</span>
+                  <span className="text-[var(--admin-ink-dim)] text-[9px]">{c.location}</span>
                 </div>
               </div>
             </div>
@@ -264,7 +267,7 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
       )}
 
       {defects.length === 0 && (!candidates || candidates.length === 0) && (
-        <p className="text-[#555555] text-xs text-center py-2">
+        <p className="text-[var(--admin-ink-dim)] text-xs text-center py-2">
           No defects marked. Click "Mark Defects" and tap the image to start.
         </p>
       )}
