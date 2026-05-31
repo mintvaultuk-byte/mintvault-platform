@@ -44,7 +44,7 @@ const GRAB_PX = 40;
 // across zoom changes. Capture math is dimensionless (% of containerRef rect)
 // so it stays accurate at any zoom.
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 8;
+const MAX_ZOOM = 16;
 const ZOOM_STEP = 1.5;
 // Thin mat margin (0–100 units) added around the outer bbox before cropping, so
 // a deskew rotation doesn't clip the card corners.
@@ -74,15 +74,19 @@ function centroid(pts: Point[]): Point {
 function Crosshair({ color }: { color: string }) {
   return (
     <svg className="absolute inset-0 pointer-events-none" width={44} height={44} viewBox="0 0 44 44" aria-hidden="true">
+      {/* Stroke widths halved from the original 1.75/1 so the line itself
+          doesn't obscure the exact border pixel the operator is aiming at —
+          critical at high zoom (16×) where a 2px line covers ~8 source pixels.
+          Halo stays a touch wider than the colour stroke for contrast. */}
       <g fill="none" strokeLinecap="round">
-        <g stroke="rgba(0,0,0,0.5)" strokeWidth={1.75}>
+        <g stroke="rgba(0,0,0,0.5)" strokeWidth={1}>
           <line x1={22} y1={15} x2={22} y2={19} />
           <line x1={22} y1={25} x2={22} y2={29} />
           <line x1={15} y1={22} x2={19} y2={22} />
           <line x1={25} y1={22} x2={29} y2={22} />
           <circle cx={22} cy={22} r={2} />
         </g>
-        <g stroke={color} strokeWidth={1}>
+        <g stroke={color} strokeWidth={0.5}>
           <line x1={22} y1={15} x2={22} y2={19} />
           <line x1={22} y1={25} x2={22} y2={29} />
           <line x1={15} y1={22} x2={19} y2={22} />
@@ -771,12 +775,12 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                   activeArr.map((p, i) => (
                     <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
                       <g stroke="rgba(0,0,0,0.3)">
-                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
-                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1.75} vectorEffect="non-scaling-stroke" />
-                      </g>
-                      <g stroke={activeColor} opacity={0.4}>
                         <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
                         <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                      </g>
+                      <g stroke={activeColor} opacity={0.4}>
+                        <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                        <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
                       </g>
                     </g>
                   ))}
@@ -794,7 +798,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                         y1={hover.y}
                         x2={100}
                         y2={hover.y}
-                        strokeWidth={2}
+                        strokeWidth={1}
                         vectorEffect="non-scaling-stroke"
                       />
                       <line
@@ -802,7 +806,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                         y1={0}
                         x2={hover.x}
                         y2={100}
-                        strokeWidth={2}
+                        strokeWidth={1}
                         vectorEffect="non-scaling-stroke"
                       />
                     </g>
@@ -813,7 +817,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                         y1={hover.y}
                         x2={100}
                         y2={hover.y}
-                        strokeWidth={1}
+                        strokeWidth={0.5}
                         vectorEffect="non-scaling-stroke"
                       />
                       <line
@@ -821,7 +825,7 @@ export default function ManualCardTool({ side, certId, rawImageUrl, onDone, onCa
                         y1={0}
                         x2={hover.x}
                         y2={100}
-                        strokeWidth={1}
+                        strokeWidth={0.5}
                         vectorEffect="non-scaling-stroke"
                       />
                     </g>
