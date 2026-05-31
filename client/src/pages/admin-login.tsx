@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { Shield, LogIn, KeyRound, Eye, EyeOff } from "lucide-react";
-import GradientButton from "@/components/ui/gradient-button";
+import { LogIn, KeyRound, Eye, EyeOff } from "lucide-react";
+import GoldShader from "@/components/admin/gold-shader";
 
 interface Props {
   onLogin?: () => void;
@@ -75,133 +75,153 @@ export default function AdminLoginPage({ onLogin }: Props) {
   };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-full border-2 border-[#D4AF37]/40 flex items-center justify-center mx-auto mb-4">
-            {step === "password" ? (
-              <Shield className="text-[#D4AF37]" size={28} />
-            ) : (
-              <KeyRound className="text-[#D4AF37]" size={28} />
-            )}
+    <div className="admin-root">
+      <div className="admin-login">
+        <GoldShader className="admin-login__fx" />
+
+        <div className="admin-login__card admin-rise">
+          <div className="mb-7">
+            <div className="admin-brand__mark" style={{ fontSize: 30 }}>
+              MintVault
+            </div>
+            <div className="admin-brand__sub" style={{ marginTop: 6 }}>
+              Admin
+            </div>
+            <p className="mt-3 text-[13px]" style={{ color: "var(--admin-ink-dim)" }}>
+              Grading &amp; Authentication Console
+            </p>
           </div>
-          <h1 className="text-2xl font-bold text-[#D4AF37] tracking-widest glow-gold-sm" data-testid="text-admin-title">
-            STAFF ACCESS
-          </h1>
-          <p className="text-[#999999] text-sm mt-1">
-            {step === "password" ? "MintVault Administration" : "Enter your security PIN"}
-          </p>
-        </div>
 
-        {step === "password" ? (
-          <form onSubmit={handlePasswordSubmit} className="space-y-4" data-testid="form-password">
-            <div>
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Password</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  autoFocus
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] focus:outline-none focus:border-[#D4AF37] transition-colors"
-                  data-testid="input-admin-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors z-10 p-1"
-                  data-testid="button-toggle-password"
-                  tabIndex={-1}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+          {step === "password" ? (
+            <form onSubmit={handlePasswordSubmit} className="space-y-5" data-testid="form-password">
+              <div>
+                <label className="admin-field-label">Operator passphrase</label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    autoFocus
+                    className="admin-input pr-11"
+                    data-testid="input-admin-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-1 transition-colors"
+                    style={{ color: "var(--admin-ink-faint)" }}
+                    data-testid="button-toggle-password"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {error && (
-              <p className="text-red-400 text-sm" data-testid="text-login-error">
-                {error}
-              </p>
-            )}
+              {error && (
+                <p className="text-sm" style={{ color: "var(--admin-red)" }} data-testid="text-login-error">
+                  {error}
+                </p>
+              )}
 
-            <GradientButton
-              as="button"
-              type="submit"
-              disabled={loading}
-              height="48px"
-              className="w-full"
-              data-testid="button-admin-login"
-            >
-              <LogIn size={16} />
-              {loading ? "Verifying..." : "Continue"}
-            </GradientButton>
-          </form>
-        ) : (
-          <form onSubmit={handlePinSubmit} className="space-y-4" data-testid="form-pin">
-            <div>
-              <label className="text-[#D4AF37]/70 text-xs uppercase tracking-wider block mb-1.5">Security PIN</label>
-              <div className="relative">
-                <input
-                  type={showPin ? "text" : "password"}
-                  value={pin}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/\D/g, "");
-                    if (v.length <= 10) setPin(v);
-                  }}
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  autoFocus
-                  placeholder="Enter PIN"
-                  className="w-full bg-transparent border border-[#D4AF37]/40 rounded px-4 py-2.5 pr-12 text-[#1A1A1A] text-center text-2xl tracking-[0.5em] focus:outline-none focus:border-[#D4AF37] transition-colors"
-                  data-testid="input-admin-pin"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#D4AF37]/60 hover:text-[#D4AF37] transition-colors z-10 p-1"
-                  data-testid="button-toggle-pin"
-                  tabIndex={-1}
-                >
-                  {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="admin-btn admin-btn--gold w-full"
+                style={{ height: 48 }}
+                data-testid="button-admin-login"
+              >
+                <LogIn size={16} />
+                {loading ? "Verifying…" : "Continue"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handlePinSubmit} className="space-y-5" data-testid="form-pin">
+              <div>
+                <label className="admin-field-label">Security PIN</label>
+                <div className="relative">
+                  <input
+                    type={showPin ? "text" : "password"}
+                    value={pin}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, "");
+                      if (v.length <= 10) setPin(v);
+                    }}
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoFocus
+                    placeholder="Enter PIN"
+                    className="admin-input pr-11 text-center text-2xl tracking-[0.5em]"
+                    data-testid="input-admin-pin"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-1 transition-colors"
+                    style={{ color: "var(--admin-ink-faint)" }}
+                    data-testid="button-toggle-pin"
+                    tabIndex={-1}
+                  >
+                    {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {error && (
-              <p className="text-red-400 text-sm" data-testid="text-login-error">
-                {error}
-              </p>
-            )}
+              {error && (
+                <p className="text-sm" style={{ color: "var(--admin-red)" }} data-testid="text-login-error">
+                  {error}
+                </p>
+              )}
 
-            <GradientButton
-              as="button"
-              type="submit"
-              disabled={loading || pin.length < 6}
-              height="48px"
-              className="w-full"
-              data-testid="button-admin-pin-submit"
-            >
-              <KeyRound size={16} />
-              {loading ? "Verifying..." : "Unlock"}
-            </GradientButton>
+              <button
+                type="submit"
+                disabled={loading || pin.length < 6}
+                className="admin-btn admin-btn--gold w-full"
+                style={{ height: 48 }}
+                data-testid="button-admin-pin-submit"
+              >
+                <KeyRound size={16} />
+                {loading ? "Verifying…" : "Enter the Vault"}
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setStep("password");
-                setPin("");
-                setError("");
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("password");
+                  setPin("");
+                  setError("");
+                }}
+                className="w-full text-xs transition-colors"
+                style={{ color: "var(--admin-ink-faint)" }}
+                data-testid="button-back-to-password"
+              >
+                Back to passphrase
+              </button>
+            </form>
+          )}
+
+          <div className="admin-login-foot mt-7 flex items-center gap-2">
+            <span
+              className="admin-env__dot"
+              style={{ background: "var(--admin-green)", color: "var(--admin-green)" }}
+            />
+            <span
+              className="font-mono-admin"
+              style={{
+                fontFamily: "var(--admin-mono)",
+                fontSize: 9.5,
+                letterSpacing: "1.5px",
+                textTransform: "uppercase",
+                color: "var(--admin-ink-faint)",
               }}
-              className="w-full text-[#999999] text-xs hover:text-[#D4AF37] transition-colors"
-              data-testid="button-back-to-password"
             >
-              Back to password
-            </button>
-          </form>
-        )}
+              MintVault · Staff Access
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
