@@ -39,8 +39,11 @@ const ISSUES: { key: keyof SurfaceValues; label: string; warning?: string }[] = 
   { key: "hasIndentation", label: "Indentation present" },
   { key: "hasRollerMarks", label: "Roller marks present" },
   { key: "hasColorRegistration", label: "Colour / registration issues" },
-  { key: "hasCrease", label: "Crease present", warning: "Maximum overall grade capped at 5.0" },
-  { key: "hasTear", label: "Tear or missing material", warning: "Maximum overall grade capped at 3.0" },
+  // v2 ceiling text — see shared/mvgs-scoring.ts legacyCeilingForFlags().
+  // The boolean is a coarse "any crease/tear present" signal; Phase 2's
+  // line-tool measurement will refine to the explicit %-span ladder.
+  { key: "hasCrease", label: "Crease present", warning: "Maximum overall grade capped at 4.5 (legacy flag)" },
+  { key: "hasTear", label: "Tear or missing material", warning: "Maximum overall grade capped at 2.0 (legacy flag)" },
 ];
 
 export function calcSurfaceSubgrade(v: SurfaceValues): number {
@@ -63,18 +66,20 @@ export default function SurfaceGrading({ values, onChange, overrideGrade, onOver
         <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Surface</h3>
       </div>
 
-      {/* Crease / Tear warning banners */}
+      {/* Crease / Tear warning banners — v2 ceilings (engine is source of
+          truth via legacyCeilingForFlags). Phase 2 swaps these for
+          measurement-driven copy on the line-tool flow. */}
       {values.hasCrease && (
         <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded px-3 py-2">
           <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
-          <p className="text-[var(--admin-red)] text-xs">Crease detected — maximum overall grade capped at 5.0</p>
+          <p className="text-[var(--admin-red)] text-xs">Crease detected — maximum overall grade capped at 4.5</p>
         </div>
       )}
       {values.hasTear && (
         <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
           <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
           <p className="text-[var(--admin-red)] text-xs">
-            Tear or missing material — maximum overall grade capped at 3.0
+            Tear or missing material — maximum overall grade capped at 2.0
           </p>
         </div>
       )}

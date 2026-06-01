@@ -3,6 +3,8 @@
  * Mirrors server/grade-calculator.ts exactly — keep in sync.
  */
 
+import { legacyCeilingForFlags } from "@shared/mvgs-scoring";
+
 export interface SubGrades {
   centering: number;
   corners: number;
@@ -10,13 +12,22 @@ export interface SubGrades {
   surface: number;
 }
 
+/**
+ * Weighted-average + lowest-subgrade-floor calculation for non-MVGS-classified
+ * cards (the fallback path when no MVGS pins exist yet). Structural ceilings
+ * (crease / tear) now flow through the engine via `legacyCeilingForFlags`
+ * — this helper no longer carries its own crease/tear numbers per MVGS-v2
+ * §5 single-source-of-truth requirement. Phase 2 swaps the boolean flags for
+ * measurement-driven inputs at the call sites.
+ */
 export function calculateOverallGrade(sub: SubGrades, hasCrease: boolean, hasTear: boolean): number {
   const weighted = sub.centering * 0.1 + sub.corners * 0.25 + sub.edges * 0.25 + sub.surface * 0.4;
   let grade = Math.round(weighted);
   const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
   grade = Math.min(grade, lowest + 1.0);
-  if (hasCrease) grade = Math.min(grade, 5);
-  if (hasTear) grade = Math.min(grade, 3);
+  // Structural ceiling sourced from the engine — single source of truth.
+  const ceiling = legacyCeilingForFlags({ hasCrease, hasTear });
+  if (ceiling) grade = Math.min(grade, ceiling.grade);
   return Math.max(1, Math.min(10, grade));
 }
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Star, Info } from "lucide-react";
 import type { SubGrades } from "./grade-logic";
+import { legacyCeilingForFlags } from "@shared/mvgs-scoring";
 
 interface Props {
   overall: number;
@@ -86,8 +87,10 @@ export default function GradeDisplay({
   const rounded = Math.round(weighted);
   const lowest = Math.min(sub.centering, sub.corners, sub.edges, sub.surface);
   const capped = Math.min(rounded, lowest + 1.0);
-  const creaseCap = hasCrease ? 5.0 : 99;
-  const tearCap = hasTear ? 3.0 : 99;
+  // Structural ceiling sourced from the engine — single source of truth
+  // (no more hard-coded 5/3 in this file). Phase 2 will swap the legacy
+  // hasCrease/hasTear booleans for measurement-driven inputs.
+  const structuralCeiling = legacyCeilingForFlags({ hasCrease, hasTear });
 
   return (
     <div className="space-y-3">
@@ -279,13 +282,17 @@ export default function GradeDisplay({
           <p>
             → Lowest subgrade ({lowest}) + 1.0 = max {lowest + 1.0} — result: {capped}
           </p>
-          {hasCrease && (
+          {structuralCeiling && (
             <p className="text-[var(--admin-red)]">
-              → Crease cap applied: max 5.0 — result: {Math.min(capped, creaseCap)}
+              →{" "}
+              {structuralCeiling.source === "tear"
+                ? "Tear"
+                : structuralCeiling.source === "wrinkle"
+                  ? "Wrinkle"
+                  : "Crease"}{" "}
+              cap applied: max {structuralCeiling.grade} ({structuralCeiling.reason}) — result:{" "}
+              {Math.min(capped, structuralCeiling.grade)}
             </p>
-          )}
-          {hasTear && (
-            <p className="text-[var(--admin-red)]">→ Tear cap applied: max 3.0 — result: {Math.min(capped, tearCap)}</p>
           )}
           <p className="text-[var(--admin-ink-dim)]">Final: {overall}</p>
         </div>
