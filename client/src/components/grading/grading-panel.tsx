@@ -16,7 +16,9 @@ import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCentering, { type CenteringResult } from "./manual-centering";
 import ManualCardTool from "./manual-card-tool";
-import MeasurementTool from "./measurement-tool";
+// MeasurementTool retired in v2.1 — line drawing now lives inside image-viewer
+// mark-mode and manual-card-tool defects phase as a tool palette, alongside
+// the pin tool. The launcher button + overlay mount are gone from this panel.
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
@@ -236,7 +238,9 @@ export default function GradingPanel({
   const [manualCardToolSide, setManualCardToolSide] = useState<"front" | "back" | null>(null);
   // MVGS v2 — measurement tool overlay (fullscreen). Opens from the surface
   // sidebar's "Open Measurement Tool" button.
-  const [measurementToolOpen, setMeasurementToolOpen] = useState(false);
+  // measurementToolOpen — REMOVED. Line drawing happens inside the existing
+  // mark-defects surfaces (image-viewer mark mode + manual-card-tool defects
+  // phase) as a tool palette next to the pin tool. No fullscreen launcher.
   const [centeringMethod, setCenteringMethod] = useState<"ai" | "manual" | null>(null);
   const [manualOuterFront, setManualOuterFront] = useState<any>(null);
   const [manualInnerFront, setManualInnerFront] = useState<any>(null);
@@ -283,20 +287,42 @@ export default function GradingPanel({
       end?: { x: number; y: number };
     }>
   >([]);
-  const [creaseSpanPct, setCreaseSpanPct] = useState<number | null>(null);
-  // Crease drawn segment — SESSION-ONLY display state. crease_span_pct is a
-  // decimal column with no jsonb home for a segment, so (per the no-migration
-  // constraint) the drawn crease line redraws only within this grading session;
-  // the span% banner is the cross-reload record. Reset on cert switch so a
-  // navigate-to-next-cert doesn't show the previous card's crease.
-  const [creaseSegment, setCreaseSegment] = useState<{
+  // MVGS v2.1 — multi-crease persistence. List of crease lines, each carrying
+  // the drawn segment + spanPct + display colour. Replaces the v2.0
+  // crease_span_pct single-value + session-only creaseSegment kludge.
+  // Engine input derives `creaseSpanPct = max(spanPct)` per spec §4/§5 at the
+  // mvgs-input-builder boundary; the legacy crease_span_pct column is kept as
+  // a derived mirror (max of this array) for back-compat.
+  type CreaseLine = {
+    id: string;
     side: "front" | "back";
+    spanPct: number;
     start: { x: number; y: number };
     end: { x: number; y: number };
-  } | null>(null);
-  useEffect(() => {
-    setCreaseSegment(null);
-  }, [certId]);
+    color?: string;
+  };
+  const [creaseLines, setCreaseLines] = useState<CreaseLine[]>([]);
+  // Derived for back-compat: legacy readers still see the worst span.
+  const creaseSpanPct = creaseLines.length > 0 ? Math.max(...creaseLines.map((l) => l.spanPct)) : null;
+  // setCreaseSpanPct shim — existing call sites that set the legacy span
+  // value (e.g. ManualCardTool defects phase prior to multi-crease wiring)
+  // synthesise a single-entry list. Removed once those call sites move to
+  // setCreaseLines directly.
+  const setCreaseSpanPct = (next: number | null) => {
+    if (next == null) {
+      setCreaseLines([]);
+      return;
+    }
+    setCreaseLines([
+      {
+        id: `legacy-${Date.now()}`,
+        side: "front",
+        spanPct: next,
+        start: { x: 0, y: 0 },
+        end: { x: 0, y: 0 },
+      },
+    ]);
+  };
   const [wrinkleSeverity, setWrinkleSeverity] = useState<
     "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
   >(null);
@@ -372,8 +398,15 @@ export default function GradingPanel({
       start?: { x: number; y: number };
       end?: { x: number; y: number };
     }>;
-    creaseSpanPct: number | null;
-    creaseSegment: { side: "front" | "back"; start: { x: number; y: number }; end: { x: number; y: number } } | null;
+    // MVGS v2.1 multi-crease list. Replaces creaseSpanPct + creaseSegment.
+    creaseLines: Array<{
+      id: string;
+      side: "front" | "back";
+      spanPct: number;
+      start: { x: number; y: number };
+      end: { x: number; y: number };
+      color?: string;
+    }>;
     wrinkleSeverity: "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null;
     tearSeverity: "minor" | "significant" | "major" | null;
   };
@@ -466,7 +499,23 @@ export default function GradingPanel({
     {
       const g = gradingData as any;
       if (Array.isArray(g.whiteningLines)) setWhiteningLines(g.whiteningLines);
-      if (g.creaseSpanPct != null) setCreaseSpanPct(Number(g.creaseSpanPct));
+      // Hydrate the multi-crease list. v2.1 column comes first; back-compat
+      // synth from the legacy single creaseSpanPct fires only when the new
+      // array is empty AND the legacy column is non-null (preserves the
+      // persisted span% even though the segment is unknown for that path).
+      if (Array.isArray(g.creaseLines) && g.creaseLines.length > 0) {
+        setCreaseLines(g.creaseLines as typeof creaseLines);
+      } else if (g.creaseSpanPct != null) {
+        setCreaseLines([
+          {
+            id: `legacy-${certId}`,
+            side: "front",
+            spanPct: Number(g.creaseSpanPct),
+            start: { x: 0, y: 0 },
+            end: { x: 0, y: 0 },
+          },
+        ]);
+      }
       if (g.wrinkleSeverity) setWrinkleSeverity(g.wrinkleSeverity);
       if (g.tearSeverity) setTearSeverity(g.tearSeverity);
     }
@@ -597,8 +646,7 @@ export default function GradingPanel({
       surfaceOverride,
       overallOverride,
       whiteningLines: [...whiteningLines],
-      creaseSpanPct,
-      creaseSegment,
+      creaseLines: [...creaseLines],
       wrinkleSeverity,
       tearSeverity,
     };
@@ -624,8 +672,7 @@ export default function GradingPanel({
     setSurfaceOverride(s.surfaceOverride);
     setOverallOverride(s.overallOverride);
     setWhiteningLines(s.whiteningLines);
-    setCreaseSpanPct(s.creaseSpanPct);
-    setCreaseSegment(s.creaseSegment);
+    setCreaseLines(s.creaseLines);
     setWrinkleSeverity(s.wrinkleSeverity);
     setTearSeverity(s.tearSeverity);
   }
@@ -949,7 +996,10 @@ export default function GradingPanel({
       darkBorderBack,
       eyeAppealModifier,
       whiteningLines,
-      creaseSpanPct,
+      // v2.1 — multi-crease list. Engine derives max(spanPct) at the builder
+      // boundary. creaseSpanPct legacy field omitted; the builder prefers
+      // creaseLines when both are present anyway.
+      creaseLines,
       wrinkleSeverity,
       tearSeverity,
       hasCrease: !!surface.hasCrease,
@@ -1084,14 +1134,17 @@ export default function GradingPanel({
     out.dark_border_back = darkBorderBack;
     out.eye_appeal_modifier = eyeAppealModifier;
 
-    // MVGS v2 measurements (Phase 2). Send unconditionally so clearing a
-    // measurement (operator removes a line / unsets a dropdown) actually
-    // persists null/[] back to the cert instead of stale values. The server's
-    // PUT /grade route writes these to the 4 new columns. Engine reads them
-    // via shared/mvgs-input-builder.ts (measurement wins over has_crease/
+    // MVGS v2 measurements. Send unconditionally so clearing a measurement
+    // (operator removes a line / unsets a dropdown) actually persists null/[]
+    // back to the cert instead of stale values. Engine reads via
+    // shared/mvgs-input-builder.ts (measurement wins over the has_crease/
     // has_tear booleans on the surface_values jsonb).
     out.whitening_lines = whiteningLines;
-    out.crease_span_pct = creaseSpanPct;
+    // v2.1 — multi-crease persistence. crease_lines is the new column; the
+    // legacy crease_span_pct is sent as a derived mirror (max spanPct) so
+    // back-compat readers see the worst crease.
+    out.crease_lines = creaseLines;
+    out.crease_span_pct = creaseSpanPct; // derived = max(creaseLines.spanPct) | null
     out.wrinkle_severity = wrinkleSeverity;
     out.tear_severity = tearSeverity;
 
@@ -1422,7 +1475,19 @@ export default function GradingPanel({
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
-                onOpenMeasurementTool={() => setMeasurementToolOpen(true)}
+                // MVGS v2.1 measurement state — flows back through the
+                // callbacks below when the operator draws a whitening or
+                // crease line inside mark mode (no separate tool overlay).
+                whiteningLines={whiteningLines}
+                creaseLines={creaseLines}
+                onWhiteningLinesChange={(next) => {
+                  setWhiteningLines(next);
+                  clearOverallOverrideIfSet();
+                }}
+                onCreaseLinesChange={(next) => {
+                  setCreaseLines(next);
+                  clearOverallOverrideIfSet();
+                }}
                 centeringFront={
                   frontLR
                     ? {
@@ -1524,6 +1589,17 @@ export default function GradingPanel({
               onHighlight={setHighlightDefect}
               candidates={defectCandidates}
               onCandidatesChange={setDefectCandidates}
+              // MVGS v2.1 — line measurements merged into the same defect list.
+              whiteningLines={whiteningLines}
+              creaseLines={creaseLines}
+              onWhiteningLinesChange={(next) => {
+                setWhiteningLines(next);
+                clearOverallOverrideIfSet();
+              }}
+              onCreaseLinesChange={(next) => {
+                setCreaseLines(next);
+                clearOverallOverrideIfSet();
+              }}
             />
           </div>
         </div>
@@ -1668,7 +1744,7 @@ export default function GradingPanel({
                     darkBorderBack,
                     eyeAppealModifier,
                     whiteningLines,
-                    creaseSpanPct,
+                    creaseLines,
                     wrinkleSeverity,
                     tearSeverity,
                     hasCrease: !!surface.hasCrease,
@@ -1879,14 +1955,10 @@ export default function GradingPanel({
                   </select>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setMeasurementToolOpen(true)}
-                className="w-full mt-1 text-[10px] font-bold uppercase tracking-widest border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 rounded px-3 py-1.5"
-                data-testid="btn-open-measurement-tool"
-              >
-                📏 Open Measurement Tool (whitening lines · crease span)
-              </button>
+              <p className="text-[var(--admin-ink-faint)] text-[10px] italic mt-1">
+                📏 Whitening + crease lines are drawn inside <strong>Mark Defects</strong> (pin / whitening / crease
+                tool palette).
+              </p>
               {(whiteningLines.length > 0 || creaseSpanPct != null) && (
                 <p className="text-[var(--admin-ink-faint)] text-[10px] font-mono">
                   {whiteningLines.length > 0 &&
@@ -2459,6 +2531,18 @@ export default function GradingPanel({
           }}
           onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
           existingDefects={defects}
+          // MVGS v2.1 — line tools mirrored from image-viewer mark mode.
+          // Same callbacks; the defects phase shares the panel's state.
+          whiteningLines={whiteningLines}
+          creaseLines={creaseLines}
+          onWhiteningLinesChange={(next) => {
+            setWhiteningLines(next);
+            clearOverallOverrideIfSet();
+          }}
+          onCreaseLinesChange={(next) => {
+            setCreaseLines(next);
+            clearOverallOverrideIfSet();
+          }}
           onDone={() => {
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
@@ -2468,30 +2552,11 @@ export default function GradingPanel({
         />
       )}
 
-      {/* MVGS v2 — Measurement Tool overlay (whitening lines + crease span).
-          Updates whiteningLines / creaseSpanPct state in this panel; the
-          panel's autoSave PUTs to /grade which persists into the new
-          certificate columns. Engine consumes via mvgs-input-builder. */}
-      {measurementToolOpen && (
-        <MeasurementTool
-          certIdStr={certIdStr ?? String(certId)}
-          frontImageUrl={(urls.front_display || urls.front_cropped || urls.front_original) ?? null}
-          backImageUrl={(urls.back_display || urls.back_cropped || urls.back_original) ?? null}
-          whiteningLines={whiteningLines}
-          creaseSpanPct={creaseSpanPct}
-          creaseSegment={creaseSegment}
-          onWhiteningLinesChange={(next) => {
-            setWhiteningLines(next);
-            clearOverallOverrideIfSet();
-          }}
-          onCreaseSpanPctChange={(next) => {
-            setCreaseSpanPct(next);
-            clearOverallOverrideIfSet();
-          }}
-          onCreaseSegmentChange={setCreaseSegment}
-          onClose={() => setMeasurementToolOpen(false)}
-        />
-      )}
+      {/* MeasurementTool overlay retired in v2.1 — operator draws lines in
+          the same mark-mode surfaces where pins are placed (image-viewer mark
+          mode + manual-card-tool defects phase). State updates flow through
+          onWhiteningLinesChange / onCreaseLinesChange callbacks on those
+          components. */}
 
       {/* Confirm modal */}
       {showConfirm && (

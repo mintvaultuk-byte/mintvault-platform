@@ -19,6 +19,7 @@ const ManualCrop = lazy(() => import("./manual-crop"));
 import { MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
 import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
+import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -87,10 +88,32 @@ interface Props {
    *  position (e.g. above an absolute-positioning anchor wrapper). The
    *  fullscreen-mode renderTabs is unaffected. */
   omitSideTabs?: boolean;
-  /** Opens the parent's MVGS v2 Measurement Tool (line-drawing overlay) from
-   *  inside the fullscreen mark-mode toolbar, so the operator doesn't have to
-   *  leave the image surface to reach it. Button is hidden when absent. */
-  onOpenMeasurementTool?: () => void;
+  /** MVGS v2.1 — line measurements drawn in-line with the pin tool. Mark
+   *  mode gains a tool palette (Pin | Whitening | Crease); when whitening or
+   *  crease is active, click-drag captures a segment. Each commit fires the
+   *  matching onChange below with the FULL new array (replace-semantics).
+   *  Omitted handlers → that tool option is hidden, mark-mode falls back to
+   *  pin-only. The MeasurementTool overlay was retired; this is its
+   *  replacement. */
+  whiteningLines?: Array<{
+    id?: string;
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    color?: string;
+  }>;
+  creaseLines?: Array<{
+    id: string;
+    side: "front" | "back";
+    spanPct: number;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color?: string;
+  }>;
+  onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
+  onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
 }
 
 // Auto-map legacy `type` strings (from DEFECT_TYPES list or AI-defect
@@ -187,7 +210,10 @@ export default function ImageViewer({
   readOnly,
   side: controlledSide,
   omitSideTabs,
-  onOpenMeasurementTool,
+  whiteningLines = [],
+  creaseLines = [],
+  onWhiteningLinesChange,
+  onCreaseLinesChange,
 }: Props) {
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
@@ -238,6 +264,21 @@ export default function ImageViewer({
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkModeRaw] = useState(false);
   const [fullscreen, setFullscreenRaw] = useState(false);
+
+  // MVGS v2.1 — mark-mode tool palette. `pin` (existing) | `whitening` |
+  // `crease`. Pin path is completely untouched when this is "pin"; gate is
+  // checked once at click time so non-line-mode behaviour is byte-identical
+  // to v2.0. Line tools are only mounted when the matching onChange handler
+  // is wired by the parent.
+  type MarkTool = "pin" | "whitening" | "crease";
+  const [markTool, setMarkTool] = useState<MarkTool>("pin");
+  // In-progress line drawing (image-relative percent coords). Mouse-down
+  // captures `lineStart`, mouse-move tracks `lineEnd` for the live preview,
+  // mouse-up commits via onWhiteningLinesChange / onCreaseLinesChange.
+  const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null);
+  const [lineEnd, setLineEnd] = useState<{ x: number; y: number } | null>(null);
+  const canDrawWhitening = !!onWhiteningLinesChange;
+  const canDrawCrease = !!onCreaseLinesChange;
 
   function setSide(s: Side) {
     // Only mutate internal state when uncontrolled. Controlled callers
@@ -358,6 +399,10 @@ export default function ImageViewer({
 
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (dragging) return;
+    // Line tools intercept clicks via mousedown/mouseup (see handleMouseDown
+    // /handleMouseUp); on click here we just skip so the existing pin path
+    // doesn't fire too. lineStart != null = a drag is in progress.
+    if (markMode && markTool !== "pin") return;
     if (markMode && imgElRef.current) {
       // Double-click shortcut: two clicks within 280ms = "Done" — open the
       // type picker on the current batch instead of dropping a 2nd pin.
@@ -389,6 +434,72 @@ export default function ImageViewer({
     }
   }
 
+  // MVGS v2.1 — line-tool helpers. Image-relative percent coords are read
+  // from the live `<img>` rect, identical to the pin path.
+  function imagePctFromEvent(e: React.MouseEvent): { x: number; y: number } | null {
+    const el = imgElRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100)),
+    };
+  }
+
+  function lineMouseDown(e: React.MouseEvent) {
+    if (!markMode) return;
+    if (markTool === "pin") return;
+    if (markTool === "whitening" && !canDrawWhitening) return;
+    if (markTool === "crease" && !canDrawCrease) return;
+    e.preventDefault();
+    const p = imagePctFromEvent(e);
+    if (!p) return;
+    setLineStart(p);
+    setLineEnd(p);
+  }
+
+  function lineMouseMove(e: React.MouseEvent) {
+    if (!lineStart) return;
+    const p = imagePctFromEvent(e);
+    if (p) setLineEnd(p);
+  }
+
+  function lineMouseUp() {
+    if (!lineStart || !lineEnd) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    // Trivially small click = ignore (operator just clicked, didn't drag).
+    const dx = Math.abs(lineEnd.x - lineStart.x);
+    const dy = Math.abs(lineEnd.y - lineStart.y);
+    if (Math.max(dx, dy) < 2) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    if (markTool === "whitening" && side !== "angled" && side !== "closeup" && onWhiteningLinesChange) {
+      // Direction-first edge auto-detect (operator can override in the list).
+      const edge = detectEdge(lineStart, lineEnd);
+      const coveragePct = coverageFromSegment(lineStart, lineEnd, edge);
+      const id = `wl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      // Replace any existing line on the same (side, edge) — one canonical
+      // entry per edge keeps the engine's ladder count clean. Operator can
+      // re-classify edges via the list chip without piling up duplicates.
+      const sideKey = side as "front" | "back";
+      const remaining = whiteningLines.filter((l) => !(l.side === sideKey && l.edge === edge));
+      onWhiteningLinesChange([...remaining, { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd }]);
+    } else if (markTool === "crease" && side !== "angled" && side !== "closeup" && onCreaseLinesChange) {
+      const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
+      const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const sideKey = side as "front" | "back";
+      // Crease appends — multiple creases per cert (longest wins in the engine).
+      onCreaseLinesChange([...creaseLines, { id, side: sideKey, spanPct, start: lineStart, end: lineEnd }]);
+    }
+    setLineStart(null);
+    setLineEnd(null);
+  }
+
   function handleWheel(e: React.WheelEvent) {
     e.preventDefault(); // prevent page scroll but don't zoom — use buttons instead
   }
@@ -405,6 +516,12 @@ export default function ImageViewer({
   }
 
   function handleMouseDown(e: React.MouseEvent) {
+    // MVGS v2.1 — line tools take priority in mark mode. Pin path keeps
+    // the pan/drag behaviour outside mark mode unchanged.
+    if (markMode && markTool !== "pin") {
+      lineMouseDown(e);
+      return;
+    }
     if (zoom <= 1 && !markMode) return;
     if (markMode && zoom <= 1) return;
     setDragging(true);
@@ -412,11 +529,19 @@ export default function ImageViewer({
   }
 
   function handleMouseMove(e: React.MouseEvent) {
+    if (lineStart) {
+      lineMouseMove(e);
+      return;
+    }
     if (!dragging) return;
     setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
   }
 
   function handleMouseUp() {
+    if (lineStart) {
+      lineMouseUp();
+      return;
+    }
     setDragging(false);
   }
 
@@ -599,6 +724,81 @@ export default function ImageViewer({
                 className="w-full h-full object-contain"
                 draggable={false}
               />
+
+              {/* MVGS v2.1 — line overlays. Whitening (yellow default) and
+                  crease (cyan default) lines for the current side render here;
+                  the in-progress drag preview renders below them so it sits on
+                  top while drawing. Colour comes from each line entry's
+                  display-only `color` field, defaulting per type. pointer-
+                  events:none so clicks still reach the container's handlers. */}
+              {(whiteningLines.length > 0 || creaseLines.length > 0 || lineStart) && (
+                <svg
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                >
+                  {whiteningLines
+                    .filter((l) => l.side === side && l.start && l.end)
+                    .map((l, i) => (
+                      <g key={`wl-${l.id ?? i}`}>
+                        <line
+                          x1={l.start!.x}
+                          y1={l.start!.y}
+                          x2={l.end!.x}
+                          y2={l.end!.y}
+                          stroke="rgba(0,0,0,0.55)"
+                          strokeWidth={3}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={l.start!.x}
+                          y1={l.start!.y}
+                          x2={l.end!.x}
+                          y2={l.end!.y}
+                          stroke={l.color ?? "#FFD400"}
+                          strokeWidth={1.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
+                    ))}
+                  {creaseLines
+                    .filter((l) => l.side === side)
+                    .map((l) => (
+                      <g key={`cl-${l.id}`}>
+                        <line
+                          x1={l.start.x}
+                          y1={l.start.y}
+                          x2={l.end.x}
+                          y2={l.end.y}
+                          stroke="rgba(0,0,0,0.55)"
+                          strokeWidth={3}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <line
+                          x1={l.start.x}
+                          y1={l.start.y}
+                          x2={l.end.x}
+                          y2={l.end.y}
+                          stroke={l.color ?? "#00CCFF"}
+                          strokeWidth={1.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      </g>
+                    ))}
+                  {lineStart && lineEnd && (
+                    <line
+                      x1={lineStart.x}
+                      y1={lineStart.y}
+                      x2={lineEnd.x}
+                      y2={lineEnd.y}
+                      stroke={markTool === "whitening" ? "#FFD400" : "#00CCFF"}
+                      strokeWidth={1.5}
+                      vectorEffect="non-scaling-stroke"
+                      strokeDasharray="2 2"
+                    />
+                  )}
+                </svg>
+              )}
 
               {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
               {showCentering &&
@@ -1014,23 +1214,61 @@ export default function ImageViewer({
 
           {/* Bottom toolbar */}
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[var(--admin-line-hard)]">
-            <p className="text-[var(--admin-ink-dim)] text-xs">
-              {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
-              <span className="text-[var(--admin-ink-dim)] ml-3">
-                Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit
-              </span>
-            </p>
             <div className="flex items-center gap-3">
-              {onOpenMeasurementTool && (
+              {/* MVGS v2.1 tool palette — Pin | Whitening line | Crease line.
+                  Pin path is unchanged; the line tools are gated on the
+                  parent wiring onWhiteningLinesChange / onCreaseLinesChange. */}
+              <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line-hard)] text-[10px] font-bold uppercase">
                 <button
                   type="button"
-                  onClick={onOpenMeasurementTool}
-                  className="flex items-center gap-2 border border-[var(--admin-gold)]/50 text-[var(--admin-gold)] text-xs font-bold uppercase px-4 py-2 rounded-lg hover:bg-[var(--admin-gold)]/10 transition-all"
-                  data-testid="btn-open-measurement-tool-markmode"
+                  onClick={() => setMarkTool("pin")}
+                  data-testid="btn-mark-tool-pin"
+                  className={`px-3 py-1.5 ${
+                    markTool === "pin"
+                      ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                      : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                  }`}
                 >
-                  📏 Measurement Tool
+                  Pin
                 </button>
-              )}
+                {canDrawWhitening && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("whitening")}
+                    data-testid="btn-mark-tool-whitening"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line-hard)] ${
+                      markTool === "whitening"
+                        ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                        : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                    }`}
+                  >
+                    Whitening line
+                  </button>
+                )}
+                {canDrawCrease && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("crease")}
+                    data-testid="btn-mark-tool-crease"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line-hard)] ${
+                      markTool === "crease"
+                        ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                        : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                    }`}
+                  >
+                    Crease line
+                  </button>
+                )}
+              </div>
+              <p className="text-[var(--admin-ink-dim)] text-xs">
+                {markTool === "pin"
+                  ? `${defects.length} defect${defects.length !== 1 ? "s" : ""} marked · Click → pin, Enter / dbl-click = Done`
+                  : markTool === "whitening"
+                    ? `${whiteningLines.length} whitening line${whiteningLines.length !== 1 ? "s" : ""} · Click-drag along the edge`
+                    : `${creaseLines.length} crease line${creaseLines.length !== 1 ? "s" : ""} · Click-drag across the card`}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
               {pendingBatch.length > 0 && !pickerOpen && (
                 <button
                   type="button"

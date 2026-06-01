@@ -411,6 +411,8 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
         darkBorderBack: cert.darkBorderBack,
         eyeAppealModifier: cert.eyeAppealModifier,
         whiteningLines: Array.isArray(certAny.whiteningLines) ? certAny.whiteningLines : null,
+        // v2.1 — multi-crease list. Engine input is max(spanPct) at the builder.
+        creaseLines: Array.isArray(certAny.creaseLines) ? certAny.creaseLines : null,
         creaseSpanPct: certAny.creaseSpanPct != null ? Number(certAny.creaseSpanPct) : null,
         wrinkleSeverity: certAny.wrinkleSeverity ?? null,
         tearSeverity: certAny.tearSeverity ?? null,

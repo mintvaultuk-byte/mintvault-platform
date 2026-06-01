@@ -154,3 +154,92 @@ describe("buildMvgsInput — calibration plumbing", () => {
     expect(buildMvgsInput(base()).calibration).toBeUndefined();
   });
 });
+
+// ── Phase 2.1 — multi-crease persistence ────────────────────────────────
+describe("buildMvgsInput — multi-crease list (longest wins)", () => {
+  const pt = (x: number, y: number) => ({ x, y });
+
+  it("empty creaseLines + no legacy span → no crease ceiling", () => {
+    expect(buildMvgsInput(base({ creaseLines: [] })).creaseSpanPct).toBeNull();
+  });
+
+  it("single crease in list → engine sees its spanPct", () => {
+    const input = buildMvgsInput(
+      base({ creaseLines: [{ id: "a", side: "front", spanPct: 35, start: pt(0, 0), end: pt(0, 0) }] })
+    );
+    expect(input.creaseSpanPct).toBe(35);
+  });
+
+  it("multiple creases → engine sees the MAX (longest wins per spec §4/§5)", () => {
+    const input = buildMvgsInput(
+      base({
+        creaseLines: [
+          { id: "a", side: "front", spanPct: 18, start: pt(0, 0), end: pt(0, 0) },
+          { id: "b", side: "back", spanPct: 62, start: pt(0, 0), end: pt(0, 0) }, // longest
+          { id: "c", side: "front", spanPct: 30, start: pt(0, 0), end: pt(0, 0) },
+        ],
+      })
+    );
+    expect(input.creaseSpanPct).toBe(62);
+  });
+
+  it("creaseLines overrides legacy creaseSpanPct (v2.1 wins over v2.0)", () => {
+    const input = buildMvgsInput(
+      base({
+        creaseSpanPct: 90, // legacy — would cap 3
+        creaseLines: [{ id: "a", side: "front", spanPct: 15, start: pt(0, 0), end: pt(0, 0) }],
+      })
+    );
+    expect(input.creaseSpanPct).toBe(15);
+  });
+
+  it("all-zero spanPct array degrades to null (no ceiling)", () => {
+    const input = buildMvgsInput(
+      base({
+        creaseLines: [{ id: "a", side: "front", spanPct: 0, start: pt(0, 0), end: pt(0, 0) }],
+      })
+    );
+    expect(input.creaseSpanPct).toBeNull();
+  });
+
+  it("creaseLines absent → legacy creaseSpanPct still applies (v2.0 fallback)", () => {
+    const input = buildMvgsInput(base({ creaseSpanPct: 45 }));
+    expect(input.creaseSpanPct).toBe(45);
+  });
+
+  it("creaseLines absent + creaseSpanPct null + hasCrease true → legacy boolean fallback (10%)", () => {
+    const input = buildMvgsInput(base({ hasCrease: true }));
+    expect(input.creaseSpanPct).toBe(10);
+  });
+});
+
+describe("buildMvgsInput — whitening line narrowing (colour can't leak)", () => {
+  it("strips id / start / end / color before passing to engine", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          {
+            id: "w1",
+            side: "front",
+            edge: "top",
+            coveragePct: 25,
+            start: { x: 10, y: 5 },
+            end: { x: 35, y: 5 },
+            color: "#FF00AA", // ← display-only, must NOT survive
+          },
+        ],
+      })
+    );
+    expect(input.whiteningEdges).toEqual([{ side: "front", edge: "top", coveragePct: 25 }]);
+    // Engine boundary received exactly the three fields, nothing else.
+    expect(Object.keys(input.whiteningEdges![0]).sort()).toEqual(["coveragePct", "edge", "side"]);
+  });
+
+  it("empty list narrows to empty list (not null) — preserves 'measurement supplied' signal", () => {
+    expect(buildMvgsInput(base({ whiteningLines: [] })).whiteningEdges).toEqual([]);
+  });
+
+  it("absent whiteningLines → whiteningEdges null (legacy path)", () => {
+    expect(buildMvgsInput(base()).whiteningEdges).toBeNull();
+  });
+});

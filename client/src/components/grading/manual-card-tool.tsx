@@ -14,6 +14,7 @@ import {
 } from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
 import { deriveZone, type Defect, type MvgsCode } from "./defect-annotation";
+import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 import DefectTypePicker, { type DefectPickerAnchor, type DefectTier } from "./defect-type-picker";
 
 interface Props {
@@ -39,6 +40,28 @@ interface Props {
    *  so the operator can see what's already pinned and avoid duplicates.
    *  Numbering for new pins starts at max(existing.id) + 1. */
   existingDefects?: Defect[];
+  /** MVGS v2.1 — line measurements drawn inside the defects phase, alongside
+   *  the pin tool. Same shape as image-viewer's line props. Omitted handlers
+   *  → that tool option is hidden; defects phase falls back to pin-only. */
+  whiteningLines?: Array<{
+    id?: string;
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    color?: string;
+  }>;
+  creaseLines?: Array<{
+    id: string;
+    side: "front" | "back";
+    spanPct: number;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color?: string;
+  }>;
+  onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
+  onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
 }
 
 // Points are captured clockwise, one SIDE at a time. Index → short label.
@@ -189,6 +212,10 @@ export default function ManualCardTool({
   onCentering,
   onDefectAdded,
   existingDefects,
+  whiteningLines = [],
+  creaseLines = [],
+  onWhiteningLinesChange,
+  onCreaseLinesChange,
 }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -229,6 +256,14 @@ export default function ManualCardTool({
   const [defectPickerOpen, setDefectPickerOpen] = useState(false);
   const [defectPickerAnchor, setDefectPickerAnchor] = useState<DefectPickerAnchor | null>(null);
   const [defectPickerTier, setDefectPickerTier] = useState<DefectTier>("D2");
+  // MVGS v2.1 — defects-phase tool palette + line drawing. Same shape as
+  // image-viewer.tsx; the pin path stays byte-identical when markTool === "pin".
+  type MarkTool = "pin" | "whitening" | "crease";
+  const [markTool, setMarkTool] = useState<MarkTool>("pin");
+  const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null);
+  const [lineEnd, setLineEnd] = useState<{ x: number; y: number } | null>(null);
+  const canDrawWhitening = !!onWhiteningLinesChange;
+  const canDrawCrease = !!onCreaseLinesChange;
   // Local mirror of just-committed defects, used to render their pins inside
   // the tool. Parent state is the source of truth via onDefectAdded — the
   // panel's auto-save then persists. This mirror exists because the parent's
@@ -410,10 +445,19 @@ export default function ManualCardTool({
 
   // Container press: in the capture phase, place the next dot (or grab a
   // nearby dot for fine-tune drag). In the defects phase, route to the
-  // defect-area click handler — drops a pin into the batch.
+  // pin handler or the line-drawing tool depending on markTool.
   function onContainerMouseDown(e: React.MouseEvent) {
     if (Date.now() - lastTouchAtRef.current < 500) return; // ignore synthetic touch
     if (phase === "defects") {
+      if (markTool !== "pin") {
+        // MVGS v2.1 line draw — capture start at mouse-down.
+        const pt = toPct(e);
+        if (pt) {
+          setLineStart(pt);
+          setLineEnd(pt);
+        }
+        return;
+      }
       onDefectAreaClick(e);
       return;
     }
@@ -438,6 +482,11 @@ export default function ManualCardTool({
       return;
     }
     if (phase === "defects") {
+      if (lineStart) {
+        const pt = toPct(e);
+        if (pt) setLineEnd(pt);
+        return;
+      }
       setHover(toPct(e));
       return;
     }
@@ -446,6 +495,35 @@ export default function ManualCardTool({
       return;
     }
     setHover(toPct(e));
+  }
+
+  // MVGS v2.1 — commit the in-progress line on mouse-up.
+  function onContainerMouseUp() {
+    if (!lineStart || !lineEnd) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    const dx = Math.abs(lineEnd.x - lineStart.x);
+    const dy = Math.abs(lineEnd.y - lineStart.y);
+    if (Math.max(dx, dy) < 2) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    if (markTool === "whitening" && onWhiteningLinesChange) {
+      const edge = detectEdge(lineStart, lineEnd);
+      const coveragePct = coverageFromSegment(lineStart, lineEnd, edge);
+      const id = `wl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const remaining = whiteningLines.filter((l) => !(l.side === side && l.edge === edge));
+      onWhiteningLinesChange([...remaining, { id, side, edge, coveragePct, start: lineStart, end: lineEnd }]);
+    } else if (markTool === "crease" && onCreaseLinesChange) {
+      const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
+      const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      onCreaseLinesChange([...creaseLines, { id, side, spanPct, start: lineStart, end: lineEnd }]);
+    }
+    setLineStart(null);
+    setLineEnd(null);
   }
   function onContainerMouseLeave() {
     if (hover) setHover(null);
@@ -1049,7 +1127,11 @@ export default function ManualCardTool({
               className="relative rounded-lg bg-[var(--admin-panel2)] flex-shrink-0"
               onMouseDown={onContainerMouseDown}
               onMouseMove={onContainerMouseMove}
-              onMouseLeave={onContainerMouseLeave}
+              onMouseLeave={() => {
+                onContainerMouseUp();
+                onContainerMouseLeave();
+              }}
+              onMouseUp={onContainerMouseUp}
               onTouchStart={onContainerTouchStart}
             >
               <img
@@ -1275,6 +1357,77 @@ export default function ManualCardTool({
                   pin / open picker on double-click). */}
               {phase === "defects" && (
                 <>
+                  {/* MVGS v2.1 — whitening + crease line overlays (current
+                      side only) plus in-progress drag preview. pointer-events
+                      :none so the drawing handlers receive clicks. */}
+                  {(whiteningLines.length > 0 || creaseLines.length > 0 || lineStart) && (
+                    <svg
+                      className="absolute inset-0 w-full h-full pointer-events-none"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                    >
+                      {whiteningLines
+                        .filter((l) => l.side === side && l.start && l.end)
+                        .map((l, i) => (
+                          <g key={`wl-${l.id ?? i}`}>
+                            <line
+                              x1={l.start!.x}
+                              y1={l.start!.y}
+                              x2={l.end!.x}
+                              y2={l.end!.y}
+                              stroke="rgba(0,0,0,0.55)"
+                              strokeWidth={3}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={l.start!.x}
+                              y1={l.start!.y}
+                              x2={l.end!.x}
+                              y2={l.end!.y}
+                              stroke={l.color ?? "#FFD400"}
+                              strokeWidth={1.5}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                        ))}
+                      {creaseLines
+                        .filter((l) => l.side === side)
+                        .map((l) => (
+                          <g key={`cl-${l.id}`}>
+                            <line
+                              x1={l.start.x}
+                              y1={l.start.y}
+                              x2={l.end.x}
+                              y2={l.end.y}
+                              stroke="rgba(0,0,0,0.55)"
+                              strokeWidth={3}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={l.start.x}
+                              y1={l.start.y}
+                              x2={l.end.x}
+                              y2={l.end.y}
+                              stroke={l.color ?? "#00CCFF"}
+                              strokeWidth={1.5}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                        ))}
+                      {lineStart && lineEnd && (
+                        <line
+                          x1={lineStart.x}
+                          y1={lineStart.y}
+                          x2={lineEnd.x}
+                          y2={lineEnd.y}
+                          stroke={markTool === "whitening" ? "#FFD400" : "#00CCFF"}
+                          strokeWidth={1.5}
+                          vectorEffect="non-scaling-stroke"
+                          strokeDasharray="2 2"
+                        />
+                      )}
+                    </svg>
+                  )}
                   {committedDefects.map((d) => {
                     // Tier-coloured ring, matching image-viewer.tsx:785-791
                     // — D1 red / D2 amber / D3 green. Undefined-tier pins
@@ -1573,35 +1726,75 @@ export default function ManualCardTool({
           // bar shows what the operator has done in this session and how to
           // finish. Label-batch is a click target equivalent to double-click
           // / Enter, kept visible so the affordance is obvious.
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-[var(--admin-ink)] font-mono">
-                Defects: <strong>{committedDefects.length}</strong>
-              </span>
-              {defectBatch.length > 0 && (
-                <span className="text-[var(--admin-gold)] font-mono">+{defectBatch.length} pending</span>
-              )}
+          <div className="flex flex-col gap-2">
+            {/* MVGS v2.1 tool palette — Pin | Whitening | Crease. Pin path
+                is unchanged when markTool === "pin". */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line)] text-[10px] font-bold uppercase">
+                <button
+                  type="button"
+                  onClick={() => setMarkTool("pin")}
+                  data-testid="btn-mark-tool-pin"
+                  className={`px-3 py-1.5 ${markTool === "pin" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                >
+                  Pin
+                </button>
+                {canDrawWhitening && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("whitening")}
+                    data-testid="btn-mark-tool-whitening"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "whitening" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                  >
+                    Whitening
+                  </button>
+                )}
+                {canDrawCrease && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("crease")}
+                    data-testid="btn-mark-tool-crease"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "crease" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                  >
+                    Crease
+                  </button>
+                )}
+              </div>
               <span className="text-[var(--admin-ink-faint)] text-[10px]">
-                Click to pin · double-click or ↵ to label · Esc to discard
+                {markTool === "pin"
+                  ? "Click to pin · double-click or ↵ to label · Esc to discard"
+                  : markTool === "whitening"
+                    ? `${whiteningLines.filter((l) => l.side === side).length} on this side · click-drag along the edge`
+                    : `${creaseLines.filter((l) => l.side === side).length} on this side · click-drag across the card`}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={openDefectPicker}
-                disabled={defectBatch.length === 0}
-                className="border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[var(--admin-panel3)] disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Label batch ({defectBatch.length})
-              </button>
-              <button
-                type="button"
-                onClick={onDone}
-                className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90"
-              >
-                <Check size={13} />
-                Done
-              </button>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-[var(--admin-ink)] font-mono">
+                  Defects: <strong>{committedDefects.length}</strong>
+                </span>
+                {defectBatch.length > 0 && (
+                  <span className="text-[var(--admin-gold)] font-mono">+{defectBatch.length} pending</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openDefectPicker}
+                  disabled={defectBatch.length === 0}
+                  className="border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg hover:bg-[var(--admin-panel3)] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Label batch ({defectBatch.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={onDone}
+                  className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90"
+                >
+                  <Check size={13} />
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         )}

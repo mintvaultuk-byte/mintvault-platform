@@ -3312,6 +3312,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             // v2 measurements (Phase 2 columns). Numeric column from Drizzle
             // is `string | null` for decimal — coerce.
             whiteningLines: Array.isArray((cert as any).whiteningLines) ? (cert as any).whiteningLines : null,
+            // v2.1 — multi-crease list. Engine input derives max(spanPct)
+            // at the mvgs-input-builder boundary. Legacy creaseSpanPct
+            // column kept as fallback when crease_lines is empty.
+            creaseLines: Array.isArray((cert as any).creaseLines) ? (cert as any).creaseLines : null,
             creaseSpanPct: (cert as any).creaseSpanPct != null ? Number((cert as any).creaseSpanPct) : null,
             wrinkleSeverity: (cert as any).wrinkleSeverity ?? null,
             tearSeverity: (cert as any).tearSeverity ?? null,
@@ -9693,6 +9697,11 @@ Defects (admin-confirmed): ${defectLines}`;
         // legacy hasCrease/hasTear booleans on surfaceValues stay as a
         // fallback when these are null/empty.
         whiteningLines: Array.isArray(c.whiteningLines) ? c.whiteningLines : [],
+        // v2.1 — multi-crease list. Hydrates direct into creaseLines state;
+        // grading-panel synthesises a legacy single-entry from
+        // creaseSpanPct when this is empty AND the legacy column is set
+        // (preserves the persisted span% on pre-2.1 rows).
+        creaseLines: Array.isArray((c as any).creaseLines) ? (c as any).creaseLines : [],
         creaseSpanPct: c.creaseSpanPct != null ? Number(c.creaseSpanPct) : null,
         wrinkleSeverity: c.wrinkleSeverity ?? null,
         tearSeverity: c.tearSeverity ?? null,
@@ -9824,8 +9833,18 @@ Defects (admin-confirmed): ${defectLines}`;
               ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
               : sql`whitening_lines`
           },
+          crease_lines        = ${
+            // MVGS v2.1 — multi-crease list with start/end persistence.
+            // Same array-overwrite pattern as whitening_lines.
+            Array.isArray((b as any).crease_lines)
+              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
+              : sql`crease_lines`
+          },
           crease_span_pct     = ${
             // Numeric 0..100 or null. Explicit null clears; undefined keeps.
+            // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
+            // on the client (sent unconditionally in buildPayload) — server
+            // accepts whatever the client computes for back-compat readers.
             (b as any).crease_span_pct === null
               ? sql`NULL`
               : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
@@ -10014,6 +10033,13 @@ Defects (admin-confirmed): ${defectLines}`;
               : Array.isArray(certAny.whiteningLines)
                 ? certAny.whiteningLines
                 : null,
+            // v2.1 — multi-crease list. Engine input is max(spanPct) at the
+            // builder boundary. creaseSpanPct legacy field kept as fallback.
+            creaseLines: Array.isArray(bAny.crease_lines)
+              ? bAny.crease_lines
+              : Array.isArray(certAny.creaseLines)
+                ? certAny.creaseLines
+                : null,
             creaseSpanPct:
               bAny.crease_span_pct != null
                 ? Number(bAny.crease_span_pct)
@@ -10073,6 +10099,12 @@ Defects (admin-confirmed): ${defectLines}`;
             Array.isArray((b as any).whitening_lines)
               ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
               : sql`whitening_lines`
+          },
+          crease_lines        = ${
+            // MVGS v2.1 multi-crease list.
+            Array.isArray((b as any).crease_lines)
+              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
+              : sql`crease_lines`
           },
           crease_span_pct     = ${
             (b as any).crease_span_pct === null

@@ -551,7 +551,29 @@ export const certificates = pgTable("certificates", {
     >()
     .notNull()
     .default([]),
+  // Legacy single-crease % — kept as a derived mirror of max(crease_lines.spanPct)
+  // for back-compat (readers that haven't migrated to crease_lines still see
+  // the worst span). New writes go through crease_lines.
   creaseSpanPct: decimal("crease_span_pct", { precision: 4, scale: 1 }),
+  // MVGS v2 multi-crease persistence (Phase 2.1). Operator can mark multiple
+  // creases per cert; each entry stores the actual drawn segment so the line
+  // redraws on reload. Engine input derives `creaseSpanPct = max(spanPct)`
+  // across all entries (longest crease wins per spec §4/§5 — strictest cap,
+  // no compounding). `color` is display-only — stripped at the
+  // mvgs-input-builder boundary so the engine never sees it.
+  creaseLines: jsonb("crease_lines")
+    .$type<
+      Array<{
+        id: string;
+        side: "front" | "back";
+        spanPct: number;
+        start: { x: number; y: number };
+        end: { x: number; y: number };
+        color?: string;
+      }>
+    >()
+    .notNull()
+    .default([]),
   wrinkleSeverity: text("wrinkle_severity").$type<
     "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
   >(),
