@@ -3283,7 +3283,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // column when any are classified (any pin with mvgsCode+tier+zone);
       // otherwise falls through to the legacy auto-promote-from-ai-defects
       // behaviour so existing flows keep working.
-      const { computeMvgsScore } = await import("./mvgs-scoring");
+      // MVGS v2 — load calibration + thread persisted measurement inputs.
+      // scoreMvgsV2 routes everything through buildMvgsInput which enforces
+      // measurement-wins-over-checkbox precedence (shared/mvgs-input-builder.ts).
+      const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
+      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
       const savedDefects: any[] = Array.isArray((cert as any).defects) ? (cert as any).defects : [];
       const mvgsPins = savedDefects
         .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
@@ -3291,18 +3295,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let mvgsScore: number | null = null;
       let mvgsDeductions: Record<string, number> | undefined;
       if (!isNonNum) {
-        const r = computeMvgsScore({
-          centeringFrontLr: (cert as any).centeringFrontLr ?? null,
-          centeringFrontTb: (cert as any).centeringFrontTb ?? null,
-          centeringBackLr: (cert as any).centeringBackLr ?? null,
-          centeringBackTb: (cert as any).centeringBackTb ?? null,
-          defects: mvgsPins,
-          // Per-side flags. Fall back to the legacy dark_border column for
-          // rows that pre-date the split (treated as both-sides dark).
-          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
-          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
-        });
+        const calibration = await loadMvgsCalibration();
+        const surfaceFlags = ((cert as any).surfaceValues as any) ?? {};
+        const r = scoreMvgsV2(
+          {
+            centeringFrontLr: (cert as any).centeringFrontLr ?? null,
+            centeringFrontTb: (cert as any).centeringFrontTb ?? null,
+            centeringBackLr: (cert as any).centeringBackLr ?? null,
+            centeringBackTb: (cert as any).centeringBackTb ?? null,
+            defects: mvgsPins,
+            // Per-side flags. Fall back to the legacy dark_border column for
+            // rows that pre-date the split (treated as both-sides dark).
+            darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
+            darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
+            eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
+            // v2 measurements (Phase 2 columns). Numeric column from Drizzle
+            // is `string | null` for decimal — coerce.
+            whiteningLines: Array.isArray((cert as any).whiteningLines) ? (cert as any).whiteningLines : null,
+            creaseSpanPct: (cert as any).creaseSpanPct != null ? Number((cert as any).creaseSpanPct) : null,
+            wrinkleSeverity: (cert as any).wrinkleSeverity ?? null,
+            tearSeverity: (cert as any).tearSeverity ?? null,
+            // Legacy boolean fallback (only consulted by the builder when the
+            // matching measurement is null).
+            hasCrease: !!surfaceFlags.hasCrease,
+            hasTear: !!surfaceFlags.hasTear,
+          },
+          calibration
+        );
         mvgsScore = r.score;
         mvgsDeductions = r.deductions;
       }
@@ -9669,6 +9688,14 @@ Defects (admin-confirmed): ${defectLines}`;
         darkBorderFront: (c as any).darkBorderFront ?? !!c.darkBorder,
         darkBorderBack: (c as any).darkBorderBack ?? !!c.darkBorder,
         eyeAppealModifier: Number(c.eyeAppealModifier ?? 0) || 0,
+        // MVGS v2 measurement inputs — hydrated into grading-panel state on
+        // load. Engine consumes them via shared/mvgs-input-builder.ts; the
+        // legacy hasCrease/hasTear booleans on surfaceValues stay as a
+        // fallback when these are null/empty.
+        whiteningLines: Array.isArray(c.whiteningLines) ? c.whiteningLines : [],
+        creaseSpanPct: c.creaseSpanPct != null ? Number(c.creaseSpanPct) : null,
+        wrinkleSeverity: c.wrinkleSeverity ?? null,
+        tearSeverity: c.tearSeverity ?? null,
         // Saved aggregate subgrades for hydration on reload. Field names below
         // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
         // map to corners_score/edges_score/surface_score). Pre-v408 the
@@ -9789,6 +9816,40 @@ Defects (admin-confirmed): ${defectLines}`;
               return sql`${clamped}`;
             })()
           },
+          whitening_lines     = ${
+            // MVGS v2 — operator-marked whitening lines per edge. Array
+            // present (incl. []) → overwrite; absent key → keep existing
+            // (legacy client / non-grading payload).
+            Array.isArray((b as any).whitening_lines)
+              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
+              : sql`whitening_lines`
+          },
+          crease_span_pct     = ${
+            // Numeric 0..100 or null. Explicit null clears; undefined keeps.
+            (b as any).crease_span_pct === null
+              ? sql`NULL`
+              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
+                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
+                : sql`crease_span_pct`
+          },
+          wrinkle_severity    = ${
+            // Validate against the enum to prevent payload junk reaching the
+            // DB CHECK constraint with a more useful error before the SQL fires.
+            (() => {
+              const v = (b as any).wrinkle_severity;
+              if (v === null) return sql`NULL`;
+              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
+                return sql`${v}`;
+              }
+              return sql`wrinkle_severity`;
+            })()
+          },
+          tear_severity       = ${(() => {
+            const v = (b as any).tear_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
+            return sql`tear_severity`;
+          })()},
           updated_at          = NOW()
         WHERE id = ${id}
       `);
@@ -9914,7 +9975,12 @@ Defects (admin-confirmed): ${defectLines}`;
       // flagged Pristine even if its corners subgrade rounds to 10.
       let blackDeductions: Record<string, number> | undefined;
       if (!isNonNum) {
-        const { computeMvgsScore } = await import("./mvgs-scoring");
+        // Same scoreMvgsV2 + calibration plumbing as the grade-card route.
+        // Engine input goes through buildMvgsInput so the legacy
+        // hasCrease/hasTear booleans are only consulted when the v2
+        // measurement (creaseSpanPct / tearSeverity) is null.
+        const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
+        const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
         const finalDefects: any[] = Array.isArray(b.defects)
           ? b.defects
           : Array.isArray((cert as any).defects)
@@ -9923,16 +9989,44 @@ Defects (admin-confirmed): ${defectLines}`;
         const mvgsPins = finalDefects
           .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
           .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
-        const r = computeMvgsScore({
-          centeringFrontLr: txt(b.centering_front_lr) ?? (cert as any).centeringFrontLr ?? null,
-          centeringFrontTb: txt(b.centering_front_tb) ?? (cert as any).centeringFrontTb ?? null,
-          centeringBackLr: txt(b.centering_back_lr) ?? (cert as any).centeringBackLr ?? null,
-          centeringBackTb: txt(b.centering_back_tb) ?? (cert as any).centeringBackTb ?? null,
-          defects: mvgsPins,
-          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
-          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
-        });
+        const calibration = await loadMvgsCalibration();
+        // Prefer the submitted body's v2 inputs (operator's just-set values)
+        // when present, else fall back to the cert's persisted columns.
+        // Body schema: { whitening_lines, crease_span_pct, wrinkle_severity,
+        // tear_severity, surface: { hasCrease, hasTear } } — same names as
+        // the grade panel payload (buildPayload in grading-panel.tsx).
+        const bAny = b as any;
+        const bodySurface = (bAny.surface as any) ?? {};
+        const certAny = cert as any;
+        const certSurface = (certAny.surfaceValues as any) ?? {};
+        const r = scoreMvgsV2(
+          {
+            centeringFrontLr: txt(b.centering_front_lr) ?? certAny.centeringFrontLr ?? null,
+            centeringFrontTb: txt(b.centering_front_tb) ?? certAny.centeringFrontTb ?? null,
+            centeringBackLr: txt(b.centering_back_lr) ?? certAny.centeringBackLr ?? null,
+            centeringBackTb: txt(b.centering_back_tb) ?? certAny.centeringBackTb ?? null,
+            defects: mvgsPins,
+            darkBorderFront: certAny.darkBorderFront ?? !!certAny.darkBorder,
+            darkBorderBack: certAny.darkBorderBack ?? !!certAny.darkBorder,
+            eyeAppealModifier: Number(certAny.eyeAppealModifier ?? 0) || 0,
+            whiteningLines: Array.isArray(bAny.whitening_lines)
+              ? bAny.whitening_lines
+              : Array.isArray(certAny.whiteningLines)
+                ? certAny.whiteningLines
+                : null,
+            creaseSpanPct:
+              bAny.crease_span_pct != null
+                ? Number(bAny.crease_span_pct)
+                : certAny.creaseSpanPct != null
+                  ? Number(certAny.creaseSpanPct)
+                  : null,
+            wrinkleSeverity: bAny.wrinkle_severity ?? certAny.wrinkleSeverity ?? null,
+            tearSeverity: bAny.tear_severity ?? certAny.tearSeverity ?? null,
+            hasCrease: bodySurface.hasCrease != null ? !!bodySurface.hasCrease : !!certSurface.hasCrease,
+            hasTear: bodySurface.hasTear != null ? !!bodySurface.hasTear : !!certSurface.hasTear,
+          },
+          calibration
+        );
         blackDeductions = r.deductions;
       }
       const labelType =
@@ -9973,6 +10067,34 @@ Defects (admin-confirmed): ${defectLines}`;
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
           label_type          = ${labelType},
+          whitening_lines     = ${
+            // MVGS v2 — persist on approve too so the cert row carries the
+            // final operator-marked measurements alongside the grade.
+            Array.isArray((b as any).whitening_lines)
+              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
+              : sql`whitening_lines`
+          },
+          crease_span_pct     = ${
+            (b as any).crease_span_pct === null
+              ? sql`NULL`
+              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
+                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
+                : sql`crease_span_pct`
+          },
+          wrinkle_severity    = ${(() => {
+            const v = (b as any).wrinkle_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
+              return sql`${v}`;
+            }
+            return sql`wrinkle_severity`;
+          })()},
+          tear_severity       = ${(() => {
+            const v = (b as any).tear_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
+            return sql`tear_severity`;
+          })()},
           grade_approved_by   = ${"Cornelius Oliver"},
           grade_approved_at   = NOW(),
           status              = 'active',

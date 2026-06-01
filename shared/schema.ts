@@ -526,6 +526,29 @@ export const certificates = pgTable("certificates", {
   darkBorderFront: boolean("dark_border_front").notNull().default(false),
   darkBorderBack: boolean("dark_border_back").notNull().default(false),
   eyeAppealModifier: integer("eye_appeal_modifier").notNull().default(0),
+  // ── MVGS v2 measurement inputs (Phase 2) ────────────────────────────────
+  // Persisted per cert from the grading-workstation line tool + severity
+  // pickers. Engine (shared/mvgs-scoring.ts) accepts these as optional
+  // MvgsInput fields; shared/mvgs-input-builder.ts handles precedence
+  // (measurement OVERRIDES the legacy has_crease/has_tear booleans on
+  // surface_values). NULL / [] = no v2 measurement for that category;
+  // legacy boolean fallback (if set) applies via the input builder.
+  // Migration: migrations/add-mvgs-v2-measurements.sql (staging only).
+  whiteningLines: jsonb("whitening_lines")
+    .$type<
+      Array<{
+        side: "front" | "back";
+        edge: "top" | "right" | "bottom" | "left";
+        coveragePct: number;
+      }>
+    >()
+    .notNull()
+    .default([]),
+  creaseSpanPct: decimal("crease_span_pct", { precision: 4, scale: 1 }),
+  wrinkleSeverity: text("wrinkle_severity").$type<
+    "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
+  >(),
+  tearSeverity: text("tear_severity").$type<"minor" | "significant" | "major" | null>(),
   centeringOuterFront: jsonb("centering_outer_front").$type<{
     top_pct: number;
     left_pct: number;

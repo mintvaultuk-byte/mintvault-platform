@@ -50,32 +50,42 @@ For each card, in order:
 
 ---
 
-## 2. Score → grade bands `[HARD-CODE]`
+## 2. Score → grade bands `[HARD-CODE — SIGNED OFF]`
 
-TAG's 50-point bands scaled to the MVGS 0–100 scale (÷10). Confirm against the
-existing MVGS table — they should already match; adjust only if they differ.
+TAG's 50-point bands scaled to the MVGS 0–100 scale (÷10).
 
-| Grade       | Name         | TAG (1000) | MVGS (0–100) |
-| ----------- | ------------ | ---------- | ------------ |
-| 10 Pristine | Pristine 10P | 990–1000   | 99–100       |
-| 10          | Gem Mint     | 950–989    | 95–98.9      |
-| 9           | Mint         | 900–949    | 90–94.9      |
-| 8.5         | NM-Mint+     | 850–899    | 85–89.9      |
-| 8           | NM-Mint      | 800–849    | 80–84.9      |
-| 7.5         | NM+          | 750–799    | 75–79.9      |
-| 7           | Near Mint    | 700–749    | 70–74.9      |
-| 6.5         | EX-Mint+     | 650–699    | 65–69.9      |
-| 6           | EX-Mint      | 600–649    | 60–64.9      |
-| 5.5         | Excellent+   | 550–599    | 55–59.9      |
-| 5           | Excellent    | 500–549    | 50–54.9      |
-| 4.5         | VG-EX+       | 450–499    | 45–49.9      |
-| 4           | VG-EX        | 400–449    | 40–44.9      |
-| 3.5         | VG+          | 350–399    | 35–39.9      |
-| 3           | Very Good    | 300–349    | 30–34.9      |
-| 2.5         | Good+        | 250–299    | 25–29.9      |
-| 2           | Good         | 200–249    | 20–24.9      |
-| 1.5         | Fair         | 150–199    | 15–19.9      |
-| 1           | Poor         | 100–149    | 10–14.9      |
+**IMPORTANT — these bands are STRICTER than v1 (do not assume parity).** The v1
+engine was ~5 points more lenient and skipped half-grades below 7.5; v2 uses the
+full TAG ladder. Verified head-to-head (v1 `main` vs v2 `fe0d60c`): same-score cards
+re-label, and the top tier tightened. **Pristine 10P now requires 99+ (was ≥96 in
+v1)** — signed off deliberately: rare Pristine makes the black label a genuine
+premium tier. A 97 that was Pristine 10P / black label under v1 is now Gem Mint 10.
+
+**Prod sequencing constraint (because the bands moved):** the v2 band table reaches
+prod ONLY bundled with the re-grade + reprint of the existing certs — never before —
+so physical slabs and the verify page always agree. No standalone band-table deploy.
+
+| Grade       | Name         | TAG (1000) | MVGS (0–100)            |
+| ----------- | ------------ | ---------- | ----------------------- |
+| 10 Pristine | Pristine 10P | 990–1000   | **99–100 (signed off)** |
+| 10          | Gem Mint     | 950–989    | 95–98.9                 |
+| 9           | Mint         | 900–949    | 90–94.9                 |
+| 8.5         | NM-Mint+     | 850–899    | 85–89.9                 |
+| 8           | NM-Mint      | 800–849    | 80–84.9                 |
+| 7.5         | NM+          | 750–799    | 75–79.9                 |
+| 7           | Near Mint    | 700–749    | 70–74.9                 |
+| 6.5         | EX-Mint+     | 650–699    | 65–69.9                 |
+| 6           | EX-Mint      | 600–649    | 60–64.9                 |
+| 5.5         | Excellent+   | 550–599    | 55–59.9                 |
+| 5           | Excellent    | 500–549    | 50–54.9                 |
+| 4.5         | VG-EX+       | 450–499    | 45–49.9                 |
+| 4           | VG-EX        | 400–449    | 40–44.9                 |
+| 3.5         | VG+          | 350–399    | 35–39.9                 |
+| 3           | Very Good    | 300–349    | 30–34.9                 |
+| 2.5         | Good+        | 250–299    | 25–29.9                 |
+| 2           | Good         | 200–249    | 20–24.9                 |
+| 1.5         | Fair         | 150–199    | 15–19.9                 |
+| 1           | Poor         | 100–149    | 10–14.9                 |
 
 ---
 
@@ -134,14 +144,18 @@ ladder:
 | Small, front            | 5.5           |
 | Multiple, front         | 5             |
 
-### Crease (breaks the stock) — by % of card span `[CALIBRATE — starting values]`
+### Crease (breaks the stock) — by % of card span `[CALIBRATE — starting values, SIGNED OFF]`
 
+Signed off: a crease breaks the stock = permanent structural damage, capped hard
+per the DINGS rule (worst factor dominates). A 40% crease → cap 4 confirmed as the
+honest grade (keeps MVGS PSA-credible on damaged cards). Tiered so minor creases
+aren't over-punished. Adjustable later against real cards.
 | Severity (length as % of card's span) | Grade ceiling |
-| ------------------------------------- | ------------- |
-| Minor crease, **< 25%**               | 4.5           |
-| **~25–50%** (≈ half across)           | 4             |
-| **~50–75%** (≈ three-quarters)        | 3.5           |
-| Full-length, **> 75%**                | ≤3            |
+|---|---|
+| Minor crease, **< 25%** | 4.5 |
+| **~25–50%** (≈ half across) | 4 |
+| **~50–75%** (≈ three-quarters) | 3.5 |
+| Full-length, **> 75%** | ≤3 |
 
 ### Tear — by extent
 
@@ -219,20 +233,26 @@ always matches what the engine actually computes (no claim-without-code drift).
 
 ## 7. Build phases (staging only, do not merge/deploy prod)
 
-**Phase 1 — Engine + calibration values.**
+**Phase 1 — Engine + calibration values. ✅ DONE (commit `fe0d60c`, staging
+`mintvault-v2`, NOT merged/prod).**
 
-- Implement the whitening→Edges ladder, the crease/wrinkle/tear ceilings, and the
-  DINGS/floor-rule resolution in the scoring engine.
-- Store the `[CALIBRATE]` thresholds as adjustable settings (calibration panel),
-  not hardcoded constants.
-- No UI marker change yet — wire it to accept a line measurement input.
-- Type-check, build, deploy STAGING. Verify with seeded test certs.
+- Whitening→Edges ladder, crease/wrinkle/tear ceilings, DINGS/floor-rule resolution
+  implemented. 172/172 tests + 13/13 smoke scenarios pass.
+- `[CALIBRATE]` thresholds stored via `server/lib/mvgs-calibration.ts`
+  (`pipeline_settings` key `mvgs.calibration`), safe defaults.
+- Divergent crease/tear caps consolidated to the engine as single source of truth
+  (grade-logic.ts, grade-display.tsx, surface-grading.tsx, grading-prompt.ts).
+- Band table corrected to §2 (stricter than v1, Pristine 99+ signed off).
+- New v2 inputs optional → 6 call sites compile + score identically when omitted.
 
-**Phase 2 — The line-marker tool.**
+**Phase 2 — The line-marker tool + persistence. (NEXT)**
 
 - Add the draw-a-line measurement marker to the grading workstation, alongside the
   existing pin. Outputs length / % of edge → feeds the Phase 1 engine.
 - Keep the pin for genuine point defects.
+- Add cert-level DB columns to PERSIST the v2 measurements per card (whitening lines,
+  crease span %, wrinkle/tear severity) — schema migration on STAGING.
+- Wire the 6 call sites to pass the persisted measurements into the engine.
 - Staging, verify on seeded certs.
 
 **Phase 3 — Standard, page, legal, slab, panels.**
@@ -244,7 +264,9 @@ always matches what the engine actually computes (no claim-without-code drift).
 - Staging.
 
 **Then:** calibration pass (you, against your own cards) → lock the values →
-qualified/legal review of the standard change → promote to prod deliberately.
+qualified/legal review of the standard change → **re-grade + reprint the existing
+certs → promote to prod in ONE bundle** (band table + re-grades together, never the
+engine alone — see §2 sequencing constraint).
 
 ---
 
