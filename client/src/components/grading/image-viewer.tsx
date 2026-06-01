@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
-import { MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
+import { MVGS_DEFECT_TYPES, deriveZone, LINE_COLOUR_PALETTE } from "./defect-annotation";
 import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
@@ -272,6 +272,12 @@ export default function ImageViewer({
   // is wired by the parent.
   type MarkTool = "pin" | "whitening" | "crease";
   const [markTool, setMarkTool] = useState<MarkTool>("pin");
+  // MVGS v2.1 — currently selected line colour (display-only). Picked in the
+  // palette BEFORE drawing; each new whitening/crease line is born with this
+  // colour. Change the palette → the NEXT line uses it; already-drawn lines
+  // keep their own colour. Stripped at the mvgs-input-builder boundary, so it
+  // never reaches the engine.
+  const [lineColor, setLineColor] = useState<string>(LINE_COLOUR_PALETTE[0]);
   // In-progress line drawing (image-relative percent coords). Mouse-down
   // captures `lineStart`, mouse-move tracks `lineEnd` for the live preview,
   // mouse-up commits via onWhiteningLinesChange / onCreaseLinesChange.
@@ -492,14 +498,17 @@ export default function ImageViewer({
       const sideKey = side as "front" | "back";
       onWhiteningLinesChange([
         ...whiteningLines,
-        { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd },
+        { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd, color: lineColor },
       ]);
     } else if (markTool === "crease" && side !== "angled" && side !== "closeup" && onCreaseLinesChange) {
       const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
       const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
       const sideKey = side as "front" | "back";
       // Crease appends — multiple creases per cert (longest wins in the engine).
-      onCreaseLinesChange([...creaseLines, { id, side: sideKey, spanPct, start: lineStart, end: lineEnd }]);
+      onCreaseLinesChange([
+        ...creaseLines,
+        { id, side: sideKey, spanPct, start: lineStart, end: lineEnd, color: lineColor },
+      ]);
     }
     setLineStart(null);
     setLineEnd(null);
@@ -796,7 +805,7 @@ export default function ImageViewer({
                       y1={lineStart.y}
                       x2={lineEnd.x}
                       y2={lineEnd.y}
-                      stroke={markTool === "whitening" ? "#FFD400" : "#00CCFF"}
+                      stroke={lineColor}
                       strokeWidth={1.5}
                       vectorEffect="non-scaling-stroke"
                       strokeDasharray="2 2"
@@ -1265,6 +1274,28 @@ export default function ImageViewer({
                   </button>
                 )}
               </div>
+              {/* MVGS v2.1 — line colour selector. Pick BEFORE drawing; the
+                  next line is born in this colour. Display-only (stripped at
+                  the mvgs-input-builder boundary). Hidden in pin-only mode. */}
+              {(canDrawWhitening || canDrawCrease) && (
+                <div className="flex items-center gap-1" data-testid="line-colour-palette">
+                  {LINE_COLOUR_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setLineColor(c)}
+                      title="Line colour (display only — doesn't affect grade)"
+                      data-testid={`btn-line-colour-${c.replace("#", "")}`}
+                      className={`w-5 h-5 rounded-full border transition-transform ${
+                        lineColor === c
+                          ? "border-[var(--admin-gold)] ring-2 ring-[var(--admin-gold)] scale-110"
+                          : "border-[var(--admin-line-hard)] hover:scale-110"
+                      }`}
+                      style={{ background: c }}
+                    />
+                  ))}
+                </div>
+              )}
               <p className="text-[var(--admin-ink-dim)] text-xs">
                 {markTool === "pin"
                   ? `${defects.length} defect${defects.length !== 1 ? "s" : ""} marked · Click → pin, Enter / dbl-click = Done`

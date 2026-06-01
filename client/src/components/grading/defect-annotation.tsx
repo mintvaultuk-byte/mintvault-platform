@@ -160,7 +160,7 @@ interface Props {
 
 /** Colour palette for line entries — display-only (engine never sees these).
  *  Operator cycles through to pick a colour that contrasts the card image. */
-const LINE_COLOUR_PALETTE = ["#FFD400", "#000000", "#FF8A00", "#FF3B6B", "#FFFFFF"] as const;
+export const LINE_COLOUR_PALETTE = ["#FFD400", "#000000", "#FF8800", "#FF3B6B", "#FFFFFF"] as const;
 const EDGE_KEYS = ["top", "right", "bottom", "left"] as const;
 
 const DEFECT_TYPES = [

@@ -537,6 +537,7 @@ export const certificates = pgTable("certificates", {
   whiteningLines: jsonb("whitening_lines")
     .$type<
       Array<{
+        id?: string;
         side: "front" | "back";
         edge: "top" | "right" | "bottom" | "left";
         coveragePct: number;
@@ -547,6 +548,9 @@ export const certificates = pgTable("certificates", {
         // to the legacy corner-stub indicator.
         start?: { x: number; y: number };
         end?: { x: number; y: number };
+        // Display-only line colour (v2.1) — stripped at the mvgs-input-builder
+        // boundary so the engine never sees it. Aligns with creaseLines.
+        color?: string;
       }>
     >()
     .notNull()

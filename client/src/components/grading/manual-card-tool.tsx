@@ -13,7 +13,7 @@ import {
   type CardToolMode,
 } from "./card-tool-geometry";
 import { type CenteringResult } from "./manual-centering";
-import { deriveZone, type Defect, type MvgsCode } from "./defect-annotation";
+import { deriveZone, LINE_COLOUR_PALETTE, type Defect, type MvgsCode } from "./defect-annotation";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 import DefectTypePicker, { type DefectPickerAnchor, type DefectTier } from "./defect-type-picker";
 
@@ -260,6 +260,10 @@ export default function ManualCardTool({
   // image-viewer.tsx; the pin path stays byte-identical when markTool === "pin".
   type MarkTool = "pin" | "whitening" | "crease";
   const [markTool, setMarkTool] = useState<MarkTool>("pin");
+  // MVGS v2.1 — selected line colour (display-only). Picked in the palette
+  // BEFORE drawing; each new line is born with it. Stripped at the
+  // mvgs-input-builder boundary — never reaches the engine.
+  const [lineColor, setLineColor] = useState<string>(LINE_COLOUR_PALETTE[0]);
   const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null);
   const [lineEnd, setLineEnd] = useState<{ x: number; y: number } | null>(null);
   const canDrawWhitening = !!onWhiteningLinesChange;
@@ -518,11 +522,14 @@ export default function ManualCardTool({
       // APPEND — multiple whitening lines per (side, edge) are allowed.
       // The engine boundary in mvgs-input-builder collapses to ONE entry
       // per edge using MAX coverage (worst-line-wins, no compounding).
-      onWhiteningLinesChange([...whiteningLines, { id, side, edge, coveragePct, start: lineStart, end: lineEnd }]);
+      onWhiteningLinesChange([
+        ...whiteningLines,
+        { id, side, edge, coveragePct, start: lineStart, end: lineEnd, color: lineColor },
+      ]);
     } else if (markTool === "crease" && onCreaseLinesChange) {
       const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
       const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-      onCreaseLinesChange([...creaseLines, { id, side, spanPct, start: lineStart, end: lineEnd }]);
+      onCreaseLinesChange([...creaseLines, { id, side, spanPct, start: lineStart, end: lineEnd, color: lineColor }]);
     }
     setLineStart(null);
     setLineEnd(null);
@@ -1422,7 +1429,7 @@ export default function ManualCardTool({
                           y1={lineStart.y}
                           x2={lineEnd.x}
                           y2={lineEnd.y}
-                          stroke={markTool === "whitening" ? "#FFD400" : "#00CCFF"}
+                          stroke={lineColor}
                           strokeWidth={1.5}
                           vectorEffect="non-scaling-stroke"
                           strokeDasharray="2 2"
@@ -1732,34 +1739,58 @@ export default function ManualCardTool({
             {/* MVGS v2.1 tool palette — Pin | Whitening | Crease. Pin path
                 is unchanged when markTool === "pin". */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line)] text-[10px] font-bold uppercase">
-                <button
-                  type="button"
-                  onClick={() => setMarkTool("pin")}
-                  data-testid="btn-mark-tool-pin"
-                  className={`px-3 py-1.5 ${markTool === "pin" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
-                >
-                  Pin
-                </button>
-                {canDrawWhitening && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line)] text-[10px] font-bold uppercase">
                   <button
                     type="button"
-                    onClick={() => setMarkTool("whitening")}
-                    data-testid="btn-mark-tool-whitening"
-                    className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "whitening" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                    onClick={() => setMarkTool("pin")}
+                    data-testid="btn-mark-tool-pin"
+                    className={`px-3 py-1.5 ${markTool === "pin" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
                   >
-                    Whitening
+                    Pin
                   </button>
-                )}
-                {canDrawCrease && (
-                  <button
-                    type="button"
-                    onClick={() => setMarkTool("crease")}
-                    data-testid="btn-mark-tool-crease"
-                    className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "crease" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
-                  >
-                    Crease
-                  </button>
+                  {canDrawWhitening && (
+                    <button
+                      type="button"
+                      onClick={() => setMarkTool("whitening")}
+                      data-testid="btn-mark-tool-whitening"
+                      className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "whitening" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                    >
+                      Whitening
+                    </button>
+                  )}
+                  {canDrawCrease && (
+                    <button
+                      type="button"
+                      onClick={() => setMarkTool("crease")}
+                      data-testid="btn-mark-tool-crease"
+                      className={`px-3 py-1.5 border-l border-[var(--admin-line)] ${markTool === "crease" ? "bg-[var(--admin-gold)] text-[#1A1400]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel3)]"}`}
+                    >
+                      Crease
+                    </button>
+                  )}
+                </div>
+                {/* MVGS v2.1 — line colour selector. Pick BEFORE drawing; the
+                  next line is born in this colour. Display-only (stripped at
+                  the mvgs-input-builder boundary). Hidden in pin-only mode. */}
+                {(canDrawWhitening || canDrawCrease) && (
+                  <div className="flex items-center gap-1" data-testid="line-colour-palette">
+                    {LINE_COLOUR_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setLineColor(c)}
+                        title="Line colour (display only — doesn't affect grade)"
+                        data-testid={`btn-line-colour-${c.replace("#", "")}`}
+                        className={`w-5 h-5 rounded-full border transition-transform ${
+                          lineColor === c
+                            ? "border-[var(--admin-gold)] ring-2 ring-[var(--admin-gold)] scale-110"
+                            : "border-[var(--admin-line)] hover:scale-110"
+                        }`}
+                        style={{ background: c }}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
               <span className="text-[var(--admin-ink-faint)] text-[10px]">

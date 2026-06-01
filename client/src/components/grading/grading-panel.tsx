@@ -276,6 +276,7 @@ export default function GradingPanel({
   // still drive a fallback ceiling when no measurement is present).
   const [whiteningLines, setWhiteningLines] = useState<
     Array<{
+      id?: string;
       side: "front" | "back";
       edge: "top" | "right" | "bottom" | "left";
       coveragePct: number;
@@ -285,6 +286,9 @@ export default function GradingPanel({
       // corner-stub indicator.
       start?: { x: number; y: number };
       end?: { x: number; y: number };
+      // Display-only line colour (v2.1). Stripped at the mvgs-input-builder
+      // boundary — never reaches the engine.
+      color?: string;
     }>
   >([]);
   // MVGS v2.1 — multi-crease persistence. List of crease lines, each carrying
