@@ -2,7 +2,8 @@ import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
-import { mvgsTierName } from "@shared/mvgs-scoring";
+import { computeMvgsScore, mvgsTierName } from "@shared/mvgs-scoring";
+import { isPristine } from "@shared/pristine";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
@@ -369,16 +370,49 @@ function drawGoldFrame(ctx: any) {
 export async function generateLabelPNG(cert: CertificateRecord, side: "front" | "back"): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
 
-  // Black Label: ONLY quad-10s (all four subgrades exactly 10) get the dark label.
-  // A standard GEM MT 10 with any subgrade below 10 renders on the white label.
+  // Black Label / PRISTINE gate — uses the canonical isPristine() from
+  // shared/pristine.ts, the SAME gate the cert/approve system uses. Quad-10
+  // subgrades are necessary but NOT sufficient: isPristine additionally
+  // requires ZERO raw defect deduction (centering_front/back, corners, edges,
+  // surface). So a card with all-10 subgrades but residual deduction renders
+  // on the WHITE label, not the black PRISTINE one. Deductions are
+  // reconstructed here exactly as the approve route does — from the same cert
+  // columns fed to computeMvgsScore — changing nothing about how they're
+  // computed.
   const gradeNum = parseFloat(cert.gradeOverall || "0");
+  const isNumericGrade = !isNonNumericGrade(cert.gradeType || "numeric");
+  let mvgsDeductions: Record<string, number> | undefined;
+  if (isNumericGrade) {
+    const rawDefects = cert.defects;
+    const savedDefects: Array<Record<string, unknown>> = Array.isArray(rawDefects)
+      ? (rawDefects as unknown as Array<Record<string, unknown>>)
+      : [];
+    const mvgsPins = savedDefects
+      .filter((d) => d.mvgsCode && d.tier && d.zone)
+      .map((d) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
+    mvgsDeductions = computeMvgsScore({
+      centeringFrontLr: cert.centeringFrontLr,
+      centeringFrontTb: cert.centeringFrontTb,
+      centeringBackLr: cert.centeringBackLr,
+      centeringBackTb: cert.centeringBackTb,
+      defects: mvgsPins,
+      darkBorderFront: cert.darkBorderFront,
+      darkBorderBack: cert.darkBorderBack,
+      eyeAppealModifier: cert.eyeAppealModifier,
+    }).deductions;
+  }
   const isBlack =
-    !isNonNumericGrade(cert.gradeType || "numeric") &&
-    gradeNum === 10 &&
-    parseFloat(cert.gradeCentering || "0") === 10 &&
-    parseFloat(cert.gradeCorners || "0") === 10 &&
-    parseFloat(cert.gradeEdges || "0") === 10 &&
-    parseFloat(cert.gradeSurface || "0") === 10;
+    isNumericGrade &&
+    isPristine(
+      {
+        centering: parseFloat(cert.gradeCentering || "0"),
+        corners: parseFloat(cert.gradeCorners || "0"),
+        edges: parseFloat(cert.gradeEdges || "0"),
+        surface: parseFloat(cert.gradeSurface || "0"),
+      },
+      gradeNum,
+      mvgsDeductions
+    );
   const labelBg = isBlack ? BLACK : WHITE;
   // Black Label foreground: GOLD_LIGHT for premium gold-on-black look.
   // Affects three text elements inside drawFront(): card title block (L742),
