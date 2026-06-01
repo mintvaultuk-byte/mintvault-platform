@@ -15,39 +15,22 @@ export interface SurfaceValues {
   hasTear: boolean;
 }
 
-/** MVGS v2 severity enums — paired with the engine's TAG-aligned ceilings.
- *  Stored on the cert in dedicated columns (wrinkle_severity / tear_severity).
- *  Engine reads them via shared/mvgs-input-builder.ts; when set they OVERRIDE
- *  the legacy hasCrease/hasTear booleans (measurement-wins precedence). */
-export type WrinkleSeverity = "tiny_back" | "longer_back" | "small_front" | "multiple_front";
-export type TearSeverity = "minor" | "significant" | "major";
+// NOTE: this file is currently DEAD — `<SurfaceGrading>` isn't mounted by
+// any consumer; only its `SurfaceValues` type is imported by grading-panel.tsx
+// for its `surface` state shape. The v2 wrinkle/tear severity dropdowns
+// (with the canonical `select-wrinkle-severity` / `select-tear-severity`
+// testids) live in grading-panel.tsx — there should be ONE source of those
+// testids. Earlier duplicates of those controls + their supporting types
+// (WrinkleSeverity / TearSeverity / WRINKLE_OPTIONS / TEAR_OPTIONS) and
+// the prop wiring lived here; stripped to keep this file as the legacy
+// boolean-flag UI only.
 
 interface Props {
   values: SurfaceValues;
   onChange: (values: SurfaceValues) => void;
   overrideGrade: number | null;
   onOverride: (val: number | null) => void;
-  // MVGS v2 — severity selectors. Wrinkle has no legacy boolean (new input
-  // only). Tear has a legacy `hasTear` boolean on `values`; severity wins
-  // when set, boolean is the fallback for legacy data.
-  wrinkleSeverity?: WrinkleSeverity | null;
-  onWrinkleSeverityChange?: (v: WrinkleSeverity | null) => void;
-  tearSeverity?: TearSeverity | null;
-  onTearSeverityChange?: (v: TearSeverity | null) => void;
 }
-
-const WRINKLE_OPTIONS: { value: WrinkleSeverity; label: string; cap: string }[] = [
-  { value: "tiny_back", label: "Tiny (back, hi-res only)", cap: "cap 6.5" },
-  { value: "longer_back", label: "Longer / visible (back)", cap: "cap 6" },
-  { value: "small_front", label: "Small (front)", cap: "cap 5.5" },
-  { value: "multiple_front", label: "Multiple (front)", cap: "cap 5" },
-];
-
-const TEAR_OPTIONS: { value: TearSeverity; label: string; cap: string }[] = [
-  { value: "minor", label: "Minor (one edge)", cap: "cap 2" },
-  { value: "significant", label: "Significant / multiple", cap: "cap 1.5" },
-  { value: "major", label: "Major / missing material", cap: "→ NO (Not Graded)" },
-];
 
 const GRADE_OPTIONS = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
@@ -77,16 +60,7 @@ export function calcSurfaceSubgrade(v: SurfaceValues): number {
   return Math.min(v.front, v.back);
 }
 
-export default function SurfaceGrading({
-  values,
-  onChange,
-  overrideGrade,
-  onOverride,
-  wrinkleSeverity,
-  onWrinkleSeverityChange,
-  tearSeverity,
-  onTearSeverityChange,
-}: Props) {
+export default function SurfaceGrading({ values, onChange, overrideGrade, onOverride }: Props) {
   const [showOverride, setShowOverride] = useState(false);
   const grade = calcSurfaceSubgrade(values);
   const displayGrade = overrideGrade ?? grade;
@@ -117,52 +91,6 @@ export default function SurfaceGrading({
           <p className="text-[var(--admin-red)] text-xs">
             Tear or missing material — maximum overall grade capped at 2.0
           </p>
-        </div>
-      )}
-
-      {/* MVGS v2 severity dropdowns. Measurement-wins precedence is enforced
-          in shared/mvgs-input-builder.ts: when set, these OVERRIDE the legacy
-          has_crease/has_tear booleans on `values`. Wrinkle has no legacy
-          boolean (new input only). */}
-      {onWrinkleSeverityChange && (
-        <div className="space-y-1">
-          <label className="text-[var(--admin-ink-dim)] text-[10px] block uppercase tracking-widest">
-            Wrinkle severity <span className="text-[var(--admin-ink-faint)] normal-case">(MVGS v2)</span>
-          </label>
-          <select
-            value={wrinkleSeverity ?? ""}
-            onChange={(e) => onWrinkleSeverityChange((e.target.value || null) as WrinkleSeverity | null)}
-            className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
-            data-testid="select-wrinkle-severity"
-          >
-            <option value="">— none —</option>
-            {WRINKLE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label} · {o.cap}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-      {onTearSeverityChange && (
-        <div className="space-y-1">
-          <label className="text-[var(--admin-ink-dim)] text-[10px] block uppercase tracking-widest">
-            Tear severity{" "}
-            <span className="text-[var(--admin-ink-faint)] normal-case">(MVGS v2 · overrides "tear" checkbox)</span>
-          </label>
-          <select
-            value={tearSeverity ?? ""}
-            onChange={(e) => onTearSeverityChange((e.target.value || null) as TearSeverity | null)}
-            className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
-            data-testid="select-tear-severity"
-          >
-            <option value="">— none —</option>
-            {TEAR_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label} · {o.cap}
-              </option>
-            ))}
-          </select>
         </div>
       )}
 
