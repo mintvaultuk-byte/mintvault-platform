@@ -87,6 +87,10 @@ interface Props {
    *  position (e.g. above an absolute-positioning anchor wrapper). The
    *  fullscreen-mode renderTabs is unaffected. */
   omitSideTabs?: boolean;
+  /** Opens the parent's MVGS v2 Measurement Tool (line-drawing overlay) from
+   *  inside the fullscreen mark-mode toolbar, so the operator doesn't have to
+   *  leave the image surface to reach it. Button is hidden when absent. */
+  onOpenMeasurementTool?: () => void;
 }
 
 // Auto-map legacy `type` strings (from DEFECT_TYPES list or AI-defect
@@ -183,6 +187,7 @@ export default function ImageViewer({
   readOnly,
   side: controlledSide,
   omitSideTabs,
+  onOpenMeasurementTool,
 }: Props) {
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
@@ -1016,6 +1021,16 @@ export default function ImageViewer({
               </span>
             </p>
             <div className="flex items-center gap-3">
+              {onOpenMeasurementTool && (
+                <button
+                  type="button"
+                  onClick={onOpenMeasurementTool}
+                  className="flex items-center gap-2 border border-[var(--admin-gold)]/50 text-[var(--admin-gold)] text-xs font-bold uppercase px-4 py-2 rounded-lg hover:bg-[var(--admin-gold)]/10 transition-all"
+                  data-testid="btn-open-measurement-tool-markmode"
+                >
+                  📏 Measurement Tool
+                </button>
+              )}
               {pendingBatch.length > 0 && !pickerOpen && (
                 <button
                   type="button"

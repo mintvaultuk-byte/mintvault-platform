@@ -1390,6 +1390,7 @@ export default function GradingPanel({
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
+                onOpenMeasurementTool={() => setMeasurementToolOpen(true)}
                 centeringFront={
                   frontLR
                     ? {
@@ -1794,6 +1795,76 @@ export default function GradingPanel({
               </button>
             </div>
 
+            {/* MVGS v2 — Whitening / Crease / Tear. Hoisted here (high in the
+                sidebar, right after the Card Tool row) so the measurement-tool
+                launcher + severity selectors sit in the operator's eye line.
+                This is the ONE canonical home for these controls — the Surface
+                block below no longer carries duplicates. All identifiers are
+                component-scope, so the move keeps them in scope. */}
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2 mb-2 border border-[var(--admin-gold)]/30">
+              <div className="flex items-center gap-2">
+                <span className="text-sm leading-none">📏</span>
+                <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
+                  MVGS v2 — Whitening / Crease / Tear
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[var(--admin-ink-dim)] text-[10px] block">Wrinkle severity</label>
+                  <select
+                    value={wrinkleSeverity ?? ""}
+                    onChange={(e) => {
+                      setWrinkleSeverity((e.target.value || null) as typeof wrinkleSeverity);
+                      clearOverallOverrideIfSet();
+                    }}
+                    className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
+                    data-testid="select-wrinkle-severity"
+                  >
+                    <option value="">— none —</option>
+                    <option value="tiny_back">Tiny (back) · cap 6.5</option>
+                    <option value="longer_back">Longer (back) · cap 6</option>
+                    <option value="small_front">Small (front) · cap 5.5</option>
+                    <option value="multiple_front">Multiple (front) · cap 5</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[var(--admin-ink-dim)] text-[10px] block">
+                    Tear severity <span className="text-[var(--admin-ink-faint)]">(overrides checkbox)</span>
+                  </label>
+                  <select
+                    value={tearSeverity ?? ""}
+                    onChange={(e) => {
+                      setTearSeverity((e.target.value || null) as typeof tearSeverity);
+                      clearOverallOverrideIfSet();
+                    }}
+                    className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
+                    data-testid="select-tear-severity"
+                  >
+                    <option value="">— none —</option>
+                    <option value="minor">Minor · cap 2</option>
+                    <option value="significant">Significant · cap 1.5</option>
+                    <option value="major">Major / missing → NO</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMeasurementToolOpen(true)}
+                className="w-full mt-1 text-[10px] font-bold uppercase tracking-widest border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 rounded px-3 py-1.5"
+                data-testid="btn-open-measurement-tool"
+              >
+                📏 Open Measurement Tool (whitening lines · crease span)
+              </button>
+              {(whiteningLines.length > 0 || creaseSpanPct != null) && (
+                <p className="text-[var(--admin-ink-faint)] text-[10px] font-mono">
+                  {whiteningLines.length > 0 &&
+                    `${whiteningLines.length} whitening line${whiteningLines.length === 1 ? "" : "s"} marked`}
+                  {whiteningLines.length > 0 && creaseSpanPct != null && " · "}
+                  {creaseSpanPct != null && `crease ${creaseSpanPct}% span`}
+                </p>
+              )}
+            </div>
+
             {/* Centering — manual measurement buttons (legacy two-rect picker) */}
             <div className="flex gap-2 mb-2">
               <button
@@ -2119,70 +2190,11 @@ export default function GradingPanel({
                 ))}
               </div>
 
-              {/* MVGS v2 — severity dropdowns + measurement-tool launcher.
-                  Severity selectors live alongside the legacy checkboxes
-                  above; precedence is enforced in mvgs-input-builder.ts.
-                  The button opens the fullscreen line-drawing tool. */}
-              <div className="space-y-2 pt-1 border-t border-[var(--admin-line)]">
-                <p className="text-[var(--admin-gold)] text-[10px] uppercase tracking-widest font-bold">
-                  MVGS v2 measurements
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[var(--admin-ink-dim)] text-[10px] block">Wrinkle severity</label>
-                    <select
-                      value={wrinkleSeverity ?? ""}
-                      onChange={(e) => {
-                        setWrinkleSeverity((e.target.value || null) as typeof wrinkleSeverity);
-                        clearOverallOverrideIfSet();
-                      }}
-                      className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
-                      data-testid="select-wrinkle-severity"
-                    >
-                      <option value="">— none —</option>
-                      <option value="tiny_back">Tiny (back) · cap 6.5</option>
-                      <option value="longer_back">Longer (back) · cap 6</option>
-                      <option value="small_front">Small (front) · cap 5.5</option>
-                      <option value="multiple_front">Multiple (front) · cap 5</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[var(--admin-ink-dim)] text-[10px] block">
-                      Tear severity <span className="text-[var(--admin-ink-faint)]">(overrides checkbox)</span>
-                    </label>
-                    <select
-                      value={tearSeverity ?? ""}
-                      onChange={(e) => {
-                        setTearSeverity((e.target.value || null) as typeof tearSeverity);
-                        clearOverallOverrideIfSet();
-                      }}
-                      className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
-                      data-testid="select-tear-severity"
-                    >
-                      <option value="">— none —</option>
-                      <option value="minor">Minor · cap 2</option>
-                      <option value="significant">Significant · cap 1.5</option>
-                      <option value="major">Major / missing → NO</option>
-                    </select>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMeasurementToolOpen(true)}
-                  className="w-full mt-1 text-[10px] font-bold uppercase tracking-widest border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 rounded px-3 py-1.5"
-                  data-testid="btn-open-measurement-tool"
-                >
-                  📏 Open Measurement Tool (whitening lines · crease span)
-                </button>
-                {(whiteningLines.length > 0 || creaseSpanPct != null) && (
-                  <p className="text-[var(--admin-ink-faint)] text-[10px] font-mono">
-                    {whiteningLines.length > 0 &&
-                      `${whiteningLines.length} whitening line${whiteningLines.length === 1 ? "" : "s"} marked`}
-                    {whiteningLines.length > 0 && creaseSpanPct != null && " · "}
-                    {creaseSpanPct != null && `crease ${creaseSpanPct}% span`}
-                  </p>
-                )}
-              </div>
+              {/* MVGS v2 measurement controls (wrinkle/tear severity, the
+                  Measurement Tool launcher, and the line/crease status line)
+                  have moved UP to the dedicated "MVGS v2 — Whitening / Crease /
+                  Tear" panel just below the Card Tool row, so they sit in the
+                  operator's eye line. One canonical home — not duplicated here. */}
 
               {/* MVGS-derived surface subgrade — read-only display + override
                   stepper. Mirrors the visual treatment of the old SurfaceGrading
