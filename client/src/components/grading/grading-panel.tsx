@@ -271,9 +271,32 @@ export default function GradingPanel({
   // over-checkbox precedence (the legacy surface.hasCrease/hasTear flags
   // still drive a fallback ceiling when no measurement is present).
   const [whiteningLines, setWhiteningLines] = useState<
-    Array<{ side: "front" | "back"; edge: "top" | "right" | "bottom" | "left"; coveragePct: number }>
+    Array<{
+      side: "front" | "back";
+      edge: "top" | "right" | "bottom" | "left";
+      coveragePct: number;
+      // Display-only: operator's actual drawn segment (image-relative %).
+      // Engine ignores it; persisted in the whitening_lines jsonb so the marked
+      // line redraws where it was drawn. Optional → legacy rows fall back to the
+      // corner-stub indicator.
+      start?: { x: number; y: number };
+      end?: { x: number; y: number };
+    }>
   >([]);
   const [creaseSpanPct, setCreaseSpanPct] = useState<number | null>(null);
+  // Crease drawn segment — SESSION-ONLY display state. crease_span_pct is a
+  // decimal column with no jsonb home for a segment, so (per the no-migration
+  // constraint) the drawn crease line redraws only within this grading session;
+  // the span% banner is the cross-reload record. Reset on cert switch so a
+  // navigate-to-next-cert doesn't show the previous card's crease.
+  const [creaseSegment, setCreaseSegment] = useState<{
+    side: "front" | "back";
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+  } | null>(null);
+  useEffect(() => {
+    setCreaseSegment(null);
+  }, [certId]);
   const [wrinkleSeverity, setWrinkleSeverity] = useState<
     "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
   >(null);
@@ -342,8 +365,15 @@ export default function GradingPanel({
     overallOverride: number | null;
     // MVGS v2 measurement inputs — captured in the snapshot so the
     // Cancel/Undo edit path restores them too.
-    whiteningLines: Array<{ side: "front" | "back"; edge: "top" | "right" | "bottom" | "left"; coveragePct: number }>;
+    whiteningLines: Array<{
+      side: "front" | "back";
+      edge: "top" | "right" | "bottom" | "left";
+      coveragePct: number;
+      start?: { x: number; y: number };
+      end?: { x: number; y: number };
+    }>;
     creaseSpanPct: number | null;
+    creaseSegment: { side: "front" | "back"; start: { x: number; y: number }; end: { x: number; y: number } } | null;
     wrinkleSeverity: "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null;
     tearSeverity: "minor" | "significant" | "major" | null;
   };
@@ -568,6 +598,7 @@ export default function GradingPanel({
       overallOverride,
       whiteningLines: [...whiteningLines],
       creaseSpanPct,
+      creaseSegment,
       wrinkleSeverity,
       tearSeverity,
     };
@@ -594,6 +625,7 @@ export default function GradingPanel({
     setOverallOverride(s.overallOverride);
     setWhiteningLines(s.whiteningLines);
     setCreaseSpanPct(s.creaseSpanPct);
+    setCreaseSegment(s.creaseSegment);
     setWrinkleSeverity(s.wrinkleSeverity);
     setTearSeverity(s.tearSeverity);
   }
@@ -2447,6 +2479,7 @@ export default function GradingPanel({
           backImageUrl={(urls.back_display || urls.back_cropped || urls.back_original) ?? null}
           whiteningLines={whiteningLines}
           creaseSpanPct={creaseSpanPct}
+          creaseSegment={creaseSegment}
           onWhiteningLinesChange={(next) => {
             setWhiteningLines(next);
             clearOverallOverrideIfSet();
@@ -2455,6 +2488,7 @@ export default function GradingPanel({
             setCreaseSpanPct(next);
             clearOverallOverrideIfSet();
           }}
+          onCreaseSegmentChange={setCreaseSegment}
           onClose={() => setMeasurementToolOpen(false)}
         />
       )}

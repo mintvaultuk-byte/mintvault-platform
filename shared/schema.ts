@@ -540,6 +540,13 @@ export const certificates = pgTable("certificates", {
         side: "front" | "back";
         edge: "top" | "right" | "bottom" | "left";
         coveragePct: number;
+        // Display-only: operator's actual drawn segment, image-relative %
+        // (0..100). Engine ignores it (reads only coveragePct); kept so the
+        // marked line redraws exactly where drawn. Extra jsonb keys round-trip
+        // with no migration; optional → rows saved before this field fall back
+        // to the legacy corner-stub indicator.
+        start?: { x: number; y: number };
+        end?: { x: number; y: number };
       }>
     >()
     .notNull()

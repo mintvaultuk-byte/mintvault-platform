@@ -32,6 +32,13 @@ import type { WhiteningEdge } from "@shared/mvgs-scoring";
 type Side = "front" | "back";
 type EdgeKey = "top" | "right" | "bottom" | "left";
 type Tool = "whitening" | "crease";
+type Pt = { x: number; y: number };
+// Structural extension of the engine's WhiteningEdge: the same required fields
+// the engine reads (side, edge, coveragePct) PLUS the operator's actual drawn
+// segment (start/end, image-relative %) for redraw. The engine still consumes
+// WhiteningEdge[] — these extra keys are ignored via structural typing, so
+// shared/mvgs-scoring.ts stays frozen.
+type DrawnWhiteningEdge = WhiteningEdge & { start?: Pt; end?: Pt };
 
 interface Props {
   certIdStr: string;
@@ -40,10 +47,15 @@ interface Props {
   backImageUrl: string | null;
   /** Current persisted measurements; the tool seeds from these and reports
    *  changes via onWhiteningLinesChange / onCreaseSpanPctChange. */
-  whiteningLines: WhiteningEdge[];
+  whiteningLines: DrawnWhiteningEdge[];
   creaseSpanPct: number | null;
-  onWhiteningLinesChange: (next: WhiteningEdge[]) => void;
+  /** Crease drawn segment — session-only display state owned by the parent
+   *  (crease_span_pct persists; the segment does not). Lets the committed
+   *  crease line redraw within the grading session. */
+  creaseSegment: { side: Side; start: Pt; end: Pt } | null;
+  onWhiteningLinesChange: (next: DrawnWhiteningEdge[]) => void;
   onCreaseSpanPctChange: (next: number | null) => void;
+  onCreaseSegmentChange: (next: { side: Side; start: Pt; end: Pt } | null) => void;
   onClose: () => void;
 }
 
@@ -84,8 +96,10 @@ export default function MeasurementTool({
   backImageUrl,
   whiteningLines,
   creaseSpanPct,
+  creaseSegment,
   onWhiteningLinesChange,
   onCreaseSpanPctChange,
+  onCreaseSegmentChange,
   onClose,
 }: Props) {
   const [side, setSide] = useState<Side>("front");
@@ -149,12 +163,15 @@ export default function MeasurementTool({
     }
     if (tool === "whitening" && edge) {
       const coveragePct = coverageFromSegment(drawStart, drawEnd, edge);
-      // Replace any existing line for this (side, edge) — single coverage
-      // value per edge keeps the engine's ladder count simple.
+      // Replace any existing line for this (side, edge) — single coverage value
+      // per edge keeps the engine's ladder count simple. Store the operator's
+      // actual drawn segment (start/end) alongside so it redraws exactly where
+      // marked; the engine still reads only coveragePct.
       const remaining = whiteningLines.filter((l) => !(l.side === side && l.edge === edge));
-      onWhiteningLinesChange([...remaining, { side, edge, coveragePct }]);
+      onWhiteningLinesChange([...remaining, { side, edge, coveragePct, start: drawStart, end: drawEnd }]);
     } else if (tool === "crease") {
       onCreaseSpanPctChange(creaseSpanFromSegment(drawStart, drawEnd));
+      onCreaseSegmentChange({ side, start: drawStart, end: drawEnd });
     }
     setDrawStart(null);
     setDrawEnd(null);
@@ -165,6 +182,7 @@ export default function MeasurementTool({
   }
   function clearCrease() {
     onCreaseSpanPctChange(null);
+    onCreaseSegmentChange(null);
   }
 
   return (
@@ -296,17 +314,49 @@ export default function MeasurementTool({
                 No {side} image
               </div>
             )}
-            {/* SVG overlay — committed whitening lines + in-progress segment */}
+            {/* SVG overlay — committed whitening lines + crease + in-progress
+                segment. Lines are drawn in the same image-% space the cursor is
+                captured in, so committed lines land exactly where drawn. */}
             <svg
               className="absolute inset-0 w-full h-full pointer-events-none"
               viewBox="0 0 100 100"
               preserveAspectRatio="none"
             >
               {sideEdgeLines.map((l) => {
-                // Draw the line ALONG the edge axis, length = coverage %.
-                // Start at the edge's near corner; this is a UX indicator, not
-                // a literal "where the operator drew" — engine only needs
-                // (side, edge, coveragePct).
+                // Preferred: redraw the operator's ACTUAL drawn segment. A dark
+                // halo underneath + a bright line on top so it shows over light
+                // edges. The % label is crisp HTML below (SVG <text> would be
+                // non-uniformly squashed by preserveAspectRatio="none").
+                if (l.start && l.end) {
+                  return (
+                    <g key={`${l.side}-${l.edge}`}>
+                      <line
+                        x1={l.start.x}
+                        y1={l.start.y}
+                        x2={l.end.x}
+                        y2={l.end.y}
+                        stroke="#000000"
+                        strokeOpacity={0.55}
+                        strokeWidth={4.5}
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1={l.start.x}
+                        y1={l.start.y}
+                        x2={l.end.x}
+                        y2={l.end.y}
+                        stroke="#FF3B6B"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  );
+                }
+                // Legacy fallback (rows saved before start/end existed): the
+                // corner-anchored indicator along the edge axis, length =
+                // coverage %.
                 const len = l.coveragePct;
                 if (l.edge === "top") {
                   return (
@@ -363,6 +413,33 @@ export default function MeasurementTool({
                   />
                 );
               })}
+              {/* Committed crease segment (session-only; redraws within the
+                  grading session on the side it was drawn). */}
+              {creaseSegment && creaseSegment.side === side && (
+                <g>
+                  <line
+                    x1={creaseSegment.start.x}
+                    y1={creaseSegment.start.y}
+                    x2={creaseSegment.end.x}
+                    y2={creaseSegment.end.y}
+                    stroke="#000000"
+                    strokeOpacity={0.55}
+                    strokeWidth={4.5}
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <line
+                    x1={creaseSegment.start.x}
+                    y1={creaseSegment.start.y}
+                    x2={creaseSegment.end.x}
+                    y2={creaseSegment.end.y}
+                    stroke="#00CCFF"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              )}
               {drawStart && drawEnd && (
                 <line
                   x1={drawStart.x}
@@ -375,6 +452,39 @@ export default function MeasurementTool({
                 />
               )}
             </svg>
+            {/* HTML label layer — % labels at segment midpoints. Rendered as
+                absolutely-positioned HTML (not SVG <text>) so the glyphs stay
+                crisp and undistorted: the SVG uses preserveAspectRatio="none"
+                on a 5:7 card, which would non-uniformly squash SVG text. */}
+            <div className="absolute inset-0 pointer-events-none">
+              {sideEdgeLines.map((l) =>
+                l.start && l.end ? (
+                  <span
+                    key={`lbl-${l.side}-${l.edge}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 rounded bg-black/70 px-1 py-0.5 text-[10px] font-bold font-mono leading-none"
+                    style={{
+                      left: `${(l.start.x + l.end.x) / 2}%`,
+                      top: `${(l.start.y + l.end.y) / 2}%`,
+                      color: "#FF3B6B",
+                    }}
+                  >
+                    {l.coveragePct}%
+                  </span>
+                ) : null
+              )}
+              {creaseSegment && creaseSegment.side === side && creaseSpanPct != null && (
+                <span
+                  className="absolute -translate-x-1/2 -translate-y-1/2 rounded bg-black/70 px-1 py-0.5 text-[10px] font-bold font-mono leading-none"
+                  style={{
+                    left: `${(creaseSegment.start.x + creaseSegment.end.x) / 2}%`,
+                    top: `${(creaseSegment.start.y + creaseSegment.end.y) / 2}%`,
+                    color: "#00CCFF",
+                  }}
+                >
+                  {creaseSpanPct}%
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
