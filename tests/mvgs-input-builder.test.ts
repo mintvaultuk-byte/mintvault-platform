@@ -243,3 +243,110 @@ describe("buildMvgsInput — whitening line narrowing (colour can't leak)", () =
     expect(buildMvgsInput(base()).whiteningEdges).toBeNull();
   });
 });
+
+// ── v2.1 fix — multiple whitening lines per edge, worst-line-wins ───────
+describe("buildMvgsInput — per-edge MAX coverage collapse (worst-line-wins)", () => {
+  it("two lines on the same edge → engine sees ONE entry with the MAX coverage", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          { id: "a", side: "front", edge: "top", coveragePct: 15 },
+          { id: "b", side: "front", edge: "top", coveragePct: 35 }, // worst
+        ],
+      })
+    );
+    expect(input.whiteningEdges).toHaveLength(1);
+    expect(input.whiteningEdges![0]).toEqual({ side: "front", edge: "top", coveragePct: 35 });
+  });
+
+  it("three lines on the same edge → MAX wins, extras don't compound", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          { id: "a", side: "front", edge: "top", coveragePct: 10 },
+          { id: "b", side: "front", edge: "top", coveragePct: 22 }, // worst
+          { id: "c", side: "front", edge: "top", coveragePct: 18 },
+        ],
+      })
+    );
+    // Critically NOT 50 (sum). The engine sees the strictest single line.
+    expect(input.whiteningEdges![0].coveragePct).toBe(22);
+  });
+
+  it("lines on different edges stay distinct (collapse is per-edge, not global)", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          { id: "a", side: "front", edge: "top", coveragePct: 15 },
+          { id: "b", side: "front", edge: "top", coveragePct: 35 }, // wins top
+          { id: "c", side: "front", edge: "left", coveragePct: 28 },
+          { id: "d", side: "back", edge: "top", coveragePct: 50 },
+        ],
+      })
+    );
+    expect(input.whiteningEdges).toHaveLength(3);
+    const byKey = new Map(input.whiteningEdges!.map((e) => [`${e.side}:${e.edge}`, e.coveragePct]));
+    expect(byKey.get("front:top")).toBe(35);
+    expect(byKey.get("front:left")).toBe(28);
+    expect(byKey.get("back:top")).toBe(50);
+  });
+
+  it("identical edges from DIFFERENT sides do NOT collapse (front top ≠ back top)", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          { id: "f", side: "front", edge: "top", coveragePct: 20 },
+          { id: "b", side: "back", edge: "top", coveragePct: 60 },
+        ],
+      })
+    );
+    expect(input.whiteningEdges).toHaveLength(2);
+  });
+
+  it("worst-line-wins still strips display-only fields (colour/id/start/end)", () => {
+    const input = buildMvgsInput(
+      base({
+        whiteningLines: [
+          {
+            id: "a",
+            side: "front",
+            edge: "top",
+            coveragePct: 30,
+            start: { x: 10, y: 5 },
+            end: { x: 40, y: 5 },
+            color: "#FF00AA",
+          },
+          {
+            id: "b",
+            side: "front",
+            edge: "top",
+            coveragePct: 18,
+            start: { x: 60, y: 5 },
+            end: { x: 78, y: 5 },
+            color: "#00CCFF",
+          },
+        ],
+      })
+    );
+    expect(input.whiteningEdges).toHaveLength(1);
+    expect(Object.keys(input.whiteningEdges![0]).sort()).toEqual(["coveragePct", "edge", "side"]);
+    expect(input.whiteningEdges![0].coveragePct).toBe(30);
+  });
+});
+
+// ── v2.1 fix — multiple creases (verified) ──────────────────────────────
+describe("buildMvgsInput — multiple creases reach the engine as max(spanPct)", () => {
+  const pt = (x: number, y: number) => ({ x, y });
+  it("three creases → engine sees one number = max", () => {
+    const input = buildMvgsInput(
+      base({
+        creaseLines: [
+          { id: "a", side: "front", spanPct: 12, start: pt(0, 0), end: pt(12, 0) },
+          { id: "b", side: "back", spanPct: 78, start: pt(0, 0), end: pt(0, 78) }, // worst
+          { id: "c", side: "front", spanPct: 33, start: pt(0, 0), end: pt(33, 0) },
+        ],
+      })
+    );
+    expect(input.creaseSpanPct).toBe(78);
+  });
+});

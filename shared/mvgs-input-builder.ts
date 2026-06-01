@@ -151,19 +151,34 @@ export function buildMvgsInput(fields: MvgsV2PersistedFields, calibration?: Mvgs
     tearSeverity = LEGACY_HAS_TEAR_SEVERITY;
   }
 
-  // ── Whitening narrowing (display-only fields stripped at this boundary) ─
-  // The persisted shape includes id/start/end/color so the line redraws on
-  // reload and renders in the operator-picked colour. The engine
-  // (shared/mvgs-scoring.ts, frozen at fe0d60c) only reads side/edge/
-  // coveragePct. Strip everything else here so colour can't leak into
-  // scoring — single boundary, easy to audit, engine stays frozen.
-  const whiteningEdges: WhiteningEdge[] | null = fields.whiteningLines
-    ? fields.whiteningLines.map((l) => ({
-        side: l.side,
-        edge: l.edge,
-        coveragePct: l.coveragePct,
-      }))
-    : null;
+  // ── Whitening narrowing + per-edge collapse ─────────────────────────────
+  // The persisted shape allows MULTIPLE lines per (side, edge) — operator
+  // marks each whitened patch separately so they're individually visible +
+  // deletable. The engine (shared/mvgs-scoring.ts, frozen at fe0d60c) reads
+  // ONE entry per affected edge. We collapse here using MAX coveragePct —
+  // worst-line-wins, no compounding (spec sign-off: extra lines are
+  // displayed to the customer but do not change the grade — the single
+  // worst patch on an edge sets that edge's severity).
+  //
+  // Two things happen at this single boundary:
+  //   1. Display-only fields (id / start / end / color) are stripped —
+  //      they MUST NOT reach the engine. Audited here, easy to verify.
+  //   2. Per-(side, edge) collapse to one entry with the max coveragePct.
+  //      Engine receives at most 8 entries (4 edges × 2 sides) and is
+  //      byte-identical to what it received in v2.0 when one-line-per-edge
+  //      was the only option.
+  let whiteningEdges: WhiteningEdge[] | null = null;
+  if (fields.whiteningLines) {
+    const byEdge = new Map<string, WhiteningEdge>();
+    for (const l of fields.whiteningLines) {
+      const key = `${l.side}:${l.edge}`;
+      const existing = byEdge.get(key);
+      if (!existing || l.coveragePct > existing.coveragePct) {
+        byEdge.set(key, { side: l.side, edge: l.edge, coveragePct: l.coveragePct });
+      }
+    }
+    whiteningEdges = Array.from(byEdge.values());
+  }
 
   return {
     centeringFrontLr: fields.centeringFrontLr,

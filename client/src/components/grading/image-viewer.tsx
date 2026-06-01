@@ -483,12 +483,17 @@ export default function ImageViewer({
       const edge = detectEdge(lineStart, lineEnd);
       const coveragePct = coverageFromSegment(lineStart, lineEnd, edge);
       const id = `wl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-      // Replace any existing line on the same (side, edge) — one canonical
-      // entry per edge keeps the engine's ladder count clean. Operator can
-      // re-classify edges via the list chip without piling up duplicates.
+      // APPEND — multiple whitening lines per (side, edge) are allowed.
+      // Three separate whitened patches along the top stay distinct on the
+      // card, in the list, individually deletable. The engine boundary in
+      // shared/mvgs-input-builder.ts collapses to ONE entry per edge using
+      // MAX coverage (worst-line-wins, no compounding) so extra lines don't
+      // change the grade.
       const sideKey = side as "front" | "back";
-      const remaining = whiteningLines.filter((l) => !(l.side === sideKey && l.edge === edge));
-      onWhiteningLinesChange([...remaining, { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd }]);
+      onWhiteningLinesChange([
+        ...whiteningLines,
+        { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd },
+      ]);
     } else if (markTool === "crease" && side !== "angled" && side !== "closeup" && onCreaseLinesChange) {
       const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
       const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;

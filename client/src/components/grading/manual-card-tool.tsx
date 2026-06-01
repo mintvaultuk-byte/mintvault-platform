@@ -515,8 +515,10 @@ export default function ManualCardTool({
       const edge = detectEdge(lineStart, lineEnd);
       const coveragePct = coverageFromSegment(lineStart, lineEnd, edge);
       const id = `wl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-      const remaining = whiteningLines.filter((l) => !(l.side === side && l.edge === edge));
-      onWhiteningLinesChange([...remaining, { id, side, edge, coveragePct, start: lineStart, end: lineEnd }]);
+      // APPEND — multiple whitening lines per (side, edge) are allowed.
+      // The engine boundary in mvgs-input-builder collapses to ONE entry
+      // per edge using MAX coverage (worst-line-wins, no compounding).
+      onWhiteningLinesChange([...whiteningLines, { id, side, edge, coveragePct, start: lineStart, end: lineEnd }]);
     } else if (markTool === "crease" && onCreaseLinesChange) {
       const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
       const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
