@@ -3472,6 +3472,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         yPercent: d.y_percent ?? d.yPercent ?? 50,
       }));
 
+      // MVGS v2 — operator-drawn line measurements alongside the pin defects.
+      // Surfaced as display-only segments for the report card overlay. Engine
+      // never sees `color` (stripped at the input-builder boundary).
+      const whiteningLines = (Array.isArray((c as any).whiteningLines) ? (c as any).whiteningLines : [])
+        .filter((w: any) => w && w.start && w.end)
+        .map((w: any) => ({
+          side: w.side === "back" ? "back" : "front",
+          edge: w.edge,
+          coveragePct: typeof w.coveragePct === "number" ? w.coveragePct : null,
+          start: w.start,
+          end: w.end,
+          color: typeof w.color === "string" ? w.color : null,
+        }));
+      const creaseLines = (Array.isArray((c as any).creaseLines) ? (c as any).creaseLines : [])
+        .filter((cr: any) => cr && cr.start && cr.end)
+        .map((cr: any) => ({
+          side: cr.side === "back" ? "back" : "front",
+          spanPct: typeof cr.spanPct === "number" ? cr.spanPct : null,
+          start: cr.start,
+          end: cr.end,
+          color: typeof cr.color === "string" ? cr.color : null,
+        }));
+
       const ai = c.aiAnalysis || {};
 
       const report = {
@@ -3519,6 +3542,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ? { front: (c.surfaceValues as any).front, back: (c.surfaceValues as any).back }
           : null,
         defects,
+        whiteningLines,
+        creaseLines,
         authentication: {
           status: c.authStatus || "genuine",
           // v417 — auth notes are free-text; sanitise on public surface.
@@ -3843,7 +3868,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { generateLogbookPdf } = await import("./logbook-pdf");
       const certId = String(req.params.certId);
       const forceRegenerate = req.query.regenerate === "true";
-      const cacheKey = `logbooks/v4/${certId}.pdf`;
+      const cacheKey = `logbooks/v5/${certId}.pdf`;
 
       // ── Cert lookup FIRST ────────────────────────────────────────────────
       // Cache must NEVER be served for hard/soft-deleted certs, even if a
@@ -4045,7 +4070,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const certId = String(req.params.certId);
       const pdf = await generateLogbookPdf(certId, {});
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
-      const cacheKey = `logbooks/v4/${certId}.pdf`;
+      const cacheKey = `logbooks/v5/${certId}.pdf`;
       await uploadToR2(cacheKey, pdf, "application/pdf");
       res.json({ ok: true, key: cacheKey });
     } catch (err: any) {
