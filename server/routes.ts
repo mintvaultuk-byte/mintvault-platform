@@ -15283,6 +15283,106 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
+  // ── MVGS v2 grading calibration (Phase 3 Step 1) ────────────────────────
+  // Admin panel writes the three "[CALIBRATE]" values per spec §3 + §6 into
+  // the pipeline_settings row keyed "mvgs.calibration". Engine
+  // (shared/mvgs-scoring.ts, frozen at fe0d60c) reads them via
+  // loadMvgsCalibration() — these routes never touch engine code.
+  //
+  // Lock semantics: once `locked: true`, normal PATCH refuses (server-side
+  // gate in saveMvgsCalibration). The dedicated /unlock route is the ONLY
+  // caller passing `force: true`, so unlocking is a deliberate two-step:
+  // unlock → edit → re-lock. Same pattern matches spec §6 ("locked values
+  // are the published standard, not a casual nudge"). updatedBy logged on
+  // every write so the audit trail captures BOTH value changes and lock
+  // state transitions.
+
+  app.get("/api/admin/mvgs/calibration", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const { defaultCalibration, FIELD_RANGES } = await import("./lib/mvgs-calibration-validation");
+      const calibration = await loadMvgsCalibration();
+      res.json({ calibration, defaults: defaultCalibration(), ranges: FIELD_RANGES });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] load failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration load failed" });
+    }
+  });
+
+  // PATCH body: { values: Partial<MvgsCalibration> }. Each field is clamped
+  // into its allowed range; cross-field ordering (crease cutoffs minor <
+  // half < threeQuarter) is validated and REJECTED with 400 if out-of-order
+  // — silent reorder would muddle the audit trail of what the operator
+  // intended. Returns 409 with `{error: "locked"}` if the store is locked.
+  app.patch("/api/admin/mvgs/calibration", requireAdmin, async (req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const { clampField, validateCalibration, FIELD_RANGES } = await import("./lib/mvgs-calibration-validation");
+      const incoming = (req.body?.values ?? {}) as Record<string, unknown>;
+      const current = await loadMvgsCalibration();
+      if (current.locked) {
+        return res.status(409).json({ error: "Calibration is locked. Unlock before editing." });
+      }
+      // Build the proposed object by overlaying clamped incoming fields onto
+      // the current persisted values. Unrecognised keys are ignored; absent
+      // keys keep their existing value (partial PATCH).
+      const proposed = { ...current };
+      for (const key of Object.keys(FIELD_RANGES) as Array<keyof typeof FIELD_RANGES>) {
+        if (key in incoming) {
+          const v = clampField(key, incoming[key]);
+          if (v !== null) proposed[key] = v;
+        }
+      }
+      const check = validateCalibration(proposed);
+      if (!check.ok) return res.status(400).json({ error: check.error });
+      const result = await saveMvgsCalibration(proposed, { updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        // Race: someone else locked between load and save. Surface plainly.
+        return res.status(409).json({ error: "Calibration was locked concurrently. Reload and retry." });
+      }
+      const next = await loadMvgsCalibration();
+      res.json({ calibration: next });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] patch failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration patch failed" });
+    }
+  });
+
+  app.post("/api/admin/mvgs/calibration/lock", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const current = await loadMvgsCalibration();
+      if (current.locked) return res.json({ calibration: current, alreadyLocked: true });
+      const result = await saveMvgsCalibration({ ...current, locked: true }, { updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        return res.status(409).json({ error: "Could not lock — concurrent modification." });
+      }
+      res.json({ calibration: await loadMvgsCalibration() });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] lock failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration lock failed" });
+    }
+  });
+
+  // /unlock is the SINGLE caller that passes `force: true` — explicit
+  // deliberate action per spec §6. The audit row records who unlocked
+  // (updatedBy). Editing the values still requires a separate PATCH.
+  app.post("/api/admin/mvgs/calibration/unlock", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const current = await loadMvgsCalibration();
+      if (!current.locked) return res.json({ calibration: current, alreadyUnlocked: true });
+      const result = await saveMvgsCalibration({ ...current, locked: false }, { force: true, updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        return res.status(500).json({ error: "Unlock save returned not-ok unexpectedly" });
+      }
+      res.json({ calibration: await loadMvgsCalibration() });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] unlock failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration unlock failed" });
+    }
+  });
+
   // ── Pipeline settings (single key/value store backing every admin dial) ──
 
   app.get("/api/admin/weekly-reel/settings", requireAdmin, async (_req, res) => {
