@@ -1022,15 +1022,33 @@ function SheetPrintingPanel() {
   const downloadPrintBatch = useCallback(
     async (certIds: string[]) => {
       // Single-click flow:
-      //   1. POST /api/admin/print-batch
-      //   2. Trigger PNG anchor download (Cricut file — the critical artefact)
-      //   3. Open print window pointed at the inline PDF endpoint
-      // All three steps run in one click handler. The PNG anchor click
-      // doesn't consume the user gesture for popup purposes; modern Chrome
-      // usually permits the post-await window.open if the page has popup
-      // permission granted. If it's blocked, the toast surfaces it and the
-      // PNG has already downloaded — so the Cricut workflow still works.
+      //   1. SYNCHRONOUSLY open the PDF tab inside the user gesture so Chrome
+      //      doesn't block it post-await. Holds a "Generating…" placeholder
+      //      until the POST returns; then redirects to the real PDF URL.
+      //   2. POST /api/admin/print-batch
+      //   3. Trigger PNG anchor download (Cricut — the critical artefact).
+      //   4. Point the placeholder tab at the PDF URL. If the tab was blocked
+      //      anyway (popup-blocker disabled the open()), the toast surfaces a
+      //      clickable fallback link so the PDF stays reachable.
+      // The PNG anchor click does not consume the user gesture and works on
+      // a hidden <a download> via the standard append/click/remove dance.
       setDownloadingBatch(true);
+      // Synchronous window.open INSIDE the click gesture — must run before any
+      // await. Held open with a tiny placeholder so the operator sees progress
+      // and the gesture-protected handle is preserved across the POST.
+      const pdfWindow = window.open("", "_blank");
+      if (pdfWindow) {
+        try {
+          pdfWindow.document.write(
+            "<title>Generating print sheet…</title>" +
+              '<body style="font-family:system-ui,sans-serif;background:#0f0f12;color:#d4af37;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">' +
+              "Generating print sheet…" +
+              "</body>"
+          );
+        } catch {
+          /* ignore: some browsers throw on document.write into about:blank */
+        }
+      }
       try {
         const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
         const data = (await res.json()) as {
@@ -1043,25 +1061,41 @@ function SheetPrintingPanel() {
           isRecentDuplicate?: boolean;
         };
 
-        // Step 2 — PNG download via current-tab navigation. Anchor.click()
-        // (even with target="_self") is still gated by Chrome's post-await
-        // user-gesture rules; assigning window.location.href IS a navigation
-        // and bypasses those rules. The server responds with
-        // Content-Disposition: attachment so the browser treats the response
-        // as a download in flight and keeps the current page intact.
-        window.location.href = data.pngUrl;
+        // PNG download — hidden <a download> appended/clicked/removed. Anchor
+        // click is not gated by the post-await popup rule (it's a navigation
+        // intent, not a popup). PNG endpoint serves Content-Disposition:
+        // attachment so the browser saves rather than navigates.
+        {
+          const a = document.createElement("a");
+          a.href = data.pngUrl;
+          a.download = `mintvault-batch-${data.batchId}.png`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
 
-        // Step 3 — open the PDF in a new tab after a brief delay. The 1.5s
-        // window gives the PNG download response time to start (so the
-        // browser commits to "download, don't navigate") before we issue
-        // the second window.open call. The PDF endpoint serves inline so
-        // the new tab renders it; user prints from there.
-        await new Promise((r) => setTimeout(r, 1500));
-        const pdfTab = window.open(data.pdfUrl, "_blank");
-        if (!pdfTab) {
+        // PDF — drop the placeholder tab onto the real URL. If the popup
+        // open was hard-blocked, surface the URL as a clickable link in the
+        // toast so the operator can still get to it.
+        if (pdfWindow) {
+          pdfWindow.location.href = data.pdfUrl;
+        } else {
           toast({
             title: "Popup blocked — PNG downloaded",
-            description: `Allow popups for this site to auto-open the PDF, or open ${data.pdfUrl} manually.`,
+            description: (
+              <span>
+                Allow popups for this site, or{" "}
+                <a
+                  href={data.pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "#D4AF37", textDecoration: "underline" }}
+                >
+                  open print sheet
+                </a>{" "}
+                manually.
+              </span>
+            ),
             variant: "destructive",
           });
         }
@@ -1076,6 +1110,15 @@ function SheetPrintingPanel() {
         });
         invalidate();
       } catch (err: any) {
+        // POST failed — close the placeholder so no dead "Generating…" tab
+        // is left behind.
+        if (pdfWindow) {
+          try {
+            pdfWindow.close();
+          } catch {
+            /* ignore */
+          }
+        }
         if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
           setReprintModal({
             claimedCertIds: err.body.claimedCertIds || [],
