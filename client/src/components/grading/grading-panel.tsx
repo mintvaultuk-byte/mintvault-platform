@@ -890,23 +890,41 @@ export default function GradingPanel({
     if (analysis.defects?.length > 0) {
       const humanDefects = defects.filter((d: any) => !d._aiSource);
       const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map((d) => d.id)) : 0;
-      const aiDefects: Defect[] = analysis.defects.map(
-        (ad, i) =>
-          ({
-            id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
-            type: ad.type?.replace(/_/g, " ") || "Unknown",
-            severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-              | "minor"
-              | "moderate"
-              | "significant",
-            description: ad.description || "",
-            location: ad.location || (ad as any).detected_in || "front",
-            image_side: ad.location === "back" ? "back" : "front",
-            x_percent: ad.position_x_percent ?? 50,
-            y_percent: ad.position_y_percent ?? 50,
-            _aiSource: true, // flag so image-viewer can render as red ring
-          }) as Defect & { _aiSource: boolean }
-      );
+      const aiDefects: Defect[] = analysis.defects.map((ad, i) => {
+        const imageSide: "front" | "back" = ad.location === "back" ? "back" : "front";
+        const xPercent = ad.position_x_percent ?? 50;
+        const yPercent = ad.position_y_percent ?? 50;
+        // Stamp mvgsCode + tier + zone at AI-ingest time so the pin reaches the
+        // engine via buildPayload (which filters on all three fields). Without
+        // this, AI pins were silently dropped until the operator clicked
+        // Recalculate — MV33's 37 stain pins are the witness of that.
+        // Default tier D2: matches manually-placed quick-clicks, never claims
+        // higher severity than the AI can warrant. Operator sees the red
+        // _aiSource ring on every AI pin and can raise to D1 (heavy stain) or
+        // lower to D3 (factory artefact) during review — they're never
+        // invisible-but-scoring.
+        const mvgsCode = mapLegacyTypeToMvgsCode(ad.type) ?? undefined;
+        const zone = deriveZone({ xPercent, yPercent, imageSide });
+        return {
+          id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
+          type: ad.type?.replace(/_/g, " ") || "Unknown",
+          severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
+            | "minor"
+            | "moderate"
+            | "significant",
+          description: ad.description || "",
+          location: ad.location || (ad as any).detected_in || "front",
+          image_side: imageSide,
+          x_percent: xPercent,
+          y_percent: yPercent,
+          // MVGS engine fields — stamped only when the AI's type maps to a
+          // known MVGS code. Unknown / unmapped AI types remain unscored
+          // until the operator labels them via the popover (same fall-back
+          // behaviour as before, just for the AI types we can't classify).
+          ...(mvgsCode ? { mvgsCode, tier: "D2" as const, zone } : {}),
+          _aiSource: true, // flag so image-viewer can render as red ring
+        } as Defect & { _aiSource: boolean };
+      });
       setDefects([...humanDefects, ...aiDefects]);
     }
 
@@ -1061,6 +1079,38 @@ export default function GradingPanel({
     if (sub.edges > 0) setEdgesOverride(sub.edges);
     if (sub.surface > 0) setSurfaceOverride(sub.surface);
   }, [hasMvgsPins, sub.corners, sub.edges, sub.surface]);
+
+  // Auto-derive the 5 mvgsCode-mappable surface flags from pin state — they
+  // exist for the CUSTOMER-FACING surface report ("Staining present: yes")
+  // and were never read by the engine. Pins are the source of truth; the
+  // engine deducts from pins, not from these flags. So we mirror the pin
+  // signal into the flag for honest display, instead of letting an operator
+  // tick or forget to tick a checkbox that already has the answer from pins.
+  // hasRollerMarks + hasColorRegistration have no mvgsCode equivalent in the
+  // standard, so they stay operator-editable.
+  useEffect(() => {
+    const hasPL = defects.some((d) => d.mvgsCode === "PL");
+    const hasSP = defects.some((d) => d.mvgsCode === "SP");
+    const hasSC = defects.some((d) => d.mvgsCode === "SC");
+    const hasST = defects.some((d) => d.mvgsCode === "ST");
+    const hasDG = defects.some((d) => d.mvgsCode === "DG");
+    setSurface((prev) =>
+      prev.hasPrintLines === hasPL &&
+      prev.hasHoloScratches === hasSP &&
+      prev.hasSurfaceScratches === hasSC &&
+      prev.hasStaining === hasST &&
+      prev.hasIndentation === hasDG
+        ? prev
+        : {
+            ...prev,
+            hasPrintLines: hasPL,
+            hasHoloScratches: hasSP,
+            hasSurfaceScratches: hasSC,
+            hasStaining: hasST,
+            hasIndentation: hasDG,
+          }
+    );
+  }, [defects]);
 
   const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
   const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);

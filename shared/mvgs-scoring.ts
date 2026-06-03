@@ -25,7 +25,13 @@
  *       only the edges of the dark side get the WH multiplier.
  *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
  *     capped at -25 total
- *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5
+ *     · D1 surface weights: SP -4 (×1.5 in FA/FH), CR -10 (force-cap 74),
+ *       SC -2, SV -3, ST -2, GL -4
+ *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5,
+ *       ST -0.5 (matches the D2 surface group — stain reads as a moderate
+ *       visible surface defect at the D2 tier)
+ *     · D3 surface weights: all 0 (Factory — documented only, no deduction,
+ *       matches the D3 pattern across corners + edges)
  *     · CR D1 (crease) sets a hard cap of 74 on the final score
  *     · SP D1 in art/holo zone (FA/FH) multiplies ×1.5
  *     · Back-surface zones (BA/BB) multiply final deduction ×0.5 —
@@ -281,9 +287,16 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
       case "WH":
         raw = -0.5;
         break;
+      // ST (stain) D2 — same band as PL/PI/SC/WH. A moderate stain at the
+      // D2 tier reads as a moderate visible surface defect. Adam J approved
+      // 2026-06 alongside the standard publication.
+      case "ST":
+        raw = -0.5;
+        break;
     }
   }
-  // D3 or unknown codes leave raw=0 → returns 0 below.
+  // D3 or unknown codes leave raw=0 → returns 0 below. Matches the
+  // "Factory — documented only" pattern used by D3 across corners + edges.
 
   // Back-surface ×0.5 multiplier — matches the published MVGS standard's
   // lenient treatment of back-side defects. Applied to the *deduction*

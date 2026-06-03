@@ -41,7 +41,8 @@ For each card, in order:
 2. **Centering** → centering subgrade (existing, unchanged).
 3. **Corners** → corners subgrade (pins; a corner ding/whitening is a point defect).
 4. **Edges** → edges subgrade, set by the **whitening/wear line measurement** (§3).
-5. **Surface** → surface subgrade (pins/codes, existing).
+5. **Surface** → surface subgrade (pins/codes, existing — see §5a for the
+   per-code/per-tier deduction table including the 2026-06 ST D2/D3 addition).
 6. **Structural ceilings** — crease / wrinkle / tear apply a grade CAP (§4).
 7. **Resolution (DINGS / floor rule, §5)** — the worst single limiting factor sets
    the grade. No compounding of lesser defects.
@@ -205,6 +206,44 @@ result, and the AI prompt text is aligned to the engine's ceilings. No path may
 carry its own crease/tear numbers. Shipping the engine while the other three keep
 stale values = the same card grading differently per view; that is the bug being
 closed, not deferred.
+
+---
+
+## 5a. Surface deduction table — per code + tier `[HARD-CODE — SIGNED OFF]`
+
+Pin defects in surface zones (FA/FH/FB/BA/BB) deduct from a 25-point surface
+budget. The mvgsCode picks the column; the tier (D1 / D2 / D3) picks the row.
+All per-defect deductions cap at −25 total in the category.
+
+| Code | Description                 | D1 (front / back)             | D2 (front / back)  | D3    |
+| ---- | --------------------------- | ----------------------------- | ------------------ | ----- |
+| SP   | Scratch (gloss-penetrating) | −4 (×1.5 in FA/FH front) / −2 | —                  | 0     |
+| CR   | Crease                      | −10 + cap 74                  | —                  | 0     |
+| SC   | Scratch (surface)           | −2 / −1                       | −0.5               | 0     |
+| SV   | Silvering                   | −3 / −1.5                     | —                  | 0     |
+| ST   | Stain                       | −2 / −1                       | **−0.5 (2026-06)** | **0** |
+| GL   | Gloss flaw                  | −4 / −2                       | —                  | 0     |
+| PL   | Print line                  | —                             | −0.5               | 0     |
+| PS   | Print spot                  | —                             | −0.25              | 0     |
+| PI   | Print imperfection          | —                             | −0.5               | 0     |
+| WH   | Whitening (surface)         | —                             | −0.5               | 0     |
+
+Back-surface zones (BA/BB) multiply the final deduction ×0.5 — matches the
+published MVGS standard's lenient back treatment. The ×1.5 multiplier on SP D1
+applies ONLY in the front art/holo zones (FA/FH).
+
+D3 across every column is 0 — the "Factory — documented only, no deduction"
+pattern that matches D3 across corners + edges. D3 pins identify minor
+factory artefacts that the customer surface report still describes (via the
+auto-set cosmetic flags below) without nudging the grade.
+
+**ST D2/D3 addition (2026-06):** D2-ST = −0.5 matches the D2 surface band
+(PL/PI/SC/WH all −0.5). D3-ST = 0 matches the D3 Factory pattern. Before this
+addition, the engine produced ZERO deduction for D2 stain pins — MV33's 37
+stain pins (mostly D2) drove no surface deduction at all, leaving the cert at
+Surface 10 / Overall 9 on a 3-condition card. The customer-facing standard at
+`content/legal/grading-standards.md` carries the same row (Stage B review by
+Adam J pending before prod).
 
 ---
 
