@@ -985,7 +985,7 @@ function SheetPrintingPanel() {
   // up to 4 cards per sheet). Returns a JSON envelope with PDF / SVG / PNG
   // as base64 blobs; saveBatchFiles drops all three to Downloads with a
   // shared batchId in the filename.
-  const PRINT_BATCH_MAX = 4;
+  const PRINT_BATCH_MAX = MAX_CERTS_PER_BATCH; // single source of truth (line 40)
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   // Loading state for the Latest Sheet row's PNG button (re-downloading
   // a historical batch). The primary Generate Batch flow auto-downloads
