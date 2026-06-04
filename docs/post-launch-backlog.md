@@ -430,6 +430,17 @@ engine. The flag is correct scaffolding for the cap-saturation edge case,
 but it doesn't substitute for honest defect description. Both belong in
 the next bundle.
 
+### MV33 root cause confirmed on staging (2026-06-04)
+
+MV33 root cause confirmed on staging: the v2 engine grades correctly when
+pins describe the damage (proven on MV206/Rayquaza — surface −24 → 2.5
+GOOD, no override needed, override panel correctly did NOT fire). MV33
+sits at 9 because its mould is pinned as light D2 stains (surface raw
+only −12). The fix for MV33 is RE-TIERING its pins to match the actual
+damage — or the mould defect type — NOT the flag threshold. The −40 flag
+is a backstop for genuine cap-saturation, a narrower case than first
+assumed.
+
 ---
 
 ## Retired infra — do not re-add
