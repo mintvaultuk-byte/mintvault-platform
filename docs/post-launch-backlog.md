@@ -340,6 +340,98 @@ not a bug.
 
 ---
 
+## Heavy-damage flag — verify on staging + decide threshold/mould
+
+**Logged:** 2026-06-04
+**Branch:** `feat/mvgs-heavy-damage-flag` at `83ff981`, deployed STAGING
+only (`mintvault-v2` v222). Migration applied to the staging Neon branch.
+NOT merged to main, NOT deployed to prod.
+
+### Build state — built but not verified end-to-end
+
+The branch adds three things:
+
+- Engine extension: `rawDeductions` on `MvgsResult` (pre-clamp totals per
+  category) + `HEAVY_DAMAGE_THRESHOLD = -40` + `getHeavyDamageFlags()`
+  helper. Weights, the -25 cap, the band table, and surfaceDeduction/
+  edgeDeduction are unchanged.
+- Override + dismiss path: `grade_manual_override` + `heavy_damage_
+acknowledged_at` columns; POST endpoints for both; audit_log row per
+  event; Approve button hard-gated until override or dismiss; the
+  grading panel banner + override panel showing "MVGS computed: X ·
+  grader set: Y".
+- Admin queue at `/admin/heavy-damage-queue` — read-only list of approved
+  certs that trip the flag; click into cert → existing grading panel →
+  same override/dismiss.
+
+12 new tests + 251 total vitest passing, tsc clean. **But none of the four
+browser-level smoke tests have actually been run yet** because staging
+has 0 approved certs.
+
+### Two unresolved problems before this is prod-ready
+
+1. **The flag at -40 doesn't fire on MV33 — the very card it was built
+   for.** MV33's surface raw deduction is ~-12 (per the 2026-06-03
+   dry-run), well above the -40 threshold. The cause isn't a threshold
+   miscalibration — it's that MV33's actual damage (mould on the back +
+   heavy whitening) is described to the engine as light D2 stain pins.
+   Severe damage was never categorised as severe. Dropping the threshold
+   alone would fire the flag on too many normal cards while still missing
+   mould-stained ones that have light pin classification. The real fix is
+   the **mould defect type** — a new MVGS code with proper D1/D2/D3
+   weights and a scoring-standard decision, deferred from this build.
+
+2. **Staging has 0 approved certs.** The four browser smoke tests from
+   the build brief (live flag fires + Approve gate blocks + override
+   persists/reloads / queue renders + click-through) cannot be exercised
+   without test data. The engine logic is unit-tested via synthetic
+   `MvgsResult` inputs, but the realistic flow — operator drops 30+ pins
+   → flag fires → override → reload → persist — is unverified.
+
+### Ordered follow-up for next session
+
+1. **Seed realistic test certs on staging.** At minimum: one cert with
+   30+ properly-classified surface pins (mix of D1 + D2 + WH) that
+   produces a raw surface deduction past -40 with the engine still
+   computing overall >= 5 (this requires the unclassified-pins path or a
+   threshold tweak — see #2 below). Plus one no-pin cert for the
+   "queue is empty" control. Plus one mid-pin cert that doesn't trip
+   the flag for negative control.
+2. **Decide threshold tuning AND mould defect code.** Two coupled
+   decisions:
+   - Threshold: tune in one place (the `HEAVY_DAMAGE_THRESHOLD` constant
+     in shared/mvgs-scoring.ts). Currently -40. Picking the right value
+     needs MV33-class real data — staging seeding from (1) makes it
+     possible to A/B candidates against synthetic damage.
+   - Mould defect code: add as a new MvgsCode + D1/D2/D3 weights +
+     update content/legal/grading-standards.md surface deduction table.
+     Requires Adam J review on the new weight band. Once present, MV33
+     would re-grade with the mould pins properly described and the flag
+     becomes the belt-and-braces for cases the operator misses.
+3. **Run all four browser tests on staging** with the seeded certs:
+   - (a) Place heavy pins → flag fires + Approve disabled?
+   - (b) Override → grader-set grade persists on reload + "computed X
+     / grader Y" copy shows?
+   - (c) Retroactive pass returns the seeded cert(s) in the queue?
+   - (d) Click into a flagged cert from the queue → grading panel opens
+     → override flow completes → cert disappears from queue on next
+     load?
+4. **Only after the above pass:** merge `feat/mvgs-heavy-damage-flag` to
+   main, deploy prod, then manually override MV33 (and any other prod
+   cert the queue surfaces) to its true grade. Reprint not in scope —
+   zero slabs printed (per the 2026-06-04 §2 carve-out).
+
+### Why not a threshold-only fix tonight
+
+A threshold change alone is a one-line edit but it can't catch MV33
+without firing on lots of healthy cards. The mould defect code is the
+real correctness fix — it puts the right information in front of the
+engine. The flag is correct scaffolding for the cap-saturation edge case,
+but it doesn't substitute for honest defect description. Both belong in
+the next bundle.
+
+---
+
 ## Retired infra — do not re-add
 
 - **`ADMIN_PIN` env var** — deleted 2026-05-04 after PIN auth migration
