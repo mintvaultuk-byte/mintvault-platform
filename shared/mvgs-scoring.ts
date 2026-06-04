@@ -25,7 +25,13 @@
  *       only the edges of the dark side get the WH multiplier.
  *   - Surface defects in zones FA/FH/FB/BA/BB by mvgsCode + tier,
  *     capped at -25 total
- *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5
+ *     · D1 surface weights: SP -4 (×1.5 in FA/FH), CR -10 (force-cap 74),
+ *       SC -2, SV -3, ST -2, GL -4
+ *     · D2 surface weights: PL -0.5, PS -0.25, PI -0.5, SC -0.5, WH -0.5,
+ *       ST -0.5 (matches the D2 surface group — stain reads as a moderate
+ *       visible surface defect at the D2 tier)
+ *     · D3 surface weights: all 0 (Factory — documented only, no deduction,
+ *       matches the D3 pattern across corners + edges)
  *     · CR D1 (crease) sets a hard cap of 74 on the final score
  *     · SP D1 in art/holo zone (FA/FH) multiplies ×1.5
  *     · Back-surface zones (BA/BB) multiply final deduction ×0.5 —
@@ -47,6 +53,77 @@ export interface MvgsDefect {
   zone: string; // one of the 20 zone codes
 }
 
+// ── v2: measurement-based ceilings + whitening ladder ─────────────────────
+// New optional inputs introduced in MVGS v2 (docs/MVGS-v2-spec.md). All are
+// optional with safe "no-penalty" defaults so legacy callers that don't yet
+// pass them keep scoring exactly as before. The grading-workstation line tool
+// (Phase 2) is what populates whiteningEdges / creaseSpanPct / wrinkleSeverity
+// / tearSeverity for new captures; this engine phase implements the maths.
+
+/** TAG-aligned wrinkle severity (surface ripple that doesn't break the stock).
+ *  Each level is a grade CEILING — the worst of all ceilings caps the overall
+ *  grade per the floor-rule resolution. */
+export type WrinkleSeverity =
+  | "tiny_back" // ceiling 6.5
+  | "longer_back" // ceiling 6
+  | "small_front" // ceiling 5.5
+  | "multiple_front"; // ceiling 5
+
+/** TAG-aligned tear severity. "major" routes to the existing non-numeric NO
+ *  outcome (returned, not slabbed) per spec §4 — caller surfaces this via the
+ *  `tearForceNotGraded` flag in MvgsResult and sets gradeType="non_numeric"
+ *  on the cert. NQ = NO; no new code is created. */
+export type TearSeverity =
+  | "minor" // cap 2
+  | "significant" // cap 1.5
+  | "major"; // → non-numeric NO outcome
+
+/** A single whitening LINE marked along one of the eight card edges (4 front +
+ *  4 back). coveragePct = how much of THIS edge's length the line covers,
+ *  0..100. Multiple lines on the same edge sum into one entry (caller
+ *  consolidates). */
+export interface WhiteningEdge {
+  side: "front" | "back";
+  /** Which of the four edges on this side. */
+  edge: "top" | "right" | "bottom" | "left";
+  /** % of this edge's length covered by whitening. 0..100. */
+  coveragePct: number;
+}
+
+/** Calibration thresholds — the three "[CALIBRATE]" values in the spec that
+ *  are not published by anyone and must be tuned, then locked. Stored in
+ *  pipeline_settings under key "mvgs.calibration" (server reads + passes).
+ *  Defaults below are the STARTING values from spec §3 + §6. */
+export interface MvgsCalibration {
+  /** An edge counts as "affected" if whitening covers ≥ this % of its length.
+   *  Starting: 10. */
+  edgeAffectedPct: number;
+  /** Split between "minor" (≤) and "visible" (>) whitening as % of the edge.
+   *  Starting: 25. */
+  minorVisibleSplitPct: number;
+  /** Dark-border multiplier on whitening coverage before the ladder reads.
+   *  Starting: 1.25. */
+  darkBorderMultiplier: number;
+  /** Crease span thresholds as % of card axis. Starting: 25 / 50 / 75. The
+   *  ladder is < creaseMinorMaxPct → cap 4.5, ≤ creaseHalfMaxPct → cap 4,
+   *  ≤ creaseThreeQuarterMaxPct → cap 3.5, > → cap 3. */
+  creaseMinorMaxPct: number;
+  creaseHalfMaxPct: number;
+  creaseThreeQuarterMaxPct: number;
+}
+
+/** Starting calibration values per spec §3 + §6. Live in code as the default;
+ *  the pipeline_settings row (key "mvgs.calibration") overrides per-deployment
+ *  when admin tunes in the calibration panel (Phase 2/3 UI). */
+export const DEFAULT_MVGS_CALIBRATION: MvgsCalibration = {
+  edgeAffectedPct: 10,
+  minorVisibleSplitPct: 25,
+  darkBorderMultiplier: 1.25,
+  creaseMinorMaxPct: 25,
+  creaseHalfMaxPct: 50,
+  creaseThreeQuarterMaxPct: 75,
+};
+
 export interface MvgsInput {
   centeringFrontLr: string | null; // "55/45"
   centeringFrontTb: string | null;
@@ -60,12 +137,46 @@ export interface MvgsInput {
    *  Triggers the WH ×1.25 multiplier on BACK edges only. */
   darkBorderBack: boolean;
   eyeAppealModifier: number; // -2..+2
+
+  // ── v2 (all optional, omit = no v2 capping, score identical to v1) ───────
+  /** Whitening lines marked along card edges. Drives the Edges subgrade via
+   *  the §3 ladder (one of 10 / 9 / 8.5 / 8 for "affected count" tiers; lower
+   *  rungs require additional pin-marked severity that lives in `defects`). */
+  whiteningEdges?: WhiteningEdge[] | null;
+  /** Crease length as % of the card's axis (0..100). 0 / null = no crease.
+   *  Maps to a grade ceiling per spec §4 crease ladder. */
+  creaseSpanPct?: number | null;
+  /** Wrinkle severity per spec §4. null = none. */
+  wrinkleSeverity?: WrinkleSeverity | null;
+  /** Tear severity per spec §4. "major" routes to non-numeric NO. null = none. */
+  tearSeverity?: TearSeverity | null;
+  /** Calibration thresholds. Server callers load from pipeline_settings; client
+   *  preview can pass DEFAULT_MVGS_CALIBRATION. Omit = use defaults. */
+  calibration?: MvgsCalibration;
+}
+
+/** Structural ceiling (crease/wrinkle/tear) applied via the floor rule per
+ *  spec §4 + §5. Worst ceiling wins; "source" names the strictest input.
+ *  Returned in MvgsResult so consumers (grade-display, slab render, AI prompt)
+ *  read this single authority instead of duplicating cap logic. */
+export interface MvgsCeiling {
+  source: "crease" | "wrinkle" | "tear";
+  grade: number; // 1..10 — cap on overall grade
+  reason: string; // human-readable, surfaced in the calc-details panel
 }
 
 export interface MvgsResult {
   score: number; // 1..100, integer
-  grade: string; // e.g. "Gem Mint 10"
+  grade: string; // e.g. "Gem Mint", "NM-Mint+"
   deductions: Record<string, number>; // breakdown, signed (always ≤ 0)
+  /** Strictest structural ceiling, or null if none triggered. */
+  ceiling: MvgsCeiling | null;
+  /** Edges subgrade derived from the whitening line measurement when supplied.
+   *  null = no measurement → caller's existing pin-derived subgrade stands. */
+  edgesSubgradeFromWhitening: number | null;
+  /** Tear severity "major" → existing non-numeric NO outcome. Caller surfaces
+   *  this on the cert as gradeType="non_numeric" + grade label "NO". */
+  tearForceNotGraded: boolean;
 }
 
 // ── Centering ─────────────────────────────────────────────────────────────
@@ -176,9 +287,16 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
       case "WH":
         raw = -0.5;
         break;
+      // ST (stain) D2 — same band as PL/PI/SC/WH. A moderate stain at the
+      // D2 tier reads as a moderate visible surface defect. Adam J approved
+      // 2026-06 alongside the standard publication.
+      case "ST":
+        raw = -0.5;
+        break;
     }
   }
-  // D3 or unknown codes leave raw=0 → returns 0 below.
+  // D3 or unknown codes leave raw=0 → returns 0 below. Matches the
+  // "Factory — documented only" pattern used by D3 across corners + edges.
 
   // Back-surface ×0.5 multiplier — matches the published MVGS standard's
   // lenient treatment of back-side defects. Applied to the *deduction*
@@ -216,57 +334,227 @@ function remainingToGrade(remaining: number): number {
  * grade N, the cappedScore drops to GRADE_BRACKET_TOP[N] so the displayed
  * label matches finalGrade exactly.
  *
- * The previous version offset each entry by +5 ("top of the next-up
- * bracket") which meant capping at 7.5 produced a cappedScore of 75 — and
- * gradeLabelForScore(75) is "NM-Mint 8", not "NM+ 7.5". That mis-display
- * was the bug fixed here: now strict per-bracket.
- *
- * Half-grades below 7 (2.5, 3.5, ...) have no label bracket of their own
- * (gradeLabelForScore brackets only support half-grades from 7.5 up), so
- * they fall through to the integer-floor lookup. E.g. finalGrade 2.5 →
- * bracketTopFor(2.5) = GRADE_BRACKET_TOP[2] = 20 → "Fair 2".
+ * v2 (MVGS-v2-spec.md §2) — TAG-aligned bands, full half-grade ladder down
+ * to 1. The v1 table was shifted ~5 points lenient AND skipped half-grades
+ * below 7.5; both are corrected here to match TAG's published rubric ÷10.
+ * 9.5 is removed (TAG does not use it). Boundaries are inclusive on the
+ * lower side, exclusive on the upper (score 95 = Gem Mint; 94 = Mint).
  */
 const GRADE_BRACKET_TOP: Record<number, number> = {
-  10: 100, // top of "Pristine 10P" range (96-100); also covers "Gem Mint 10"
-  9.5: 90, // top of "Mint+ 9.5" (86-90)
-  9: 85, // top of "Mint 9" (81-85)
-  8.5: 80, // top of "NM-Mint+ 8.5" (76-80)
-  8: 75, // top of "NM-Mint 8" (71-75)
-  7.5: 70, // top of "NM+ 7.5" (66-70)
-  7: 65, // top of "Near Mint 7" (61-65)
-  6: 60, // top of "Excellent-Mint 6" (51-60)
-  5: 50, // top of "Excellent 5" (41-50)
-  4: 40, // top of "Very Good-Excellent 4" (31-40)
-  3: 30, // top of "Good 3" (21-30)
-  2: 20, // top of "Fair 2" (11-20)
-  1: 10, // top of "Poor 1" (1-10)
+  10: 100, // Pristine 10P (99-100) + Gem Mint (95-98.9), integer top = 100
+  9: 94, // Mint 9 (90-94.9)
+  8.5: 89, // NM-Mint+ 8.5 (85-89.9)
+  8: 84, // NM-Mint 8 (80-84.9)
+  7.5: 79, // NM+ 7.5 (75-79.9)
+  7: 74, // Near Mint 7 (70-74.9)
+  6.5: 69, // EX-Mint+ 6.5 (65-69.9)
+  6: 64, // EX-Mint 6 (60-64.9)
+  5.5: 59, // Excellent+ 5.5 (55-59.9)
+  5: 54, // Excellent 5 (50-54.9)
+  4.5: 49, // VG-EX+ 4.5 (45-49.9)
+  4: 44, // VG-EX 4 (40-44.9)
+  3.5: 39, // VG+ 3.5 (35-39.9)
+  3: 34, // Very Good 3 (30-34.9)
+  2.5: 29, // Good+ 2.5 (25-29.9)
+  2: 24, // Good 2 (20-24.9)
+  1.5: 19, // Fair 1.5 (15-19.9)
+  1: 14, // Poor 1 (10-14.9; score < 10 still labels Poor)
 };
 function bracketTopFor(grade: number): number {
   if (GRADE_BRACKET_TOP[grade] !== undefined) return GRADE_BRACKET_TOP[grade];
   return GRADE_BRACKET_TOP[Math.floor(grade)] ?? 100;
 }
 
+/** Score → label per spec §2 band table. */
 function gradeLabelForScore(score: number): string {
-  if (score >= 96) return "Pristine 10P";
-  if (score >= 91) return "Gem Mint 10";
-  if (score >= 86) return "Mint+ 9.5";
-  if (score >= 81) return "Mint 9";
-  if (score >= 76) return "NM-Mint+ 8.5";
-  if (score >= 71) return "NM-Mint 8";
-  if (score >= 66) return "NM+ 7.5";
-  if (score >= 61) return "Near Mint 7";
-  if (score >= 51) return "Excellent-Mint 6";
-  if (score >= 41) return "Excellent 5";
-  if (score >= 31) return "Very Good-Excellent 4";
-  if (score >= 21) return "Good 3";
-  if (score >= 11) return "Fair 2";
-  return "Poor 1";
+  if (score >= 99) return "Pristine 10P";
+  if (score >= 95) return "Gem Mint";
+  if (score >= 90) return "Mint";
+  if (score >= 85) return "NM-Mint+";
+  if (score >= 80) return "NM-Mint";
+  if (score >= 75) return "NM+";
+  if (score >= 70) return "Near Mint";
+  if (score >= 65) return "EX-Mint+";
+  if (score >= 60) return "EX-Mint";
+  if (score >= 55) return "Excellent+";
+  if (score >= 50) return "Excellent";
+  if (score >= 45) return "VG-EX+";
+  if (score >= 40) return "VG-EX";
+  if (score >= 35) return "VG+";
+  if (score >= 30) return "Very Good";
+  if (score >= 25) return "Good+";
+  if (score >= 20) return "Good";
+  if (score >= 15) return "Fair";
+  return "Poor";
+}
+
+// ── v2: ceiling helpers (crease / wrinkle / tear) ─────────────────────────
+// Each helper returns the grade ceiling for its input, or null when the
+// input is absent / zero. Callers combine via worstCeiling() (lowest grade
+// wins) before the floor rule resolves the final overall grade. Single source
+// of truth — client grade-logic + grade-display + the AI prompt all read
+// from these helpers (or from MvgsResult.ceiling), not duplicates of the
+// hard-coded numbers below.
+
+/** Crease ceiling by % of card axis per spec §4. Calibrated thresholds are
+ *  read from the calibration object so the same number that drives scoring
+ *  drives the public /standard page (no claim-without-code drift). */
+function creaseCeiling(spanPct: number | null | undefined, c: MvgsCalibration): MvgsCeiling | null {
+  if (spanPct == null || spanPct <= 0) return null;
+  let grade: number;
+  let span: string;
+  if (spanPct < c.creaseMinorMaxPct) {
+    grade = 4.5;
+    span = `<${c.creaseMinorMaxPct}%`;
+  } else if (spanPct <= c.creaseHalfMaxPct) {
+    grade = 4;
+    span = `${c.creaseMinorMaxPct}-${c.creaseHalfMaxPct}%`;
+  } else if (spanPct <= c.creaseThreeQuarterMaxPct) {
+    grade = 3.5;
+    span = `${c.creaseHalfMaxPct}-${c.creaseThreeQuarterMaxPct}%`;
+  } else {
+    grade = 3;
+    span = `>${c.creaseThreeQuarterMaxPct}%`;
+  }
+  return { source: "crease", grade, reason: `crease ${spanPct.toFixed(1)}% of card span (${span} bracket)` };
+}
+
+/** Wrinkle ceiling per spec §4. */
+function wrinkleCeiling(sev: WrinkleSeverity | null | undefined): MvgsCeiling | null {
+  if (!sev) return null;
+  const map: Record<WrinkleSeverity, number> = {
+    tiny_back: 6.5,
+    longer_back: 6,
+    small_front: 5.5,
+    multiple_front: 5,
+  };
+  return { source: "wrinkle", grade: map[sev], reason: `wrinkle: ${sev.replace("_", " ")}` };
+}
+
+/** Tear ceiling per spec §4. "major" → non-numeric NO outcome (existing code,
+ *  not a new one) — caller acts on tearForceNotGraded in MvgsResult. */
+function tearCeiling(sev: TearSeverity | null | undefined): { ceiling: MvgsCeiling | null; forceNotGraded: boolean } {
+  if (!sev) return { ceiling: null, forceNotGraded: false };
+  if (sev === "major") {
+    // Major tear routes to the existing "Not Graded" non-numeric outcome.
+    // The ceiling is informational; the engine still surfaces a score so
+    // the floor rule has a number to work with, but the caller treats this
+    // as gradeType=non_numeric / grade label "NO".
+    return {
+      ceiling: { source: "tear", grade: 1, reason: "major tear / missing material — routed to NO (existing code)" },
+      forceNotGraded: true,
+    };
+  }
+  const grade = sev === "minor" ? 2 : 1.5;
+  return {
+    ceiling: { source: "tear", grade, reason: `tear: ${sev}` },
+    forceNotGraded: false,
+  };
+}
+
+/** Take the strictest (lowest-grade) ceiling out of any supplied. */
+function worstCeiling(...ceilings: Array<MvgsCeiling | null>): MvgsCeiling | null {
+  let worst: MvgsCeiling | null = null;
+  for (const c of ceilings) {
+    if (c && (!worst || c.grade < worst.grade)) worst = c;
+  }
+  return worst;
+}
+
+/** Legacy boolean → ceiling mapping. The original surface-grading UI uses
+ *  has_crease / has_tear flags (no length measurement). Phase 1 keeps that
+ *  signal but routes it through the same v2 ladder so client + display + AI
+ *  prompt all read the SAME ceiling — no path carries its own crease/tear
+ *  numbers any more (spec §5 single-source-of-truth requirement).
+ *
+ *  Mapping conservatively to the LEAST-severe bucket in each ladder because
+ *  the legacy boolean is too coarse to imply more:
+ *   - has_crease = true → "less than minor" bucket → cap 4.5
+ *   - has_tear   = true → "minor" tear → cap 2 (major-tear-NO is reserved
+ *     for the explicit tearSeverity="major" path; the legacy boolean alone
+ *     never escalates to NO).
+ *  Phase 2 swaps these for measurement-driven inputs (creaseSpanPct,
+ *  tearSeverity) at the call sites; this helper goes away then. */
+export function legacyCeilingForFlags(opts: { hasCrease: boolean; hasTear: boolean }): MvgsCeiling | null {
+  const cCrease = opts.hasCrease
+    ? ({ source: "crease", grade: 4.5, reason: "crease present (legacy flag)" } as const)
+    : null;
+  const cTear = opts.hasTear ? ({ source: "tear", grade: 2, reason: "tear present (legacy flag)" } as const) : null;
+  return worstCeiling(cCrease, cTear);
+}
+
+/** §3 whitening edges ladder. Counts how many edges are "affected" (coverage
+ *  ≥ calibration.edgeAffectedPct), splits "minor" vs "visible" at the
+ *  calibration split, and reads the ladder. Dark-border WH multiplier from
+ *  the caller (passed darkBorderFront/Back) is applied to coverage BEFORE
+ *  thresholding so a dark edge with 8% coverage × 1.25 = 10% counts as
+ *  affected.
+ *
+ *  Returns null when no whitening edges are supplied (legacy callers); the
+ *  caller's pin-derived edges subgrade stays in force. Returns 10 when
+ *  measurements exist but no edge clears the affected threshold.
+ *
+ *  Phase 1 covers the first four rungs (10 / 9 / 8.5 / 8) cleanly from the
+ *  count + severity-split signal. Worse rungs (7.5 and below — notching,
+ *  chipping, severe wear) sit on top of pin-marked severity codes (CH/PI/
+ *  SP D1) that flow through the existing pin-based edges deduction; the
+ *  combined min() at the call site makes sure neither can over-rule the
+ *  other. */
+function whiteningEdgesSubgrade(
+  edges: WhiteningEdge[] | null | undefined,
+  c: MvgsCalibration,
+  darkBorderFront: boolean,
+  darkBorderBack: boolean
+): number | null {
+  if (!edges || edges.length === 0) return null;
+
+  // Dedupe by (side, edge): an edge counts once, with worst (max) coverage.
+  const byKey = new Map<string, { side: "front" | "back"; edge: string; effectiveCoverage: number }>();
+  for (const e of edges) {
+    const key = `${e.side}:${e.edge}`;
+    const sideDark = e.side === "front" ? darkBorderFront : darkBorderBack;
+    const eff = sideDark ? e.coveragePct * c.darkBorderMultiplier : e.coveragePct;
+    const prev = byKey.get(key);
+    if (!prev || eff > prev.effectiveCoverage) byKey.set(key, { side: e.side, edge: e.edge, effectiveCoverage: eff });
+  }
+
+  // Affected = ≥ edgeAffectedPct. Visible = > minorVisibleSplitPct (else minor).
+  let affectedFront = 0;
+  let affectedBack = 0;
+  let visibleFront = 0;
+  let visibleBack = 0;
+  for (const v of byKey.values()) {
+    if (v.effectiveCoverage < c.edgeAffectedPct) continue;
+    if (v.side === "front") {
+      affectedFront++;
+      if (v.effectiveCoverage > c.minorVisibleSplitPct) visibleFront++;
+    } else {
+      affectedBack++;
+      if (v.effectiveCoverage > c.minorVisibleSplitPct) visibleBack++;
+    }
+  }
+  const totalAffected = affectedFront + affectedBack;
+
+  // Ladder rungs covered in Phase 1 (count-based, no severity codes needed):
+  //   Clean / hi-res artifacts only         → 10  (zero edges clear threshold)
+  //   Minor whitening, 1-2 edges            →  9
+  //   Visible, multiple edges (front)       →  8.5
+  //   All four edges affected               →  8
+  if (totalAffected === 0) return 10;
+  if (totalAffected >= 4) return 8;
+  // "Visible, multiple edges (front)" — 2+ front edges past the visible split.
+  if (visibleFront >= 2) return 8.5;
+  // "Minor whitening, 1-2 edges" — 1-2 edges affected at the minor level.
+  return 9;
 }
 
 // ── Public entry point ────────────────────────────────────────────────────
 
 export function computeMvgsScore(input: MvgsInput): MvgsResult {
   const deductions: Record<string, number> = {};
+  // v2 calibration — caller passes pipeline_settings overrides; defaults
+  // otherwise. Engine never goes to the DB, stays pure.
+  const calibration = input.calibration ?? DEFAULT_MVGS_CALIBRATION;
 
   // Centering — worst front axis → front deduction (0..-20), worst back axis
   // → back deduction (0..-5). Both come from the shared PSA chart so the
@@ -336,16 +624,51 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
     input.centeringBackLr,
     input.centeringBackTb
   ).subgrade;
+
+  // v2 §3 — whitening line measurement, if supplied, drives the displayed
+  // edges subgrade alongside the pin-derived one. The lower (worse) of the
+  // two wins so neither path can over-rule the other:
+  //   - line says "all 4 affected" (8) but pins only mark a single CH D2
+  //     (subgrade ~10): operator-marked whitening dominates, edges = 8.
+  //   - pins mark a severe CH D1 (subgrade ~7 from deductions) and no line
+  //     measurement: pin path dominates, edges = 7.
+  // The PIN-derived edges deduction is still summed into the score; the
+  // line subgrade only constrains the DISPLAYED subgrade + the floor rule.
+  // (Phase 2 will add a corresponding deduction-equivalent so the score
+  // also reflects line measurements end-to-end — out of scope here.)
+  const edgesSubgradeFromWhitening = whiteningEdgesSubgrade(
+    input.whiteningEdges,
+    calibration,
+    input.darkBorderFront,
+    input.darkBorderBack
+  );
+  const edgesSubgradeFromPins = remainingToGrade(25 - Math.abs(deductions.edges ?? 0));
+  const edgesSub =
+    edgesSubgradeFromWhitening != null
+      ? Math.min(edgesSubgradeFromWhitening, edgesSubgradeFromPins)
+      : edgesSubgradeFromPins;
+
   const subList = [
     centeringSub,
     remainingToGrade(25 - Math.abs(deductions.corners ?? 0)),
-    remainingToGrade(25 - Math.abs(deductions.edges ?? 0)),
+    edgesSub,
     remainingToGrade(25 - Math.abs(deductions.surface ?? 0)),
   ];
   const lowest = Math.min(...subList);
   const others = subList.filter((s) => s !== lowest);
   const gap = others.reduce((sum, s) => sum + (s - lowest), 0);
-  const maxGrade = gap >= 4 ? lowest + 0.5 : lowest;
+  let maxGrade = gap >= 4 ? lowest + 0.5 : lowest;
+
+  // v2 §4 — structural ceilings (crease / wrinkle / tear) cap the overall
+  // grade if they're stricter than the floor rule. Worst ceiling wins per
+  // §5 DINGS: a card with both a wrinkle (cap 6.5) AND a minor tear (cap 2)
+  // resolves at 2; lesser ceilings do not compound.
+  const cCrease = creaseCeiling(input.creaseSpanPct, calibration);
+  const cWrinkle = wrinkleCeiling(input.wrinkleSeverity);
+  const tearResult = tearCeiling(input.tearSeverity);
+  const ceiling = worstCeiling(cCrease, cWrinkle, tearResult.ceiling);
+  if (ceiling) maxGrade = Math.min(maxGrade, ceiling.grade);
+
   const scoreGrade = gradeFromMvgsScore(score);
   const finalGrade = Math.min(scoreGrade, maxGrade);
   const cappedScore = Math.min(score, bracketTopFor(finalGrade));
@@ -354,6 +677,9 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
     score: cappedScore,
     grade: gradeLabelForScore(cappedScore),
     deductions,
+    ceiling,
+    edgesSubgradeFromWhitening,
+    tearForceNotGraded: tearResult.forceNotGraded,
   };
 }
 
@@ -370,42 +696,53 @@ export { gradeLabelForScore as mvgsGradeLabel };
  * grade with the MVGS-derived grade when defects have been MVGS-classified.
  */
 export function gradeFromMvgsScore(score: number): number {
-  if (score >= 96) return 10; // Pristine 10P → 10
-  if (score >= 91) return 10; // Gem Mint 10
-  if (score >= 86) return 9.5; // Mint+ 9.5
-  if (score >= 81) return 9; // Mint 9
-  if (score >= 76) return 8.5; // NM-Mint+ 8.5
-  if (score >= 71) return 8; // NM-Mint 8
-  if (score >= 66) return 7.5; // NM+ 7.5
-  if (score >= 61) return 7; // Near Mint 7
-  if (score >= 51) return 6; // Excellent-Mint 6
-  if (score >= 41) return 5; // Excellent 5
-  if (score >= 31) return 4; // Very Good-Excellent 4
-  if (score >= 21) return 3; // Good 3
-  if (score >= 11) return 2; // Fair 2
-  return 1; // Poor 1
+  // v2 band table per spec §2 — full TAG half-grade ladder.
+  if (score >= 99) return 10; // Pristine 10P → grade 10 ("P" is label-only)
+  if (score >= 95) return 10; // Gem Mint
+  if (score >= 90) return 9; // Mint
+  if (score >= 85) return 8.5; // NM-Mint+
+  if (score >= 80) return 8; // NM-Mint
+  if (score >= 75) return 7.5; // NM+
+  if (score >= 70) return 7; // Near Mint
+  if (score >= 65) return 6.5; // EX-Mint+
+  if (score >= 60) return 6; // EX-Mint
+  if (score >= 55) return 5.5; // Excellent+
+  if (score >= 50) return 5; // Excellent
+  if (score >= 45) return 4.5; // VG-EX+
+  if (score >= 40) return 4; // VG-EX
+  if (score >= 35) return 3.5; // VG+
+  if (score >= 30) return 3; // Very Good
+  if (score >= 25) return 2.5; // Good+
+  if (score >= 20) return 2; // Good
+  if (score >= 15) return 1.5; // Fair
+  return 1; // Poor
 }
 
 /**
  * MVGS tier NAME for a numeric 1-10 grade (no score, no trailing number).
  * Single source of truth for grade→name on the physical slab and the cert
- * page, so the two can never disagree. Mirrors the tier vocabulary in
- * gradeLabelForScore / gradeFromMvgsScore but keyed by the grade itself, so a
- * half-grade renders its TRUE tier (8.5 → "NM-Mint+", 7.5 → "NM+") instead of
- * being rounded up into the next whole tier. Callers uppercase as needed.
+ * page, so the two can never disagree. Mirrors gradeLabelForScore /
+ * gradeFromMvgsScore but keyed by the grade itself, so a half-grade renders
+ * its TRUE tier instead of being rounded up into the next whole tier.
+ * Callers uppercase as needed.
  */
 export function mvgsTierName(grade: number): string {
   if (grade >= 10) return "Gem Mint";
-  if (grade >= 9.5) return "Mint+";
   if (grade >= 9) return "Mint";
   if (grade >= 8.5) return "NM-Mint+";
   if (grade >= 8) return "NM-Mint";
   if (grade >= 7.5) return "NM+";
   if (grade >= 7) return "Near Mint";
-  if (grade >= 6) return "Excellent-Mint";
+  if (grade >= 6.5) return "EX-Mint+";
+  if (grade >= 6) return "EX-Mint";
+  if (grade >= 5.5) return "Excellent+";
   if (grade >= 5) return "Excellent";
-  if (grade >= 4) return "Very Good-Excellent";
-  if (grade >= 3) return "Good";
-  if (grade >= 2) return "Fair";
+  if (grade >= 4.5) return "VG-EX+";
+  if (grade >= 4) return "VG-EX";
+  if (grade >= 3.5) return "VG+";
+  if (grade >= 3) return "Very Good";
+  if (grade >= 2.5) return "Good+";
+  if (grade >= 2) return "Good";
+  if (grade >= 1.5) return "Fair";
   return "Poor";
 }

@@ -29,6 +29,7 @@ The overall grade reflects the cumulative subgrade assessment and is expressed o
 ## Black Label
 
 Black Label is awarded **automatically** when all four recorded subgrades are each 10.
+
 - No separate opt-in required.
 - No extra fee.
 - Black Label is part of the grading outcome, not a paid upgrade.

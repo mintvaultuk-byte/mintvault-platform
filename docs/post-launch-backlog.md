@@ -134,6 +134,7 @@ small numbers undermine the page's positioning as the public
 ledger of every graded card. Better hidden than shown small.
 
 When restoring, consider:
+
 - Conditional render via `if stats.total_graded > 100`
 - Or keep removed permanently and replace with a more
   qualitative section (e.g. "Recent additions" ticker)
@@ -152,6 +153,7 @@ queue jump) was stripped from welcome email + config because none of these
 were enforced in code.
 
 Decide which (if any) of these to actually build based on:
+
 - Week-1 customer signup volume on Silver
 - Funnel data: where do non-members drop off?
 - Direct asks: what do customers say is missing?
@@ -162,7 +164,7 @@ shipped in v1 (2026-05-05) — see commit history.
 1. **Free return shipping over £50** — needs return shipping unbundled from
    grading fee as separate line, threshold logic, stacking rules with bulk
 2. **Free authentication credits monthly** — needs member_credits table writes
-   + checkout consumption logic
+   - checkout consumption logic
 3. **Queue jump** — would need grading queue priority field consumed by admin
    queue ordering
 4. **Free reholder credits quarterly** — same plumbing as auth credits
@@ -179,6 +181,7 @@ free return shipping, early pop reports) and use a SCENARIOS math table that
 multiplies these into "saves £30+/mo". Pages already say "Subscriptions
 temporarily paused — relaunching with full perks system" so no immediate
 customer harm. After v1 launch, decide:
+
 1. Keep `/vault-club` or `/vault-club-v2` as canonical (one or the other, not both)
 2. Rewrite around real Silver perks: 50 AI credits + Showroom + badge
 3. Replace SCENARIOS math table with realistic value framing OR delete section
@@ -199,6 +202,7 @@ The `certificates.grade` column is written by both `draft_save` (debounced auto-
 **Risk:** low for v1 (Cornelius is sole admin, won't open the workstation if not committed to grading). High for v1.1+ when (a) other admin graders are added, or (b) any auto-save triggers fire during partial edits.
 
 **Fix options (pick one in v1.1):**
+
 1. Gate public `grade` on `grade_approved_at IS NOT NULL` — return `ai_draft_grade` or NULL otherwise
 2. Stop writing draft state to `grade`. Use `ai_draft_grade` as the working state, only write `grade` on `/approve`
 3. Add `grade_visibility` flag to certificates and gate public read
@@ -206,6 +210,7 @@ The `certificates.grade` column is written by both `draft_save` (debounced auto-
 Option 2 is cleanest and matches the existing schema split (`ai_draft_grade` already exists for this purpose).
 
 **Affected files:**
+
 - [server/routes.ts:7501](../server/routes.ts#L7501) (`/approve` handler)
 - The `/grade` auto-save handler (find via grep)
 - `server/routes.ts` public cert lookup (`certToPublic`)
@@ -217,6 +222,7 @@ Option 2 is cleanest and matches the existing schema split (`ai_draft_grade` alr
 The entire `/admin` area was built desktop-first. On mobile (~390px width) every page squashes the desktop layout into the leftmost ~33% with empty whitespace on the right. Affects: cert browser, cert edit form, grading workstation (forms not crop UI — that was fixed separately in v1.0), submissions list, transfers, scans, intake, pricing, capacity, printing, learning, AI workstation panel.
 
 Scope: 8+ hours. Should be done as a single dedicated sprint, not piecemeal. Strategy:
+
 1. Audit every admin page for missing responsive classes
 2. Convert `grid-cols-N` to `grid-cols-1 sm:grid-cols-N`
 3. Add mobile-friendly form layouts (full-width inputs, stacked labels)
@@ -275,6 +281,7 @@ Surfaced 2026-05-04 by physical E2E test on submission MV-SUB-000317. Display fi
 Discovered during Phase A3 diagnostic. Stripe TEST-mode webhook endpoint is registered at the stale `https://mint-vault.replit.app/api/stripe/webhook` URL (Replit hosting from the pre-Fly era) and only subscribes to `checkout.session.completed` — `payment_intent.succeeded` is not subscribed. Fly app is therefore unreachable from Stripe; `payment_intent.succeeded` events fire but never deliver. Status='paid' is currently set entirely by the client-driven `/api/confirm-payment` path (which does verify with Stripe via `paymentIntents.retrieve`, so payments are real — just no webhook safety net).
 
 Action items (Stripe Dashboard, no code):
+
 - Update webhook URL to `https://mintvaultuk.com/api/stripe/webhook` (and/or `https://mintvault.fly.dev/api/stripe/webhook`)
 - Subscribe to `payment_intent.succeeded` and `payment_intent.payment_failed`
 - Verify/rotate `STRIPE_WEBHOOK_SECRET` in Fly env to match new endpoint signing secret
@@ -283,6 +290,53 @@ Action items (Stripe Dashboard, no code):
 ### Latent security check in /confirm-payment
 
 [server/routes.ts:601](../server/routes.ts#L601) `/api/confirm-payment` retrieves the PI server-side (so the client cannot fake a successful PI status), but does **not** verify the PI belongs to the submission. Add cross-checks: `submission.paymentIntentId === paymentIntentId` (we already store this at create-time at [server/routes.ts:1579-1581](../server/routes.ts#L1579-L1581)) and ideally `paymentIntent.metadata.submissionId === submissionId`. PI IDs are 36-char random strings so guessing is hard, but defending against ID-substitution is a 2-line hardening worth bundling with the audit-log additions above.
+
+---
+
+## MVGS surface cap — D1 stain saturation behaviour
+
+**Logged:** 2026-06-03
+**Triggered by:** MV33 grading verification after the D2-ST = −0.5 engine
+fix landed on staging (`feat/mvgs-v2-engine` @ `74964f3`).
+
+### Observation
+
+The surface deduction budget caps at −25 (the standard rule, shared with
+corners/edges/surface). Verified during the post-fix offline engine run:
+
+| Scenario                                       | Surface dedn | Surface subgrade | Overall  |
+| ---------------------------------------------- | ------------ | ---------------- | -------- |
+| 37 stain D2 + 11 other D2 (back)               | −12.00       | 6                | 6.5      |
+| 37 stain **D1** + 11 other D2 (back)           | −25 capped   | 1                | Fair 1.5 |
+| 20 stain D1 + 17 stain D2 + 11 other D2 (back) | −25 capped   | 1                | Fair 1.5 |
+
+Scenarios B and C both floor at Fair regardless of D1 stain count, because
+once total deduction hits −25 the engine can't differentiate "20 heavy
+stains" from "37 heavy stains" — both saturate the budget. Acceptable for
+staining as the headline behaviour (heavy staining IS a Fair-grade card),
+but the granularity loss between "bad" and "catastrophic" is worth
+revisiting.
+
+### Possible adjustments (review, do not act tonight)
+
+- **D1-ST weight** — currently −2 front / −1 back. Lower to −1 / −0.5 so
+  more pins are needed to saturate, giving the grader headroom to
+  distinguish severity by COUNT rather than by tier alone.
+- **Surface cap granularity** — split the −25 cap by zone (e.g. −15 front
+  - −10 back) or by code class (stain bucket separate from print-defect
+    bucket) so a heavily-stained card doesn't crowd out other surface
+    signals at the cap.
+- **Sub-tier within D1** — introduce a "D1+" notation for grossly heavy
+  stains that pushes through the cap by a small margin. Probably the
+  worst option (adds a tier the standard doesn't recognise) but listed
+  for completeness.
+
+### Action
+
+None tonight. Bring up at the next calibration review against real
+graded cards. The current behaviour is internally consistent and
+matches the published standard — this is a calibration-tuning question,
+not a bug.
 
 ---
 

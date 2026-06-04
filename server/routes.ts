@@ -3283,7 +3283,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // column when any are classified (any pin with mvgsCode+tier+zone);
       // otherwise falls through to the legacy auto-promote-from-ai-defects
       // behaviour so existing flows keep working.
-      const { computeMvgsScore } = await import("./mvgs-scoring");
+      // MVGS v2 — load calibration + thread persisted measurement inputs.
+      // scoreMvgsV2 routes everything through buildMvgsInput which enforces
+      // measurement-wins-over-checkbox precedence (shared/mvgs-input-builder.ts).
+      const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
+      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
       const savedDefects: any[] = Array.isArray((cert as any).defects) ? (cert as any).defects : [];
       const mvgsPins = savedDefects
         .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
@@ -3291,18 +3295,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       let mvgsScore: number | null = null;
       let mvgsDeductions: Record<string, number> | undefined;
       if (!isNonNum) {
-        const r = computeMvgsScore({
-          centeringFrontLr: (cert as any).centeringFrontLr ?? null,
-          centeringFrontTb: (cert as any).centeringFrontTb ?? null,
-          centeringBackLr: (cert as any).centeringBackLr ?? null,
-          centeringBackTb: (cert as any).centeringBackTb ?? null,
-          defects: mvgsPins,
-          // Per-side flags. Fall back to the legacy dark_border column for
-          // rows that pre-date the split (treated as both-sides dark).
-          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
-          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
-        });
+        const calibration = await loadMvgsCalibration();
+        const surfaceFlags = ((cert as any).surfaceValues as any) ?? {};
+        const r = scoreMvgsV2(
+          {
+            centeringFrontLr: (cert as any).centeringFrontLr ?? null,
+            centeringFrontTb: (cert as any).centeringFrontTb ?? null,
+            centeringBackLr: (cert as any).centeringBackLr ?? null,
+            centeringBackTb: (cert as any).centeringBackTb ?? null,
+            defects: mvgsPins,
+            // Per-side flags. Fall back to the legacy dark_border column for
+            // rows that pre-date the split (treated as both-sides dark).
+            darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
+            darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
+            eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
+            // v2 measurements (Phase 2 columns). Numeric column from Drizzle
+            // is `string | null` for decimal — coerce.
+            whiteningLines: Array.isArray((cert as any).whiteningLines) ? (cert as any).whiteningLines : null,
+            // v2.1 — multi-crease list. Engine input derives max(spanPct)
+            // at the mvgs-input-builder boundary. Legacy creaseSpanPct
+            // column kept as fallback when crease_lines is empty.
+            creaseLines: Array.isArray((cert as any).creaseLines) ? (cert as any).creaseLines : null,
+            creaseSpanPct: (cert as any).creaseSpanPct != null ? Number((cert as any).creaseSpanPct) : null,
+            wrinkleSeverity: (cert as any).wrinkleSeverity ?? null,
+            tearSeverity: (cert as any).tearSeverity ?? null,
+            // Legacy boolean fallback (only consulted by the builder when the
+            // matching measurement is null).
+            hasCrease: !!surfaceFlags.hasCrease,
+            hasTear: !!surfaceFlags.hasTear,
+          },
+          calibration
+        );
         mvgsScore = r.score;
         mvgsDeductions = r.deductions;
       }
@@ -3449,6 +3472,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         yPercent: d.y_percent ?? d.yPercent ?? 50,
       }));
 
+      // MVGS v2 — operator-drawn line measurements alongside the pin defects.
+      // Surfaced as display-only segments for the report card overlay. Engine
+      // never sees `color` (stripped at the input-builder boundary).
+      const whiteningLines = (Array.isArray((c as any).whiteningLines) ? (c as any).whiteningLines : [])
+        .filter((w: any) => w && w.start && w.end)
+        .map((w: any) => ({
+          side: w.side === "back" ? "back" : "front",
+          edge: w.edge,
+          coveragePct: typeof w.coveragePct === "number" ? w.coveragePct : null,
+          start: w.start,
+          end: w.end,
+          color: typeof w.color === "string" ? w.color : null,
+        }));
+      const creaseLines = (Array.isArray((c as any).creaseLines) ? (c as any).creaseLines : [])
+        .filter((cr: any) => cr && cr.start && cr.end)
+        .map((cr: any) => ({
+          side: cr.side === "back" ? "back" : "front",
+          spanPct: typeof cr.spanPct === "number" ? cr.spanPct : null,
+          start: cr.start,
+          end: cr.end,
+          color: typeof cr.color === "string" ? cr.color : null,
+        }));
+
       const ai = c.aiAnalysis || {};
 
       const report = {
@@ -3496,6 +3542,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ? { front: (c.surfaceValues as any).front, back: (c.surfaceValues as any).back }
           : null,
         defects,
+        whiteningLines,
+        creaseLines,
         authentication: {
           status: c.authStatus || "genuine",
           // v417 — auth notes are free-text; sanitise on public surface.
@@ -3820,7 +3868,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { generateLogbookPdf } = await import("./logbook-pdf");
       const certId = String(req.params.certId);
       const forceRegenerate = req.query.regenerate === "true";
-      const cacheKey = `logbooks/v4/${certId}.pdf`;
+      const cacheKey = `logbooks/v5/${certId}.pdf`;
 
       // ── Cert lookup FIRST ────────────────────────────────────────────────
       // Cache must NEVER be served for hard/soft-deleted certs, even if a
@@ -4022,7 +4070,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const certId = String(req.params.certId);
       const pdf = await generateLogbookPdf(certId, {});
       if (!pdf) return res.status(404).json({ error: "Certificate not found" });
-      const cacheKey = `logbooks/v4/${certId}.pdf`;
+      const cacheKey = `logbooks/v5/${certId}.pdf`;
       await uploadToR2(cacheKey, pdf, "application/pdf");
       res.json({ ok: true, key: cacheKey });
     } catch (err: any) {
@@ -9669,6 +9717,19 @@ Defects (admin-confirmed): ${defectLines}`;
         darkBorderFront: (c as any).darkBorderFront ?? !!c.darkBorder,
         darkBorderBack: (c as any).darkBorderBack ?? !!c.darkBorder,
         eyeAppealModifier: Number(c.eyeAppealModifier ?? 0) || 0,
+        // MVGS v2 measurement inputs — hydrated into grading-panel state on
+        // load. Engine consumes them via shared/mvgs-input-builder.ts; the
+        // legacy hasCrease/hasTear booleans on surfaceValues stay as a
+        // fallback when these are null/empty.
+        whiteningLines: Array.isArray(c.whiteningLines) ? c.whiteningLines : [],
+        // v2.1 — multi-crease list. Hydrates direct into creaseLines state;
+        // grading-panel synthesises a legacy single-entry from
+        // creaseSpanPct when this is empty AND the legacy column is set
+        // (preserves the persisted span% on pre-2.1 rows).
+        creaseLines: Array.isArray((c as any).creaseLines) ? (c as any).creaseLines : [],
+        creaseSpanPct: c.creaseSpanPct != null ? Number(c.creaseSpanPct) : null,
+        wrinkleSeverity: c.wrinkleSeverity ?? null,
+        tearSeverity: c.tearSeverity ?? null,
         // Saved aggregate subgrades for hydration on reload. Field names below
         // come straight from the schema (gradeCorners/gradeEdges/gradeSurface
         // map to corners_score/edges_score/surface_score). Pre-v408 the
@@ -9789,6 +9850,50 @@ Defects (admin-confirmed): ${defectLines}`;
               return sql`${clamped}`;
             })()
           },
+          whitening_lines     = ${
+            // MVGS v2 — operator-marked whitening lines per edge. Array
+            // present (incl. []) → overwrite; absent key → keep existing
+            // (legacy client / non-grading payload).
+            Array.isArray((b as any).whitening_lines)
+              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
+              : sql`whitening_lines`
+          },
+          crease_lines        = ${
+            // MVGS v2.1 — multi-crease list with start/end persistence.
+            // Same array-overwrite pattern as whitening_lines.
+            Array.isArray((b as any).crease_lines)
+              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
+              : sql`crease_lines`
+          },
+          crease_span_pct     = ${
+            // Numeric 0..100 or null. Explicit null clears; undefined keeps.
+            // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
+            // on the client (sent unconditionally in buildPayload) — server
+            // accepts whatever the client computes for back-compat readers.
+            (b as any).crease_span_pct === null
+              ? sql`NULL`
+              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
+                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
+                : sql`crease_span_pct`
+          },
+          wrinkle_severity    = ${
+            // Validate against the enum to prevent payload junk reaching the
+            // DB CHECK constraint with a more useful error before the SQL fires.
+            (() => {
+              const v = (b as any).wrinkle_severity;
+              if (v === null) return sql`NULL`;
+              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
+                return sql`${v}`;
+              }
+              return sql`wrinkle_severity`;
+            })()
+          },
+          tear_severity       = ${(() => {
+            const v = (b as any).tear_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
+            return sql`tear_severity`;
+          })()},
           updated_at          = NOW()
         WHERE id = ${id}
       `);
@@ -9914,7 +10019,12 @@ Defects (admin-confirmed): ${defectLines}`;
       // flagged Pristine even if its corners subgrade rounds to 10.
       let blackDeductions: Record<string, number> | undefined;
       if (!isNonNum) {
-        const { computeMvgsScore } = await import("./mvgs-scoring");
+        // Same scoreMvgsV2 + calibration plumbing as the grade-card route.
+        // Engine input goes through buildMvgsInput so the legacy
+        // hasCrease/hasTear booleans are only consulted when the v2
+        // measurement (creaseSpanPct / tearSeverity) is null.
+        const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
+        const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
         const finalDefects: any[] = Array.isArray(b.defects)
           ? b.defects
           : Array.isArray((cert as any).defects)
@@ -9923,16 +10033,51 @@ Defects (admin-confirmed): ${defectLines}`;
         const mvgsPins = finalDefects
           .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
           .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
-        const r = computeMvgsScore({
-          centeringFrontLr: txt(b.centering_front_lr) ?? (cert as any).centeringFrontLr ?? null,
-          centeringFrontTb: txt(b.centering_front_tb) ?? (cert as any).centeringFrontTb ?? null,
-          centeringBackLr: txt(b.centering_back_lr) ?? (cert as any).centeringBackLr ?? null,
-          centeringBackTb: txt(b.centering_back_tb) ?? (cert as any).centeringBackTb ?? null,
-          defects: mvgsPins,
-          darkBorderFront: (cert as any).darkBorderFront ?? !!(cert as any).darkBorder,
-          darkBorderBack: (cert as any).darkBorderBack ?? !!(cert as any).darkBorder,
-          eyeAppealModifier: Number((cert as any).eyeAppealModifier ?? 0) || 0,
-        });
+        const calibration = await loadMvgsCalibration();
+        // Prefer the submitted body's v2 inputs (operator's just-set values)
+        // when present, else fall back to the cert's persisted columns.
+        // Body schema: { whitening_lines, crease_span_pct, wrinkle_severity,
+        // tear_severity, surface: { hasCrease, hasTear } } — same names as
+        // the grade panel payload (buildPayload in grading-panel.tsx).
+        const bAny = b as any;
+        const bodySurface = (bAny.surface as any) ?? {};
+        const certAny = cert as any;
+        const certSurface = (certAny.surfaceValues as any) ?? {};
+        const r = scoreMvgsV2(
+          {
+            centeringFrontLr: txt(b.centering_front_lr) ?? certAny.centeringFrontLr ?? null,
+            centeringFrontTb: txt(b.centering_front_tb) ?? certAny.centeringFrontTb ?? null,
+            centeringBackLr: txt(b.centering_back_lr) ?? certAny.centeringBackLr ?? null,
+            centeringBackTb: txt(b.centering_back_tb) ?? certAny.centeringBackTb ?? null,
+            defects: mvgsPins,
+            darkBorderFront: certAny.darkBorderFront ?? !!certAny.darkBorder,
+            darkBorderBack: certAny.darkBorderBack ?? !!certAny.darkBorder,
+            eyeAppealModifier: Number(certAny.eyeAppealModifier ?? 0) || 0,
+            whiteningLines: Array.isArray(bAny.whitening_lines)
+              ? bAny.whitening_lines
+              : Array.isArray(certAny.whiteningLines)
+                ? certAny.whiteningLines
+                : null,
+            // v2.1 — multi-crease list. Engine input is max(spanPct) at the
+            // builder boundary. creaseSpanPct legacy field kept as fallback.
+            creaseLines: Array.isArray(bAny.crease_lines)
+              ? bAny.crease_lines
+              : Array.isArray(certAny.creaseLines)
+                ? certAny.creaseLines
+                : null,
+            creaseSpanPct:
+              bAny.crease_span_pct != null
+                ? Number(bAny.crease_span_pct)
+                : certAny.creaseSpanPct != null
+                  ? Number(certAny.creaseSpanPct)
+                  : null,
+            wrinkleSeverity: bAny.wrinkle_severity ?? certAny.wrinkleSeverity ?? null,
+            tearSeverity: bAny.tear_severity ?? certAny.tearSeverity ?? null,
+            hasCrease: bodySurface.hasCrease != null ? !!bodySurface.hasCrease : !!certSurface.hasCrease,
+            hasTear: bodySurface.hasTear != null ? !!bodySurface.hasTear : !!certSurface.hasTear,
+          },
+          calibration
+        );
         blackDeductions = r.deductions;
       }
       const labelType =
@@ -9973,6 +10118,40 @@ Defects (admin-confirmed): ${defectLines}`;
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
           label_type          = ${labelType},
+          whitening_lines     = ${
+            // MVGS v2 — persist on approve too so the cert row carries the
+            // final operator-marked measurements alongside the grade.
+            Array.isArray((b as any).whitening_lines)
+              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
+              : sql`whitening_lines`
+          },
+          crease_lines        = ${
+            // MVGS v2.1 multi-crease list.
+            Array.isArray((b as any).crease_lines)
+              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
+              : sql`crease_lines`
+          },
+          crease_span_pct     = ${
+            (b as any).crease_span_pct === null
+              ? sql`NULL`
+              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
+                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
+                : sql`crease_span_pct`
+          },
+          wrinkle_severity    = ${(() => {
+            const v = (b as any).wrinkle_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
+              return sql`${v}`;
+            }
+            return sql`wrinkle_severity`;
+          })()},
+          tear_severity       = ${(() => {
+            const v = (b as any).tear_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
+            return sql`tear_severity`;
+          })()},
           grade_approved_by   = ${"Cornelius Oliver"},
           grade_approved_at   = NOW(),
           status              = 'active',
@@ -15126,6 +15305,106 @@ Defects (admin-confirmed): ${defectLines}`;
     } catch (err: any) {
       console.error("[weekly-reel] featured override failed:", err);
       res.status(500).json({ error: err?.message ?? "featured update failed" });
+    }
+  });
+
+  // ── MVGS v2 grading calibration (Phase 3 Step 1) ────────────────────────
+  // Admin panel writes the three "[CALIBRATE]" values per spec §3 + §6 into
+  // the pipeline_settings row keyed "mvgs.calibration". Engine
+  // (shared/mvgs-scoring.ts, frozen at fe0d60c) reads them via
+  // loadMvgsCalibration() — these routes never touch engine code.
+  //
+  // Lock semantics: once `locked: true`, normal PATCH refuses (server-side
+  // gate in saveMvgsCalibration). The dedicated /unlock route is the ONLY
+  // caller passing `force: true`, so unlocking is a deliberate two-step:
+  // unlock → edit → re-lock. Same pattern matches spec §6 ("locked values
+  // are the published standard, not a casual nudge"). updatedBy logged on
+  // every write so the audit trail captures BOTH value changes and lock
+  // state transitions.
+
+  app.get("/api/admin/mvgs/calibration", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const { defaultCalibration, FIELD_RANGES } = await import("./lib/mvgs-calibration-validation");
+      const calibration = await loadMvgsCalibration();
+      res.json({ calibration, defaults: defaultCalibration(), ranges: FIELD_RANGES });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] load failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration load failed" });
+    }
+  });
+
+  // PATCH body: { values: Partial<MvgsCalibration> }. Each field is clamped
+  // into its allowed range; cross-field ordering (crease cutoffs minor <
+  // half < threeQuarter) is validated and REJECTED with 400 if out-of-order
+  // — silent reorder would muddle the audit trail of what the operator
+  // intended. Returns 409 with `{error: "locked"}` if the store is locked.
+  app.patch("/api/admin/mvgs/calibration", requireAdmin, async (req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const { clampField, validateCalibration, FIELD_RANGES } = await import("./lib/mvgs-calibration-validation");
+      const incoming = (req.body?.values ?? {}) as Record<string, unknown>;
+      const current = await loadMvgsCalibration();
+      if (current.locked) {
+        return res.status(409).json({ error: "Calibration is locked. Unlock before editing." });
+      }
+      // Build the proposed object by overlaying clamped incoming fields onto
+      // the current persisted values. Unrecognised keys are ignored; absent
+      // keys keep their existing value (partial PATCH).
+      const proposed = { ...current };
+      for (const key of Object.keys(FIELD_RANGES) as Array<keyof typeof FIELD_RANGES>) {
+        if (key in incoming) {
+          const v = clampField(key, incoming[key]);
+          if (v !== null) proposed[key] = v;
+        }
+      }
+      const check = validateCalibration(proposed);
+      if (!check.ok) return res.status(400).json({ error: check.error });
+      const result = await saveMvgsCalibration(proposed, { updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        // Race: someone else locked between load and save. Surface plainly.
+        return res.status(409).json({ error: "Calibration was locked concurrently. Reload and retry." });
+      }
+      const next = await loadMvgsCalibration();
+      res.json({ calibration: next });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] patch failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration patch failed" });
+    }
+  });
+
+  app.post("/api/admin/mvgs/calibration/lock", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const current = await loadMvgsCalibration();
+      if (current.locked) return res.json({ calibration: current, alreadyLocked: true });
+      const result = await saveMvgsCalibration({ ...current, locked: true }, { updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        return res.status(409).json({ error: "Could not lock — concurrent modification." });
+      }
+      res.json({ calibration: await loadMvgsCalibration() });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] lock failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration lock failed" });
+    }
+  });
+
+  // /unlock is the SINGLE caller that passes `force: true` — explicit
+  // deliberate action per spec §6. The audit row records who unlocked
+  // (updatedBy). Editing the values still requires a separate PATCH.
+  app.post("/api/admin/mvgs/calibration/unlock", requireAdmin, async (_req, res) => {
+    try {
+      const { loadMvgsCalibration, saveMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const current = await loadMvgsCalibration();
+      if (!current.locked) return res.json({ calibration: current, alreadyUnlocked: true });
+      const result = await saveMvgsCalibration({ ...current, locked: false }, { force: true, updatedBy: ADMIN_EMAIL });
+      if (!result.ok) {
+        return res.status(500).json({ error: "Unlock save returned not-ok unexpectedly" });
+      }
+      res.json({ calibration: await loadMvgsCalibration() });
+    } catch (err: any) {
+      console.error("[mvgs-calibration] unlock failed:", err);
+      res.status(500).json({ error: err?.message ?? "calibration unlock failed" });
     }
   });
 

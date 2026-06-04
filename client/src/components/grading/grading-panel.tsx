@@ -16,11 +16,15 @@ import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCentering, { type CenteringResult } from "./manual-centering";
 import ManualCardTool from "./manual-card-tool";
+// MeasurementTool retired in v2.1 — line drawing now lives inside image-viewer
+// mark-mode and manual-card-tool defects phase as a tool palette, alongside
+// the pin tool. The launcher button + overlay mount are gone from this panel.
 import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
-import { computeMvgsScore, gradeFromMvgsScore } from "@shared/mvgs-scoring";
+import { computeMvgsScore, gradeFromMvgsScore, DEFAULT_MVGS_CALIBRATION } from "@shared/mvgs-scoring";
+import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
 // Centering single source of truth (true PSA chart — front strict / back lenient).
 import {
   centeringSubgrade,
@@ -173,8 +177,15 @@ const SURFACE_ISSUES: { key: keyof SurfaceValues; label: string; warning?: strin
   { key: "hasIndentation", label: "Indentation present" },
   { key: "hasRollerMarks", label: "Roller marks present" },
   { key: "hasColorRegistration", label: "Colour / registration issues" },
-  { key: "hasCrease", label: "Crease present", warning: "Maximum overall grade capped at 5.0" },
-  { key: "hasTear", label: "Tear or missing material", warning: "Maximum overall grade capped at 3.0" },
+  // v2 caps: hasCrease → 4.5 (legacy fallback), hasTear → 2 (legacy fallback).
+  // When the v2 measurement is set (creaseSpanPct / tearSeverity), it OVERRIDES
+  // the checkbox per shared/mvgs-input-builder.ts precedence rules.
+  { key: "hasCrease", label: "Crease present", warning: "Cap 4.5 (legacy flag — overridden by v2 crease line)" },
+  {
+    key: "hasTear",
+    label: "Tear or missing material",
+    warning: "Cap 2.0 (legacy flag — overridden by v2 tear severity)",
+  },
 ];
 
 function surfaceGradeColor(g: number): string {
@@ -225,6 +236,11 @@ export default function GradingPanel({
   const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
   // 8-dot manual card tool (crop + deskew + centering in one pass)
   const [manualCardToolSide, setManualCardToolSide] = useState<"front" | "back" | null>(null);
+  // MVGS v2 — measurement tool overlay (fullscreen). Opens from the surface
+  // sidebar's "Open Measurement Tool" button.
+  // measurementToolOpen — REMOVED. Line drawing happens inside the existing
+  // mark-defects surfaces (image-viewer mark mode + manual-card-tool defects
+  // phase) as a tool palette next to the pin tool. No fullscreen launcher.
   const [centeringMethod, setCenteringMethod] = useState<"ai" | "manual" | null>(null);
   const [manualOuterFront, setManualOuterFront] = useState<any>(null);
   const [manualInnerFront, setManualInnerFront] = useState<any>(null);
@@ -253,6 +269,68 @@ export default function GradingPanel({
   const [darkBorderFront, setDarkBorderFront] = useState(false);
   const [darkBorderBack, setDarkBorderBack] = useState(false);
   const [eyeAppealModifier, setEyeAppealModifier] = useState(0);
+  // ── MVGS v2 measurement inputs (Phase 2) ───────────────────────────────
+  // Persisted on the cert via buildPayload → /grade PUT. Engine reads them
+  // through shared/mvgs-input-builder.ts which enforces measurement-wins-
+  // over-checkbox precedence (the legacy surface.hasCrease/hasTear flags
+  // still drive a fallback ceiling when no measurement is present).
+  const [whiteningLines, setWhiteningLines] = useState<
+    Array<{
+      id?: string;
+      side: "front" | "back";
+      edge: "top" | "right" | "bottom" | "left";
+      coveragePct: number;
+      // Display-only: operator's actual drawn segment (image-relative %).
+      // Engine ignores it; persisted in the whitening_lines jsonb so the marked
+      // line redraws where it was drawn. Optional → legacy rows fall back to the
+      // corner-stub indicator.
+      start?: { x: number; y: number };
+      end?: { x: number; y: number };
+      // Display-only line colour (v2.1). Stripped at the mvgs-input-builder
+      // boundary — never reaches the engine.
+      color?: string;
+    }>
+  >([]);
+  // MVGS v2.1 — multi-crease persistence. List of crease lines, each carrying
+  // the drawn segment + spanPct + display colour. Replaces the v2.0
+  // crease_span_pct single-value + session-only creaseSegment kludge.
+  // Engine input derives `creaseSpanPct = max(spanPct)` per spec §4/§5 at the
+  // mvgs-input-builder boundary; the legacy crease_span_pct column is kept as
+  // a derived mirror (max of this array) for back-compat.
+  type CreaseLine = {
+    id: string;
+    side: "front" | "back";
+    spanPct: number;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color?: string;
+  };
+  const [creaseLines, setCreaseLines] = useState<CreaseLine[]>([]);
+  // Derived for back-compat: legacy readers still see the worst span.
+  const creaseSpanPct = creaseLines.length > 0 ? Math.max(...creaseLines.map((l) => l.spanPct)) : null;
+  // setCreaseSpanPct shim — existing call sites that set the legacy span
+  // value (e.g. ManualCardTool defects phase prior to multi-crease wiring)
+  // synthesise a single-entry list. Removed once those call sites move to
+  // setCreaseLines directly.
+  const setCreaseSpanPct = (next: number | null) => {
+    if (next == null) {
+      setCreaseLines([]);
+      return;
+    }
+    setCreaseLines([
+      {
+        id: `legacy-${Date.now()}`,
+        side: "front",
+        spanPct: next,
+        start: { x: 0, y: 0 },
+        end: { x: 0, y: 0 },
+      },
+    ]);
+  };
+  const [wrinkleSeverity, setWrinkleSeverity] = useState<
+    "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
+  >(null);
+  const [tearSeverity, setTearSeverity] = useState<"minor" | "significant" | "major" | null>(null);
   // Pre-grade checklist — session-only state, deliberately NOT persisted to
   // the cert. It's an operational reminder that the grader deionized the
   // card before scanning, not a data field on the certificate.
@@ -315,6 +393,26 @@ export default function GradingPanel({
     edgesOverride: number | null;
     surfaceOverride: number | null;
     overallOverride: number | null;
+    // MVGS v2 measurement inputs — captured in the snapshot so the
+    // Cancel/Undo edit path restores them too.
+    whiteningLines: Array<{
+      side: "front" | "back";
+      edge: "top" | "right" | "bottom" | "left";
+      coveragePct: number;
+      start?: { x: number; y: number };
+      end?: { x: number; y: number };
+    }>;
+    // MVGS v2.1 multi-crease list. Replaces creaseSpanPct + creaseSegment.
+    creaseLines: Array<{
+      id: string;
+      side: "front" | "back";
+      spanPct: number;
+      start: { x: number; y: number };
+      end: { x: number; y: number };
+      color?: string;
+    }>;
+    wrinkleSeverity: "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null;
+    tearSeverity: "minor" | "significant" | "major" | null;
   };
   const editSnapshotRef = useRef<EditSnapshot | null>(null);
 
@@ -398,6 +496,32 @@ export default function GradingPanel({
       else if (typeof g.darkBorder === "boolean") setDarkBorderFront(legacy);
       if (typeof g.darkBorderBack === "boolean") setDarkBorderBack(g.darkBorderBack);
       else if (typeof g.darkBorder === "boolean") setDarkBorderBack(legacy);
+    }
+    // Hydrate MVGS v2 measurement inputs from the cert row. Server columns
+    // are nullable / default-empty so legacy certs read as "no measurement"
+    // and the legacy boolean fallback applies via mvgs-input-builder.
+    {
+      const g = gradingData as any;
+      if (Array.isArray(g.whiteningLines)) setWhiteningLines(g.whiteningLines);
+      // Hydrate the multi-crease list. v2.1 column comes first; back-compat
+      // synth from the legacy single creaseSpanPct fires only when the new
+      // array is empty AND the legacy column is non-null (preserves the
+      // persisted span% even though the segment is unknown for that path).
+      if (Array.isArray(g.creaseLines) && g.creaseLines.length > 0) {
+        setCreaseLines(g.creaseLines as typeof creaseLines);
+      } else if (g.creaseSpanPct != null) {
+        setCreaseLines([
+          {
+            id: `legacy-${certId}`,
+            side: "front",
+            spanPct: Number(g.creaseSpanPct),
+            start: { x: 0, y: 0 },
+            end: { x: 0, y: 0 },
+          },
+        ]);
+      }
+      if (g.wrinkleSeverity) setWrinkleSeverity(g.wrinkleSeverity);
+      if (g.tearSeverity) setTearSeverity(g.tearSeverity);
     }
     if (typeof (gradingData as any).eyeAppealModifier === "number")
       setEyeAppealModifier((gradingData as any).eyeAppealModifier);
@@ -525,6 +649,10 @@ export default function GradingPanel({
       edgesOverride,
       surfaceOverride,
       overallOverride,
+      whiteningLines: [...whiteningLines],
+      creaseLines: [...creaseLines],
+      wrinkleSeverity,
+      tearSeverity,
     };
   }
 
@@ -547,6 +675,10 @@ export default function GradingPanel({
     setEdgesOverride(s.edgesOverride);
     setSurfaceOverride(s.surfaceOverride);
     setOverallOverride(s.overallOverride);
+    setWhiteningLines(s.whiteningLines);
+    setCreaseLines(s.creaseLines);
+    setWrinkleSeverity(s.wrinkleSeverity);
+    setTearSeverity(s.tearSeverity);
   }
 
   function enterEditMode() {
@@ -758,23 +890,41 @@ export default function GradingPanel({
     if (analysis.defects?.length > 0) {
       const humanDefects = defects.filter((d: any) => !d._aiSource);
       const maxHumanId = humanDefects.length > 0 ? Math.max(...humanDefects.map((d) => d.id)) : 0;
-      const aiDefects: Defect[] = analysis.defects.map(
-        (ad, i) =>
-          ({
-            id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
-            type: ad.type?.replace(/_/g, " ") || "Unknown",
-            severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
-              | "minor"
-              | "moderate"
-              | "significant",
-            description: ad.description || "",
-            location: ad.location || (ad as any).detected_in || "front",
-            image_side: ad.location === "back" ? "back" : "front",
-            x_percent: ad.position_x_percent ?? 50,
-            y_percent: ad.position_y_percent ?? 50,
-            _aiSource: true, // flag so image-viewer can render as red ring
-          }) as Defect & { _aiSource: boolean }
-      );
+      const aiDefects: Defect[] = analysis.defects.map((ad, i) => {
+        const imageSide: "front" | "back" = ad.location === "back" ? "back" : "front";
+        const xPercent = ad.position_x_percent ?? 50;
+        const yPercent = ad.position_y_percent ?? 50;
+        // Stamp mvgsCode + tier + zone at AI-ingest time so the pin reaches the
+        // engine via buildPayload (which filters on all three fields). Without
+        // this, AI pins were silently dropped until the operator clicked
+        // Recalculate — MV33's 37 stain pins are the witness of that.
+        // Default tier D2: matches manually-placed quick-clicks, never claims
+        // higher severity than the AI can warrant. Operator sees the red
+        // _aiSource ring on every AI pin and can raise to D1 (heavy stain) or
+        // lower to D3 (factory artefact) during review — they're never
+        // invisible-but-scoring.
+        const mvgsCode = mapLegacyTypeToMvgsCode(ad.type) ?? undefined;
+        const zone = deriveZone({ xPercent, yPercent, imageSide });
+        return {
+          id: maxHumanId + 1000 + i, // high IDs to avoid collision with human defects
+          type: ad.type?.replace(/_/g, " ") || "Unknown",
+          severity: (ad.severity === "major" ? "significant" : ad.severity === "moderate" ? "moderate" : "minor") as
+            | "minor"
+            | "moderate"
+            | "significant",
+          description: ad.description || "",
+          location: ad.location || (ad as any).detected_in || "front",
+          image_side: imageSide,
+          x_percent: xPercent,
+          y_percent: yPercent,
+          // MVGS engine fields — stamped only when the AI's type maps to a
+          // known MVGS code. Unknown / unmapped AI types remain unscored
+          // until the operator labels them via the popover (same fall-back
+          // behaviour as before, just for the AI types we can't classify).
+          ...(mvgsCode ? { mvgsCode, tier: "D2" as const, zone } : {}),
+          _aiSource: true, // flag so image-viewer can render as red ring
+        } as Defect & { _aiSource: boolean };
+      });
       setDefects([...humanDefects, ...aiDefects]);
     }
 
@@ -851,18 +1001,34 @@ export default function GradingPanel({
   // mvgsSurfaceGrade (the surface deduction from the scoring engine). Once
   // any defect is MVGS-classified the engine also drives the headline
   // grade (admin's overallOverride still wins over MVGS, which wins over AI).
-  const mvgsForOverall = computeMvgsScore({
-    centeringFrontLr: frontLR || null,
-    centeringFrontTb: frontTB || null,
-    centeringBackLr: backLR || null,
-    centeringBackTb: backTB || null,
-    defects: (defects || [])
-      .filter((d) => d.mvgsCode && d.tier && d.zone)
-      .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-    darkBorderFront,
-    darkBorderBack,
-    eyeAppealModifier,
-  });
+  // MVGS v2 — scoreMvgsV2 routes through buildMvgsInput which enforces
+  // measurement-wins-over-checkbox precedence. Client uses
+  // DEFAULT_MVGS_CALIBRATION for the live preview; server's authoritative
+  // compute on approve loads the persisted calibration row.
+  const mvgsForOverall = scoreMvgsV2(
+    {
+      centeringFrontLr: frontLR || null,
+      centeringFrontTb: frontTB || null,
+      centeringBackLr: backLR || null,
+      centeringBackTb: backTB || null,
+      defects: (defects || [])
+        .filter((d) => d.mvgsCode && d.tier && d.zone)
+        .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+      darkBorderFront,
+      darkBorderBack,
+      eyeAppealModifier,
+      whiteningLines,
+      // v2.1 — multi-crease list. Engine derives max(spanPct) at the builder
+      // boundary. creaseSpanPct legacy field omitted; the builder prefers
+      // creaseLines when both are present anyway.
+      creaseLines,
+      wrinkleSeverity,
+      tearSeverity,
+      hasCrease: !!surface.hasCrease,
+      hasTear: !!surface.hasTear,
+    },
+    DEFAULT_MVGS_CALIBRATION
+  );
   const hasMvgsPins = (defects || []).some((d) => d.mvgsCode);
 
   // MVGS subgrades. Centering comes straight from the shared PSA chart
@@ -913,6 +1079,38 @@ export default function GradingPanel({
     if (sub.edges > 0) setEdgesOverride(sub.edges);
     if (sub.surface > 0) setSurfaceOverride(sub.surface);
   }, [hasMvgsPins, sub.corners, sub.edges, sub.surface]);
+
+  // Auto-derive the 5 mvgsCode-mappable surface flags from pin state — they
+  // exist for the CUSTOMER-FACING surface report ("Staining present: yes")
+  // and were never read by the engine. Pins are the source of truth; the
+  // engine deducts from pins, not from these flags. So we mirror the pin
+  // signal into the flag for honest display, instead of letting an operator
+  // tick or forget to tick a checkbox that already has the answer from pins.
+  // hasRollerMarks + hasColorRegistration have no mvgsCode equivalent in the
+  // standard, so they stay operator-editable.
+  useEffect(() => {
+    const hasPL = defects.some((d) => d.mvgsCode === "PL");
+    const hasSP = defects.some((d) => d.mvgsCode === "SP");
+    const hasSC = defects.some((d) => d.mvgsCode === "SC");
+    const hasST = defects.some((d) => d.mvgsCode === "ST");
+    const hasDG = defects.some((d) => d.mvgsCode === "DG");
+    setSurface((prev) =>
+      prev.hasPrintLines === hasPL &&
+      prev.hasHoloScratches === hasSP &&
+      prev.hasSurfaceScratches === hasSC &&
+      prev.hasStaining === hasST &&
+      prev.hasIndentation === hasDG
+        ? prev
+        : {
+            ...prev,
+            hasPrintLines: hasPL,
+            hasHoloScratches: hasSP,
+            hasSurfaceScratches: hasSC,
+            hasStaining: hasST,
+            hasIndentation: hasDG,
+          }
+    );
+  }, [defects]);
 
   const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
   const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
@@ -989,6 +1187,20 @@ export default function GradingPanel({
     out.dark_border_front = darkBorderFront;
     out.dark_border_back = darkBorderBack;
     out.eye_appeal_modifier = eyeAppealModifier;
+
+    // MVGS v2 measurements. Send unconditionally so clearing a measurement
+    // (operator removes a line / unsets a dropdown) actually persists null/[]
+    // back to the cert instead of stale values. Engine reads via
+    // shared/mvgs-input-builder.ts (measurement wins over the has_crease/
+    // has_tear booleans on the surface_values jsonb).
+    out.whitening_lines = whiteningLines;
+    // v2.1 — multi-crease persistence. crease_lines is the new column; the
+    // legacy crease_span_pct is sent as a derived mirror (max spanPct) so
+    // back-compat readers see the worst crease.
+    out.crease_lines = creaseLines;
+    out.crease_span_pct = creaseSpanPct; // derived = max(creaseLines.spanPct) | null
+    out.wrinkle_severity = wrinkleSeverity;
+    out.tear_severity = tearSeverity;
 
     return out;
   }
@@ -1317,6 +1529,19 @@ export default function GradingPanel({
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
+                // MVGS v2.1 measurement state — flows back through the
+                // callbacks below when the operator draws a whitening or
+                // crease line inside mark mode (no separate tool overlay).
+                whiteningLines={whiteningLines}
+                creaseLines={creaseLines}
+                onWhiteningLinesChange={(next) => {
+                  setWhiteningLines(next);
+                  clearOverallOverrideIfSet();
+                }}
+                onCreaseLinesChange={(next) => {
+                  setCreaseLines(next);
+                  clearOverallOverrideIfSet();
+                }}
                 centeringFront={
                   frontLR
                     ? {
@@ -1418,6 +1643,17 @@ export default function GradingPanel({
               onHighlight={setHighlightDefect}
               candidates={defectCandidates}
               onCandidatesChange={setDefectCandidates}
+              // MVGS v2.1 — line measurements merged into the same defect list.
+              whiteningLines={whiteningLines}
+              creaseLines={creaseLines}
+              onWhiteningLinesChange={(next) => {
+                setWhiteningLines(next);
+                clearOverallOverrideIfSet();
+              }}
+              onCreaseLinesChange={(next) => {
+                setCreaseLines(next);
+                clearOverallOverrideIfSet();
+              }}
             />
           </div>
         </div>
@@ -1545,18 +1781,31 @@ export default function GradingPanel({
               on approve. */}
             {!isNonNumeric &&
               (() => {
-                const mvgs = computeMvgsScore({
-                  centeringFrontLr: frontLR || null,
-                  centeringFrontTb: frontTB || null,
-                  centeringBackLr: backLR || null,
-                  centeringBackTb: backTB || null,
-                  defects: (defects || [])
-                    .filter((d) => d.mvgsCode && d.tier && d.zone)
-                    .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
-                  darkBorderFront,
-                  darkBorderBack,
-                  eyeAppealModifier,
-                });
+                // Preview compute — same scoreMvgsV2 path as mvgsForOverall
+                // above. Client uses DEFAULT_MVGS_CALIBRATION; server's
+                // approve route is the authoritative compute and loads the
+                // persisted calibration row.
+                const mvgs = scoreMvgsV2(
+                  {
+                    centeringFrontLr: frontLR || null,
+                    centeringFrontTb: frontTB || null,
+                    centeringBackLr: backLR || null,
+                    centeringBackTb: backTB || null,
+                    defects: (defects || [])
+                      .filter((d) => d.mvgsCode && d.tier && d.zone)
+                      .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+                    darkBorderFront,
+                    darkBorderBack,
+                    eyeAppealModifier,
+                    whiteningLines,
+                    creaseLines,
+                    wrinkleSeverity,
+                    tearSeverity,
+                    hasCrease: !!surface.hasCrease,
+                    hasTear: !!surface.hasTear,
+                  },
+                  DEFAULT_MVGS_CALIBRATION
+                );
                 return (
                   <div
                     className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
@@ -1706,6 +1955,72 @@ export default function GradingPanel({
               >
                 Card Tool (Back)
               </button>
+            </div>
+
+            {/* MVGS v2 — Whitening / Crease / Tear. Hoisted here (high in the
+                sidebar, right after the Card Tool row) so the measurement-tool
+                launcher + severity selectors sit in the operator's eye line.
+                This is the ONE canonical home for these controls — the Surface
+                block below no longer carries duplicates. All identifiers are
+                component-scope, so the move keeps them in scope. */}
+            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2 mb-2 border border-[var(--admin-gold)]/30">
+              <div className="flex items-center gap-2">
+                <span className="text-sm leading-none">📏</span>
+                <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
+                  MVGS v2 — Whitening / Crease / Tear
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[var(--admin-ink-dim)] text-[10px] block">Wrinkle severity</label>
+                  <select
+                    value={wrinkleSeverity ?? ""}
+                    onChange={(e) => {
+                      setWrinkleSeverity((e.target.value || null) as typeof wrinkleSeverity);
+                      clearOverallOverrideIfSet();
+                    }}
+                    className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
+                    data-testid="select-wrinkle-severity"
+                  >
+                    <option value="">— none —</option>
+                    <option value="tiny_back">Tiny (back) · cap 6.5</option>
+                    <option value="longer_back">Longer (back) · cap 6</option>
+                    <option value="small_front">Small (front) · cap 5.5</option>
+                    <option value="multiple_front">Multiple (front) · cap 5</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[var(--admin-ink-dim)] text-[10px] block">
+                    Tear severity <span className="text-[var(--admin-ink-faint)]">(overrides checkbox)</span>
+                  </label>
+                  <select
+                    value={tearSeverity ?? ""}
+                    onChange={(e) => {
+                      setTearSeverity((e.target.value || null) as typeof tearSeverity);
+                      clearOverallOverrideIfSet();
+                    }}
+                    className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
+                    data-testid="select-tear-severity"
+                  >
+                    <option value="">— none —</option>
+                    <option value="minor">Minor · cap 2</option>
+                    <option value="significant">Significant · cap 1.5</option>
+                    <option value="major">Major / missing → NO</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-[var(--admin-ink-faint)] text-[10px] italic mt-1">
+                📏 Whitening + crease lines are drawn inside <strong>Mark Defects</strong> (pin / whitening / crease
+                tool palette).
+              </p>
+              {(whiteningLines.length > 0 || creaseSpanPct != null) && (
+                <p className="text-[var(--admin-ink-faint)] text-[10px] font-mono">
+                  {whiteningLines.length > 0 &&
+                    `${whiteningLines.length} whitening line${whiteningLines.length === 1 ? "" : "s"} marked`}
+                  {whiteningLines.length > 0 && creaseSpanPct != null && " · "}
+                  {creaseSpanPct != null && `crease ${creaseSpanPct}% span`}
+                </p>
+              )}
             </div>
 
             {/* Centering — manual measurement buttons (legacy two-rect picker) */}
@@ -1945,19 +2260,58 @@ export default function GradingPanel({
                 <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Surface</h3>
               </div>
 
-              {surface.hasCrease && (
-                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded px-3 py-2">
-                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
-                  <p className="text-[var(--admin-red)] text-xs">
-                    Crease detected — maximum overall grade capped at 5.0
-                  </p>
-                </div>
-              )}
-              {surface.hasTear && (
+              {/* v2 measurement banners — prefer the measurement, fall back
+                  to the legacy boolean. Shown ONLY for the active source so
+                  the operator sees the actual ceiling that will apply. */}
+              {creaseSpanPct != null ? (
                 <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
                   <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
                   <p className="text-[var(--admin-red)] text-xs">
-                    Tear or missing material — maximum overall grade capped at 3.0
+                    Crease line drawn — {creaseSpanPct}% of card span (v2 measurement; ceiling applies via engine)
+                  </p>
+                </div>
+              ) : surface.hasCrease ? (
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Crease detected (legacy flag) — cap 4.5. Draw the crease line for the strict v2 ceiling.
+                  </p>
+                </div>
+              ) : null}
+              {tearSeverity ? (
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_22%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Tear severity: {tearSeverity} —{" "}
+                    {tearSeverity === "major"
+                      ? "→ NO (Not Graded), returned unslabbed"
+                      : tearSeverity === "significant"
+                        ? "cap 1.5"
+                        : "cap 2"}{" "}
+                    (v2 measurement)
+                  </p>
+                </div>
+              ) : surface.hasTear ? (
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_18%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Tear detected (legacy flag) — cap 2. Select severity below for the explicit v2 ceiling.
+                  </p>
+                </div>
+              ) : null}
+              {wrinkleSeverity && (
+                <div className="flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-red)_16%,transparent)] border border-[var(--admin-red)] rounded px-3 py-2">
+                  <AlertTriangle size={12} className="text-[var(--admin-red)] flex-shrink-0" />
+                  <p className="text-[var(--admin-red)] text-xs">
+                    Wrinkle severity: {wrinkleSeverity.replace("_", " ")} — cap{" "}
+                    {wrinkleSeverity === "tiny_back"
+                      ? "6.5"
+                      : wrinkleSeverity === "longer_back"
+                        ? "6"
+                        : wrinkleSeverity === "small_front"
+                          ? "5.5"
+                          : "5"}{" "}
+                    (v2 measurement)
                   </p>
                 </div>
               )}
@@ -1993,6 +2347,12 @@ export default function GradingPanel({
                   </label>
                 ))}
               </div>
+
+              {/* MVGS v2 measurement controls (wrinkle/tear severity, the
+                  Measurement Tool launcher, and the line/crease status line)
+                  have moved UP to the dedicated "MVGS v2 — Whitening / Crease /
+                  Tear" panel just below the Card Tool row, so they sit in the
+                  operator's eye line. One canonical home — not duplicated here. */}
 
               {/* MVGS-derived surface subgrade — read-only display + override
                   stepper. Mirrors the visual treatment of the old SurfaceGrading
@@ -2225,6 +2585,18 @@ export default function GradingPanel({
           }}
           onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
           existingDefects={defects}
+          // MVGS v2.1 — line tools mirrored from image-viewer mark mode.
+          // Same callbacks; the defects phase shares the panel's state.
+          whiteningLines={whiteningLines}
+          creaseLines={creaseLines}
+          onWhiteningLinesChange={(next) => {
+            setWhiteningLines(next);
+            clearOverallOverrideIfSet();
+          }}
+          onCreaseLinesChange={(next) => {
+            setCreaseLines(next);
+            clearOverallOverrideIfSet();
+          }}
           onDone={() => {
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
             queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
@@ -2233,6 +2605,12 @@ export default function GradingPanel({
           onCancel={() => setManualCardToolSide(null)}
         />
       )}
+
+      {/* MeasurementTool overlay retired in v2.1 — operator draws lines in
+          the same mark-mode surfaces where pins are placed (image-viewer mark
+          mode + manual-card-tool defects phase). State updates flow through
+          onWhiteningLinesChange / onCreaseLinesChange callbacks on those
+          components. */}
 
       {/* Confirm modal */}
       {showConfirm && (

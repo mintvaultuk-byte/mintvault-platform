@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { coverageFromSegment } from "./measurement-math";
 
 export interface Defect {
   id: number;
@@ -132,7 +133,35 @@ interface Props {
    *  Optional — undefined/empty = legacy / no candidates. */
   candidates?: DefectCandidate[];
   onCandidatesChange?: (next: DefectCandidate[]) => void;
+  /** MVGS v2.1 — line measurements (whitening + crease). Rendered as
+   *  additional list rows below the pin defects. Edge override + colour
+   *  picker per entry; delete removes from the relevant array. Display-only
+   *  colour never reaches the engine (stripped in mvgs-input-builder). */
+  whiteningLines?: Array<{
+    id?: string;
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    color?: string;
+  }>;
+  creaseLines?: Array<{
+    id: string;
+    side: "front" | "back";
+    spanPct: number;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color?: string;
+  }>;
+  onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
+  onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
 }
+
+/** Colour palette for line entries — display-only (engine never sees these).
+ *  Operator cycles through to pick a colour that contrasts the card image. */
+export const LINE_COLOUR_PALETTE = ["#FFD400", "#000000", "#FF8800", "#FF3B6B", "#FFFFFF"] as const;
+const EDGE_KEYS = ["top", "right", "bottom", "left"] as const;
 
 const DEFECT_TYPES = [
   "Scratch",
@@ -172,7 +201,50 @@ export { DEFECT_TYPES };
 
 const SEVERITY_CYCLE: Defect["severity"][] = ["minor", "moderate", "significant"];
 
-export default function DefectAnnotation({ defects, onChange, highlightId, onHighlight, candidates }: Props) {
+export default function DefectAnnotation({
+  defects,
+  onChange,
+  highlightId,
+  onHighlight,
+  candidates,
+  whiteningLines,
+  creaseLines,
+  onWhiteningLinesChange,
+  onCreaseLinesChange,
+}: Props) {
+  function cycleWhiteningColor(id: string | undefined, currentIdx: number) {
+    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    const nextColor = LINE_COLOUR_PALETTE[(currentIdx + 1) % LINE_COLOUR_PALETTE.length];
+    onWhiteningLinesChange(whiteningLines.map((l) => (l.id === id ? { ...l, color: nextColor } : l)));
+  }
+  function cycleCreaseColor(id: string, currentIdx: number) {
+    if (!onCreaseLinesChange || !creaseLines) return;
+    const nextColor = LINE_COLOUR_PALETTE[(currentIdx + 1) % LINE_COLOUR_PALETTE.length];
+    onCreaseLinesChange(creaseLines.map((l) => (l.id === id ? { ...l, color: nextColor } : l)));
+  }
+  function setWhiteningEdge(id: string | undefined, edge: (typeof EDGE_KEYS)[number]) {
+    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    onWhiteningLinesChange(
+      whiteningLines.map((l) => {
+        if (l.id !== id) return l;
+        // Re-derive coverage on the new edge axis if we have the segment;
+        // otherwise keep the persisted coveragePct (legacy entry without
+        // start/end — operator can re-draw to refresh).
+        if (l.start && l.end) {
+          return { ...l, edge, coveragePct: coverageFromSegment(l.start, l.end, edge) };
+        }
+        return { ...l, edge };
+      })
+    );
+  }
+  function removeWhiteningLine(id: string | undefined) {
+    if (!onWhiteningLinesChange || !whiteningLines || !id) return;
+    onWhiteningLinesChange(whiteningLines.filter((l) => l.id !== id));
+  }
+  function removeCreaseLine(id: string) {
+    if (!onCreaseLinesChange || !creaseLines) return;
+    onCreaseLinesChange(creaseLines.filter((l) => l.id !== id));
+  }
   function removeDefect(id: number) {
     onChange(defects.filter((d) => d.id !== id));
     if (highlightId === id) onHighlight(null);
@@ -266,11 +338,136 @@ export default function DefectAnnotation({ defects, onChange, highlightId, onHig
         </div>
       )}
 
-      {defects.length === 0 && (!candidates || candidates.length === 0) && (
-        <p className="text-[var(--admin-ink-dim)] text-xs text-center py-2">
-          No defects marked. Click "Mark Defects" and tap the image to start.
-        </p>
+      {/* MVGS v2.1 — line measurements (whitening + crease). Rendered as a
+          single merged list alongside pin defects so the operator sees ONE
+          source of truth for everything they've marked. */}
+      {whiteningLines && whiteningLines.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-widest font-bold">
+            Whitening lines ({whiteningLines.length})
+          </p>
+          {whiteningLines.map((l, i) => {
+            const colorIdx = Math.max(0, LINE_COLOUR_PALETTE.indexOf(l.color as (typeof LINE_COLOUR_PALETTE)[number]));
+            return (
+              <div
+                key={l.id ?? `wl-${i}`}
+                className="flex items-start gap-2 rounded-lg px-3 py-2 border border-[var(--admin-line)] bg-[var(--admin-panel)]"
+                data-testid={`row-whitening-line-${l.id ?? i}`}
+              >
+                <span
+                  className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[#1A1400] text-[9px] font-bold mt-0.5"
+                  style={{ background: l.color ?? "#FFD400" }}
+                  aria-hidden="true"
+                >
+                  W
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[var(--admin-ink)] text-[10px] font-bold">Whitening line</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full border bg-[var(--admin-bg2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] font-mono uppercase">
+                      {l.side} · {l.edge}
+                    </span>
+                    <span className="text-[var(--admin-ink-dim)] text-[9px] font-mono">{l.coveragePct}% coverage</span>
+                  </div>
+                  {/* Edge override chips — re-derives coveragePct on change. */}
+                  <div className="flex items-center gap-1 mt-1">
+                    {EDGE_KEYS.map((e) => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => setWhiteningEdge(l.id, e)}
+                        className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                          l.edge === e
+                            ? "bg-[var(--admin-gold)] text-[#1A1400] border-[var(--admin-gold)]"
+                            : "bg-[var(--admin-panel)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] hover:border-[var(--admin-gold)]"
+                        }`}
+                        data-testid={`btn-wl-edge-${l.id ?? i}-${e}`}
+                      >
+                        {e[0].toUpperCase()}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => cycleWhiteningColor(l.id, colorIdx)}
+                      title="Cycle colour (display only — doesn't affect grade)"
+                      className="ml-2 w-4 h-4 rounded-full border border-[var(--admin-line)]"
+                      style={{ background: l.color ?? "#FFD400" }}
+                      data-testid={`btn-wl-color-${l.id ?? i}`}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeWhiteningLine(l.id)}
+                  className="flex-shrink-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors p-0.5"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
       )}
+      {creaseLines && creaseLines.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[var(--admin-ink-dim)] text-[9px] uppercase tracking-widest font-bold">
+            Crease lines ({creaseLines.length})
+          </p>
+          {creaseLines.map((l) => {
+            const colorIdx = Math.max(0, LINE_COLOUR_PALETTE.indexOf(l.color as (typeof LINE_COLOUR_PALETTE)[number]));
+            return (
+              <div
+                key={l.id}
+                className="flex items-start gap-2 rounded-lg px-3 py-2 border border-[var(--admin-line)] bg-[var(--admin-panel)]"
+                data-testid={`row-crease-line-${l.id}`}
+              >
+                <span
+                  className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold mt-0.5"
+                  style={{ background: l.color ?? "#00CCFF" }}
+                  aria-hidden="true"
+                >
+                  C
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[var(--admin-ink)] text-[10px] font-bold">Crease</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full border bg-[var(--admin-bg2)] text-[var(--admin-ink-dim)] border-[var(--admin-line)] font-mono uppercase">
+                      {l.side}
+                    </span>
+                    <span className="text-[var(--admin-ink-dim)] text-[9px] font-mono">{l.spanPct}% of card span</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => cycleCreaseColor(l.id, colorIdx)}
+                      title="Cycle colour (display only — doesn't affect grade)"
+                      className="w-4 h-4 rounded-full border border-[var(--admin-line)]"
+                      style={{ background: l.color ?? "#00CCFF" }}
+                      data-testid={`btn-cl-color-${l.id}`}
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeCreaseLine(l.id)}
+                  className="flex-shrink-0 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] transition-colors p-0.5"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {defects.length === 0 &&
+        (!candidates || candidates.length === 0) &&
+        (!whiteningLines || whiteningLines.length === 0) &&
+        (!creaseLines || creaseLines.length === 0) && (
+          <p className="text-[var(--admin-ink-dim)] text-xs text-center py-2">
+            No defects marked. Click "Mark Defects" and tap the image to start.
+          </p>
+        )}
     </div>
   );
 }

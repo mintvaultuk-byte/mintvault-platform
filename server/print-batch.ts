@@ -1,37 +1,37 @@
 /**
  * print-batch.ts
- * v525 — single-sheet print-and-cut batch generator.
+ * v3 — guillotine PDF on full A4; PNG/SVG stay on the Cricut sheet.
  *
- * Sized to the Cricut Explore 4 Print Then Cut max printable area
- * (165.9 × 234.7mm). A4 (210 × 297mm) forces Cricut Design Space's
- * Auto-Resize, which distorts the label dimensions — so we render at
- * Cricut's exact ceiling and let the home-printer PDF render small on
- * the A4 paper (right and bottom whitespace, no functional impact).
+ * THE PDF IS NO LONGER CUT ON THE CRICUT. It's a guillotine sheet now, so it
+ * uses full A4 (210×297mm) with margins above the inkjet's unprintable edge.
+ * The PNG + SVG (Cricut Explore 4 Print Then Cut max area, 165.9×234.7mm)
+ * are still emitted for any downstream Cricut tooling and produce the same
+ * output as before for ≤4-cert inputs — they're explicitly held byte-stable.
  *
- * LAYOUT (mm, top-left origin):
- *   Page margins: 2mm on all sides (Cricut's printable area is tight —
- *     content row width = 70 + 4 + 85.6 = 159.6mm, page width 165.9mm).
- *   Universal cut gap: 4mm between cells.
- *   Cards per sheet: up to 4 (MAX_CERTS_PER_BATCH).
+ * PDF LAYOUT (mm, top-left origin, FULL A4):
+ *   Page: 210 × 297mm (A4).
+ *   Top + bottom margins: 16.5mm each — clear of the inkjet's ~3–5mm
+ *     unprintable edge (the previous 2mm top landed inside it; MV78 lost
+ *     its top border).
+ *   Rows: 5 cert rows, slab-pair-driven row height (44mm).
+ *   Inter-row gap: 11mm — clear guillotine lane between every label.
+ *   Per row: [front 70×20mm stacked over back 70×20mm with 4mm gap]
+ *            | 8mm horizontal gap | claim insert 69.74×44mm (aspect 1.585
+ *            preserved; shrunk from 85.6×54 so it fits the row height
+ *            without overflowing into the next row's guillotine lane).
+ *   Block is centred horizontally; left + right margins = 31.13mm each.
+ *   Vertical sum: 16.5 + 5×44 + 4×11 + 16.5 = 297mm (exact A4 fit, asserted
+ *     at module load).
  *
- *   Per row (left column stacked, right column full row):
- *     - Front label 70×20mm  (top of left column)
- *     - 4mm gap
- *     - Back label  70×20mm  (below front in left column)
- *     - 4mm gap (between columns)
- *     - Claim insert 85.6×54mm (right; row height = insert height)
- *
- *   Row pitch: 58mm (54mm row + 4mm inter-row gap).
- *   4 rows × 54 + 3 × 4 inter-row gaps + 2 × 2mm margins = 232mm — fits
- *   inside the 234.7mm PNG height with 2.7mm spare.
+ * CRICUT LAYOUT (mm, PNG + SVG) — UNCHANGED:
+ *   165.9 × 234.7mm canvas, 2mm margins, 4mm gaps, 4-row sheet.
+ *   Row pitch 58mm, content height 232mm with 2.7mm spare. See buildLayout().
  *
  * THREE OUTPUT FILES (all share batchId in filename):
- *   A) generatePrintBatchPDF()    → 165.9×297mm PDF with artwork only.
- *      Home-printer fallback prints small on A4 paper (right + bottom
- *      whitespace), no cut lines on the PDF — those live in the SVG.
- *   B) generatePrintBatchCutSVG() → 165.9×297mm SVG with cut rectangles only.
- *      Magenta hairline (#FF00FF) on a <g id="cut"> layer. ScanNCut Direct
- *      Cut and Cricut SVG cut path both consume this.
+ *   A) generatePrintBatchPDF()    → 210×297mm A4 PDF, 5 cert rows,
+ *      drawLabelCropMarks on every slab label for guillotine alignment.
+ *   B) generatePrintBatchCutSVG() → 165.9×297mm Cricut SVG cut path.
+ *      Magenta hairline (#FF00FF) on a <g id="cut"> layer.
  *   C) generatePrintBatchPNG()    → 165.9×234.7mm Cricut canvas @ 144 DPI
  *      = 941×1331px PNG composite. Cricut Design Space ignores the pHYs
  *      DPI chunk and applies a fixed 144 DPI to the raw pixel count — so the
@@ -41,12 +41,13 @@
  *      fixed 144 DPI is applied. The v4 627px/"96 DPI" canvas printed
  *      undersized at 11.06cm.)
  *
- * Single source of truth: buildLayout() returns the cell array consumed by
- * all three renderers — PDF, SVG and PNG cannot drift from each other.
+ * Two layout builders: buildPdfLayout() for the A4 guillotine sheet,
+ * buildLayout() for the Cricut PNG/SVG path. The two can drift safely now
+ * that they target different physical sheets and tooling.
  *
- * Cut-path bleed inset: 0.25mm per side. Pushes the cut INSIDE the printed
- * gold border so any sub-mm cutter drift slices through the gold rather than
- * the white paper outside it.
+ * Cut-path bleed inset (SVG only): 0.25mm per side. Pushes the cut INSIDE
+ * the printed gold border so any sub-mm cutter drift slices through the gold
+ * rather than the white paper outside it.
  */
 
 import { createHash } from "crypto";
@@ -69,14 +70,17 @@ const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
 // ── Page dimensions ──────────────────────────────────────────────────────────
-// Width is Cricut Explore 4's Print Then Cut max (165.9mm) — shared by all
-// three outputs. PDF height stays full A4 (297mm) for home-printer use; PNG
-// height matches Cricut's vertical ceiling (234.7mm) to prevent Auto-Resize.
+// PNG + SVG (Cricut Explore 4 Print Then Cut max area, 165.9×234.7mm) keep
+// their existing dimensions — guillotine-only now, but the Cricut output is
+// still emitted for downstream tooling and must be byte-identical for ≤4-cert
+// inputs. PDF moves to FULL A4 (210×297mm) because it's no longer cut on the
+// Cricut, so the 165.9mm safe-area constraint no longer applies to this path.
 const PAGE_W_MM = 165.9;
+const PDF_PAGE_W_MM = 210; // full A4 — guillotine PDF only
 const PDF_PAGE_H_MM = 297;
 const PNG_PAGE_H_MM = 234.7;
 
-// ── Layout (mm) ──────────────────────────────────────────────────────────────
+// ── Layout (mm) — PNG + SVG (Cricut) ─────────────────────────────────────────
 // MARGIN_MM dropped from 10 → 2 because Cricut's 165.9mm width minus row
 // content (70 + 4 + 85.6 = 159.6mm) leaves only 6.3mm total horizontal
 // budget for margins. 2mm per side gives 2.3mm spare for cutter tolerance.
@@ -89,8 +93,53 @@ const INSERT_H_MM = 54;
 const ROW_H_MM = INSERT_H_MM;
 const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 
-export const MAX_CERTS_PER_BATCH = 4;
-export const SHEET_LAYOUT_VERSION = "v2";
+// ── Layout (mm) — Guillotine PDF (A4, 5 rows, spread for cutting) ────────────
+// Replaces the Cricut-tight 2mm margin + 4mm gap layout with a full-A4 page
+// that puts a clear guillotine lane between every label. Top/bottom margins
+// sit above the inkjet's ~3–5mm unprintable-edge floor (the previous 2mm top
+// margin landed inside it — MV78 lost its top border).
+//
+// Slab label dimensions are PRESERVED (70 × 20mm) per spec. Row height is
+// driven by the slab pair (front + 4mm + back = 44mm), NOT by the claim
+// insert: the insert is rescaled to fit the same 44mm row height with its
+// 1.585 aspect preserved (→ 69.74 × 44mm). Without this rescale, 5 rows of
+// 54mm-tall inserts + 10mm margins would force the inter-row gap to 1.75mm —
+// well below the 10mm guillotine-blade clearance the operator needs.
+//
+// Vertical sum: 16.5 + 5×44 + 4×11 + 16.5 = 297mm (exact A4 fit).
+// Horizontal sum: 31.13 + 70 + 8 + 69.74 + 31.13 = 210mm (block centred).
+const PDF_ROW_COUNT = 5;
+const PDF_TOP_MARGIN_MM = 16.5;
+const PDF_BOTTOM_MARGIN_MM = 16.5;
+const PDF_INTER_ROW_GAP_MM = 11; // mid-target of the spec's 10–12mm range
+const PDF_HORIZ_GAP_MM = 8; // spec floor for vertical-cut clearance
+const PDF_SLAB_PAIR_H_MM = LABEL_H_MM + GAP_MM + LABEL_H_MM; // 44
+const PDF_INSERT_W_MM = 69.74; // 44 × (85.6 / 54), aspect preserved
+const PDF_INSERT_H_MM = 44;
+const PDF_ROW_H_MM = Math.max(PDF_SLAB_PAIR_H_MM, PDF_INSERT_H_MM); // 44
+const PDF_CONTENT_W_MM = LABEL_W_MM + PDF_HORIZ_GAP_MM + PDF_INSERT_W_MM; // 147.74
+const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
+
+// Static assertion — the vertical layout MUST close to 297mm on module load.
+// If anyone edits a constant above without rebalancing, this throws at import
+// time rather than silently producing a clipped or oversized PDF.
+{
+  const vSum =
+    PDF_TOP_MARGIN_MM +
+    PDF_ROW_COUNT * PDF_ROW_H_MM +
+    (PDF_ROW_COUNT - 1) * PDF_INTER_ROW_GAP_MM +
+    PDF_BOTTOM_MARGIN_MM;
+  if (Math.abs(vSum - PDF_PAGE_H_MM) > 0.5) {
+    throw new Error(`print-batch.ts: PDF vertical layout sums to ${vSum}mm, expected ${PDF_PAGE_H_MM}mm`);
+  }
+}
+
+// Public cap — the route validator + UI use this. Bumped 4 → 5 for the new
+// PDF row count. The Cricut PNG/SVG path keeps its own internal cap (4) below
+// so the Cricut sheet stays untouched even if a caller passes 5.
+export const MAX_CERTS_PER_BATCH = 5;
+const MAX_CERTS_PER_CRICUT_SHEET = 4;
+export const SHEET_LAYOUT_VERSION = "v3";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -115,7 +164,11 @@ interface CellSpec {
 }
 
 function buildLayout(itemCount: number): CellSpec[] {
-  const n = Math.max(1, Math.min(MAX_CERTS_PER_BATCH, itemCount | 0));
+  // Cricut PNG + SVG cap — held separate from MAX_CERTS_PER_BATCH (which
+  // grew to 5 for the A4 PDF) so the Cricut sheet stays at its byte-stable
+  // 4-row form. 5-cert callers get a 4-cert Cricut sheet; the PDF carries
+  // the 5th cert.
+  const n = Math.max(1, Math.min(MAX_CERTS_PER_CRICUT_SHEET, itemCount | 0));
   const cells: CellSpec[] = [];
   for (let i = 0; i < n; i++) {
     const rowTopY = MARGIN_MM + i * ROW_PITCH_MM;
@@ -147,6 +200,45 @@ function buildLayout(itemCount: number): CellSpec[] {
       yMm: rowTopY,
       wMm: INSERT_W_MM,
       hMm: INSERT_H_MM,
+    });
+  }
+  return cells;
+}
+
+// Guillotine PDF layout — 5 rows on full A4, slab pair + insert per row.
+// Mirrors buildLayout's `kind` semantics so drawLabelCropMarks works without
+// modification. Coordinates are computed from the PDF_* constants above so
+// changing the spec (margins, gap, row count) only touches the constants —
+// the static assertion at import time catches any breakage in the sum.
+function buildPdfLayout(itemCount: number): CellSpec[] {
+  const n = Math.max(1, Math.min(PDF_ROW_COUNT, itemCount | 0));
+  const pitch = PDF_ROW_H_MM + PDF_INTER_ROW_GAP_MM;
+  const cells: CellSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    const rowTopY = PDF_TOP_MARGIN_MM + i * pitch;
+    cells.push({
+      kind: "label",
+      itemIndex: i,
+      xMm: PDF_LEFT_MARGIN_MM,
+      yMm: rowTopY,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
+    });
+    cells.push({
+      kind: "back",
+      itemIndex: i,
+      xMm: PDF_LEFT_MARGIN_MM,
+      yMm: rowTopY + LABEL_H_MM + GAP_MM,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
+    });
+    cells.push({
+      kind: "insert",
+      itemIndex: i,
+      xMm: PDF_LEFT_MARGIN_MM + LABEL_W_MM + PDF_HORIZ_GAP_MM,
+      yMm: rowTopY,
+      wMm: PDF_INSERT_W_MM,
+      hMm: PDF_INSERT_H_MM,
     });
   }
   return cells;
@@ -210,15 +302,15 @@ function drawLabelCropMarks(doc: InstanceType<typeof PDFDocument>, cell: CellSpe
   doc.restore();
 }
 
-// ── PDF generator (A4 full page) ─────────────────────────────────────────────
+// ── PDF generator (full A4, guillotine sheet) ────────────────────────────────
 
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
-  const layout = buildLayout(items.length);
+  const layout = buildPdfLayout(items.length);
   const { fronts, backs, inserts } = await renderItemBuffers(items);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
-      size: [mm(PAGE_W_MM), mm(PDF_PAGE_H_MM)],
+      size: [mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)],
       margin: 0,
       info: {
         Title: `MintVault Print Batch (${SHEET_LAYOUT_VERSION})`,
@@ -232,7 +324,7 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
     doc.on("error", reject);
 
     try {
-      doc.rect(0, 0, mm(PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
+      doc.rect(0, 0, mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
       for (const cell of layout) {
         const buf =
           cell.kind === "label"
@@ -357,8 +449,13 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 //   a fixed 144 DPI to raw pixels (ignores pHYs): the v4 96 DPI / 627px canvas
 //   printed undersized at 11.06cm. 144 DPI / 941×1331px lands at 16.59×23.47cm.
 //   Crop marks (v5) retained.
+// Cache key folds SHEET_LAYOUT_VERSION so a layout bump (e.g. v2 → v3) writes
+// to a NEW R2 object and the route's idempotent HEAD fast-path can't serve a
+// stale older-layout PDF for the same batchId. Same dance the PNG history did
+// inline historically (-v2 / -v3 / -v6) — now centralised so the version
+// flows from one constant to every read+write site.
 export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
-  return `print-batches/${batchId}-v6.${ext}`;
+  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}.${ext}`;
 }
 
 export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {

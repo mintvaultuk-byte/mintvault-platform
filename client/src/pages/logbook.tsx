@@ -60,6 +60,26 @@ interface LogbookData {
     y_percent?: number | null;
     image_side?: "front" | "back";
   }>;
+  // MVGS v2 — operator-drawn whitening segments. Colour is chosen for
+  // legibility against the card; render as-stored. Engine never sees colour.
+  whiteningLines?: Array<{
+    id: string | null;
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number | null;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color: string | null;
+  }>;
+  // MVGS v2 — multi-crease spans. Same display-only colour rule.
+  creaseLines?: Array<{
+    id: string | null;
+    side: "front" | "back";
+    spanPct: number | null;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color: string | null;
+  }>;
   gradingReport: {
     centering: string | null;
     corners: string | null;
@@ -164,13 +184,26 @@ type OverlayDefect = {
   y_percent?: number | null;
   image_side?: "front" | "back";
 };
+// MVGS v2 line entries — same shape on the front + back overlay. Colour is
+// the operator's display-only pick (already stored on the row); we render
+// it as-given so it reads against the operator's chosen background.
+type OverlayLine = {
+  side: "front" | "back";
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  color: string | null;
+};
 function DefectOverlayPair({
   defects,
+  whiteningLines = [],
+  creaseLines = [],
   images,
   highlightId,
   onHighlight,
 }: {
   defects: OverlayDefect[];
+  whiteningLines?: OverlayLine[];
+  creaseLines?: OverlayLine[];
   images: { front: string | null; back: string | null };
   highlightId: number | null;
   onHighlight: (id: number | null) => void;
@@ -178,6 +211,14 @@ function DefectOverlayPair({
   const positioned = defects.filter((d) => typeof d.x_percent === "number" && typeof d.y_percent === "number");
   const frontDefects = positioned.filter((d) => d.image_side !== "back");
   const backDefects = positioned.filter((d) => d.image_side === "back");
+  const frontLines = [
+    ...whiteningLines.filter((l) => l.side !== "back"),
+    ...creaseLines.filter((l) => l.side !== "back"),
+  ];
+  const backLines = [
+    ...whiteningLines.filter((l) => l.side === "back"),
+    ...creaseLines.filter((l) => l.side === "back"),
+  ];
   // Always render both sides if their image URL exists, regardless of defect
   // presence on that side. Sides with no positioned defects render the image
   // bare. Defensive: if neither URL exists we render nothing — caller
@@ -191,12 +232,49 @@ function DefectOverlayPair({
         ? "border-orange-600 text-orange-600 bg-orange-50"
         : "border-amber-600 text-amber-600 bg-amber-50";
 
-  function SidePanel({ url, label, defects }: { url: string; label: string; defects: OverlayDefect[] }) {
+  function SidePanel({
+    url,
+    label,
+    defects,
+    lines,
+  }: {
+    url: string;
+    label: string;
+    defects: OverlayDefect[];
+    lines: OverlayLine[];
+  }) {
     return (
       <div className="flex flex-col items-center">
         <p className="text-[10px] uppercase tracking-[0.2em] text-[#888888] mb-2">{label}</p>
         <div className="relative inline-block">
           <img src={url} alt={label} className="h-64 rounded-lg shadow-lg" draggable={false} />
+          {/* SVG overlay for whitening + crease line segments. preserveAspectRatio
+              "none" stretches the 0..100% coordinate space exactly over the
+              image regardless of its rendered aspect ratio, so the line lands
+              where the operator drew it. */}
+          {lines.length > 0 && (
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              data-testid={`overlay-lines-${label.toLowerCase()}`}
+            >
+              {lines.map((l, i) => (
+                <line
+                  key={i}
+                  x1={l.start.x}
+                  y1={l.start.y}
+                  x2={l.end.x}
+                  y2={l.end.y}
+                  stroke={l.color || "#D4AF37"}
+                  strokeWidth={0.6}
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                  style={{ strokeWidth: 3 }}
+                />
+              ))}
+            </svg>
+          )}
           {defects.map((d) => {
             const isHi = highlightId === d.id;
             return (
@@ -234,8 +312,8 @@ function DefectOverlayPair({
 
   return (
     <div className="mt-4 flex justify-center gap-4">
-      {images.front && <SidePanel url={images.front} label="Front" defects={frontDefects} />}
-      {images.back && <SidePanel url={images.back} label="Back" defects={backDefects} />}
+      {images.front && <SidePanel url={images.front} label="Front" defects={frontDefects} lines={frontLines} />}
+      {images.back && <SidePanel url={images.back} label="Back" defects={backDefects} lines={backLines} />}
     </div>
   );
 }
@@ -453,6 +531,12 @@ export default function LogbookPage() {
     );
 
   const { card, grades, centering, authentication, defects, gradingReport, images, provenance, verification } = data;
+  const whiteningLines = Array.isArray(data.whiteningLines) ? data.whiteningLines : [];
+  const creaseLines = Array.isArray(data.creaseLines) ? data.creaseLines : [];
+  // Lines count toward the visible "N defects" total since they ARE defects —
+  // the operator drew them as evidence of damage. Hides the section when nothing
+  // is recorded; keeps the existing behaviour when only pins exist.
+  const totalDefectCount = defects.length + whiteningLines.length + creaseLines.length;
 
   return (
     <>
@@ -740,23 +824,25 @@ export default function LogbookPage() {
               </Section>
 
               {/* Condition / Defects */}
-              {defects.length > 0 && (
+              {totalDefectCount > 0 && (
                 <Section title="Condition Report">
                   <button
                     onClick={() => setShowDefects(!showDefects)}
                     className="flex items-center gap-2 text-sm text-[#555555] hover:text-[#1A1A1A] transition-colors"
                   >
-                    {defects.length} defect{defects.length !== 1 ? "s" : ""} detected
+                    {totalDefectCount} defect{totalDefectCount !== 1 ? "s" : ""} detected
                     {showDefects ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                   {showDefects && (
                     <>
                       {/* Overlay images — Condition Report only. Hero card images
-                      at the top of the page stay clean. Each side renders
-                      only if at least one defect on that side has coordinates;
-                      sides with no positioned defects are skipped entirely. */}
+                      at the top of the page stay clean. Pins render at their
+                      stored x/y%; v2 whitening + crease lines render as SVG
+                      segments in the operator's chosen colour. */}
                       <DefectOverlayPair
                         defects={defects}
+                        whiteningLines={whiteningLines}
+                        creaseLines={creaseLines}
                         images={images}
                         highlightId={highlightDefectId}
                         onHighlight={setHighlightDefectId}
@@ -796,6 +882,58 @@ export default function LogbookPage() {
                             </div>
                           );
                         })}
+                        {/* MVGS v2 — line entries. No numbered pin marker (lines
+                            identify themselves visually by colour + position).
+                            Coverage% / span% drives the readable label. */}
+                        {whiteningLines.map((w, i) => (
+                          <div
+                            key={`w-${i}`}
+                            className="flex items-start gap-3 py-2 border-b border-[#E8E4DC]"
+                            data-testid={`whitening-row-${i}`}
+                          >
+                            <span
+                              className="text-[9px] uppercase px-1.5 py-0.5 rounded border"
+                              style={{
+                                color: w.color || "#D4AF37",
+                                borderColor: w.color || "#D4AF37",
+                                backgroundColor: "transparent",
+                              }}
+                            >
+                              line
+                            </span>
+                            <div>
+                              <p className="text-sm text-[#1A1A1A]">
+                                Whitening · {w.edge}
+                                {typeof w.coveragePct === "number" ? ` (${Math.round(w.coveragePct)}% of edge)` : ""}
+                              </p>
+                              <p className="text-xs text-[#888888]">{w.side}</p>
+                            </div>
+                          </div>
+                        ))}
+                        {creaseLines.map((cr, i) => (
+                          <div
+                            key={`c-${i}`}
+                            className="flex items-start gap-3 py-2 border-b border-[#E8E4DC]"
+                            data-testid={`crease-row-${i}`}
+                          >
+                            <span
+                              className="text-[9px] uppercase px-1.5 py-0.5 rounded border"
+                              style={{
+                                color: cr.color || "#D4AF37",
+                                borderColor: cr.color || "#D4AF37",
+                                backgroundColor: "transparent",
+                              }}
+                            >
+                              line
+                            </span>
+                            <div>
+                              <p className="text-sm text-[#1A1A1A]">
+                                Crease{typeof cr.spanPct === "number" ? ` · ${Math.round(cr.spanPct)}%` : ""}
+                              </p>
+                              <p className="text-xs text-[#888888]">{cr.side}</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </>
                   )}

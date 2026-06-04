@@ -179,6 +179,33 @@ export async function buildLogbookData(certIdInput: string) {
       image_side: d.image_side === "back" ? "back" : "front",
     })),
 
+    // MVGS v2 line stores (Phase 3 display surfacing). Operator-drawn whitening
+    // segments along an edge and crease spans across the card, each with the
+    // legibility colour the operator picked. Engine never sees `color` —
+    // input-builder boundary strips it. Display-only, sit alongside the pin
+    // defects array. Empty arrays when no v2 measurement on this cert.
+    whiteningLines: (Array.isArray(c.whiteningLines) ? c.whiteningLines : [])
+      .filter((w: any) => w && w.start && w.end)
+      .map((w: any) => ({
+        id: w.id || null,
+        side: w.side === "back" ? "back" : "front",
+        edge: w.edge,
+        coveragePct: typeof w.coveragePct === "number" ? w.coveragePct : null,
+        start: w.start,
+        end: w.end,
+        color: typeof w.color === "string" ? w.color : null,
+      })),
+    creaseLines: (Array.isArray(c.creaseLines) ? c.creaseLines : [])
+      .filter((cr: any) => cr && cr.start && cr.end)
+      .map((cr: any) => ({
+        id: cr.id || null,
+        side: cr.side === "back" ? "back" : "front",
+        spanPct: typeof cr.spanPct === "number" ? cr.spanPct : null,
+        start: cr.start,
+        end: cr.end,
+        color: typeof cr.color === "string" ? cr.color : null,
+      })),
+
     gradingReport: {
       centering: report.centering || null,
       corners: report.corners || null,

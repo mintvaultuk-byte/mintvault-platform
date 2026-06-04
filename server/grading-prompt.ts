@@ -132,7 +132,7 @@ DEFECT TYPES — you MUST check for ALL of the following. Report each defect fou
 - Corner dings or bends (indentations at corners from impact)
 - Surface scuffs (light abrasion marks, often visible in high-contrast)
 - Holo scratches (scratches on holographic layer — often invisible in colour, visible in greyscale)
-- Creases (ANY crease caps overall grade at 5.0 maximum — this is non-negotiable)
+- Creases (ANY crease caps overall grade at 4.5 maximum — see crease ladder under OVERALL GRADE CALCULATION)
 - Indentations or pressure marks (show in high-contrast images as subtle shadows)
 - Fingerprints or oils (residue on surface, visible in angled light)
 - Stains (water damage, wax residue, adhesive residue, dirt)
@@ -144,7 +144,7 @@ DEFECT TYPES — you MUST check for ALL of the following. Report each defect fou
 - Colour fading or inconsistency
 - Focus or registration errors (printed image misaligned with borders)
 - Texture inconsistency on textured cards (full art, VMAX, alt art, etc.)
-- Tear or missing card material (caps overall grade at 3.0 maximum)
+- Tear or missing card material (minor tear → cap 2; significant → cap 1.5; major / missing material → NO outcome)
 
 HOLO/FOIL CARDS: These require EXTRA surface scrutiny. Scratches on holographic surfaces are frequently invisible in straight-on colour photos but show clearly in greyscale images and angled photos. If a greyscale or angled image is provided, examine it very carefully for surface scratches. Report your surface confidence as LOW if only a straight-on colour image is available for a holo card.
 
@@ -177,12 +177,26 @@ Use this weighted formula:
 
 Round to the nearest whole number. Use only integers 1–10. No half-point grades (no 9.5, 8.5, etc.).
 
-ABSOLUTE RULES — these override the formula:
+ABSOLUTE RULES — these override the formula (aligned to MVGS-v2-spec.md §4):
 1. The overall grade can NEVER be more than 1.0 point higher than the lowest subgrade
-2. Any visible crease: maximum overall grade of 5.0 regardless of all other categories
-3. Any tear or missing card material: maximum overall grade of 3.0
-4. Evidence of trimming, recolouring, or alteration: grade as "AA" (Authentic Altered) — no numeric grade
-5. Evidence of counterfeiting or reproduction: grade as "NO" (Not Original) — no numeric grade
+2. Crease ceiling (by length as % of card span):
+   - Minor crease, <25%  → max 4.5
+   - ~25-50% across      → max 4
+   - ~50-75% across      → max 3.5
+   - >75% (full-length)  → max 3
+   - When only the legacy boolean (has_crease) is set with no length, default to max 4.5
+3. Tear ceiling:
+   - Minor tear (one edge)        → max 2
+   - Significant / multiple tears → max 1.5
+   - Major tear / missing material → grade as "NO" (Not Graded, returned unslabbed)
+   - When only the legacy boolean (has_tear) is set, default to max 2
+4. Wrinkle ceiling (surface ripple that doesn't break the stock):
+   - Tiny, back, hi-res only → max 6.5
+   - Longer, visible, back   → max 6
+   - Small, front            → max 5.5
+   - Multiple, front         → max 5
+5. Evidence of trimming, recolouring, or alteration: grade as "AA" (Authentic Altered) — no numeric grade
+6. Evidence of counterfeiting or reproduction: grade as "NO" (Not Original) — no numeric grade
 
 ---
 
@@ -195,7 +209,7 @@ The grade_strength_score (0–99) captures within-tier granularity instead of ha
 Compute: weighted = (centering × 0.10) + (corners × 0.25) + (edges × 0.25) + (surface × 0.40)
 Round to nearest integer: overall_grade = Math.round(weighted)
 Apply proximity cap: overall_grade = min(overall_grade, lowest_subgrade + 1)
-Apply defect caps: crease → max 5, tear → max 3
+Apply structural ceilings per Rules 2–4 above (worst ceiling wins; lesser flaws do not compound)
 
 ## RESPONSE FORMAT
 
@@ -461,18 +475,18 @@ Respond with ONLY valid JSON. No markdown fences. No text outside the JSON.
 }`;
 
 export const GRADE_LABELS: Record<string, string> = {
-  '10': 'GEM MINT',
-  '9':  'MINT',
-  '8':  'NEAR MINT-MINT',
-  '7':  'NEAR MINT',
-  '6':  'EXCELLENT-NEAR MINT',
-  '5':  'EXCELLENT',
-  '4':  'VERY GOOD-EXCELLENT',
-  '3':  'VERY GOOD',
-  '2':  'GOOD',
-  '1':  'POOR',
-  'AA': 'AUTHENTIC ALTERED',
-  'NO': 'NOT ORIGINAL',
+  "10": "GEM MINT",
+  "9": "MINT",
+  "8": "NEAR MINT-MINT",
+  "7": "NEAR MINT",
+  "6": "EXCELLENT-NEAR MINT",
+  "5": "EXCELLENT",
+  "4": "VERY GOOD-EXCELLENT",
+  "3": "VERY GOOD",
+  "2": "GOOD",
+  "1": "POOR",
+  AA: "AUTHENTIC ALTERED",
+  NO: "NOT ORIGINAL",
 };
 
 // ── Focused prompts for individual AI actions ─────────────────────────────
@@ -671,7 +685,7 @@ SHINY/HOLO CARDS: do NOT flag glare or reflections as scratches.
 
 ## OVERALL GRADE
 Weighted: (centering × 10%) + (corners × 25%) + (edges × 25%) + (surface × 40%). Round to nearest whole number, then cap at lowest_subgrade + 1.
-Crease cap: max 5. Tear cap: max 3.
+Structural ceilings (MVGS-v2 §4): crease <25%→4.5, 25-50%→4, 50-75%→3.5, >75%→3. Tear minor→2, significant→1.5, major/missing→NO. Wrinkle tiny-back→6.5, longer-back→6, small-front→5.5, multiple-front→5. Worst ceiling wins; legacy boolean defaults: has_crease→4.5, has_tear→2.
 
 ## CONFIDENCE
 Per subgrade ("centering", "corners", "edges", "surface", "overall"): "high" / "medium" / "low".

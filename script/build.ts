@@ -42,10 +42,7 @@ async function buildAll() {
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
-  const allDeps = [
-    ...Object.keys(pkg.dependencies || {}),
-    ...Object.keys(pkg.devDependencies || {}),
-  ];
+  const allDeps = [...Object.keys(pkg.dependencies || {}), ...Object.keys(pkg.devDependencies || {})];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
   await esbuild({
@@ -58,6 +55,25 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
+    external: externals,
+    logLevel: "info",
+  });
+
+  // One-off: MVGS v2 prod column migration (scripts/run-mvgs-v2-migration.ts).
+  // Bundled to dist so it can run inside the prod container with plain node:
+  //   fly ssh console --app mintvault -C "node /app/dist/run-mvgs-v2-migration.cjs"
+  // Not minified, so any prod error/stack stays legible. Safe to remove this
+  // block once the migration has been applied to prod.
+  console.log("building one-off mvgs-v2 migration script...");
+  await esbuild({
+    entryPoints: ["scripts/run-mvgs-v2-migration.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/run-mvgs-v2-migration.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
     external: externals,
     logLevel: "info",
   });

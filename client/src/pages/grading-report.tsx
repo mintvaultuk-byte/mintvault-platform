@@ -3,32 +3,94 @@ import { useParams, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import SeoHead from "@/components/seo-head";
 import {
-  Shield, CheckCircle2, AlertTriangle, ExternalLink, Download,
-  ChevronDown, ChevronUp, Scissors, Minus, Circle, Star,
-  ZoomIn, X,
+  Shield,
+  CheckCircle2,
+  AlertTriangle,
+  ExternalLink,
+  Download,
+  ChevronDown,
+  ChevronUp,
+  Scissors,
+  Minus,
+  Circle,
+  Star,
+  ZoomIn,
+  X,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface ReportData {
   certificate: {
-    certId: string; cardName: string; cardGame: string; cardSet: string;
-    cardYear: string; cardNumber: string; language: string; rarity: string | null;
-    variant: string | null; gradedDate: string; gradedBy: string; status: string;
+    certId: string;
+    cardName: string;
+    cardGame: string;
+    cardSet: string;
+    cardYear: string;
+    cardNumber: string;
+    language: string;
+    rarity: string | null;
+    variant: string | null;
+    gradedDate: string;
+    gradedBy: string;
+    status: string;
   };
   grade: {
-    overall: number | string; label: string; labelType: string;
-    isBlackLabel: boolean; explanation: string | null;
-    approvedBy: string | null; approvedAt: string | null;
+    overall: number | string;
+    label: string;
+    labelType: string;
+    isBlackLabel: boolean;
+    explanation: string | null;
+    approvedBy: string | null;
+    approvedAt: string | null;
   };
   subgrades: { centering: number | null; corners: number | null; edges: number | null; surface: number | null };
   centering: { frontLR: string | null; frontTB: string | null; backLR: string | null; backTB: string | null };
   corners: any | null;
   edges: any | null;
   surface: { front: number | null; back: number | null } | null;
-  defects: Array<{ id: number; type: string; severity: string; description: string; location: string; imageSide: string; xPercent: number; yPercent: number }>;
+  defects: Array<{
+    id: number;
+    type: string;
+    severity: string;
+    description: string;
+    location: string;
+    imageSide: string;
+    xPercent: number;
+    yPercent: number;
+  }>;
+  // MVGS v2 — operator-drawn segments. Colour is display-only (operator's
+  // legibility pick); engine never sees it.
+  whiteningLines?: Array<{
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number | null;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color: string | null;
+  }>;
+  creaseLines?: Array<{
+    side: "front" | "back";
+    spanPct: number | null;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color: string | null;
+  }>;
   authentication: { status: string; notes: string | null };
-  images: { front: string | null; back: string | null; frontGreyscale: string | null; frontHighcontrast: string | null; frontEdge: string | null; frontInverted: string | null; backGreyscale: string | null; backHighcontrast: string | null; backEdge: string | null; backInverted: string | null; angled: string | null; closeup: string | null };
+  images: {
+    front: string | null;
+    back: string | null;
+    frontGreyscale: string | null;
+    frontHighcontrast: string | null;
+    frontEdge: string | null;
+    frontInverted: string | null;
+    backGreyscale: string | null;
+    backHighcontrast: string | null;
+    backEdge: string | null;
+    backInverted: string | null;
+    angled: string | null;
+    closeup: string | null;
+  };
   population: { totalGraded: number; sameGradeCount: number; higherGradeCount: number; percentile: number };
   ownership: { status: string; nfcEnabled: boolean };
   marketValue: { estimatedLow: null; estimatedHigh: null; currency: string };
@@ -38,13 +100,13 @@ interface ReportData {
 
 function useTheme(isBlack: boolean) {
   return {
-    bg:       isBlack ? "bg-[#0A0A0A]"  : "bg-[#FFFFFF]",
-    text:     isBlack ? "text-white"     : "text-[#1A1A1A]",
-    textSec:  isBlack ? "text-[#AAAAAA]" : "text-[#666666]",
-    textMut:  isBlack ? "text-[#666666]" : "text-[#999999]",
-    border:   isBlack ? "border-[#333333]" : "border-[#E8E4DC]",
-    section:  isBlack ? "bg-[#141414]"  : "bg-[#FAFAF8]",
-    card:     isBlack ? "bg-[#111111] border border-[#222222]" : "bg-white border border-[#E8E4DC]",
+    bg: isBlack ? "bg-[#0A0A0A]" : "bg-[#FFFFFF]",
+    text: isBlack ? "text-white" : "text-[#1A1A1A]",
+    textSec: isBlack ? "text-[#AAAAAA]" : "text-[#666666]",
+    textMut: isBlack ? "text-[#666666]" : "text-[#999999]",
+    border: isBlack ? "border-[#333333]" : "border-[#E8E4DC]",
+    section: isBlack ? "bg-[#141414]" : "bg-[#FAFAF8]",
+    card: isBlack ? "bg-[#111111] border border-[#222222]" : "bg-white border border-[#E8E4DC]",
   };
 }
 
@@ -52,30 +114,30 @@ function useTheme(isBlack: boolean) {
 
 function subgradeStyle(v: number | null): { bg: string; text: string } {
   if (v === null) return { bg: "bg-[#333333]", text: "text-[#888888]" };
-  if (v >= 10)  return { bg: "bg-[#D4AF37]", text: "text-[#1A1400]" };
-  if (v >= 9)   return { bg: "bg-[#22C55E]", text: "text-white" };
-  if (v >= 7)   return { bg: "bg-[#EAB308]", text: "text-[#1A1A1A]" };
-  if (v >= 5)   return { bg: "bg-[#F97316]", text: "text-white" };
+  if (v >= 10) return { bg: "bg-[#D4AF37]", text: "text-[#1A1400]" };
+  if (v >= 9) return { bg: "bg-[#22C55E]", text: "text-white" };
+  if (v >= 7) return { bg: "bg-[#EAB308]", text: "text-[#1A1A1A]" };
+  if (v >= 5) return { bg: "bg-[#F97316]", text: "text-white" };
   return { bg: "bg-[#EF4444]", text: "text-white" };
 }
 
 function cornerColor(v: number): string {
   if (v >= 9.5) return "text-[#D4AF37]";
-  if (v >= 8)   return "text-[#22C55E]";
-  if (v >= 6)   return "text-[#EAB308]";
+  if (v >= 8) return "text-[#22C55E]";
+  if (v >= 6) return "text-[#EAB308]";
   return "text-[#EF4444]";
 }
 
 function defectIcon(type: string) {
   const t = (type || "").toLowerCase();
   if (t.includes("scratch") || t.includes("holo")) return <Scissors size={14} />;
-  if (t.includes("print") || t.includes("line"))   return <Minus size={14} />;
+  if (t.includes("print") || t.includes("line")) return <Minus size={14} />;
   return <Circle size={14} />;
 }
 
 const SEV_BADGE: Record<string, string> = {
-  minor:       "bg-yellow-900/30 text-yellow-400 border-yellow-700/40",
-  moderate:    "bg-orange-900/30 text-orange-400 border-orange-700/40",
+  minor: "bg-yellow-900/30 text-yellow-400 border-yellow-700/40",
+  moderate: "bg-orange-900/30 text-orange-400 border-orange-700/40",
   significant: "bg-red-900/30 text-red-400 border-red-700/40",
 };
 
@@ -84,12 +146,20 @@ const SEV_BADGE: Record<string, string> = {
 type ImgVariant = "original" | "greyscale" | "highcontrast";
 
 function CardImagePanel({
-  side, images, defects, showDefects, isBlack,
+  side,
+  images,
+  defects,
+  whiteningLines = [],
+  creaseLines = [],
+  showDefects,
+  isBlack,
   onLightbox,
 }: {
   side: "front" | "back";
   images: ReportData["images"];
   defects: ReportData["defects"];
+  whiteningLines?: NonNullable<ReportData["whiteningLines"]>;
+  creaseLines?: NonNullable<ReportData["creaseLines"]>;
   showDefects: boolean;
   isBlack: boolean;
   onLightbox: (url: string) => void;
@@ -97,13 +167,19 @@ function CardImagePanel({
   const [variant, setVariant] = useState<ImgVariant>("original");
 
   const VARIANTS: { key: ImgVariant; label: string; url: string | null }[] = [
-    { key: "original",     label: "Original",    url: side === "front" ? images.front          : images.back },
-    { key: "greyscale",    label: "Greyscale",   url: side === "front" ? images.frontGreyscale : images.backGreyscale },
-    { key: "highcontrast", label: "Hi-Contrast", url: side === "front" ? images.frontHighcontrast : images.backHighcontrast },
+    { key: "original", label: "Original", url: side === "front" ? images.front : images.back },
+    { key: "greyscale", label: "Greyscale", url: side === "front" ? images.frontGreyscale : images.backGreyscale },
+    {
+      key: "highcontrast",
+      label: "Hi-Contrast",
+      url: side === "front" ? images.frontHighcontrast : images.backHighcontrast,
+    },
   ];
 
-  const currentUrl = VARIANTS.find(v => v.key === variant)?.url ?? images.front;
-  const sideDefects = defects.filter(d => d.imageSide === side);
+  const currentUrl = VARIANTS.find((v) => v.key === variant)?.url ?? images.front;
+  const sideDefects = defects.filter((d) => d.imageSide === side);
+  // MVGS v2 — operator-drawn segments for this side only.
+  const sideLines = [...whiteningLines.filter((l) => l.side === side), ...creaseLines.filter((l) => l.side === side)];
 
   if (!currentUrl) return null;
 
@@ -119,16 +195,43 @@ function CardImagePanel({
           alt={`${side} card image`}
           className="w-full object-contain aspect-[5/7] transition-opacity duration-200"
         />
-        {/* Defect markers */}
-        {showDefects && sideDefects.map(d => (
-          <div
-            key={d.id}
-            className="absolute w-6 h-6 rounded-full bg-red-600 border-2 border-white flex items-center justify-center text-white text-[9px] font-black pointer-events-none"
-            style={{ left: `calc(${d.xPercent}% - 12px)`, top: `calc(${d.yPercent}% - 12px)` }}
+        {/* MVGS v2 line overlay — whitening + crease segments in the operator's
+            chosen colour. viewBox 0..100 maps directly to the stored coords;
+            preserveAspectRatio "none" + absolute inset-0 stretches the
+            coordinate space exactly over the image. */}
+        {showDefects && sideLines.length > 0 && (
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            data-testid={`overlay-lines-${side}`}
           >
-            {d.id}
-          </div>
-        ))}
+            {sideLines.map((l, i) => (
+              <line
+                key={i}
+                x1={l.start.x}
+                y1={l.start.y}
+                x2={l.end.x}
+                y2={l.end.y}
+                stroke={l.color || "#D4AF37"}
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+                style={{ strokeWidth: 3 }}
+              />
+            ))}
+          </svg>
+        )}
+        {/* Defect markers */}
+        {showDefects &&
+          sideDefects.map((d) => (
+            <div
+              key={d.id}
+              className="absolute w-6 h-6 rounded-full bg-red-600 border-2 border-white flex items-center justify-center text-white text-[9px] font-black pointer-events-none"
+              style={{ left: `calc(${d.xPercent}% - 12px)`, top: `calc(${d.yPercent}% - 12px)` }}
+            >
+              {d.id}
+            </div>
+          ))}
         {/* Hover zoom hint */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
           <ZoomIn size={24} className="text-white drop-shadow-lg" />
@@ -136,7 +239,7 @@ function CardImagePanel({
       </div>
       {/* Variant tabs */}
       <div className="flex gap-1 flex-wrap">
-        {VARIANTS.filter(v => v.url).map(v => (
+        {VARIANTS.filter((v) => v.url).map((v) => (
           <button
             key={v.key}
             type="button"
@@ -159,9 +262,15 @@ function CardImagePanel({
 // ── Subgrade card with expandable details ──────────────────────────────────
 
 function SubgradeCard({
-  label, value, isBlack, children,
+  label,
+  value,
+  isBlack,
+  children,
 }: {
-  label: string; value: number | null; isBlack: boolean; children?: React.ReactNode;
+  label: string;
+  value: number | null;
+  isBlack: boolean;
+  children?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const style = subgradeStyle(value);
@@ -175,13 +284,22 @@ function SubgradeCard({
         className={`w-full p-4 text-left ${isBlack ? "bg-[#111111]" : "bg-white"} ${children ? "cursor-pointer" : "cursor-default"}`}
       >
         <div className="flex items-center justify-between mb-2">
-          <p className={`text-[10px] font-bold uppercase tracking-widest ${isBlack ? "text-[#888888]" : "text-[#999999]"}`}>{label}</p>
-          {children && (
-            open ? <ChevronUp size={12} className="text-[#D4AF37]" /> : <ChevronDown size={12} className="text-[#888888]" />
-          )}
+          <p
+            className={`text-[10px] font-bold uppercase tracking-widest ${isBlack ? "text-[#888888]" : "text-[#999999]"}`}
+          >
+            {label}
+          </p>
+          {children &&
+            (open ? (
+              <ChevronUp size={12} className="text-[#D4AF37]" />
+            ) : (
+              <ChevronDown size={12} className="text-[#888888]" />
+            ))}
         </div>
-        <div className={`text-4xl font-black mb-2 ${style.text === "text-[#1A1400]" ? "" : style.text}`}
-          style={value !== null && value >= 10 ? { color: "#D4AF37" } : {}}>
+        <div
+          className={`text-4xl font-black mb-2 ${style.text === "text-[#1A1400]" ? "" : style.text}`}
+          style={value !== null && value >= 10 ? { color: "#D4AF37" } : {}}
+        >
           {value !== null ? value : "—"}
         </div>
         <div className={`h-1.5 rounded-full overflow-hidden ${isBlack ? "bg-[#222222]" : "bg-[#F0EDE6]"}`}>
@@ -189,7 +307,9 @@ function SubgradeCard({
         </div>
       </button>
       {open && children && (
-        <div className={`px-4 pb-4 border-t ${isBlack ? "border-[#222222] bg-[#0D0D0D]" : "border-[#F0EDE6] bg-[#FAFAF8]"}`}>
+        <div
+          className={`px-4 pb-4 border-t ${isBlack ? "border-[#222222] bg-[#0D0D0D]" : "border-[#F0EDE6] bg-[#FAFAF8]"}`}
+        >
           {children}
         </div>
       )}
@@ -207,7 +327,9 @@ function Skeleton() {
         <div className="h-4 bg-[#E8E4DC] rounded animate-pulse w-1/2 mx-auto" />
         <div className="h-48 bg-[#E8E4DC] rounded-xl animate-pulse" />
         <div className="grid grid-cols-4 gap-3">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-28 bg-[#E8E4DC] rounded-xl animate-pulse" />)}
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-28 bg-[#E8E4DC] rounded-xl animate-pulse" />
+          ))}
         </div>
       </div>
     </div>
@@ -222,11 +344,21 @@ export default function GradingReportPage() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [showDefects, setShowDefects] = useState(true);
 
-  const { data: report, isLoading, error } = useQuery<ReportData>({
+  const {
+    data: report,
+    isLoading,
+    error,
+  } = useQuery<ReportData>({
     queryKey: [`/api/cert/${certId}/report`],
     queryFn: async () => {
       const res = await fetch(`/api/cert/${certId}/report`);
-      if (!res.ok) throw new Error(await res.json().then(d => d.error).catch(() => "Not found"));
+      if (!res.ok)
+        throw new Error(
+          await res
+            .json()
+            .then((d) => d.error)
+            .catch(() => "Not found")
+        );
       return res.json();
     },
     retry: false,
@@ -245,13 +377,33 @@ export default function GradingReportPage() {
               ? "This certificate has not yet been graded. Check back soon."
               : "This certificate does not have a public grading report."}
           </p>
-          <Link href="/" className="text-[#D4AF37] text-sm hover:underline">← Back to MintVault</Link>
+          <Link href="/" className="text-[#D4AF37] text-sm hover:underline">
+            ← Back to MintVault
+          </Link>
         </div>
       </div>
     );
   }
 
-  const { certificate: cert, grade, subgrades, centering, corners, edges, surface, defects, authentication, images, population, ownership, marketValue } = report;
+  const {
+    certificate: cert,
+    grade,
+    subgrades,
+    centering,
+    corners,
+    edges,
+    surface,
+    defects,
+    authentication,
+    images,
+    population,
+    ownership,
+    marketValue,
+  } = report;
+  // MVGS v2 — surfacing operator-drawn segments on this report's overlay
+  // and defect list. Falls back to empty when the cert has no v2 measurement.
+  const whiteningLines = Array.isArray(report.whiteningLines) ? report.whiteningLines : [];
+  const creaseLines = Array.isArray(report.creaseLines) ? report.creaseLines : [];
   const isBlack = grade.isBlackLabel;
   const t = useTheme(isBlack);
 
@@ -277,15 +429,22 @@ export default function GradingReportPage() {
           className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 print:hidden"
           onClick={() => setLightboxUrl(null)}
         >
-          <button className="absolute top-4 right-4 text-white hover:text-[#D4AF37]" onClick={() => setLightboxUrl(null)}>
+          <button
+            className="absolute top-4 right-4 text-white hover:text-[#D4AF37]"
+            onClick={() => setLightboxUrl(null)}
+          >
             <X size={28} />
           </button>
-          <img src={lightboxUrl} alt="Card image" className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl" onClick={e => e.stopPropagation()} />
+          <img
+            src={lightboxUrl}
+            alt="Card image"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-xl"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 
       <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
-
         {/* ── Header ── */}
         <div className="text-center space-y-1 reveal-on-scroll">
           <p className="text-[#D4AF37] text-[10px] font-bold uppercase tracking-[0.2em]">MintVault UK</p>
@@ -324,8 +483,16 @@ export default function GradingReportPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <h1 className={`text-2xl font-black tracking-tight mb-1 ${t.text}`}>{cert.cardName || "—"}</h1>
-              <p className={`text-sm mb-0.5 ${t.textSec}`}>{cert.cardSet}{cert.cardYear ? ` · ${cert.cardYear}` : ""}{cert.cardNumber ? ` · #${cert.cardNumber}` : ""}</p>
-              {cert.cardGame && <p className={`text-xs ${t.textMut}`}>{cert.cardGame} · {cert.language}</p>}
+              <p className={`text-sm mb-0.5 ${t.textSec}`}>
+                {cert.cardSet}
+                {cert.cardYear ? ` · ${cert.cardYear}` : ""}
+                {cert.cardNumber ? ` · #${cert.cardNumber}` : ""}
+              </p>
+              {cert.cardGame && (
+                <p className={`text-xs ${t.textMut}`}>
+                  {cert.cardGame} · {cert.language}
+                </p>
+              )}
               {cert.rarity && <p className={`text-xs ${t.textMut}`}>{cert.rarity}</p>}
               {cert.variant && <p className={`text-xs ${t.textMut}`}>{cert.variant}</p>}
             </div>
@@ -343,7 +510,9 @@ export default function GradingReportPage() {
                 <span className="text-xs font-mono font-medium text-[#D4AF37]">{cert.certId}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold uppercase`}>
+                <span
+                  className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold uppercase`}
+                >
                   <CheckCircle2 size={10} /> Active
                 </span>
                 {ownership.nfcEnabled && (
@@ -360,10 +529,28 @@ export default function GradingReportPage() {
         {(images.front || images.back) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 reveal-on-scroll">
             {images.front && (
-              <CardImagePanel side="front" images={images} defects={defects} showDefects={showDefects} isBlack={isBlack} onLightbox={setLightboxUrl} />
+              <CardImagePanel
+                side="front"
+                images={images}
+                defects={defects}
+                whiteningLines={whiteningLines}
+                creaseLines={creaseLines}
+                showDefects={showDefects}
+                isBlack={isBlack}
+                onLightbox={setLightboxUrl}
+              />
             )}
             {images.back && (
-              <CardImagePanel side="back" images={images} defects={defects} showDefects={showDefects} isBlack={isBlack} onLightbox={setLightboxUrl} />
+              <CardImagePanel
+                side="back"
+                images={images}
+                defects={defects}
+                whiteningLines={whiteningLines}
+                creaseLines={creaseLines}
+                showDefects={showDefects}
+                isBlack={isBlack}
+                onLightbox={setLightboxUrl}
+              />
             )}
           </div>
         )}
@@ -371,43 +558,60 @@ export default function GradingReportPage() {
         {/* ── Overall grade hero ── */}
         <div className="reveal-on-scroll">
           {isBlack && (
-            <div className={`flex items-center justify-center gap-2 mb-3 text-[#D4AF37] text-xs font-bold uppercase tracking-widest animate-pulse`}>
+            <div
+              className={`flex items-center justify-center gap-2 mb-3 text-[#D4AF37] text-xs font-bold uppercase tracking-widest animate-pulse`}
+            >
               <Star size={14} className="fill-[#D4AF37]" />
               PRISTINE 10P
               <Star size={14} className="fill-[#D4AF37]" />
             </div>
           )}
-          <div className={`rounded-2xl p-8 text-center border-2 ${isBlack ? "border-[#D4AF37]/40 bg-[#111111]" : "border-[#E8E4DC] bg-white"}`}
-            style={isBlack ? { boxShadow: "0 0 40px rgba(212,175,55,0.15)" } : {}}>
+          <div
+            className={`rounded-2xl p-8 text-center border-2 ${isBlack ? "border-[#D4AF37]/40 bg-[#111111]" : "border-[#E8E4DC] bg-white"}`}
+            style={isBlack ? { boxShadow: "0 0 40px rgba(212,175,55,0.15)" } : {}}
+          >
             <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${t.textMut}`}>Overall Grade</p>
-            <p className="text-8xl font-black leading-none" style={{ color: "#D4AF37" }}>{grade.overall}</p>
+            <p className="text-8xl font-black leading-none" style={{ color: "#D4AF37" }}>
+              {grade.overall}
+            </p>
             <p className={`text-xl font-bold uppercase tracking-widest mt-2 ${t.text}`}>{grade.label}</p>
-            {approvedDateFmt && (
-              <p className={`text-xs mt-2 ${t.textMut}`}>Approved {approvedDateFmt}</p>
-            )}
+            {approvedDateFmt && <p className={`text-xs mt-2 ${t.textMut}`}>Approved {approvedDateFmt}</p>}
           </div>
           {grade.explanation && (
-            <div className={`mt-4 rounded-xl p-5 border-l-4 border-[#D4AF37] ${isBlack ? "bg-[#111111]" : "bg-[#FFF9E6]"}`}>
-              <p className={`text-sm leading-relaxed italic ${isBlack ? "text-[#AAAAAA]" : "text-[#444444]"}`}>"{grade.explanation}"</p>
+            <div
+              className={`mt-4 rounded-xl p-5 border-l-4 border-[#D4AF37] ${isBlack ? "bg-[#111111]" : "bg-[#FFF9E6]"}`}
+            >
+              <p className={`text-sm leading-relaxed italic ${isBlack ? "text-[#AAAAAA]" : "text-[#444444]"}`}>
+                "{grade.explanation}"
+              </p>
             </div>
           )}
         </div>
 
         {/* ── Subgrade breakdown ── */}
-        {(subgrades.centering !== null || subgrades.corners !== null || subgrades.edges !== null || subgrades.surface !== null) && (
+        {(subgrades.centering !== null ||
+          subgrades.corners !== null ||
+          subgrades.edges !== null ||
+          subgrades.surface !== null) && (
           <div className="reveal-on-scroll">
             <h2 className={`text-xs font-bold uppercase tracking-widest mb-4 text-[#D4AF37]`}>Subgrade Breakdown</h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-
               <SubgradeCard label="Centering" value={subgrades.centering} isBlack={isBlack}>
                 {(centering.frontLR || centering.frontTB) && (
                   <div className="pt-3 space-y-1.5">
-                    {[["Front L/R", centering.frontLR], ["Front T/B", centering.frontTB], ["Back L/R", centering.backLR], ["Back T/B", centering.backTB]].map(([l, v]) => v ? (
-                      <div key={String(l)} className="flex justify-between">
-                        <span className={`text-[10px] ${t.textMut}`}>{l}</span>
-                        <span className="text-[10px] font-mono font-bold text-[#D4AF37]">{v}</span>
-                      </div>
-                    ) : null)}
+                    {[
+                      ["Front L/R", centering.frontLR],
+                      ["Front T/B", centering.frontTB],
+                      ["Back L/R", centering.backLR],
+                      ["Back T/B", centering.backTB],
+                    ].map(([l, v]) =>
+                      v ? (
+                        <div key={String(l)} className="flex justify-between">
+                          <span className={`text-[10px] ${t.textMut}`}>{l}</span>
+                          <span className="text-[10px] font-mono font-bold text-[#D4AF37]">{v}</span>
+                        </div>
+                      ) : null
+                    )}
                   </div>
                 )}
               </SubgradeCard>
@@ -415,13 +619,20 @@ export default function GradingReportPage() {
               <SubgradeCard label="Corners" value={subgrades.corners} isBlack={isBlack}>
                 {corners && (
                   <div className="pt-3 space-y-2">
-                    {[["Front", ["frontTL", "frontTR", "frontBL", "frontBR"]], ["Back", ["backTL", "backTR", "backBL", "backBR"]]].map(([side, keys]) => (
+                    {[
+                      ["Front", ["frontTL", "frontTR", "frontBL", "frontBR"]],
+                      ["Back", ["backTL", "backTR", "backBL", "backBR"]],
+                    ].map(([side, keys]) => (
                       <div key={String(side)}>
                         <p className={`text-[9px] uppercase tracking-wider mb-1 ${t.textMut}`}>{side}</p>
                         <div className="grid grid-cols-2 gap-1">
-                          {(keys as string[]).map(k => (
+                          {(keys as string[]).map((k) => (
                             <span key={k} className={`text-[10px] font-bold ${cornerColor(corners[k])}`}>
-                              {k.replace(/^(front|back)/, "").replace(/([A-Z])/g, " $1").trim()}: {corners[k]}
+                              {k
+                                .replace(/^(front|back)/, "")
+                                .replace(/([A-Z])/g, " $1")
+                                .trim()}
+                              : {corners[k]}
                             </span>
                           ))}
                         </div>
@@ -434,13 +645,20 @@ export default function GradingReportPage() {
               <SubgradeCard label="Edges" value={subgrades.edges} isBlack={isBlack}>
                 {edges && (
                   <div className="pt-3 space-y-2">
-                    {[["Front", ["frontTop", "frontRight", "frontBottom", "frontLeft"]], ["Back", ["backTop", "backRight", "backBottom", "backLeft"]]].map(([side, keys]) => (
+                    {[
+                      ["Front", ["frontTop", "frontRight", "frontBottom", "frontLeft"]],
+                      ["Back", ["backTop", "backRight", "backBottom", "backLeft"]],
+                    ].map(([side, keys]) => (
                       <div key={String(side)}>
                         <p className={`text-[9px] uppercase tracking-wider mb-1 ${t.textMut}`}>{side}</p>
                         <div className="grid grid-cols-2 gap-1">
-                          {(keys as string[]).map(k => (
+                          {(keys as string[]).map((k) => (
                             <span key={k} className={`text-[10px] font-bold ${cornerColor(edges[k])}`}>
-                              {k.replace(/^(front|back)/, "").replace(/([A-Z])/g, " $1").trim()}: {edges[k]}
+                              {k
+                                .replace(/^(front|back)/, "")
+                                .replace(/([A-Z])/g, " $1")
+                                .trim()}
+                              : {edges[k]}
                             </span>
                           ))}
                         </div>
@@ -453,12 +671,21 @@ export default function GradingReportPage() {
               <SubgradeCard label="Surface" value={subgrades.surface} isBlack={isBlack}>
                 {surface && (
                   <div className="pt-3 space-y-1">
-                    {surface.front != null && <div className="flex justify-between"><span className={`text-[10px] ${t.textMut}`}>Front</span><span className={`text-[10px] font-bold ${cornerColor(surface.front)}`}>{surface.front}</span></div>}
-                    {surface.back  != null && <div className="flex justify-between"><span className={`text-[10px] ${t.textMut}`}>Back</span><span className={`text-[10px] font-bold ${cornerColor(surface.back)}`}>{surface.back}</span></div>}
+                    {surface.front != null && (
+                      <div className="flex justify-between">
+                        <span className={`text-[10px] ${t.textMut}`}>Front</span>
+                        <span className={`text-[10px] font-bold ${cornerColor(surface.front)}`}>{surface.front}</span>
+                      </div>
+                    )}
+                    {surface.back != null && (
+                      <div className="flex justify-between">
+                        <span className={`text-[10px] ${t.textMut}`}>Back</span>
+                        <span className={`text-[10px] font-bold ${cornerColor(surface.back)}`}>{surface.back}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </SubgradeCard>
-
             </div>
             <p className={`text-[10px] mt-2 ${t.textMut}`}>Tap a subgrade to expand details.</p>
           </div>
@@ -467,7 +694,7 @@ export default function GradingReportPage() {
         {/* ── Defects ── */}
         <div className="reveal-on-scroll">
           <h2 className="text-xs font-bold uppercase tracking-widest mb-4 text-[#D4AF37]">Identified Defects</h2>
-          {defects.length === 0 ? (
+          {defects.length === 0 && whiteningLines.length === 0 && creaseLines.length === 0 ? (
             <div className={`rounded-xl p-6 text-center ${t.card}`}>
               <CheckCircle2 size={28} className="text-emerald-500 mx-auto mb-2" />
               <p className={`font-bold text-sm ${t.text}`}>No defects identified</p>
@@ -475,17 +702,83 @@ export default function GradingReportPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {defects.map(d => (
+              {defects.map((d) => (
                 <div key={d.id} className={`flex items-start gap-3 rounded-xl px-4 py-3 ${t.card}`}>
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-white text-[9px] font-black mt-0.5">{d.id}</span>
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-white text-[9px] font-black mt-0.5">
+                    {d.id}
+                  </span>
                   <div className={`flex-shrink-0 mt-1 ${t.textMut}`}>{defectIcon(d.type)}</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
                       <span className={`text-xs font-bold ${t.text}`}>{d.type}</span>
-                      <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_BADGE[d.severity] || SEV_BADGE.minor}`}>{d.severity}</span>
+                      <span
+                        className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${SEV_BADGE[d.severity] || SEV_BADGE.minor}`}
+                      >
+                        {d.severity}
+                      </span>
                       <span className={`text-[10px] ${t.textMut}`}>{d.location}</span>
                     </div>
                     {d.description && <p className={`text-xs leading-relaxed ${t.textSec}`}>{d.description}</p>}
+                  </div>
+                </div>
+              ))}
+              {/* MVGS v2 — whitening line entries. Coloured chip in the same
+                  hue as the on-image line so the customer can match badge to
+                  marking by eye. */}
+              {whiteningLines.map((w, i) => (
+                <div
+                  key={`w-${i}`}
+                  className={`flex items-start gap-3 rounded-xl px-4 py-3 ${t.card}`}
+                  data-testid={`whitening-row-${i}`}
+                >
+                  <span
+                    className="flex-shrink-0 mt-0.5 inline-block w-6 h-1 rounded-full"
+                    style={{ backgroundColor: w.color || "#D4AF37" }}
+                    aria-hidden="true"
+                  />
+                  <div className={`flex-shrink-0 mt-1 ${t.textMut}`}>
+                    <Minus size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                      <span className={`text-xs font-bold ${t.text}`}>Whitening · {w.edge}</span>
+                      <span className={`text-[10px] ${t.textMut}`}>{w.side}</span>
+                    </div>
+                    {typeof w.coveragePct === "number" && (
+                      <p className={`text-xs leading-relaxed ${t.textSec}`}>
+                        {Math.round(w.coveragePct)}% of edge affected
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* MVGS v2 — crease entries. */}
+              {creaseLines.map((cr, i) => (
+                <div
+                  key={`c-${i}`}
+                  className={`flex items-start gap-3 rounded-xl px-4 py-3 ${t.card}`}
+                  data-testid={`crease-row-${i}`}
+                >
+                  <span
+                    className="flex-shrink-0 mt-0.5 inline-block w-6 h-1 rounded-full"
+                    style={{ backgroundColor: cr.color || "#D4AF37" }}
+                    aria-hidden="true"
+                  />
+                  <div className={`flex-shrink-0 mt-1 ${t.textMut}`}>
+                    <Minus size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                      <span className={`text-xs font-bold ${t.text}`}>
+                        Crease{typeof cr.spanPct === "number" ? ` · ${Math.round(cr.spanPct)}%` : ""}
+                      </span>
+                      <span className={`text-[10px] ${t.textMut}`}>{cr.side}</span>
+                    </div>
+                    {typeof cr.spanPct === "number" && (
+                      <p className={`text-xs leading-relaxed ${t.textSec}`}>
+                        Spans {Math.round(cr.spanPct)}% across the card
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -507,8 +800,12 @@ export default function GradingReportPage() {
                 : "This card has been identified as NOT ORIGINAL."}
           </p>
           {authentication.notes && <p className={`text-xs mt-2 italic ${t.textMut}`}>{authentication.notes}</p>}
-          {ownership.nfcEnabled && <p className={`text-xs mt-2 ${t.textMut}`}>This slab contains an NFC chip. Tap to verify authenticity.</p>}
-          {ownership.status === "claimed" && <p className={`text-xs mt-2 text-[#D4AF37]`}>✓ Registered owner on file.</p>}
+          {ownership.nfcEnabled && (
+            <p className={`text-xs mt-2 ${t.textMut}`}>This slab contains an NFC chip. Tap to verify authenticity.</p>
+          )}
+          {ownership.status === "claimed" && (
+            <p className={`text-xs mt-2 text-[#D4AF37]`}>✓ Registered owner on file.</p>
+          )}
         </div>
 
         {/* ── Population ── */}
@@ -516,16 +813,19 @@ export default function GradingReportPage() {
           <div className={`rounded-xl p-5 ${t.card} reveal-on-scroll`}>
             <h2 className={`text-xs font-bold uppercase tracking-widest mb-3 text-[#D4AF37]`}>Population Context</h2>
             <p className={`text-sm ${t.textSec}`}>
-              MintVault has graded <strong className={t.text}>{population.totalGraded}</strong> {population.totalGraded === 1 ? "copy" : "copies"} of this card.
+              MintVault has graded <strong className={t.text}>{population.totalGraded}</strong>{" "}
+              {population.totalGraded === 1 ? "copy" : "copies"} of this card.
             </p>
             {population.percentile > 0 && (
               <p className={`text-sm mt-1 ${t.textSec}`}>
-                This card is graded higher than <strong className={t.text}>{population.percentile}%</strong> of copies in our registry.
+                This card is graded higher than <strong className={t.text}>{population.percentile}%</strong> of copies
+                in our registry.
               </p>
             )}
             {isBlack && (
               <p className="text-sm mt-1 text-[#D4AF37] font-bold">
-                ★ This is one of {population.sameGradeCount} Pristine 10P {population.sameGradeCount === 1 ? "copy" : "copies"} — the rarest grade at MintVault.
+                ★ This is one of {population.sameGradeCount} Pristine 10P{" "}
+                {population.sameGradeCount === 1 ? "copy" : "copies"} — the rarest grade at MintVault.
               </p>
             )}
             {population.higherGradeCount === 0 && population.totalGraded > 1 && (
@@ -539,14 +839,20 @@ export default function GradingReportPage() {
           <div className={`rounded-xl p-5 ${t.card} reveal-on-scroll`}>
             <h2 className="text-xs font-bold uppercase tracking-widest mb-3 text-[#D4AF37]">Estimated Market Value</h2>
             <p className={`text-2xl font-black ${t.text}`}>
-              {marketValue.currency === "GBP" ? "£" : "$"}{marketValue.estimatedLow} – {marketValue.currency === "GBP" ? "£" : "$"}{marketValue.estimatedHigh}
+              {marketValue.currency === "GBP" ? "£" : "$"}
+              {marketValue.estimatedLow} – {marketValue.currency === "GBP" ? "£" : "$"}
+              {marketValue.estimatedHigh}
             </p>
-            <p className={`text-xs mt-1 ${t.textMut}`}>AI-estimated retail value for a card of this grade. Not a guarantee of sale price.</p>
+            <p className={`text-xs mt-1 ${t.textMut}`}>
+              AI-estimated retail value for a card of this grade. Not a guarantee of sale price.
+            </p>
           </div>
         )}
 
         {/* ── Footer ── */}
-        <div className={`text-center pt-6 border-t ${isBlack ? "border-[#222222]" : "border-[#E8E4DC]"} reveal-on-scroll`}>
+        <div
+          className={`text-center pt-6 border-t ${isBlack ? "border-[#222222]" : "border-[#E8E4DC]"} reveal-on-scroll`}
+        >
           <p className={`text-xs mb-1 ${t.textMut}`}>Graded by MintVault UK · Kent · mintvaultuk.com</p>
           <p className={`text-[10px] mb-2 ${isBlack ? "text-[#444444]" : "text-[#CCCCCC]"}`}>
             This report is permanent and cannot be altered. Certificate {cert.certId}.
@@ -563,7 +869,6 @@ export default function GradingReportPage() {
             </a>
           </div>
         </div>
-
       </div>
 
       {/* Print styles */}

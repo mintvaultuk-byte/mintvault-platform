@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 
 const ManualCrop = lazy(() => import("./manual-crop"));
-import { MVGS_DEFECT_TYPES, deriveZone } from "./defect-annotation";
+import { MVGS_DEFECT_TYPES, deriveZone, LINE_COLOUR_PALETTE } from "./defect-annotation";
 import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
+import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -87,6 +88,32 @@ interface Props {
    *  position (e.g. above an absolute-positioning anchor wrapper). The
    *  fullscreen-mode renderTabs is unaffected. */
   omitSideTabs?: boolean;
+  /** MVGS v2.1 — line measurements drawn in-line with the pin tool. Mark
+   *  mode gains a tool palette (Pin | Whitening | Crease); when whitening or
+   *  crease is active, click-drag captures a segment. Each commit fires the
+   *  matching onChange below with the FULL new array (replace-semantics).
+   *  Omitted handlers → that tool option is hidden, mark-mode falls back to
+   *  pin-only. The MeasurementTool overlay was retired; this is its
+   *  replacement. */
+  whiteningLines?: Array<{
+    id?: string;
+    side: "front" | "back";
+    edge: "top" | "right" | "bottom" | "left";
+    coveragePct: number;
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    color?: string;
+  }>;
+  creaseLines?: Array<{
+    id: string;
+    side: "front" | "back";
+    spanPct: number;
+    start: { x: number; y: number };
+    end: { x: number; y: number };
+    color?: string;
+  }>;
+  onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
+  onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
 }
 
 // Auto-map legacy `type` strings (from DEFECT_TYPES list or AI-defect
@@ -183,6 +210,10 @@ export default function ImageViewer({
   readOnly,
   side: controlledSide,
   omitSideTabs,
+  whiteningLines = [],
+  creaseLines = [],
+  onWhiteningLinesChange,
+  onCreaseLinesChange,
 }: Props) {
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
@@ -224,6 +255,18 @@ export default function ImageViewer({
   // Controlled when `side` prop supplied; otherwise falls back to internal state.
   const side: Side = controlledSide ?? internalSide;
   const [variant, setVariant] = useState<Variant>("original");
+
+  // Measured offset + size of the <img> element inside its parent. Placement
+  // (handleContainerClick + imagePctFromEvent) already reads `imgElRef
+  // .getBoundingClientRect()` — i.e. the IMAGE box after object-contain
+  // letterboxing. Render previously used the PARENT div as the coord basis,
+  // which differs by the 1.5% container padding + any object-contain letterbox
+  // bars when the image's aspect ≠ the container's 5:7 aspectRatio. The two
+  // mismatched bases produced the visible drift on layout reflow (opening /
+  // closing Manual Centering re-laid out the grid → letterbox bars shifted →
+  // pins jumped). Anchoring the pin/line overlay to this measured img box
+  // collapses both bases to one, so render and placement always agree.
+  const [imgBox, setImgBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [showReference, setShowReference] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -233,6 +276,27 @@ export default function ImageViewer({
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkModeRaw] = useState(false);
   const [fullscreen, setFullscreenRaw] = useState(false);
+
+  // MVGS v2.1 — mark-mode tool palette. `pin` (existing) | `whitening` |
+  // `crease`. Pin path is completely untouched when this is "pin"; gate is
+  // checked once at click time so non-line-mode behaviour is byte-identical
+  // to v2.0. Line tools are only mounted when the matching onChange handler
+  // is wired by the parent.
+  type MarkTool = "pin" | "whitening" | "crease";
+  const [markTool, setMarkTool] = useState<MarkTool>("pin");
+  // MVGS v2.1 — currently selected line colour (display-only). Picked in the
+  // palette BEFORE drawing; each new whitening/crease line is born with this
+  // colour. Change the palette → the NEXT line uses it; already-drawn lines
+  // keep their own colour. Stripped at the mvgs-input-builder boundary, so it
+  // never reaches the engine.
+  const [lineColor, setLineColor] = useState<string>(LINE_COLOUR_PALETTE[0]);
+  // In-progress line drawing (image-relative percent coords). Mouse-down
+  // captures `lineStart`, mouse-move tracks `lineEnd` for the live preview,
+  // mouse-up commits via onWhiteningLinesChange / onCreaseLinesChange.
+  const [lineStart, setLineStart] = useState<{ x: number; y: number } | null>(null);
+  const [lineEnd, setLineEnd] = useState<{ x: number; y: number } | null>(null);
+  const canDrawWhitening = !!onWhiteningLinesChange;
+  const canDrawCrease = !!onCreaseLinesChange;
 
   function setSide(s: Side) {
     // Only mutate internal state when uncontrolled. Controlled callers
@@ -309,6 +373,48 @@ export default function ImageViewer({
   const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
   const backDefectCount = defects.filter((d) => d.image_side === "back").length;
 
+  // Measure the <img>'s actual position inside its parent on every layout
+  // change. ResizeObserver fires on parent resize (zoom / fullscreen / window
+  // resize) and on the img's intrinsic-size change (variant swap, recrop URL
+  // load). `load` covers the first paint when ResizeObserver hasn't latched
+  // yet. Same parent as the pin overlay container so the offset numbers map
+  // straight into its coordinate system.
+  useEffect(() => {
+    const img = imgElRef.current;
+    if (!img) return;
+    let raf = 0;
+    const measure = () => {
+      const parent = img.parentElement;
+      if (!parent) return;
+      const pRect = parent.getBoundingClientRect();
+      const iRect = img.getBoundingClientRect();
+      if (iRect.width === 0 || iRect.height === 0) return;
+      setImgBox({
+        left: iRect.left - pRect.left,
+        top: iRect.top - pRect.top,
+        width: iRect.width,
+        height: iRect.height,
+      });
+    };
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(img);
+    if (img.parentElement) ro.observe(img.parentElement);
+    img.addEventListener("load", schedule);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      img.removeEventListener("load", schedule);
+    };
+    // Re-run when the displayed side/variant changes so the new image's
+    // bounding box is measured fresh; img.load + ResizeObserver cover any
+    // further intra-side layout changes (zoom, fullscreen, window resize).
+  }, [side, variant]);
+
   // Keyboard shortcuts for fullscreen mode. Esc unwinds in order:
   // picker → pending batch → exit. Enter on a non-empty batch opens
   // the type picker. F/B switch sides (skipped while typing in a field).
@@ -353,6 +459,10 @@ export default function ImageViewer({
 
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (dragging) return;
+    // Line tools intercept clicks via mousedown/mouseup (see handleMouseDown
+    // /handleMouseUp); on click here we just skip so the existing pin path
+    // doesn't fire too. lineStart != null = a drag is in progress.
+    if (markMode && markTool !== "pin") return;
     if (markMode && imgElRef.current) {
       // Double-click shortcut: two clicks within 280ms = "Done" — open the
       // type picker on the current batch instead of dropping a 2nd pin.
@@ -384,6 +494,80 @@ export default function ImageViewer({
     }
   }
 
+  // MVGS v2.1 — line-tool helpers. Image-relative percent coords are read
+  // from the live `<img>` rect, identical to the pin path.
+  function imagePctFromEvent(e: React.MouseEvent): { x: number; y: number } | null {
+    const el = imgElRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100)),
+    };
+  }
+
+  function lineMouseDown(e: React.MouseEvent) {
+    if (!markMode) return;
+    if (markTool === "pin") return;
+    if (markTool === "whitening" && !canDrawWhitening) return;
+    if (markTool === "crease" && !canDrawCrease) return;
+    e.preventDefault();
+    const p = imagePctFromEvent(e);
+    if (!p) return;
+    setLineStart(p);
+    setLineEnd(p);
+  }
+
+  function lineMouseMove(e: React.MouseEvent) {
+    if (!lineStart) return;
+    const p = imagePctFromEvent(e);
+    if (p) setLineEnd(p);
+  }
+
+  function lineMouseUp() {
+    if (!lineStart || !lineEnd) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    // Trivially small click = ignore (operator just clicked, didn't drag).
+    const dx = Math.abs(lineEnd.x - lineStart.x);
+    const dy = Math.abs(lineEnd.y - lineStart.y);
+    if (Math.max(dx, dy) < 2) {
+      setLineStart(null);
+      setLineEnd(null);
+      return;
+    }
+    if (markTool === "whitening" && side !== "angled" && side !== "closeup" && onWhiteningLinesChange) {
+      // Direction-first edge auto-detect (operator can override in the list).
+      const edge = detectEdge(lineStart, lineEnd);
+      const coveragePct = coverageFromSegment(lineStart, lineEnd, edge);
+      const id = `wl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      // APPEND — multiple whitening lines per (side, edge) are allowed.
+      // Three separate whitened patches along the top stay distinct on the
+      // card, in the list, individually deletable. The engine boundary in
+      // shared/mvgs-input-builder.ts collapses to ONE entry per edge using
+      // MAX coverage (worst-line-wins, no compounding) so extra lines don't
+      // change the grade.
+      const sideKey = side as "front" | "back";
+      onWhiteningLinesChange([
+        ...whiteningLines,
+        { id, side: sideKey, edge, coveragePct, start: lineStart, end: lineEnd, color: lineColor },
+      ]);
+    } else if (markTool === "crease" && side !== "angled" && side !== "closeup" && onCreaseLinesChange) {
+      const spanPct = creaseSpanFromSegment(lineStart, lineEnd);
+      const id = `cl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+      const sideKey = side as "front" | "back";
+      // Crease appends — multiple creases per cert (longest wins in the engine).
+      onCreaseLinesChange([
+        ...creaseLines,
+        { id, side: sideKey, spanPct, start: lineStart, end: lineEnd, color: lineColor },
+      ]);
+    }
+    setLineStart(null);
+    setLineEnd(null);
+  }
+
   function handleWheel(e: React.WheelEvent) {
     e.preventDefault(); // prevent page scroll but don't zoom — use buttons instead
   }
@@ -400,6 +584,12 @@ export default function ImageViewer({
   }
 
   function handleMouseDown(e: React.MouseEvent) {
+    // MVGS v2.1 — line tools take priority in mark mode. Pin path keeps
+    // the pan/drag behaviour outside mark mode unchanged.
+    if (markMode && markTool !== "pin") {
+      lineMouseDown(e);
+      return;
+    }
     if (zoom <= 1 && !markMode) return;
     if (markMode && zoom <= 1) return;
     setDragging(true);
@@ -407,11 +597,19 @@ export default function ImageViewer({
   }
 
   function handleMouseMove(e: React.MouseEvent) {
+    if (lineStart) {
+      lineMouseMove(e);
+      return;
+    }
     if (!dragging) return;
     setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
   }
 
   function handleMouseUp() {
+    if (lineStart) {
+      lineMouseUp();
+      return;
+    }
     setDragging(false);
   }
 
@@ -595,331 +793,424 @@ export default function ImageViewer({
                 draggable={false}
               />
 
-              {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
-              {showCentering &&
-                (() => {
-                  const cd = side === "front" ? centeringFront : centeringBack;
-                  if (!cd) return null;
-                  const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
-                  const inner = cd.innerFrame;
-                  // Compute geometric centering from outer + inner frame coordinates
-                  let lPct = 50,
-                    rPct = 50,
-                    tPct = 50,
-                    bPct = 50;
-                  if (inner) {
-                    const leftM = inner.left_pct - outer.left_pct;
-                    const rightM = outer.right_pct - inner.right_pct;
-                    const topM = inner.top_pct - outer.top_pct;
-                    const botM = outer.bottom_pct - inner.bottom_pct;
-                    const lrTotal = leftM + rightM;
-                    const tbTotal = topM + botM;
-                    if (lrTotal > 0) {
-                      lPct = Math.round((leftM / lrTotal) * 100);
-                      rPct = 100 - lPct;
-                    }
-                    if (tbTotal > 0) {
-                      tPct = Math.round((topM / tbTotal) * 100);
-                      bPct = 100 - tPct;
-                    }
-                  }
-                  // Sanity checks
-                  let warning = "";
-                  if (inner) {
-                    const innerW = inner.right_pct - inner.left_pct;
-                    const innerH = inner.bottom_pct - inner.top_pct;
-                    const outerW = outer.right_pct - outer.left_pct;
-                    const outerH = outer.bottom_pct - outer.top_pct;
-                    const areaRatio = (innerW * innerH) / (outerW * outerH);
-                    if (areaRatio < 0.4)
-                      warning = "⚠ Inner frame too small — may be measuring art window, not card border";
-                    if (Math.abs(lPct - tPct) > 20) warning = "⚠ L/R and T/B differ significantly — verify inner frame";
-                  }
-
-                  // Fallback to AI ratios if no frame coords
-                  const lr = inner ? [lPct, rPct] : cd.ratioLR?.split("/").map(Number) || [50, 50];
-                  const tb = inner ? [tPct, bPct] : cd.ratioTB?.split("/").map(Number) || [50, 50];
-                  const midY = inner ? (inner.top_pct + inner.bottom_pct) / 2 : 50;
-                  const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
-                  return (
-                    <svg
-                      className="absolute inset-0 w-full h-full pointer-events-none"
-                      viewBox="0 0 100 100"
-                      preserveAspectRatio="none"
-                    >
-                      {/* Sanity warning */}
-                      {warning && (
-                        <text x="50" y="3" textAnchor="middle" fill="#FF6600" fontSize="2.5" fontWeight="bold">
-                          {warning}
-                        </text>
-                      )}
-                      {/* Outer frame — solid gold, traces card physical edge */}
-                      <rect
-                        x={outer.left_pct}
-                        y={outer.top_pct}
-                        width={outer.right_pct - outer.left_pct}
-                        height={outer.bottom_pct - outer.top_pct}
-                        fill="none"
-                        stroke="#D4AF37"
-                        strokeWidth="0.6"
-                        opacity="0.7"
+              {/* Img-relative overlay layer. ALL pin / line / centering visuals
+                  render inside this wrapper, which sizes itself to the
+                  measured <img> bounding box (object-contain-aware). Coords
+                  inside (left: %, top: %) therefore map onto the VISIBLE
+                  image, exactly matching where handleContainerClick and
+                  imagePctFromEvent captured them. When imgBox hasn't been
+                  measured yet (first paint), we fall back to inset:0 so the
+                  pre-fix behaviour holds until ResizeObserver lands. */}
+              <div
+                className="absolute"
+                style={
+                  imgBox
+                    ? { left: imgBox.left, top: imgBox.top, width: imgBox.width, height: imgBox.height }
+                    : { inset: 0 }
+                }
+              >
+                {/* MVGS v2.1 — line overlays. Whitening (yellow default) and
+                  crease (cyan default) lines for the current side render here;
+                  the in-progress drag preview renders below them so it sits on
+                  top while drawing. Colour comes from each line entry's
+                  display-only `color` field, defaulting per type. pointer-
+                  events:none so clicks still reach the container's handlers. */}
+                {(whiteningLines.length > 0 || creaseLines.length > 0 || lineStart) && (
+                  <svg
+                    className="absolute inset-0 w-full h-full pointer-events-none"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                  >
+                    {whiteningLines
+                      .filter((l) => l.side === side && l.start && l.end)
+                      .map((l, i) => (
+                        <g key={`wl-${l.id ?? i}`}>
+                          <line
+                            x1={l.start!.x}
+                            y1={l.start!.y}
+                            x2={l.end!.x}
+                            y2={l.end!.y}
+                            stroke="rgba(0,0,0,0.55)"
+                            strokeWidth={3}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={l.start!.x}
+                            y1={l.start!.y}
+                            x2={l.end!.x}
+                            y2={l.end!.y}
+                            stroke={l.color ?? "#FFD400"}
+                            strokeWidth={1.5}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        </g>
+                      ))}
+                    {creaseLines
+                      .filter((l) => l.side === side)
+                      .map((l) => (
+                        <g key={`cl-${l.id}`}>
+                          <line
+                            x1={l.start.x}
+                            y1={l.start.y}
+                            x2={l.end.x}
+                            y2={l.end.y}
+                            stroke="rgba(0,0,0,0.55)"
+                            strokeWidth={3}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={l.start.x}
+                            y1={l.start.y}
+                            x2={l.end.x}
+                            y2={l.end.y}
+                            stroke={l.color ?? "#00CCFF"}
+                            strokeWidth={1.5}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        </g>
+                      ))}
+                    {lineStart && lineEnd && (
+                      <line
+                        x1={lineStart.x}
+                        y1={lineStart.y}
+                        x2={lineEnd.x}
+                        y2={lineEnd.y}
+                        stroke={lineColor}
+                        strokeWidth={1.5}
+                        vectorEffect="non-scaling-stroke"
+                        strokeDasharray="2 2"
                       />
-                      {/* Inner frame — dashed gold, traces artwork boundary */}
-                      {inner && (
+                    )}
+                  </svg>
+                )}
+
+                {/* Centering overlay — outer (card edge) + inner (artwork frame) */}
+                {showCentering &&
+                  (() => {
+                    const cd = side === "front" ? centeringFront : centeringBack;
+                    if (!cd) return null;
+                    const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
+                    const inner = cd.innerFrame;
+                    // Compute geometric centering from outer + inner frame coordinates
+                    let lPct = 50,
+                      rPct = 50,
+                      tPct = 50,
+                      bPct = 50;
+                    if (inner) {
+                      const leftM = inner.left_pct - outer.left_pct;
+                      const rightM = outer.right_pct - inner.right_pct;
+                      const topM = inner.top_pct - outer.top_pct;
+                      const botM = outer.bottom_pct - inner.bottom_pct;
+                      const lrTotal = leftM + rightM;
+                      const tbTotal = topM + botM;
+                      if (lrTotal > 0) {
+                        lPct = Math.round((leftM / lrTotal) * 100);
+                        rPct = 100 - lPct;
+                      }
+                      if (tbTotal > 0) {
+                        tPct = Math.round((topM / tbTotal) * 100);
+                        bPct = 100 - tPct;
+                      }
+                    }
+                    // Sanity checks
+                    let warning = "";
+                    if (inner) {
+                      const innerW = inner.right_pct - inner.left_pct;
+                      const innerH = inner.bottom_pct - inner.top_pct;
+                      const outerW = outer.right_pct - outer.left_pct;
+                      const outerH = outer.bottom_pct - outer.top_pct;
+                      const areaRatio = (innerW * innerH) / (outerW * outerH);
+                      if (areaRatio < 0.4)
+                        warning = "⚠ Inner frame too small — may be measuring art window, not card border";
+                      if (Math.abs(lPct - tPct) > 20)
+                        warning = "⚠ L/R and T/B differ significantly — verify inner frame";
+                    }
+
+                    // Fallback to AI ratios if no frame coords
+                    const lr = inner ? [lPct, rPct] : cd.ratioLR?.split("/").map(Number) || [50, 50];
+                    const tb = inner ? [tPct, bPct] : cd.ratioTB?.split("/").map(Number) || [50, 50];
+                    const midY = inner ? (inner.top_pct + inner.bottom_pct) / 2 : 50;
+                    const midX = inner ? (inner.left_pct + inner.right_pct) / 2 : 50;
+                    return (
+                      <svg
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                      >
+                        {/* Sanity warning */}
+                        {warning && (
+                          <text x="50" y="3" textAnchor="middle" fill="#FF6600" fontSize="2.5" fontWeight="bold">
+                            {warning}
+                          </text>
+                        )}
+                        {/* Outer frame — solid gold, traces card physical edge */}
                         <rect
-                          x={inner.left_pct}
-                          y={inner.top_pct}
-                          width={inner.right_pct - inner.left_pct}
-                          height={inner.bottom_pct - inner.top_pct}
+                          x={outer.left_pct}
+                          y={outer.top_pct}
+                          width={outer.right_pct - outer.left_pct}
+                          height={outer.bottom_pct - outer.top_pct}
                           fill="none"
                           stroke="#D4AF37"
-                          strokeWidth="0.4"
-                          strokeDasharray="1.5,1"
-                          opacity="0.8"
+                          strokeWidth="0.6"
+                          opacity="0.7"
                         />
-                      )}
-                      {/* Measurement lines + computed percentages */}
-                      {inner && (
-                        <>
-                          <line
-                            x1={outer.left_pct}
-                            y1={midY}
-                            x2={inner.left_pct}
-                            y2={midY}
+                        {/* Inner frame — dashed gold, traces artwork boundary */}
+                        {inner && (
+                          <rect
+                            x={inner.left_pct}
+                            y={inner.top_pct}
+                            width={inner.right_pct - inner.left_pct}
+                            height={inner.bottom_pct - inner.top_pct}
+                            fill="none"
                             stroke="#D4AF37"
-                            strokeWidth="0.3"
-                            opacity="0.6"
+                            strokeWidth="0.4"
+                            strokeDasharray="1.5,1"
+                            opacity="0.8"
                           />
-                          <text
-                            x={(outer.left_pct + inner.left_pct) / 2}
-                            y={midY - 1.5}
-                            textAnchor="middle"
-                            fill="#D4AF37"
-                            fontSize="3"
-                            fontWeight="bold"
-                            opacity="0.9"
-                          >
-                            {lr[0]}%
-                          </text>
-                          <line
-                            x1={inner.right_pct}
-                            y1={midY}
-                            x2={outer.right_pct}
-                            y2={midY}
-                            stroke="#D4AF37"
-                            strokeWidth="0.3"
-                            opacity="0.6"
-                          />
-                          <text
-                            x={(inner.right_pct + outer.right_pct) / 2}
-                            y={midY - 1.5}
-                            textAnchor="middle"
-                            fill="#D4AF37"
-                            fontSize="3"
-                            fontWeight="bold"
-                            opacity="0.9"
-                          >
-                            {lr[1]}%
-                          </text>
-                          <line
-                            x1={midX}
-                            y1={outer.top_pct}
-                            x2={midX}
-                            y2={inner.top_pct}
-                            stroke="#D4AF37"
-                            strokeWidth="0.3"
-                            opacity="0.6"
-                          />
-                          <text
-                            x={midX}
-                            y={(outer.top_pct + inner.top_pct) / 2 + 1}
-                            textAnchor="middle"
-                            fill="#D4AF37"
-                            fontSize="3"
-                            fontWeight="bold"
-                            opacity="0.9"
-                          >
-                            {tb[0]}%
-                          </text>
-                          <line
-                            x1={midX}
-                            y1={inner.bottom_pct}
-                            x2={midX}
-                            y2={outer.bottom_pct}
-                            stroke="#D4AF37"
-                            strokeWidth="0.3"
-                            opacity="0.6"
-                          />
-                          <text
-                            x={midX}
-                            y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1}
-                            textAnchor="middle"
-                            fill="#D4AF37"
-                            fontSize="3"
-                            fontWeight="bold"
-                            opacity="0.9"
-                          >
-                            {tb[1]}%
-                          </text>
-                        </>
-                      )}
-                    </svg>
-                  );
-                })()}
+                        )}
+                        {/* Measurement lines + computed percentages */}
+                        {inner && (
+                          <>
+                            <line
+                              x1={outer.left_pct}
+                              y1={midY}
+                              x2={inner.left_pct}
+                              y2={midY}
+                              stroke="#D4AF37"
+                              strokeWidth="0.3"
+                              opacity="0.6"
+                            />
+                            <text
+                              x={(outer.left_pct + inner.left_pct) / 2}
+                              y={midY - 1.5}
+                              textAnchor="middle"
+                              fill="#D4AF37"
+                              fontSize="3"
+                              fontWeight="bold"
+                              opacity="0.9"
+                            >
+                              {lr[0]}%
+                            </text>
+                            <line
+                              x1={inner.right_pct}
+                              y1={midY}
+                              x2={outer.right_pct}
+                              y2={midY}
+                              stroke="#D4AF37"
+                              strokeWidth="0.3"
+                              opacity="0.6"
+                            />
+                            <text
+                              x={(inner.right_pct + outer.right_pct) / 2}
+                              y={midY - 1.5}
+                              textAnchor="middle"
+                              fill="#D4AF37"
+                              fontSize="3"
+                              fontWeight="bold"
+                              opacity="0.9"
+                            >
+                              {lr[1]}%
+                            </text>
+                            <line
+                              x1={midX}
+                              y1={outer.top_pct}
+                              x2={midX}
+                              y2={inner.top_pct}
+                              stroke="#D4AF37"
+                              strokeWidth="0.3"
+                              opacity="0.6"
+                            />
+                            <text
+                              x={midX}
+                              y={(outer.top_pct + inner.top_pct) / 2 + 1}
+                              textAnchor="middle"
+                              fill="#D4AF37"
+                              fontSize="3"
+                              fontWeight="bold"
+                              opacity="0.9"
+                            >
+                              {tb[0]}%
+                            </text>
+                            <line
+                              x1={midX}
+                              y1={inner.bottom_pct}
+                              x2={midX}
+                              y2={outer.bottom_pct}
+                              stroke="#D4AF37"
+                              strokeWidth="0.3"
+                              opacity="0.6"
+                            />
+                            <text
+                              x={midX}
+                              y={(inner.bottom_pct + outer.bottom_pct) / 2 + 1}
+                              textAnchor="middle"
+                              fill="#D4AF37"
+                              fontSize="3"
+                              fontWeight="bold"
+                              opacity="0.9"
+                            >
+                              {tb[1]}%
+                            </text>
+                          </>
+                        )}
+                      </svg>
+                    );
+                  })()}
 
-              {/* Defect ring markers — clickable when not readOnly and an
+                {/* Defect ring markers — clickable when not readOnly and an
                 onDefectsChange handler exists. Click opens an inline popover
                 anchored to the marker for edit / delete. AI markers are also
                 editable (they share the defects[] array with admin-placed). */}
-              {showDefects &&
-                (() => {
-                  let humanIdx = 0;
-                  const clickable = !readOnly && !!onDefectsChange;
-                  return sideDefects.map((d) => {
-                    const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
-                    if (!isAi) humanIdx++;
-                    const isHL = highlightId === d.id;
-                    // Tier-coloured ring: D1=red, D2=orange, D3=green.
-                    // AI pins (no tier yet) keep red as a "needs review" cue.
-                    // Legacy admin pins with no tier fall back to gold.
-                    const col = (() => {
-                      if (d.tier === "D1") return "#DC2626"; // red-600
-                      if (d.tier === "D2") return "#F59E0B"; // amber-500 (yellow-orange)
-                      if (d.tier === "D3") return "#16A34A"; // green-600
-                      if (isAi) return "#DC2626";
-                      return "#D4AF37"; // gold (legacy)
-                    })();
-                    const badge = isAi ? "AI" : String(humanIdx);
-                    const isEditing = editingDefectId === d.id;
-                    // Popover above marker when marker is in lower half; below
-                    // when in upper half — keeps marker visible.
-                    const popoverAbove = d.y_percent > 50;
-                    return (
-                      <div
-                        key={d.id}
-                        className={`absolute ${clickable ? "" : "pointer-events-none"} ${isHL ? "defect-ring-pulse" : ""}`}
-                        style={{
-                          left: `${d.x_percent}%`,
-                          top: `${d.y_percent}%`,
-                          transform: "translate(-50%, -50%)",
-                          width: 32,
-                          height: 32,
-                        }}
-                      >
-                        {/* Marker ring — a button when clickable so keyboard nav
+                {showDefects &&
+                  (() => {
+                    let humanIdx = 0;
+                    const clickable = !readOnly && !!onDefectsChange;
+                    return sideDefects.map((d) => {
+                      const isAi = !!(d as any)._aiSource || !!(d as any).detected_in;
+                      if (!isAi) humanIdx++;
+                      const isHL = highlightId === d.id;
+                      // Tier-coloured ring: D1=red, D2=orange, D3=green.
+                      // AI pins (no tier yet) keep red as a "needs review" cue.
+                      // Legacy admin pins with no tier fall back to gold.
+                      const col = (() => {
+                        if (d.tier === "D1") return "#DC2626"; // red-600
+                        if (d.tier === "D2") return "#F59E0B"; // amber-500 (yellow-orange)
+                        if (d.tier === "D3") return "#16A34A"; // green-600
+                        if (isAi) return "#DC2626";
+                        return "#D4AF37"; // gold (legacy)
+                      })();
+                      const badge = isAi ? "AI" : String(humanIdx);
+                      const isEditing = editingDefectId === d.id;
+                      // Popover above marker when marker is in lower half; below
+                      // when in upper half — keeps marker visible.
+                      const popoverAbove = d.y_percent > 50;
+                      return (
+                        <div
+                          key={d.id}
+                          className={`absolute ${clickable ? "" : "pointer-events-none"} ${isHL ? "defect-ring-pulse" : ""}`}
+                          style={{
+                            left: `${d.x_percent}%`,
+                            top: `${d.y_percent}%`,
+                            transform: "translate(-50%, -50%)",
+                            width: 32,
+                            height: 32,
+                          }}
+                        >
+                          {/* Marker ring — a button when clickable so keyboard nav
                         + role + aria-label come for free. Falls back to a
                         decorative div when read-only / handler missing.
                         Light fill so the centre dot (drawn separately below)
                         reads clearly against any background image. */}
-                        {clickable ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (isEditing) {
-                                setEditingDefectId(null);
-                                setEditingDefectAnchor(null);
-                              } else {
-                                // Capture the marker's viewport rect so the
-                                // portal'd popover can position itself in fixed
-                                // coordinates. currentTarget is the marker button;
-                                // its bounding rect matches the visible marker.
-                                setEditingDefectAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
-                                setEditingDefectId(d.id);
-                              }
-                            }}
-                            title={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}`}
-                            aria-label={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}. Click to edit or delete.`}
-                            className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[var(--admin-gold)]/60"
-                            style={{
-                              border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
-                              background: "transparent",
-                              boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none",
-                            }}
-                          />
-                        ) : (
-                          <div
-                            className="w-full h-full rounded-full transition-all"
-                            title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
-                            style={{
-                              border: `${isHL ? 3 : 2}px solid ${col}`,
-                              background: "transparent",
-                              boxShadow: isHL ? `0 0 8px ${col}80` : "none",
-                            }}
-                          />
-                        )}
-                        {/* Centre dot — 4 px filled circle in the tier
+                          {clickable ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isEditing) {
+                                  setEditingDefectId(null);
+                                  setEditingDefectAnchor(null);
+                                } else {
+                                  // Capture the marker's viewport rect so the
+                                  // portal'd popover can position itself in fixed
+                                  // coordinates. currentTarget is the marker button;
+                                  // its bounding rect matches the visible marker.
+                                  setEditingDefectAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
+                                  setEditingDefectId(d.id);
+                                }
+                              }}
+                              title={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}`}
+                              aria-label={`Defect ${badge}: ${d.mvgsCode ?? d.type}${d.tier ? ` (${d.tier})` : ""}. Click to edit or delete.`}
+                              className="w-full h-full rounded-full transition-all cursor-pointer hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[var(--admin-gold)]/60"
+                              style={{
+                                border: `${isHL || isEditing ? 3 : 2}px solid ${col}`,
+                                background: "transparent",
+                                boxShadow: isHL || isEditing ? `0 0 8px ${col}80` : "none",
+                              }}
+                            />
+                          ) : (
+                            <div
+                              className="w-full h-full rounded-full transition-all"
+                              title={readOnly ? "Click EDIT GRADE to edit defects" : undefined}
+                              style={{
+                                border: `${isHL ? 3 : 2}px solid ${col}`,
+                                background: "transparent",
+                                boxShadow: isHL ? `0 0 8px ${col}80` : "none",
+                              }}
+                            />
+                          )}
+                          {/* Centre dot — 4 px filled circle in the tier
                             colour (gold for ungraded pins). Always rendered
                             so the exact click point is visible on every pin.
                             Pointer-events off so the underlying button still
                             receives clicks anywhere inside the ring. */}
-                        <span
-                          aria-hidden="true"
-                          className="absolute pointer-events-none rounded-full"
-                          style={{
-                            left: "50%",
-                            top: "50%",
-                            transform: "translate(-50%, -50%)",
-                            width: 4,
-                            height: 4,
-                            background: col,
-                          }}
-                        />
-                        <span
-                          className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
-                          style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}
-                        >
-                          {badge}
-                        </span>
-
-                        {/* Inline edit/delete popover */}
-                        {isEditing && editingDefectAnchor && (
-                          <DefectEditPopover
-                            defect={d}
-                            badge={badge}
-                            anchorAbove={popoverAbove}
-                            anchorRect={editingDefectAnchor}
-                            onChangeField={(k, v) => updateDefectField(d.id, k, v)}
-                            onBulkUpdate={(patch) => {
-                              if (!onDefectsChange) return;
-                              onDefectsChange(defects.map((dd) => (dd.id === d.id ? { ...dd, ...patch } : dd)));
-                            }}
-                            onDelete={() => deleteDefect(d.id)}
-                            onClose={() => {
-                              setEditingDefectId(null);
-                              setEditingDefectAnchor(null);
+                          <span
+                            aria-hidden="true"
+                            className="absolute pointer-events-none rounded-full"
+                            style={{
+                              left: "50%",
+                              top: "50%",
+                              transform: "translate(-50%, -50%)",
+                              width: 4,
+                              height: 4,
+                              background: col,
                             }}
                           />
-                        )}
-                      </div>
-                    );
-                  });
-                })()}
+                          <span
+                            className="absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
+                            style={{ background: col, color: isAi ? "#fff" : "#1A1400" }}
+                          >
+                            {badge}
+                          </span>
 
-              {/* Pending batch pins — grey numbered markers for the current
+                          {/* Inline edit/delete popover */}
+                          {isEditing && editingDefectAnchor && (
+                            <DefectEditPopover
+                              defect={d}
+                              badge={badge}
+                              anchorAbove={popoverAbove}
+                              anchorRect={editingDefectAnchor}
+                              onChangeField={(k, v) => updateDefectField(d.id, k, v)}
+                              onBulkUpdate={(patch) => {
+                                if (!onDefectsChange) return;
+                                onDefectsChange(defects.map((dd) => (dd.id === d.id ? { ...dd, ...patch } : dd)));
+                              }}
+                              onDelete={() => deleteDefect(d.id)}
+                              onClose={() => {
+                                setEditingDefectId(null);
+                                setEditingDefectAnchor(null);
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+
+                {/* Pending batch pins — grey numbered markers for the current
                 click-batch. Each click in markMode adds a pin here; the Done
                 button (or Enter / dbl-click) opens the picker which commits
                 all of them at once. Filtered to the visible side. */}
-              {pendingBatch
-                .filter((p) => p.image_side === side)
-                .map((p) => (
-                  <div
-                    key={p.localId}
-                    className="absolute pointer-events-none"
-                    style={{
-                      left: `${p.x}%`,
-                      top: `${p.y}%`,
-                      transform: "translate(-50%, -50%)",
-                      width: 32,
-                      height: 32,
-                    }}
-                  >
-                    <div className="w-full h-full rounded-full border-2 border-[var(--admin-gold)] bg-transparent" />
-                    <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[var(--admin-ink-dim)] text-white px-1 rounded-full leading-none py-0.5">
-                      {p.localId}
-                    </span>
-                  </div>
-                ))}
+                {pendingBatch
+                  .filter((p) => p.image_side === side)
+                  .map((p) => (
+                    <div
+                      key={p.localId}
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: `${p.x}%`,
+                        top: `${p.y}%`,
+                        transform: "translate(-50%, -50%)",
+                        width: 32,
+                        height: 32,
+                      }}
+                    >
+                      <div className="w-full h-full rounded-full border-2 border-[var(--admin-gold)] bg-transparent" />
+                      <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[var(--admin-ink-dim)] text-white px-1 rounded-full leading-none py-0.5">
+                        {p.localId}
+                      </span>
+                    </div>
+                  ))}
+              </div>
             </div>
           ) : certId ? (
             /* Inline drop zone for missing side */
@@ -1009,12 +1300,82 @@ export default function ImageViewer({
 
           {/* Bottom toolbar */}
           <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[var(--admin-line-hard)]">
-            <p className="text-[var(--admin-ink-dim)] text-xs">
-              {defects.length} defect{defects.length !== 1 ? "s" : ""} marked
-              <span className="text-[var(--admin-ink-dim)] ml-3">
-                Click pins, then Done to assign type · Enter / dbl-click = Done · F/B switch sides · Esc to exit
-              </span>
-            </p>
+            <div className="flex items-center gap-3">
+              {/* MVGS v2.1 tool palette — Pin | Whitening line | Crease line.
+                  Pin path is unchanged; the line tools are gated on the
+                  parent wiring onWhiteningLinesChange / onCreaseLinesChange. */}
+              <div className="flex rounded-lg overflow-hidden border border-[var(--admin-line-hard)] text-[10px] font-bold uppercase">
+                <button
+                  type="button"
+                  onClick={() => setMarkTool("pin")}
+                  data-testid="btn-mark-tool-pin"
+                  className={`px-3 py-1.5 ${
+                    markTool === "pin"
+                      ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                      : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                  }`}
+                >
+                  Pin
+                </button>
+                {canDrawWhitening && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("whitening")}
+                    data-testid="btn-mark-tool-whitening"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line-hard)] ${
+                      markTool === "whitening"
+                        ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                        : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                    }`}
+                  >
+                    Whitening line
+                  </button>
+                )}
+                {canDrawCrease && (
+                  <button
+                    type="button"
+                    onClick={() => setMarkTool("crease")}
+                    data-testid="btn-mark-tool-crease"
+                    className={`px-3 py-1.5 border-l border-[var(--admin-line-hard)] ${
+                      markTool === "crease"
+                        ? "bg-[var(--admin-gold)] text-[#1A1400]"
+                        : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]"
+                    }`}
+                  >
+                    Crease line
+                  </button>
+                )}
+              </div>
+              {/* MVGS v2.1 — line colour selector. Pick BEFORE drawing; the
+                  next line is born in this colour. Display-only (stripped at
+                  the mvgs-input-builder boundary). Hidden in pin-only mode. */}
+              {(canDrawWhitening || canDrawCrease) && (
+                <div className="flex items-center gap-1" data-testid="line-colour-palette">
+                  {LINE_COLOUR_PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setLineColor(c)}
+                      title="Line colour (display only — doesn't affect grade)"
+                      data-testid={`btn-line-colour-${c.replace("#", "")}`}
+                      className={`w-5 h-5 rounded-full border transition-transform ${
+                        lineColor === c
+                          ? "border-[var(--admin-gold)] ring-2 ring-[var(--admin-gold)] scale-110"
+                          : "border-[var(--admin-line-hard)] hover:scale-110"
+                      }`}
+                      style={{ background: c }}
+                    />
+                  ))}
+                </div>
+              )}
+              <p className="text-[var(--admin-ink-dim)] text-xs">
+                {markTool === "pin"
+                  ? `${defects.length} defect${defects.length !== 1 ? "s" : ""} marked · Click → pin, Enter / dbl-click = Done`
+                  : markTool === "whitening"
+                    ? `${whiteningLines.length} whitening line${whiteningLines.length !== 1 ? "s" : ""} · Click-drag along the edge`
+                    : `${creaseLines.length} crease line${creaseLines.length !== 1 ? "s" : ""} · Click-drag across the card`}
+              </p>
+            </div>
             <div className="flex items-center gap-3">
               {pendingBatch.length > 0 && !pickerOpen && (
                 <button

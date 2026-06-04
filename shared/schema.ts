@@ -526,6 +526,62 @@ export const certificates = pgTable("certificates", {
   darkBorderFront: boolean("dark_border_front").notNull().default(false),
   darkBorderBack: boolean("dark_border_back").notNull().default(false),
   eyeAppealModifier: integer("eye_appeal_modifier").notNull().default(0),
+  // ── MVGS v2 measurement inputs (Phase 2) ────────────────────────────────
+  // Persisted per cert from the grading-workstation line tool + severity
+  // pickers. Engine (shared/mvgs-scoring.ts) accepts these as optional
+  // MvgsInput fields; shared/mvgs-input-builder.ts handles precedence
+  // (measurement OVERRIDES the legacy has_crease/has_tear booleans on
+  // surface_values). NULL / [] = no v2 measurement for that category;
+  // legacy boolean fallback (if set) applies via the input builder.
+  // Migration: migrations/add-mvgs-v2-measurements.sql (staging only).
+  whiteningLines: jsonb("whitening_lines")
+    .$type<
+      Array<{
+        id?: string;
+        side: "front" | "back";
+        edge: "top" | "right" | "bottom" | "left";
+        coveragePct: number;
+        // Display-only: operator's actual drawn segment, image-relative %
+        // (0..100). Engine ignores it (reads only coveragePct); kept so the
+        // marked line redraws exactly where drawn. Extra jsonb keys round-trip
+        // with no migration; optional → rows saved before this field fall back
+        // to the legacy corner-stub indicator.
+        start?: { x: number; y: number };
+        end?: { x: number; y: number };
+        // Display-only line colour (v2.1) — stripped at the mvgs-input-builder
+        // boundary so the engine never sees it. Aligns with creaseLines.
+        color?: string;
+      }>
+    >()
+    .notNull()
+    .default([]),
+  // Legacy single-crease % — kept as a derived mirror of max(crease_lines.spanPct)
+  // for back-compat (readers that haven't migrated to crease_lines still see
+  // the worst span). New writes go through crease_lines.
+  creaseSpanPct: decimal("crease_span_pct", { precision: 4, scale: 1 }),
+  // MVGS v2 multi-crease persistence (Phase 2.1). Operator can mark multiple
+  // creases per cert; each entry stores the actual drawn segment so the line
+  // redraws on reload. Engine input derives `creaseSpanPct = max(spanPct)`
+  // across all entries (longest crease wins per spec §4/§5 — strictest cap,
+  // no compounding). `color` is display-only — stripped at the
+  // mvgs-input-builder boundary so the engine never sees it.
+  creaseLines: jsonb("crease_lines")
+    .$type<
+      Array<{
+        id: string;
+        side: "front" | "back";
+        spanPct: number;
+        start: { x: number; y: number };
+        end: { x: number; y: number };
+        color?: string;
+      }>
+    >()
+    .notNull()
+    .default([]),
+  wrinkleSeverity: text("wrinkle_severity").$type<
+    "tiny_back" | "longer_back" | "small_front" | "multiple_front" | null
+  >(),
+  tearSeverity: text("tear_severity").$type<"minor" | "significant" | "major" | null>(),
   centeringOuterFront: jsonb("centering_outer_front").$type<{
     top_pct: number;
     left_pct: number;

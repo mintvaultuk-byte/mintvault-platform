@@ -38,3 +38,6 @@ uploads
 # ─── Markdown — keep README, drop everything else at the repo root ────
 *.md
 !README.md
+
+# Exception: one-off prod migration script needs to reach the build (additive ADD COLUMN x5, see file header)
+!scripts/run-mvgs-v2-migration.ts

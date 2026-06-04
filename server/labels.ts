@@ -390,16 +390,37 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
     const mvgsPins = savedDefects
       .filter((d) => d.mvgsCode && d.tier && d.zone)
       .map((d) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
-    mvgsDeductions = computeMvgsScore({
-      centeringFrontLr: cert.centeringFrontLr,
-      centeringFrontTb: cert.centeringFrontTb,
-      centeringBackLr: cert.centeringBackLr,
-      centeringBackTb: cert.centeringBackTb,
-      defects: mvgsPins,
-      darkBorderFront: cert.darkBorderFront,
-      darkBorderBack: cert.darkBorderBack,
-      eyeAppealModifier: cert.eyeAppealModifier,
-    }).deductions;
+    // MVGS v2 — load calibration + thread persisted measurement inputs
+    // through the precedence-aware builder (shared/mvgs-input-builder.ts).
+    // The slab gate reads `deductions` from the engine result, so v2
+    // ceiling-triggered scores still surface the right deduction shape for
+    // the isPristine check below.
+    const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
+    const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+    const certAny = cert as any;
+    const surfaceFlags = (certAny.surfaceValues as any) ?? {};
+    const calibration = await loadMvgsCalibration();
+    mvgsDeductions = scoreMvgsV2(
+      {
+        centeringFrontLr: cert.centeringFrontLr,
+        centeringFrontTb: cert.centeringFrontTb,
+        centeringBackLr: cert.centeringBackLr,
+        centeringBackTb: cert.centeringBackTb,
+        defects: mvgsPins,
+        darkBorderFront: cert.darkBorderFront,
+        darkBorderBack: cert.darkBorderBack,
+        eyeAppealModifier: cert.eyeAppealModifier,
+        whiteningLines: Array.isArray(certAny.whiteningLines) ? certAny.whiteningLines : null,
+        // v2.1 — multi-crease list. Engine input is max(spanPct) at the builder.
+        creaseLines: Array.isArray(certAny.creaseLines) ? certAny.creaseLines : null,
+        creaseSpanPct: certAny.creaseSpanPct != null ? Number(certAny.creaseSpanPct) : null,
+        wrinkleSeverity: certAny.wrinkleSeverity ?? null,
+        tearSeverity: certAny.tearSeverity ?? null,
+        hasCrease: !!surfaceFlags.hasCrease,
+        hasTear: !!surfaceFlags.hasTear,
+      },
+      calibration
+    ).deductions;
   }
   const isBlack =
     isNumericGrade &&

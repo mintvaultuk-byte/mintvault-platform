@@ -14,6 +14,7 @@ import {
   Brain,
   Activity,
   TrendingUp,
+  SlidersHorizontal,
   ArrowRightLeft,
   History,
   Search,
@@ -77,6 +78,7 @@ const NAV: NavSection[] = [
     heading: "Insight",
     items: [
       { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
+      { href: "/admin/mvgs-calibration", label: "MVGS Calibration", icon: SlidersHorizontal },
       { key: "grading", label: "Grading", icon: BarChart3 },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "capture-health", label: "Capture Health", icon: Activity },
