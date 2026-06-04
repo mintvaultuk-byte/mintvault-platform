@@ -458,6 +458,22 @@ export const certificates = pgTable("certificates", {
     .default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
+  // Heavy-damage manual override. When true, the cert's `grade` column
+  // carries the GRADER'S explicit grade, not the engine's computed grade.
+  // Used when a category's raw pre-clamp deduction blows past the -25 cap
+  // (HEAVY_DAMAGE_THRESHOLD in shared/mvgs-scoring.ts) and the engine
+  // can't express how bad the card actually is. The engine's computed grade
+  // stays available via grade_strength_score for reference display. Audit
+  // trail: every override fires an audit_log entry with action
+  // 'manual_grade_override' carrying computed_grade + grader_grade + the
+  // raw category deductions that justified the override.
+  gradeManualOverride: boolean("grade_manual_override").notNull().default(false),
+  // Heavy-damage flag dismissal — when the grader reviews a flagged cert
+  // and explicitly leaves the engine grade in place ("Reviewed — grade
+  // stands"), we record the timestamp so the flag doesn't re-block the
+  // Approve button on every page reload. Null = flag has never been
+  // dismissed (default).
+  heavyDamageAcknowledgedAt: timestamp("heavy_damage_acknowledged_at", { withTimezone: true }),
   // Admin-controlled marketing-pool flag. Distinct from
   // submissions.marketing_feature_consent (user opt-in, legal record) —
   // this column gates the weekly-reel pool regardless of consent state.

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2, Eye, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
@@ -23,7 +24,13 @@ import CrossGradeDisplay from "./cross-grade-display";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
-import { computeMvgsScore, gradeFromMvgsScore, DEFAULT_MVGS_CALIBRATION } from "@shared/mvgs-scoring";
+import {
+  computeMvgsScore,
+  gradeFromMvgsScore,
+  DEFAULT_MVGS_CALIBRATION,
+  getHeavyDamageFlags,
+  HEAVY_DAMAGE_THRESHOLD,
+} from "@shared/mvgs-scoring";
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
 // Centering single source of truth (true PSA chart — front strict / back lenient).
 import {
@@ -547,6 +554,13 @@ export default function GradingPanel({
     if (gradingData.edgesScore != null) setEdgesOverride(Number(gradingData.edgesScore));
     if (gradingData.surfaceScore != null) setSurfaceOverride(Number(gradingData.surfaceScore));
     if (gradingData.grade != null) setOverallOverride(Number(gradingData.grade));
+    // Hydrate the persisted manual-override state. When a previous grader
+    // overrode this cert's grade, surface that override in the UI so the
+    // toggle reads ON and the grader's grade displays (not the engine's).
+    if ((gradingData as any).gradeManualOverride === true) {
+      setManualOverrideEnabled(true);
+      if (gradingData.grade != null) setManualOverrideGrade(Number(gradingData.grade));
+    }
     // Centering: prefer letting centeringCalc derive from L/R + T/B ratios.
     // Fallback: if ratios are missing but a centering_score was saved, use it
     // as an override so the Overall formula still has a value to weight.
@@ -1113,7 +1127,42 @@ export default function GradingPanel({
   }, [defects]);
 
   const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
-  const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+  // What the engine WOULD assign — used as the reference grade displayed
+  // next to the grader's override and as the heavy-damage flag's "computed"
+  // input. Never null when pins are MVGS-classified.
+  const computedGrade = mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+
+  // ── Heavy-damage override + dismiss ─────────────────────────────────────
+  // When a category's raw pre-clamp deduction blows past the -25 cap with
+  // margin (HEAVY_DAMAGE_THRESHOLD) AND the engine still computes overall
+  // >= 5, the card is over-graded by the engine. The grader either flips
+  // on the manual override or explicitly dismisses the flag. The Approve
+  // button is hard-gated until one of those happens.
+  //
+  // Persistence (gradeManualOverride + heavyDamageAcknowledgedAt) is on
+  // the cert row — hydrated below from gradingData. The local-state pair
+  // tracks the operator's IN-SESSION choice so it works before save.
+  const [manualOverrideEnabled, setManualOverrideEnabled] = useState(false);
+  const [manualOverrideGrade, setManualOverrideGrade] = useState<number | null>(null);
+  const [heavyDamageDismissed, setHeavyDamageDismissed] = useState(false);
+  const heavyDamageFlags = getHeavyDamageFlags(mvgsForOverall, computedGrade);
+  const heavyDamageFlagged = heavyDamageFlags.length > 0;
+  // The flag blocks Approve only when it's tripped AND the grader hasn't
+  // resolved it (no override turned on, no in-session dismissal, no
+  // previously-persisted dismissal/override on the cert row).
+  const heavyDamageResolved =
+    manualOverrideEnabled ||
+    heavyDamageDismissed ||
+    !!(gradingData as any)?.heavyDamageAcknowledgedAt ||
+    !!(gradingData as any)?.gradeManualOverride;
+  const heavyDamageBlocking = heavyDamageFlagged && !heavyDamageResolved;
+
+  // Final overall: manual override wins when active; else legacy
+  // overallOverride (eye-appeal mode); else engine grade; else AI fallback.
+  const overall =
+    manualOverrideEnabled && manualOverrideGrade != null
+      ? manualOverrideGrade
+      : (overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear));
 
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
@@ -1295,6 +1344,20 @@ export default function GradingPanel({
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
+      }
+      // Heavy-damage manual override — POST the explicit endpoint BEFORE
+      // approve so the cert row's grade_manual_override column + the
+      // one-per-event audit_log entry land. Approve then proceeds with the
+      // grader's grade as `overall_grade`. Order matters: the column must
+      // be set before grade_approved_at flips so any post-approve reader
+      // sees the override flag alongside the published grade.
+      if (manualOverrideEnabled && manualOverrideGrade != null && certId) {
+        await apiRequest("POST", `/api/admin/certificates/${certId}/manual-grade-override`, {
+          graderGrade: manualOverrideGrade,
+          computedGrade,
+          rawDeductions: mvgsForOverall.rawDeductions,
+          reason: `Heavy-damage override at approve: ${heavyDamageFlags.map((f) => f.label).join(", ")}`,
+        });
       }
       const elapsedSeconds = Math.round((Date.now() - gradingStartedAtRef.current) / 1000);
       const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
@@ -2456,6 +2519,125 @@ export default function GradingPanel({
               the cert is live and we want edits to flow through). The auto-
               save status pip sits to the left of the button. */}
             <div className="sticky bottom-0 pb-2 pt-1 bg-[var(--admin-panel)] space-y-2">
+              {/* Heavy-damage flag — fires when any category's RAW pre-clamp
+                  deduction blows past HEAVY_DAMAGE_THRESHOLD and the engine
+                  still computes overall >= 5. Engine math is unchanged; this
+                  surfaces the cap-saturation case where a 2-3 by eye reads
+                  as a 9 because the -25 cap can't express the damage. Two
+                  resolution paths — override or dismiss — both unlock the
+                  Approve button. */}
+              {heavyDamageFlagged && !heavyDamageResolved && (
+                <div
+                  className="rounded border-2 border-[var(--admin-red)] bg-[var(--admin-red)]/10 px-3 py-2.5 space-y-2"
+                  data-testid="heavy-damage-warning"
+                >
+                  <div className="flex items-center gap-2 text-[var(--admin-red)] text-[11px] font-bold uppercase tracking-wider">
+                    <span aria-hidden="true">⚠️</span>
+                    {heavyDamageFlags.map((f) => f.label).join(" · ")}
+                  </div>
+                  <div className="text-[10px] text-[var(--admin-ink-dim)] leading-snug">
+                    {heavyDamageFlags.map((f) => (
+                      <div key={f.category}>
+                        Raw {f.category} deduction is{" "}
+                        <strong className="text-[var(--admin-red)]">{f.rawDeduction.toFixed(1)}</strong> — blows past
+                        the −25 cap by <strong>{Math.abs(f.rawDeduction - f.threshold).toFixed(1)}</strong> beyond the −
+                        {Math.abs(f.threshold)} threshold. Engine still computes overall{" "}
+                        <strong>{computedGrade}</strong>. The cap saturates and can't express the damage.
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualOverrideEnabled(true);
+                        if (manualOverrideGrade == null)
+                          setManualOverrideGrade(Math.max(1, Math.min(10, computedGrade - 3)));
+                      }}
+                      className="bg-[var(--admin-red)] text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded hover:opacity-90"
+                      data-testid="btn-heavy-damage-override"
+                    >
+                      Override grade
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!certId) return;
+                        try {
+                          await apiRequest("POST", `/api/admin/certificates/${certId}/heavy-damage-acknowledge`, {
+                            computedGrade,
+                            rawDeductions: mvgsForOverall.rawDeductions,
+                            reason: "Grader reviewed — engine grade stands.",
+                          });
+                          setHeavyDamageDismissed(true);
+                          toast({
+                            title: "Heavy-damage flag dismissed",
+                            description: "Engine grade stands; recorded to audit log.",
+                          });
+                          queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+                        } catch (e: any) {
+                          toast({ title: "Dismiss failed", description: e?.message || "", variant: "destructive" });
+                        }
+                      }}
+                      className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded hover:text-[var(--admin-ink)]"
+                      data-testid="btn-heavy-damage-dismiss"
+                    >
+                      Reviewed — grade stands
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Manual override controls — visible whenever the toggle is
+                  ON, independent of the heavy-damage flag. Toggle is OFF by
+                  default; engine grade stands. When ON: grader picks the
+                  grade, computed grade displays as reference. */}
+              {manualOverrideEnabled && (
+                <div
+                  className="rounded border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] px-3 py-2.5 space-y-2"
+                  data-testid="manual-override-panel"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] uppercase tracking-wider text-[var(--admin-gold)]">
+                      Manual override active
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualOverrideEnabled(false);
+                        setManualOverrideGrade(null);
+                      }}
+                      className="text-[10px] text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] underline"
+                    >
+                      Turn off
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-[var(--admin-ink-dim)]">MVGS computed:</span>
+                    <span className="text-[var(--admin-ink)] font-mono">{computedGrade}</span>
+                    <span className="text-[var(--admin-ink-dim)]">· grader set:</span>
+                    <select
+                      value={manualOverrideGrade ?? ""}
+                      onChange={(e) =>
+                        setManualOverrideGrade(e.target.value === "" ? null : parseFloat(e.target.value))
+                      }
+                      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-xs text-[var(--admin-ink)]"
+                      data-testid="select-manual-override-grade"
+                    >
+                      <option value="">Pick…</option>
+                      {[10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1].map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-[9px] text-[var(--admin-ink-faint)]">
+                    Override persists on save. Audit log records the computed grade and your chosen grade.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
                 <span className="text-[var(--admin-ink-faint)]">
                   {autoSaveStatus === "saving" && (
@@ -2478,13 +2660,17 @@ export default function GradingPanel({
                 <button
                   type="button"
                   onClick={() => setShowConfirm(true)}
-                  disabled={approving || overall <= 0 || subgradesIncomplete || !deionizationComplete}
+                  disabled={
+                    approving || overall <= 0 || subgradesIncomplete || !deionizationComplete || heavyDamageBlocking
+                  }
                   title={
                     overall <= 0 || subgradesIncomplete
                       ? "Set all four subgrades first"
                       : !deionizationComplete
                         ? "Tick 'Deionization complete' before approving"
-                        : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                        : heavyDamageBlocking
+                          ? `Heavy-damage flag requires override or dismiss: ${heavyDamageFlags.map((f) => f.label).join(", ")}`
+                          : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
@@ -2494,7 +2680,9 @@ export default function GradingPanel({
                     ? "Set subgrades first"
                     : !deionizationComplete
                       ? "Confirm deionization first"
-                      : "Approve & Publish"}
+                      : heavyDamageBlocking
+                        ? "Resolve heavy-damage flag first"
+                        : "Approve & Publish"}
                 </button>
               ) : (
                 <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">

@@ -177,6 +177,20 @@ export interface MvgsResult {
   /** Tear severity "major" → existing non-numeric NO outcome. Caller surfaces
    *  this on the cert as gradeType="non_numeric" + grade label "NO". */
   tearForceNotGraded: boolean;
+  /** Pre-clamp deduction totals per category. Each is capped at -25 in the
+   *  score sum; the raw value can dip much lower when a category accumulates
+   *  catastrophic damage (e.g. mould, heavy whitening across all edges).
+   *  Surfaced so the heavy-damage flag (HEAVY_DAMAGE_THRESHOLD +
+   *  getHeavyDamageFlags) can detect "category blew past the cap with margin"
+   *  and force grader review. Centering raw = front+back chart deductions
+   *  (naturally capped at -25 by the chart — included for symmetry, will not
+   *  normally trip the flag). */
+  rawDeductions: {
+    corners: number;
+    edges: number;
+    surface: number;
+    centering: number;
+  };
 }
 
 // ── Centering ─────────────────────────────────────────────────────────────
@@ -568,9 +582,13 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   if (centFront !== 0) deductions.centering_front = centFront;
   if (centBack !== 0) deductions.centering_back = centBack;
 
-  // Corners — capped at -25.
+  // Corners — capped at -25. Raw pre-clamp captured for the heavy-damage
+  // flag (see HEAVY_DAMAGE_THRESHOLD + getHeavyDamageFlags). A category
+  // that BLOWS PAST the cap means the engine can't express how bad the
+  // card actually is — surfaced so the grader can override.
   let cornerSum = 0;
   for (const d of input.defects) cornerSum += cornerDeduction(d);
+  const cornerSumRaw = cornerSum;
   if (cornerSum < -25) cornerSum = -25;
   if (cornerSum !== 0) deductions.corners = cornerSum;
 
@@ -578,6 +596,7 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   // inside edgeDeduction, before the sum.
   let edgeSum = 0;
   for (const d of input.defects) edgeSum += edgeDeduction(d, input.darkBorderFront, input.darkBorderBack);
+  const edgeSumRaw = edgeSum;
   if (edgeSum < -25) edgeSum = -25;
   if (edgeSum !== 0) deductions.edges = edgeSum;
 
@@ -590,6 +609,7 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
     surfaceSum += r.deduction;
     if (r.forceCap74) surfaceForceCap = true;
   }
+  const surfaceSumRaw = surfaceSum;
   if (surfaceSum < -25) surfaceSum = -25;
   if (surfaceSum !== 0) deductions.surface = surfaceSum;
 
@@ -680,7 +700,71 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
     ceiling,
     edgesSubgradeFromWhitening,
     tearForceNotGraded: tearResult.forceNotGraded,
+    rawDeductions: {
+      corners: cornerSumRaw,
+      edges: edgeSumRaw,
+      surface: surfaceSumRaw,
+      centering: centFront + centBack,
+    },
   };
+}
+
+// ── Heavy-damage flag ─────────────────────────────────────────────────────
+// When a category accumulates so much damage that the -25 cap can't express
+// it, the engine still computes a high overall (e.g. 9 on a 2-3 by eye).
+// The grader sees the score, suspects something is off, but the engine
+// gives them no signal. This flag surfaces it: any category whose RAW
+// pre-clamp deduction blows past HEAVY_DAMAGE_THRESHOLD (-40) AND the
+// computed overall sits at 5 or above → flag fires. The UI gates Approve
+// until the grader either overrides the grade or explicitly dismisses
+// ("Reviewed — grade stands"). Does NOT change weights, the cap, or the
+// scoring math. Single threshold for tuning.
+
+/** Single-source threshold for the heavy-damage flag. Categories with raw
+ *  pre-clamp deductions below this value (e.g. -47 < -40) trip the flag.
+ *  Set in one place so a future calibration nudge is a one-line edit. */
+export const HEAVY_DAMAGE_THRESHOLD = -40;
+
+export type HeavyDamageCategory = "corners" | "edges" | "surface" | "centering";
+
+export interface HeavyDamageFlag {
+  category: HeavyDamageCategory;
+  /** UI-ready label, e.g. "HEAVY SURFACE DAMAGE". */
+  label: string;
+  /** Pre-clamp deduction that tripped the flag (always < threshold). */
+  rawDeduction: number;
+  /** Threshold the deduction blew past — surfaced for the warning copy. */
+  threshold: number;
+}
+
+const HEAVY_DAMAGE_LABELS: Record<HeavyDamageCategory, string> = {
+  surface: "HEAVY SURFACE DAMAGE",
+  edges: "HEAVY EDGE DAMAGE",
+  corners: "HEAVY CORNER DAMAGE",
+  centering: "HEAVY CENTERING",
+};
+
+/** Return any heavy-damage flags raised by this score. Empty array = card is
+ *  fine to grade. Fires only when (a) at least one category's raw pre-clamp
+ *  deduction is below `threshold` (default HEAVY_DAMAGE_THRESHOLD = -40) AND
+ *  (b) overall grade is >= 5. A card that already grades low doesn't need
+ *  the flag — the score reflects the damage. The flag exists for cards that
+ *  COMPUTE high despite catastrophic single-category damage. */
+export function getHeavyDamageFlags(
+  result: MvgsResult,
+  overallGrade: number,
+  threshold: number = HEAVY_DAMAGE_THRESHOLD
+): HeavyDamageFlag[] {
+  if (overallGrade < 5) return [];
+  const flags: HeavyDamageFlag[] = [];
+  const cats: HeavyDamageCategory[] = ["surface", "edges", "corners", "centering"];
+  for (const c of cats) {
+    const raw = result.rawDeductions[c];
+    if (raw < threshold) {
+      flags.push({ category: c, label: HEAVY_DAMAGE_LABELS[c], rawDeduction: raw, threshold });
+    }
+  }
+  return flags;
 }
 
 // Convenience re-export of the grade-label lookup so the UI can label an

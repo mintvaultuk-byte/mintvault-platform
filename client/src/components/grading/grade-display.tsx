@@ -298,21 +298,17 @@ export default function GradeDisplay({
         </div>
       )}
 
-      {/* Override — locked when MVGS pins drive the grade */}
+      {/* Override — engine grade is the default. For routine fine-tuning use
+          eye-appeal ±2. For the cap-saturation case (catastrophic damage in
+          a single category that the -25 cap can't express), the heavy-damage
+          flag in grading-panel surfaces a "Override grade" button which
+          enables a full grade override there. Hiding it here keeps this
+          legacy override out of the normal flow. */}
       {lockedByMvgs ? (
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <select
-              value=""
-              disabled
-              title="Grade locked by MVGS — adjust via eye appeal only"
-              className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink-faint)] text-xs rounded px-2 py-1 cursor-not-allowed opacity-60"
-            >
-              <option value="">Locked by MVGS</option>
-            </select>
-          </div>
           <p className="text-[var(--admin-ink-faint)] text-[9px] italic">
-            Grade locked by MVGS — adjust via eye appeal only
+            Engine grade — use eye-appeal ±2 for fine tuning. Heavy-damage override panel appears when a category
+            saturates the cap.
           </p>
         </div>
       ) : (

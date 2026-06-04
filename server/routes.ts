@@ -3244,6 +3244,209 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Heavy-damage flag — queue + override + dismiss ─────────────────────
+  // Surfaces certs whose engine computes a high grade despite catastrophic
+  // single-category damage (raw pre-clamp deduction blows past the -25 cap
+  // by HEAVY_DAMAGE_THRESHOLD margin). The engine's score doesn't change;
+  // the grading panel hard-gates Approve until the grader overrides or
+  // dismisses. Existing approved certs that trip the flag surface on the
+  // /api/admin/heavy-damage-queue list so the grader can revisit them one
+  // at a time. NO automated grade rewrites — every change is a human call.
+
+  /** GET /api/admin/heavy-damage-queue
+   *  Read-only. Runs the heavy-damage check over every active+approved
+   *  cert and returns those that (a) trip the flag right now and (b)
+   *  haven't already been resolved (no override + no dismissal). Sorted
+   *  worst-first by the most-negative raw deduction.
+   */
+  app.get("/api/admin/heavy-damage-queue", requireAdmin, async (_req, res) => {
+    try {
+      const { computeMvgsScore, getHeavyDamageFlags, gradeFromMvgsScore } = await import("@shared/mvgs-scoring");
+      const { buildMvgsInput } = await import("@shared/mvgs-input-builder");
+      const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+      const calibration = await loadMvgsCalibration();
+
+      const rows = await db.execute(sql`
+        SELECT
+          certificate_number,
+          id,
+          grade,
+          grade_strength_score,
+          defects,
+          whitening_lines,
+          crease_lines,
+          crease_span_pct,
+          wrinkle_severity,
+          tear_severity,
+          centering_front_lr,
+          centering_front_tb,
+          centering_back_lr,
+          centering_back_tb,
+          dark_border_front,
+          dark_border_back,
+          eye_appeal_modifier,
+          surface_values,
+          card_name,
+          set_name,
+          grade_manual_override,
+          heavy_damage_acknowledged_at
+        FROM certificates
+        WHERE deleted_at IS NULL
+          AND status = 'active'
+          AND grade_approved_at IS NOT NULL
+          AND grade_manual_override = false
+          AND heavy_damage_acknowledged_at IS NULL
+      `);
+
+      const queue: Array<{
+        certId: string;
+        certInternalId: number;
+        cardName: string | null;
+        setName: string | null;
+        currentGrade: number | null;
+        flaggedCategories: Array<{ category: string; label: string; rawDeduction: number; threshold: number }>;
+        worstRaw: number;
+      }> = [];
+
+      for (const r of rows.rows as any[]) {
+        const surfaceValues = (r.surface_values ?? {}) as Record<string, unknown>;
+        const mvgsPins = (Array.isArray(r.defects) ? r.defects : [])
+          .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
+          .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
+
+        const input = buildMvgsInput(
+          {
+            centeringFrontLr: r.centering_front_lr,
+            centeringFrontTb: r.centering_front_tb,
+            centeringBackLr: r.centering_back_lr,
+            centeringBackTb: r.centering_back_tb,
+            defects: mvgsPins,
+            darkBorderFront: !!r.dark_border_front,
+            darkBorderBack: !!r.dark_border_back,
+            eyeAppealModifier: Number(r.eye_appeal_modifier ?? 0),
+            whiteningLines: Array.isArray(r.whitening_lines) ? r.whitening_lines : null,
+            creaseLines: Array.isArray(r.crease_lines) ? r.crease_lines : null,
+            creaseSpanPct: r.crease_span_pct != null ? Number(r.crease_span_pct) : null,
+            wrinkleSeverity: r.wrinkle_severity ?? null,
+            tearSeverity: r.tear_severity ?? null,
+            hasCrease: !!surfaceValues.hasCrease,
+            hasTear: !!surfaceValues.hasTear,
+          },
+          calibration
+        );
+        const result = computeMvgsScore(input);
+        const overall = gradeFromMvgsScore(result.score);
+        const flags = getHeavyDamageFlags(result, overall);
+        if (flags.length === 0) continue;
+        queue.push({
+          certId: String(r.certificate_number),
+          certInternalId: Number(r.id),
+          cardName: r.card_name ?? null,
+          setName: r.set_name ?? null,
+          currentGrade: r.grade != null ? parseFloat(r.grade) : null,
+          flaggedCategories: flags,
+          worstRaw: Math.min(...flags.map((f) => f.rawDeduction)),
+        });
+      }
+
+      queue.sort((a, b) => a.worstRaw - b.worstRaw);
+      res.json({ queue, total: queue.length });
+    } catch (err: any) {
+      console.error("[heavy-damage-queue]", err.message);
+      res.status(500).json({ error: "Failed to load heavy-damage queue" });
+    }
+  });
+
+  /** POST /api/admin/certificates/:id/manual-grade-override
+   *  Body: { graderGrade: number, reason?: string, computedGrade: number,
+   *          rawDeductions: { corners, edges, surface, centering } }
+   *  Sets grade_manual_override=true, stores graderGrade in `grade`,
+   *  writes one audit_log row carrying the computed grade + the raw
+   *  deductions that justified the override.
+   */
+  app.post("/api/admin/certificates/:id/manual-grade-override", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { graderGrade, reason, computedGrade, rawDeductions } = req.body ?? {};
+      const g = Number(graderGrade);
+      if (!Number.isFinite(g) || g < 1 || g > 10) {
+        return res.status(400).json({ error: "graderGrade must be a number 1..10" });
+      }
+
+      await db.execute(sql`
+        UPDATE certificates
+        SET grade = ${g}::numeric,
+            grade_manual_override = true,
+            updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      const adminEmail = (req.session as any)?.userId
+        ? String((req.session as any).userEmail || (req.session as any).userId)
+        : "admin";
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String((cert as any).certificate_number || (cert as any).certificateNumber || id)},
+                'manual_grade_override', ${adminEmail},
+                ${JSON.stringify({
+                  computedGrade: computedGrade ?? null,
+                  graderGrade: g,
+                  rawDeductions: rawDeductions ?? null,
+                  reason: reason ?? null,
+                })}::jsonb)
+      `);
+      res.json({ ok: true, graderGrade: g });
+    } catch (err: any) {
+      console.error("[manual-grade-override]", err.message);
+      res.status(500).json({ error: "Failed to record manual grade override" });
+    }
+  });
+
+  /** POST /api/admin/certificates/:id/heavy-damage-acknowledge
+   *  Body: { reason?: string, computedGrade: number, rawDeductions: {...} }
+   *  Grader reviewed the flagged cert and chose to leave the engine grade
+   *  in place ("Reviewed — grade stands"). Sets heavy_damage_acknowledged_at
+   *  so the flag doesn't re-block Approve on every reload; writes one
+   *  audit_log row recording the decision.
+   */
+  app.post("/api/admin/certificates/:id/heavy-damage-acknowledge", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const { reason, computedGrade, rawDeductions } = req.body ?? {};
+
+      await db.execute(sql`
+        UPDATE certificates
+        SET heavy_damage_acknowledged_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ${id}
+      `);
+
+      const adminEmail = (req.session as any)?.userId
+        ? String((req.session as any).userEmail || (req.session as any).userId)
+        : "admin";
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String((cert as any).certificate_number || (cert as any).certificateNumber || id)},
+                'heavy_damage_acknowledged', ${adminEmail},
+                ${JSON.stringify({
+                  computedGrade: computedGrade ?? null,
+                  rawDeductions: rawDeductions ?? null,
+                  reason: reason ?? null,
+                })}::jsonb)
+      `);
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[heavy-damage-acknowledge]", err.message);
+      res.status(500).json({ error: "Failed to record heavy-damage acknowledgement" });
+    }
+  });
+
   app.put("/api/admin/certificates/:id/approve-grade", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);

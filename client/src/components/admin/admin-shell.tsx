@@ -15,6 +15,7 @@ import {
   Activity,
   TrendingUp,
   SlidersHorizontal,
+  AlertTriangle,
   ArrowRightLeft,
   History,
   Search,
@@ -79,6 +80,7 @@ const NAV: NavSection[] = [
     items: [
       { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
       { href: "/admin/mvgs-calibration", label: "MVGS Calibration", icon: SlidersHorizontal },
+      { href: "/admin/heavy-damage-queue", label: "Heavy-Damage Queue", icon: AlertTriangle },
       { key: "grading", label: "Grading", icon: BarChart3 },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "capture-health", label: "Capture Health", icon: Activity },
