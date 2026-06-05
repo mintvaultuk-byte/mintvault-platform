@@ -4818,17 +4818,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
-      // For shipped transitions, validate the carrier/service pair against
-      // the shared catalogue when a carrier is supplied. Legacy clients that
-      // omit returnService still succeed when the carrier itself isn't
-      // present — only enforce when carrier is set.
-      if (status.toLowerCase() === "shipped" && returnCarrier) {
-        const svc = returnService ? String(returnService) : null;
-        if (!isServiceValidForCarrier(String(returnCarrier), svc)) {
+      // DEAD CODE: this /status handler is shadowed by the earlier
+      // registration in server/routes/admin-submissions.ts (registerAdmin-
+      // SubmissionRoutes runs at line ~1296, before this block). Kept in
+      // sync with the served handler so a future re-ordering doesn't
+      // silently change behaviour.
+      //
+      // Validate the (carrier, service) pair ONLY when BOTH are supplied.
+      // A null/omitted service must NOT block a shipped transition.
+      if (status.toLowerCase() === "shipped" && returnCarrier && returnService) {
+        if (!isServiceValidForCarrier(String(returnCarrier), String(returnService))) {
           return res.status(400).json({
             error: "Invalid carrier/service combination",
             carrier: returnCarrier,
-            service: returnService ?? null,
+            service: returnService,
           });
         }
       }
@@ -4992,12 +4995,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const safeTracking = trackingNumber ? String(trackingNumber) : null;
       const safeCost = postageCost ? parseInt(postageCost, 10) : null;
 
-      // Validate carrier+service combination against the shared catalogue —
-      // only when the caller actually supplied a carrier (legacy callers that
-      // omit both must still succeed). isServiceValidForCarrier permits a
-      // null service when carrier === "other"; otherwise the service is
-      // required and must be a known key for that carrier.
-      if (safeCarrier && !isServiceValidForCarrier(safeCarrier, safeService)) {
+      // DEAD CODE: this /return-label handler is shadowed by the earlier
+      // registration in server/routes/admin-submissions.ts. Kept in sync
+      // with the served handler.
+      //
+      // Validate the (carrier, service) pair ONLY when BOTH are supplied.
+      // A null/omitted service must never block a return-label write.
+      if (safeCarrier && safeService && !isServiceValidForCarrier(safeCarrier, safeService)) {
         return res.status(400).json({
           error: "Invalid carrier/service combination",
           carrier: safeCarrier,

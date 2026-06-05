@@ -143,7 +143,7 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const { status, returnTracking, returnCarrier, returnPostageCost } = req.body;
+      const { status, returnTracking, returnCarrier, returnService, returnPostageCost } = req.body;
       if (!status) {
         return res.status(400).json({ error: "Status is required" });
       }
@@ -156,10 +156,25 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         });
       }
 
+      // Validate the (carrier, service) pair against the shared catalogue
+      // ONLY when both are supplied. A null/omitted service must NOT block
+      // a shipped transition — legacy callers (pre-service rollout) and
+      // the "other" carrier path both rely on this. Backwards compatible.
+      if (status.toLowerCase() === "shipped" && returnCarrier && returnService) {
+        if (!isServiceValidForCarrier(String(returnCarrier), String(returnService))) {
+          return res.status(400).json({
+            error: "Invalid carrier/service combination",
+            carrier: returnCarrier,
+            service: returnService,
+          });
+        }
+      }
+
       const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
       const updated = await storage.updateSubmissionStatus(numId, status, {
         returnTracking,
         returnCarrier,
+        returnService,
         returnPostageCost: returnPostageCost ? parseInt(returnPostageCost, 10) : undefined,
       });
 
@@ -173,8 +188,16 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           toStatus: status,
           returnTracking,
           returnCarrier,
+          returnService: returnService ?? null,
         }
       );
+
+      if (status.toLowerCase() === "shipped") {
+        // Diagnostic-safe log: submissionId + carrier + service only. No PII.
+        console.log(
+          `[dispatch] status_shipped submissionId=${submission.submissionId} carrier=${returnCarrier ?? "-"} service=${returnService ?? "-"}`
+        );
+      }
 
       const emailData = {
         email: submission.email || "",
@@ -193,6 +216,7 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           ...emailData,
           trackingNumber: returnTracking || submission.returnTracking || undefined,
           carrier: returnCarrier || submission.returnCarrier || undefined,
+          service: returnService || (submission as any).returnService || undefined,
         }).catch(() => {});
       } else if (newStatus === "delivered" && emailData.email) {
         sendSubmissionDelivered({
@@ -305,10 +329,11 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       const safeTracking = trackingNumber ? String(trackingNumber) : null;
       const safeCost = postageCost ? parseInt(postageCost, 10) : null;
 
-      // Validate carrier+service combination against the shared catalogue.
-      // Only enforced when a carrier is supplied — legacy calls that pass
-      // neither must still succeed.
-      if (safeCarrier && !isServiceValidForCarrier(safeCarrier, safeService)) {
+      // Validate the (carrier, service) pair against the shared catalogue
+      // ONLY when BOTH are supplied. A null/omitted service must never
+      // block a return-label write — legacy callers and the "other"
+      // carrier flow both rely on this. Backwards compatible.
+      if (safeCarrier && safeService && !isServiceValidForCarrier(safeCarrier, safeService)) {
         return res.status(400).json({
           error: "Invalid carrier/service combination",
           carrier: safeCarrier,

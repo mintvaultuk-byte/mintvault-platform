@@ -137,11 +137,16 @@ export function isServiceValidForCarrier(
 }
 
 /** Pick a default service for a carrier based on the submission's declared
- *  value. The admin form pre-selects this; operator can override. Mapping:
+ *  value. Mapping:
  *    - > £500.00 (50000p)   → express
  *    - <= £100.00 (10000p)  → standard
  *    - otherwise            → priority
- *  Returns null for carriers without services (e.g. "other"). */
+ *  Returns null for carriers without services (e.g. "other").
+ *
+ *  Kept for callers that don't know the serviceType. For dispatch use
+ *  suggestServiceForSubmission below — graded slabs default to express
+ *  regardless of declared value (RM Tracked's ~£100 cover is too thin
+ *  for any encapsulated card). */
 export function suggestServiceForValue(
   carrierId: string | null | undefined,
   totalDeclaredValuePence: number
@@ -155,6 +160,41 @@ export function suggestServiceForValue(
   // Fall back to the first service if the picked band isn't defined for
   // this carrier (defence-in-depth — current carrier defs all cover the
   // standard/priority bands; "express" only exists on RM + DPD).
+  return services.find((s) => s.band === band)?.key ?? services[0].key;
+}
+
+/** Pick a default service that's aware of the submission's serviceType.
+ *  Every GRADING return defaults to the carrier's express-band service
+ *  regardless of declared value — RM Tracked's ~£100 cover is too low
+ *  for any slab. Non-grading work (reholder/crossover/authentication)
+ *  can fall back to the cheap Standard service when the card is worth
+ *  under £50; everything else gets express.
+ *
+ *  Bands:
+ *    - serviceType === "grading" (or unknown/null)  → express
+ *    - other serviceType + value <  £50 (5000p)     → standard
+ *    - other serviceType + value >= £50             → express
+ *  Returns null for carriers without services (e.g. "other"). */
+export function suggestServiceForSubmission(
+  carrierId: string | null | undefined,
+  serviceType: string | null | undefined,
+  totalDeclaredValuePence: number
+): string | null {
+  const services = servicesForCarrier(carrierId);
+  if (services.length === 0) return null;
+  const stype = (serviceType ?? "").toLowerCase();
+  const isGrading = stype === "" || stype === "grading";
+  let band: ServiceDef["band"];
+  if (isGrading) {
+    band = "express";
+  } else if (totalDeclaredValuePence < 5000) {
+    band = "standard";
+  } else {
+    band = "express";
+  }
+  // Fall back to the first service if the picked band isn't defined for
+  // this carrier (defence-in-depth — current carrier defs all cover the
+  // standard band; "express" only exists on RM + DPD).
   return services.find((s) => s.band === band)?.key ?? services[0].key;
 }
 

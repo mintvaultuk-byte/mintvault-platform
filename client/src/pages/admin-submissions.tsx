@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
-import { CARRIERS, servicesForCarrier, suggestServiceForValue, carrierIdFromLegacyName } from "@shared/carriers";
+import { CARRIERS, servicesForCarrier, suggestServiceForSubmission, carrierIdFromLegacyName } from "@shared/carriers";
 import {
   ArrowLeft,
   Package,
@@ -413,12 +413,15 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   }, [sub?.submissionId, sub?.returnCarrier]);
 
   // totalDeclaredValue is stored in whole pounds; carriers.ts auto-suggest
-  // expects pence, so convert at the boundary.
+  // expects pence, so convert at the boundary. Grading submissions default
+  // to the carrier's express-band service regardless of declared value —
+  // see suggestServiceForSubmission for the rule.
   const declaredValuePence = (sub?.totalDeclaredValue ?? 0) * 100;
+  const subServiceType = sub?.serviceType ?? null;
   useEffect(() => {
-    const suggested = suggestServiceForValue(carrierInput, declaredValuePence);
+    const suggested = suggestServiceForSubmission(carrierInput, subServiceType, declaredValuePence);
     setServiceInput(suggested ?? "");
-  }, [carrierInput, declaredValuePence]);
+  }, [carrierInput, subServiceType, declaredValuePence]);
 
   if (isLoading || !sub) {
     return (
@@ -598,8 +601,9 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                 ))}
               </select>
               <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1">
-                Auto-selected from declared value (£{(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if
-                needed.
+                {subServiceType === "grading" || !subServiceType
+                  ? `Defaults to Express for graded slabs (declared £${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`
+                  : `Auto-selected from declared value (£${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`}
               </p>
             </div>
           )}
