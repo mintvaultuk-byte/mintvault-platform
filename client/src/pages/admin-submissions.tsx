@@ -25,9 +25,6 @@ import {
   Download,
   Camera,
   Upload,
-  Layers,
-  FlaskConical,
-  PackageCheck,
   Loader2,
 } from "lucide-react";
 
@@ -386,16 +383,6 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
     },
   });
 
-  const granularStatusMutation = useMutation({
-    mutationFn: async (status: string) => {
-      await apiRequest("POST", `/api/admin/submissions/${submissionId}/status`, { status });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
-    },
-  });
-
   useEffect(() => {
     if (sub) {
       setAdminNotesInput(sub.adminNotes ?? "");
@@ -746,55 +733,6 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               Cancel
             </button>
           </div>
-        </div>
-      )}
-
-      {/* ── Granular status buttons (received+) ───────────────────────────────── */}
-      {["received", "in_grading", "ready_to_return", "shipped"].includes(currentStatus) && (
-        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Layers size={14} className="text-[var(--admin-gold)]" />
-            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
-              Granular Status Updates
-            </h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => granularStatusMutation.mutate("queued")}
-              disabled={granularStatusMutation.isPending}
-              className="text-xs border border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-              data-testid="button-status-queued"
-            >
-              <Clock size={11} /> Move to Grading Queue
-            </button>
-            <button
-              onClick={() => granularStatusMutation.mutate("grading_started")}
-              disabled={granularStatusMutation.isPending}
-              className="text-xs border border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-amber)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-              data-testid="button-status-grading"
-            >
-              <FlaskConical size={11} /> Mark Grading Started
-            </button>
-            <button
-              onClick={() => granularStatusMutation.mutate("encapsulating")}
-              disabled={granularStatusMutation.isPending}
-              className="text-xs border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-green)_10%,transparent)] text-[var(--admin-green)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-green)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-              data-testid="button-status-encapsulating"
-            >
-              <PackageCheck size={11} /> Mark Encapsulating
-            </button>
-            <button
-              onClick={() => granularStatusMutation.mutate("delivered")}
-              disabled={granularStatusMutation.isPending}
-              className="text-xs border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-green)_10%,transparent)] text-[var(--admin-green)] px-3 py-1.5 rounded hover:bg-[color-mix(in_srgb,var(--admin-green)_20%,transparent)] transition-colors disabled:opacity-50 flex items-center gap-1.5"
-              data-testid="button-status-delivered"
-            >
-              <CheckCircle size={11} /> Mark Delivered
-            </button>
-          </div>
-          {granularStatusMutation.isError && (
-            <p className="text-[var(--admin-red)] text-xs mt-2">{(granularStatusMutation.error as Error)?.message}</p>
-          )}
         </div>
       )}
 
