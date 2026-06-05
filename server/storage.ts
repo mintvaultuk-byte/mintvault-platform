@@ -1,4 +1,37 @@
-import { users, submissions, submissionItems, certificates, certificateImages, cardSets, cardMaster, auditLog, serviceTiers, labelPrints, labelOverrides, reprintLog, ownershipHistory, claimVerifications, transferVerifications, type User, type Submission, type SubmissionItem, type CertificateRecord, type InsertCertificate, type CertificateImage, type InsertCertificateImage, type CardMaster, type CardSet, type AuditLog, type ServiceTierRecord, type LabelPrint, type LabelOverride, type OwnershipHistoryRecord, type ClaimVerification, type TransferVerification, isNonNumericGrade } from "@shared/schema";
+import {
+  users,
+  submissions,
+  submissionItems,
+  certificates,
+  certificateImages,
+  cardSets,
+  cardMaster,
+  auditLog,
+  serviceTiers,
+  labelPrints,
+  labelOverrides,
+  reprintLog,
+  ownershipHistory,
+  claimVerifications,
+  transferVerifications,
+  type User,
+  type Submission,
+  type SubmissionItem,
+  type CertificateRecord,
+  type InsertCertificate,
+  type CertificateImage,
+  type InsertCertificateImage,
+  type CardMaster,
+  type CardSet,
+  type AuditLog,
+  type ServiceTierRecord,
+  type LabelPrint,
+  type LabelOverride,
+  type OwnershipHistoryRecord,
+  type ClaimVerification,
+  type TransferVerification,
+  isNonNumericGrade,
+} from "@shared/schema";
 import { eq, sql, desc, or, ilike, like, and, isNull, isNotNull, ne, inArray } from "drizzle-orm";
 import { db } from "./db";
 import crypto from "crypto";
@@ -68,7 +101,18 @@ export interface IStorage {
   listSubmissions(filters?: SubmissionFilters): Promise<any[]>;
   getSubmissionItems(submissionId: number): Promise<SubmissionItem[]>;
   addSubmissionItems(submissionId: number, items: any[]): Promise<void>;
-  updateSubmissionItem(itemId: number, data: Partial<{ game: string | null; cardName: string | null; cardSet: string | null; cardNumber: string | null; year: string | null; declaredValue: number; notes: string | null }>): Promise<SubmissionItem | undefined>;
+  updateSubmissionItem(
+    itemId: number,
+    data: Partial<{
+      game: string | null;
+      cardName: string | null;
+      cardSet: string | null;
+      cardNumber: string | null;
+      year: string | null;
+      declaredValue: number;
+      notes: string | null;
+    }>
+  ): Promise<SubmissionItem | undefined>;
   updateSubmissionStatus(id: number, status: string, extra?: Record<string, any>): Promise<any | undefined>;
   setEstimatedCompletionDate(id: number): Promise<void>;
 
@@ -80,7 +124,10 @@ export interface IStorage {
   searchCertificates(query: string): Promise<CertificateRecord[]>;
   getNextCertId(): Promise<string>;
 
-  saveNfcData(id: number, data: { uid: string; chipType?: string; url: string; writtenBy?: string }): Promise<CertificateRecord | undefined>;
+  saveNfcData(
+    id: number,
+    data: { uid: string; chipType?: string; url: string; writtenBy?: string }
+  ): Promise<CertificateRecord | undefined>;
   getCertificateByNfcUid(uid: string): Promise<CertificateRecord | undefined>;
   lockNfc(id: number): Promise<CertificateRecord | undefined>;
   clearNfc(id: number): Promise<CertificateRecord | undefined>;
@@ -92,12 +139,25 @@ export interface IStorage {
   getLabelPrintStatus(certIds: string[]): Promise<LabelPrint[]>;
   queueForPrinting(certIds: string[], sheetRef: string): Promise<void>;
   markSheetPrinted(sheetRef: string): Promise<void>;
-  getLabelSheets(): Promise<{ sheetRef: string; total: number; printed: boolean; queuedAt: Date; printedAt: Date | null }[]>;
-  getSheetDetail(sheetRef: string): Promise<{ certId: string; printedAt: Date | null; queuedAt: Date; cert: CertificateRecord | null }[]>;
+  getLabelSheets(): Promise<
+    { sheetRef: string; total: number; printed: boolean; queuedAt: Date; printedAt: Date | null }[]
+  >;
+  getSheetDetail(
+    sheetRef: string
+  ): Promise<{ certId: string; printedAt: Date | null; queuedAt: Date; cert: CertificateRecord | null }[]>;
 
   // ── Label overrides & reprint log ──────────────────────────────────────────
   getLabelOverride(certId: string): Promise<LabelOverride | null>;
-  upsertLabelOverride(certId: string, data: { cardNameOverride?: string | null; setOverride?: string | null; variantOverride?: string | null; languageOverride?: string | null; yearOverride?: string | null }): Promise<LabelOverride>;
+  upsertLabelOverride(
+    certId: string,
+    data: {
+      cardNameOverride?: string | null;
+      setOverride?: string | null;
+      variantOverride?: string | null;
+      languageOverride?: string | null;
+      yearOverride?: string | null;
+    }
+  ): Promise<LabelOverride>;
   clearLabelOverride(certId: string): Promise<void>;
   logReprint(certId: string): Promise<void>;
   listCertificatesBrowser(): Promise<Array<CertificateRecord & { isPrinted: boolean; reprintCount: number }>>;
@@ -110,10 +170,26 @@ export interface IStorage {
   addCertificateImage(data: InsertCertificateImage): Promise<CertificateImage>;
   getCertificateImages(certificateId: number): Promise<CertificateImage[]>;
 
-  autofillCard(setId: string, cardNumber: string, language: string, allowFallbackLanguage: boolean): Promise<{ match: CardMaster | null; matchType: "exact" | "fallback_language" | "none"; setName: string | null; suggestions?: CardMaster[] }>;
+  autofillCard(
+    setId: string,
+    cardNumber: string,
+    language: string,
+    allowFallbackLanguage: boolean
+  ): Promise<{
+    match: CardMaster | null;
+    matchType: "exact" | "fallback_language" | "none";
+    setName: string | null;
+    suggestions?: CardMaster[];
+  }>;
   getCardSets(game?: string): Promise<CardSet[]>;
 
-  writeAuditLog(entityType: string, entityId: string, action: string, adminUser: string | null, details?: Record<string, unknown>): Promise<void>;
+  writeAuditLog(
+    entityType: string,
+    entityId: string,
+    action: string,
+    adminUser: string | null,
+    details?: Record<string, unknown>
+  ): Promise<void>;
   softDeleteCardMaster(id: number, adminUser: string): Promise<boolean>;
   getLastIssuedMvNumber(): Promise<{ lastIssued: number; mvNumber: string }>;
 
@@ -128,51 +204,142 @@ export interface IStorage {
   getOrGenerateClaimCode(certId: string): Promise<string>;
   validateClaimCode(certId: string, claimCode: string): Promise<boolean>;
   createClaimVerification(certId: string, email: string, ownerName?: string, declaredNew?: boolean): Promise<string>;
-  completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }>;
+  completeClaimByToken(
+    token: string
+  ): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }>;
   getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]>;
-  assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string, opts?: { overrideStolen?: boolean }): Promise<void>;
+  assignOwnerManual(
+    certId: string,
+    email: string,
+    adminUser: string,
+    notes?: string,
+    opts?: { overrideStolen?: boolean }
+  ): Promise<void>;
   batchGenerateClaimCodes(): Promise<{ certId: string; claimCode: string }[]>;
-  createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string>;
-  confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }>;
-  completeTransferByNewOwnerToken(token: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  createTransferVerification(
+    certId: string,
+    fromEmail: string,
+    toEmail: string,
+    newOwnerName?: string
+  ): Promise<string>;
+  confirmOwnerTransferStep(
+    token: string
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    newOwnerToken?: string;
+    error?: string;
+  }>;
+  completeTransferByNewOwnerToken(
+    token: string
+  ): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
 
   // ── v2 transfer flow (DVLA-style with ref number + dispute window) ─────────
   createTransferV2(data: {
-    certId: string; fromEmail: string; toEmail: string; newOwnerName?: string;
-    outgoingKeeperUserId: string; referenceNumber: string;
+    certId: string;
+    fromEmail: string;
+    toEmail: string;
+    newOwnerName?: string;
+    outgoingKeeperUserId: string;
+    referenceNumber: string;
   }): Promise<string>;
-  confirmOutgoingKeeperV2(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string; stolen?: boolean }>;
-  confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string; stolen?: boolean }>;
+  confirmOutgoingKeeperV2(
+    token: string
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    newOwnerToken?: string;
+    error?: string;
+    stolen?: boolean;
+  }>;
+  confirmIncomingKeeperV2(
+    token: string,
+    referenceNumberProvided: string
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    toEmail?: string;
+    ownerName?: string | null;
+    error?: string;
+    stolen?: boolean;
+  }>;
   getTransferV2(id: number): Promise<TransferVerification | undefined>;
   getTransferV2ByCertId(certId: string): Promise<TransferVerification | undefined>;
   listTransfersV2(filters?: { status?: string; certId?: string }): Promise<TransferVerification[]>;
-  disputeTransferV2(transferId: number, disputedBy: "outgoing" | "incoming", reason: string): Promise<{ success: boolean; error?: string }>;
+  disputeTransferV2(
+    transferId: number,
+    disputedBy: "outgoing" | "incoming",
+    reason: string
+  ): Promise<{ success: boolean; error?: string }>;
   cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }>;
-  finaliseTransferV2(transferId: number, opts?: { skipStatusCheck?: boolean }): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
+  finaliseTransferV2(
+    transferId: number,
+    opts?: { skipStatusCheck?: boolean }
+  ): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }>;
   getTransfersReadyToFinalise(): Promise<TransferVerification[]>;
-  expireStaleTransfersV2(): Promise<Array<{ transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string }>>;
+  expireStaleTransfersV2(): Promise<
+    Array<{ transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string }>
+  >;
 
   // ── v435 buyer-initiated transfer entry point ─────────────────────────────
-  validateClaimCodeForTransfer(certId: string, claimCode: string): Promise<{ valid: boolean; currentOwnerEmail?: string; currentOwnerUserId?: string }>;
+  validateClaimCodeForTransfer(
+    certId: string,
+    claimCode: string
+  ): Promise<{ valid: boolean; currentOwnerEmail?: string; currentOwnerUserId?: string }>;
   createTransferV2BuyerInit(data: {
-    certId: string; claimantEmail: string; claimantName?: string; currentOwnerEmail: string; currentOwnerUserId: string;
+    certId: string;
+    claimantEmail: string;
+    claimantName?: string;
+    currentOwnerEmail: string;
+    currentOwnerUserId: string;
   }): Promise<{ ownerToken: string; transferId: number }>;
-  confirmBuyerInitTransfer(token: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string; stolen?: boolean }>;
-  disputeBuyerInitTransfer(token: string, reason?: string): Promise<{ success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; error?: string }>;
+  confirmBuyerInitTransfer(
+    token: string
+  ): Promise<{
+    success: boolean;
+    transferId?: number;
+    certId?: string;
+    claimantEmail?: string;
+    ownerEmail?: string;
+    disputeDeadline?: Date;
+    error?: string;
+    stolen?: boolean;
+  }>;
+  disputeBuyerInitTransfer(
+    token: string,
+    reason?: string
+  ): Promise<{
+    success: boolean;
+    transferId?: number;
+    certId?: string;
+    claimantEmail?: string;
+    ownerEmail?: string;
+    error?: string;
+  }>;
 
   // ── Customer dashboard queries ──────────────────────────────────────────────
   getSubmissionsByEmail(email: string): Promise<any[]>;
   getCertificatesByEmail(email: string): Promise<CertificateRecord[]>;
 
   // ── Population report ───────────────────────────────────────────────────────
-  getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<{
-    cardGame: string | null;
-    setName: string | null;
-    cardName: string | null;
-    total: number;
-    gBL: number; g10: number; g9: number;
-    g8: number; g7: number; gLow: number;
-  }[]>;
+  getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<
+    {
+      cardGame: string | null;
+      setName: string | null;
+      cardName: string | null;
+      total: number;
+      gBL: number;
+      g10: number;
+      g9: number;
+      g8: number;
+      g7: number;
+      gLow: number;
+    }[]
+  >;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -187,17 +354,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createUser(data: { email: string; firstName?: string; lastName?: string }): Promise<User> {
-    const [user] = await db.insert(users).values({
-      email: data.email.toLowerCase(),
-      firstName: data.firstName || null,
-      lastName: data.lastName || null,
-    }).returning();
+    const [user] = await db
+      .insert(users)
+      .values({
+        email: data.email.toLowerCase(),
+        firstName: data.firstName || null,
+        lastName: data.lastName || null,
+      })
+      .returning();
     return user;
   }
 
   async createSubmission(data: any): Promise<any> {
     if (!data.pricePerCardAtPurchase || data.pricePerCardAtPurchase <= 0) {
-      throw new Error(`Cannot create submission: price_per_card_at_purchase is missing or zero (${data.pricePerCardAtPurchase}). Aborting.`);
+      throw new Error(
+        `Cannot create submission: price_per_card_at_purchase is missing or zero (${data.pricePerCardAtPurchase}). Aborting.`
+      );
     }
     const trackingNumber = data.submissionId || `MV-SUB-${Date.now()}`;
     const totalDeclaredValue = data.totalDeclaredValue || data.declaredValue || 0;
@@ -219,12 +391,12 @@ export class DatabaseStorage implements IStorage {
       )
       VALUES (
         COALESCE(${data.userId || null}, (SELECT id FROM users LIMIT 1), gen_random_uuid()::text),
-        ${data.status || 'draft'},
+        ${data.status || "draft"},
         ${trackingNumber},
         ${data.quantity || 0},
         ${((data.amountTotal || 0) / 100).toFixed(2)},
         ${totalDeclaredValue},
-        ${data.currency || 'GBP'},
+        ${data.currency || "GBP"},
         ${data.email || null},
         ${data.firstName || null},
         ${data.lastName || null},
@@ -316,6 +488,7 @@ export class DatabaseStorage implements IStorage {
       shippedAt: row.shipped_at,
       completedAt: row.completed_at,
       returnCarrier: row.return_carrier,
+      returnService: row.return_service,
       returnTracking: row.return_tracking,
       crossoverCompany: row.crossover_company,
       crossoverOriginalGrade: row.crossover_original_grade,
@@ -387,7 +560,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSubmission(id: any, data: any): Promise<any | undefined> {
-    const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+    const numId = typeof id === "string" ? parseInt(id, 10) : id;
     const setParts: ReturnType<typeof sql>[] = [];
 
     if (data.stripePaymentId !== undefined) {
@@ -416,7 +589,7 @@ export class DatabaseStorage implements IStorage {
 
   async getNextSubmissionId(): Promise<string> {
     const result = await db.execute(sql`SELECT COUNT(*) as count FROM submissions`);
-    const count = parseInt(result.rows[0]?.count as string || "0", 10) + 1;
+    const count = parseInt((result.rows[0]?.count as string) || "0", 10) + 1;
     return `MV-SUB-${String(count).padStart(6, "0")}`;
   }
 
@@ -427,10 +600,10 @@ export class DatabaseStorage implements IStorage {
       conditions.push(sql`LOWER(status) = ${filters.status.toLowerCase()}`);
     }
     if (filters?.email) {
-      conditions.push(sql`LOWER(customer_email) LIKE ${'%' + filters.email.toLowerCase() + '%'}`);
+      conditions.push(sql`LOWER(customer_email) LIKE ${"%" + filters.email.toLowerCase() + "%"}`);
     }
     if (filters?.submissionId) {
-      conditions.push(sql`LOWER(tracking_number) LIKE ${'%' + filters.submissionId.toLowerCase() + '%'}`);
+      conditions.push(sql`LOWER(tracking_number) LIKE ${"%" + filters.submissionId.toLowerCase() + "%"}`);
     }
     if (filters?.dateFrom) {
       conditions.push(sql`created_at >= ${filters.dateFrom}::timestamp`);
@@ -439,7 +612,7 @@ export class DatabaseStorage implements IStorage {
       conditions.push(sql`created_at <= (${filters.dateTo}::date + interval '1 day')`);
     }
 
-    const whereClause = conditions.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`);
+    const whereClause = conditions.reduce((acc, cond, i) => (i === 0 ? cond : sql`${acc} AND ${cond}`));
     const result = await db.execute(sql`SELECT * FROM submissions WHERE ${whereClause} ORDER BY created_at DESC`);
     return result.rows.map((row: any) => ({
       id: row.id,
@@ -501,7 +674,7 @@ export class DatabaseStorage implements IStorage {
       const item = items[i];
       await db.insert(submissionItems).values({
         submissionId,
-        cardIndex: item.cardIndex ?? (i + 1),
+        cardIndex: item.cardIndex ?? i + 1,
         game: item.game || null,
         cardSet: item.cardSet || null,
         cardName: item.cardName || null,
@@ -513,7 +686,18 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateSubmissionItem(itemId: number, data: Partial<{ game: string | null; cardName: string | null; cardSet: string | null; cardNumber: string | null; year: string | null; declaredValue: number; notes: string | null }>): Promise<SubmissionItem | undefined> {
+  async updateSubmissionItem(
+    itemId: number,
+    data: Partial<{
+      game: string | null;
+      cardName: string | null;
+      cardSet: string | null;
+      cardNumber: string | null;
+      year: string | null;
+      declaredValue: number;
+      notes: string | null;
+    }>
+  ): Promise<SubmissionItem | undefined> {
     const setParts: ReturnType<typeof sql>[] = [];
     if (data.game !== undefined) setParts.push(sql`game = ${data.game}`);
     if (data.cardName !== undefined) setParts.push(sql`card_name = ${data.cardName}`);
@@ -532,10 +716,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSubmissionStatus(id: number, status: string, extra: Record<string, any> = {}): Promise<any | undefined> {
-    const setParts: ReturnType<typeof sql>[] = [
-      sql`status = ${status.toLowerCase()}`,
-      sql`updated_at = NOW()`,
-    ];
+    const setParts: ReturnType<typeof sql>[] = [sql`status = ${status.toLowerCase()}`, sql`updated_at = NOW()`];
 
     if (status.toLowerCase() === "received") {
       setParts.push(sql`received_at = NOW()`);
@@ -553,6 +734,7 @@ export class DatabaseStorage implements IStorage {
       setParts.push(sql`shipped_at = NOW()`);
       if (extra.returnTracking) setParts.push(sql`return_tracking = ${extra.returnTracking}`);
       if (extra.returnCarrier) setParts.push(sql`return_carrier = ${extra.returnCarrier}`);
+      if (extra.returnService) setParts.push(sql`return_service = ${extra.returnService}`);
     }
     if (status.toLowerCase() === "delivered") {
       setParts.push(sql`delivered_at = NOW()`);
@@ -567,7 +749,11 @@ export class DatabaseStorage implements IStorage {
       setParts.push(sql`on_receipt_photo_urls = ${extra.onReceiptPhotoUrls}`);
     }
     // Append to status_history JSON array
-    const historyEntry = JSON.stringify({ status: status.toLowerCase(), timestamp: new Date().toISOString(), note: extra.note || null });
+    const historyEntry = JSON.stringify({
+      status: status.toLowerCase(),
+      timestamp: new Date().toISOString(),
+      note: extra.note || null,
+    });
     setParts.push(sql`status_history = COALESCE(status_history, '[]'::jsonb) || ${historyEntry}::jsonb`);
 
     const result = await db.execute(
@@ -600,16 +786,24 @@ export class DatabaseStorage implements IStorage {
 
   async createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord> {
     const certId = await this.getNextCertId();
-    const hash = crypto.createHash("sha256").update(certId + Date.now()).digest("hex");
+    const hash = crypto
+      .createHash("sha256")
+      .update(certId + Date.now())
+      .digest("hex");
 
     const { getDatabaseUrl } = await import("./config");
     const dbUrl = getDatabaseUrl();
     let dbHost = "";
-    try { dbHost = new URL(dbUrl).hostname.split(".")[0].slice(0, 12); } catch {}
+    try {
+      dbHost = new URL(dbUrl).hostname.split(".")[0].slice(0, 12);
+    } catch {}
     const env = process.env.NODE_ENV || "development";
 
     await this.writeAuditLog("certificate", certId, "CERT_ID_ALLOCATED", adminUser || null, {
-      mvNumber: certId, env, dbHost, timestamp: new Date().toISOString(),
+      mvNumber: certId,
+      env,
+      dbHost,
+      timestamp: new Date().toISOString(),
     });
 
     try {
@@ -620,18 +814,25 @@ export class DatabaseStorage implements IStorage {
         refNum = generateReferenceNumber();
       } catch {}
 
-      const [cert] = await db.insert(certificates).values({
-        ...data,
-        certId,
-        integrityHash: hash,
-        ...(refNum ? { referenceNumber: refNum } : {}),
-        logbookVersion: 1,
-        logbookLastIssuedAt: new Date(),
-      } as any).returning();
+      const [cert] = await db
+        .insert(certificates)
+        .values({
+          ...data,
+          certId,
+          integrityHash: hash,
+          ...(refNum ? { referenceNumber: refNum } : {}),
+          logbookVersion: 1,
+          logbookLastIssuedAt: new Date(),
+        } as any)
+        .returning();
       return cert;
     } catch (error: any) {
       await this.writeAuditLog("certificate", certId, "CERT_CREATE_FAILED", adminUser || null, {
-        mvNumber: certId, env, dbHost, reason: error.message, timestamp: new Date().toISOString(),
+        mvNumber: certId,
+        env,
+        dbHost,
+        reason: error.message,
+        timestamp: new Date().toISOString(),
       });
       throw error;
     }
@@ -641,7 +842,9 @@ export class DatabaseStorage implements IStorage {
    *  For admin/audit flows that need to see soft-deleted rows, add a dedicated
    *  getCertificateIncludingDeleted — do not widen this one. */
   async getCertificate(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.select().from(certificates)
+    const [cert] = await db
+      .select()
+      .from(certificates)
       .where(sql`${certificates.id} = ${id} AND ${certificates.deletedAt} IS NULL`);
     return cert;
   }
@@ -649,7 +852,9 @@ export class DatabaseStorage implements IStorage {
   /** Live cert by public MV cert-id. Soft-deleted certs (deleted_at IS NOT NULL) are NOT returned.
    *  See getCertificate above for the rationale on scoping. */
   async getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.select().from(certificates)
+    const [cert] = await db
+      .select()
+      .from(certificates)
       .where(sql`${certificates.certId} = ${certId} AND ${certificates.deletedAt} IS NULL`);
     return cert;
   }
@@ -665,68 +870,91 @@ export class DatabaseStorage implements IStorage {
 
   async getCertificateByNfcUid(uid: string): Promise<CertificateRecord | undefined> {
     const normalised = uid.toLowerCase();
-    const [cert] = await db.select().from(certificates)
+    const [cert] = await db
+      .select()
+      .from(certificates)
       .where(sql`LOWER(${certificates.nfcUid}) = ${normalised} AND ${certificates.deletedAt} IS NULL`);
     return cert;
   }
 
-  async saveNfcData(id: number, data: { uid: string; chipType?: string; url: string; writtenBy?: string }): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.update(certificates).set({
-      nfcUid: data.uid,
-      nfcEnabled: true,
-      nfcChipType: data.chipType || null,
-      nfcUrl: data.url,
-      nfcLocked: false,
-      nfcWrittenAt: new Date(),
-      nfcWrittenBy: data.writtenBy || null,
-      nfcLastVerifiedAt: null,
-      nfcLockedAt: null,
-      updatedAt: new Date(),
-    }).where(eq(certificates.id, id)).returning();
+  async saveNfcData(
+    id: number,
+    data: { uid: string; chipType?: string; url: string; writtenBy?: string }
+  ): Promise<CertificateRecord | undefined> {
+    const [cert] = await db
+      .update(certificates)
+      .set({
+        nfcUid: data.uid,
+        nfcEnabled: true,
+        nfcChipType: data.chipType || null,
+        nfcUrl: data.url,
+        nfcLocked: false,
+        nfcWrittenAt: new Date(),
+        nfcWrittenBy: data.writtenBy || null,
+        nfcLastVerifiedAt: null,
+        nfcLockedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(certificates.id, id))
+      .returning();
     return cert;
   }
 
   async lockNfc(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.update(certificates).set({
-      nfcLocked: true,
-      nfcLockedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(certificates.id, id)).returning();
+    const [cert] = await db
+      .update(certificates)
+      .set({
+        nfcLocked: true,
+        nfcLockedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(certificates.id, id))
+      .returning();
     return cert;
   }
 
   async clearNfc(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db.update(certificates).set({
-      nfcUid: null,
-      nfcEnabled: false,
-      nfcChipType: null,
-      nfcUrl: null,
-      nfcLocked: false,
-      nfcWrittenAt: null,
-      nfcLockedAt: null,
-      nfcLastVerifiedAt: null,
-      nfcWrittenBy: null,
-      nfcScanCount: 0,
-      nfcLastScanAt: null,
-      nfcLastScanIp: null,
-      updatedAt: new Date(),
-    }).where(eq(certificates.id, id)).returning();
+    const [cert] = await db
+      .update(certificates)
+      .set({
+        nfcUid: null,
+        nfcEnabled: false,
+        nfcChipType: null,
+        nfcUrl: null,
+        nfcLocked: false,
+        nfcWrittenAt: null,
+        nfcLockedAt: null,
+        nfcLastVerifiedAt: null,
+        nfcWrittenBy: null,
+        nfcScanCount: 0,
+        nfcLastScanAt: null,
+        nfcLastScanIp: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(certificates.id, id))
+      .returning();
     return cert;
   }
 
   async recordNfcVerified(id: number): Promise<void> {
-    await db.update(certificates).set({
-      nfcLastVerifiedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(certificates.id, id));
+    await db
+      .update(certificates)
+      .set({
+        nfcLastVerifiedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(certificates.id, id));
   }
 
   async recordNfcScan(certId: string, ip?: string): Promise<void> {
-    await db.update(certificates).set({
-      nfcScanCount: sql`COALESCE(${certificates.nfcScanCount}, 0) + 1`,
-      nfcLastScanAt: new Date(),
-      nfcLastScanIp: ip || null,
-    }).where(eq(certificates.certId, certId));
+    await db
+      .update(certificates)
+      .set({
+        nfcScanCount: sql`COALESCE(${certificates.nfcScanCount}, 0) + 1`,
+        nfcLastScanAt: new Date(),
+        nfcLastScanIp: ip || null,
+      })
+      .where(eq(certificates.certId, certId));
   }
 
   // ── Label printing ──────────────────────────────────────────────────────────
@@ -761,9 +989,10 @@ export class DatabaseStorage implements IStorage {
 
   async getLabelPrintStatus(certIds: string[]): Promise<LabelPrint[]> {
     if (!certIds.length) return [];
-    return db.select().from(labelPrints).where(
-      sql`${labelPrints.certId} = ANY(${certIds}::text[])`
-    );
+    return db
+      .select()
+      .from(labelPrints)
+      .where(sql`${labelPrints.certId} = ANY(${certIds}::text[])`);
   }
 
   async queueForPrinting(certIds: string[], sheetRef: string): Promise<void> {
@@ -780,13 +1009,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async markSheetPrinted(sheetRef: string): Promise<void> {
-    await db
-      .update(labelPrints)
-      .set({ printedAt: new Date() })
-      .where(eq(labelPrints.sheetRef, sheetRef));
+    await db.update(labelPrints).set({ printedAt: new Date() }).where(eq(labelPrints.sheetRef, sheetRef));
   }
 
-  async getLabelSheets(): Promise<{ sheetRef: string; total: number; printed: boolean; queuedAt: Date; printedAt: Date | null }[]> {
+  async getLabelSheets(): Promise<
+    { sheetRef: string; total: number; printed: boolean; queuedAt: Date; printedAt: Date | null }[]
+  > {
     const rows = await db.select().from(labelPrints).orderBy(desc(labelPrints.queuedAt));
     const bySheet = new Map<string, typeof rows>();
     for (const row of rows) {
@@ -796,14 +1024,16 @@ export class DatabaseStorage implements IStorage {
     }
     return Array.from(bySheet.entries()).map(([sheetRef, items]) => ({
       sheetRef,
-      total:     items.length,
-      printed:   items.every((i) => i.printedAt != null),
-      queuedAt:  items[0].queuedAt,
+      total: items.length,
+      printed: items.every((i) => i.printedAt != null),
+      queuedAt: items[0].queuedAt,
       printedAt: items.find((i) => i.printedAt)?.printedAt ?? null,
     }));
   }
 
-  async getSheetDetail(sheetRef: string): Promise<{ certId: string; printedAt: Date | null; queuedAt: Date; cert: CertificateRecord | null }[]> {
+  async getSheetDetail(
+    sheetRef: string
+  ): Promise<{ certId: string; printedAt: Date | null; queuedAt: Date; cert: CertificateRecord | null }[]> {
     const prints = await db
       .select()
       .from(labelPrints)
@@ -813,17 +1043,14 @@ export class DatabaseStorage implements IStorage {
     if (!prints.length) return [];
 
     const certIds = prints.map((p) => p.certId);
-    const certs = await db
-      .select()
-      .from(certificates)
-      .where(inArray(certificates.certId, certIds));
+    const certs = await db.select().from(certificates).where(inArray(certificates.certId, certIds));
 
     const certMap = new Map(certs.map((c) => [c.certId, c]));
     return prints.map((p) => ({
-      certId:    p.certId,
+      certId: p.certId,
       printedAt: p.printedAt,
-      queuedAt:  p.queuedAt,
-      cert:      certMap.get(p.certId) ?? null,
+      queuedAt: p.queuedAt,
+      cert: certMap.get(p.certId) ?? null,
     }));
   }
 
@@ -838,10 +1065,10 @@ export class DatabaseStorage implements IStorage {
       }
     }
     if (filters?.cardName) {
-      conditions.push(sql`LOWER(${certificates.cardName}) LIKE ${'%' + filters.cardName.toLowerCase() + '%'}`);
+      conditions.push(sql`LOWER(${certificates.cardName}) LIKE ${"%" + filters.cardName.toLowerCase() + "%"}`);
     }
     if (filters?.setName) {
-      conditions.push(sql`LOWER(${certificates.setName}) LIKE ${'%' + filters.setName.toLowerCase() + '%'}`);
+      conditions.push(sql`LOWER(${certificates.setName}) LIKE ${"%" + filters.setName.toLowerCase() + "%"}`);
     }
     if (filters?.grade) {
       const gradeNum = parseFloat(filters.grade);
@@ -859,32 +1086,38 @@ export class DatabaseStorage implements IStorage {
       conditions.push(sql`${certificates.ownershipStatus} = ${filters.ownershipStatus}`);
     }
 
-    const whereClause = conditions.reduce((acc, cond, i) => i === 0 ? cond : sql`${acc} AND ${cond}`);
+    const whereClause = conditions.reduce((acc, cond, i) => (i === 0 ? cond : sql`${acc} AND ${cond}`));
     // Sort by numeric portion of certId DESC so MV141 > MV140 > MV135 — admin
     // dashboard list, CSV export, ownership export, and printing sheet all
     // read via this method. createdAt order puts renumbered certs out of place.
-    return await db.select().from(certificates).where(whereClause).orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
+    return await db
+      .select()
+      .from(certificates)
+      .where(whereClause)
+      .orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
   }
 
   async searchCertificates(query: string): Promise<CertificateRecord[]> {
     const q = `%${query}%`;
-    return await db.select().from(certificates).where(
-      and(
-        sql`${certificates.deletedAt} IS NULL`,
-        or(
-          ilike(certificates.certId, q),
-          ilike(certificates.cardName, q),
-          ilike(certificates.setName, q),
-          ilike(certificates.cardGame, q),
+    return await db
+      .select()
+      .from(certificates)
+      .where(
+        and(
+          sql`${certificates.deletedAt} IS NULL`,
+          or(
+            ilike(certificates.certId, q),
+            ilike(certificates.cardName, q),
+            ilike(certificates.setName, q),
+            ilike(certificates.cardGame, q)
+          )
         )
       )
-    ).orderBy(desc(certificates.createdAt));
+      .orderBy(desc(certificates.createdAt));
   }
 
   async getNextCertId(): Promise<string> {
-    await db.execute(
-      sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`
-    );
+    await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
     const result = await db.execute(
       sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
     );
@@ -898,11 +1131,9 @@ export class DatabaseStorage implements IStorage {
     return `MV${nextNum}`;
   }
 
-
-
   async getLastIssuedMvNumber(): Promise<{ lastIssued: number; mvNumber: string }> {
     const result = await db.execute(sql`SELECT last_issued FROM cert_counter WHERE id = 1`);
-    const lastIssued = parseInt(result.rows[0]?.last_issued as string || "0", 10);
+    const lastIssued = parseInt((result.rows[0]?.last_issued as string) || "0", 10);
     return {
       lastIssued,
       mvNumber: lastIssued > 0 ? `MV${lastIssued}` : "None",
@@ -913,13 +1144,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await db
       .selectDistinct({ rarityOther: certificates.rarityOther })
       .from(certificates)
-      .where(
-        and(
-          isNotNull(certificates.rarityOther),
-          ne(certificates.rarityOther, ""),
-          isNull(certificates.deletedAt),
-        )
-      )
+      .where(and(isNotNull(certificates.rarityOther), ne(certificates.rarityOther, ""), isNull(certificates.deletedAt)))
       .orderBy(certificates.rarityOther);
     return rows.map((r) => r.rarityOther!).filter(Boolean) as string[];
   }
@@ -933,7 +1158,7 @@ export class DatabaseStorage implements IStorage {
           isNotNull(certificates.variant),
           ne(certificates.variant, ""),
           ne(certificates.variant, "NONE"),
-          isNull(certificates.deletedAt),
+          isNull(certificates.deletedAt)
         )
       )
       .orderBy(certificates.variant);
@@ -945,12 +1170,14 @@ export class DatabaseStorage implements IStorage {
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const allCerts = await db.select().from(certificates).where(
-      sql`${certificates.deletedAt} IS NULL`
-    ).orderBy(desc(certificates.createdAt));
+    const allCerts = await db
+      .select()
+      .from(certificates)
+      .where(sql`${certificates.deletedAt} IS NULL`)
+      .orderBy(desc(certificates.createdAt));
     const totalCerts = allCerts.length;
-    const thisWeek = allCerts.filter(c => c.createdAt && new Date(c.createdAt) >= weekAgo).length;
-    const thisMonth = allCerts.filter(c => c.createdAt && new Date(c.createdAt) >= monthAgo).length;
+    const thisWeek = allCerts.filter((c) => c.createdAt && new Date(c.createdAt) >= weekAgo).length;
+    const thisMonth = allCerts.filter((c) => c.createdAt && new Date(c.createdAt) >= monthAgo).length;
 
     const gradeMap = new Map<number, number>();
     let authenticOnlyCount = 0;
@@ -977,13 +1204,19 @@ export class DatabaseStorage implements IStorage {
 
     const recentCerts = allCerts.slice(0, 20);
 
-    return { totalCerts, thisWeek, thisMonth, authenticOnlyCount, authenticAlteredCount, gradeDistribution, recentCerts };
+    return {
+      totalCerts,
+      thisWeek,
+      thisMonth,
+      authenticOnlyCount,
+      authenticAlteredCount,
+      gradeDistribution,
+      recentCerts,
+    };
   }
 
   async getPopulationData(cert: CertificateRecord): Promise<PopulationResult> {
-    const conditions: any[] = [
-      sql`${certificates.deletedAt} IS NULL`,
-    ];
+    const conditions: any[] = [sql`${certificates.deletedAt} IS NULL`];
 
     if (cert.cardName) conditions.push(eq(certificates.cardName, cert.cardName));
     if (cert.setName) conditions.push(eq(certificates.setName, cert.setName));
@@ -992,7 +1225,10 @@ export class DatabaseStorage implements IStorage {
     if (cert.language) conditions.push(eq(certificates.language, cert.language));
     if (cert.variant) conditions.push(eq(certificates.variant, cert.variant));
 
-    const matching = await db.select().from(certificates).where(and(...conditions));
+    const matching = await db
+      .select()
+      .from(certificates)
+      .where(and(...conditions));
 
     const certGradeType = cert.gradeType || "numeric";
     const certIsNonNumeric = isNonNumericGrade(certGradeType);
@@ -1051,72 +1287,95 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCertificateImages(certificateId: number): Promise<CertificateImage[]> {
-    return await db.select().from(certificateImages)
+    return await db
+      .select()
+      .from(certificateImages)
       .where(eq(certificateImages.certificateId, certificateId))
       .orderBy(certificateImages.sortOrder);
   }
 
-  async autofillCard(setId: string, cardNumber: string, language: string, allowFallbackLanguage: boolean): Promise<{ match: CardMaster | null; matchType: "exact" | "fallback_language" | "none"; setName: string | null; suggestions?: CardMaster[] }> {
+  async autofillCard(
+    setId: string,
+    cardNumber: string,
+    language: string,
+    allowFallbackLanguage: boolean
+  ): Promise<{
+    match: CardMaster | null;
+    matchType: "exact" | "fallback_language" | "none";
+    setName: string | null;
+    suggestions?: CardMaster[];
+  }> {
     const num = cardNumber.trim();
     const lang = language.trim();
 
-    const [setRow] = await db.select().from(cardSets).where(
-      and(eq(cardSets.setId, setId), eq(cardSets.isDeleted, false))
-    );
+    const [setRow] = await db
+      .select()
+      .from(cardSets)
+      .where(and(eq(cardSets.setId, setId), eq(cardSets.isDeleted, false)));
     const setName = setRow?.setName || null;
 
-    const exact = await db.select().from(cardMaster).where(
-      and(
-        eq(cardMaster.setId, setId),
-        eq(cardMaster.cardNumber, num),
-        eq(cardMaster.language, lang),
-        eq(cardMaster.isDeleted, false),
+    const exact = await db
+      .select()
+      .from(cardMaster)
+      .where(
+        and(
+          eq(cardMaster.setId, setId),
+          eq(cardMaster.cardNumber, num),
+          eq(cardMaster.language, lang),
+          eq(cardMaster.isDeleted, false)
+        )
       )
-    ).limit(1);
+      .limit(1);
 
     if (exact.length > 0) {
       return { match: exact[0], matchType: "exact", setName };
     }
 
     if (allowFallbackLanguage) {
-      const fallback = await db.select().from(cardMaster).where(
-        and(
-          eq(cardMaster.setId, setId),
-          eq(cardMaster.cardNumber, num),
-          eq(cardMaster.isDeleted, false),
-        )
-      ).limit(1);
+      const fallback = await db
+        .select()
+        .from(cardMaster)
+        .where(and(eq(cardMaster.setId, setId), eq(cardMaster.cardNumber, num), eq(cardMaster.isDeleted, false)))
+        .limit(1);
 
       if (fallback.length > 0) {
         return { match: fallback[0], matchType: "fallback_language", setName };
       }
     }
 
-    const suggestions = await db.select().from(cardMaster).where(
-      and(
-        eq(cardMaster.setId, setId),
-        eq(cardMaster.language, lang),
-        eq(cardMaster.isDeleted, false),
-        or(
-          like(cardMaster.cardNumber, `${num}%`),
-          like(cardMaster.cardNumber, `%${num}%`),
-        ),
+    const suggestions = await db
+      .select()
+      .from(cardMaster)
+      .where(
+        and(
+          eq(cardMaster.setId, setId),
+          eq(cardMaster.language, lang),
+          eq(cardMaster.isDeleted, false),
+          or(like(cardMaster.cardNumber, `${num}%`), like(cardMaster.cardNumber, `%${num}%`))
+        )
       )
-    ).limit(5);
+      .limit(5);
 
     return { match: null, matchType: "none", setName, suggestions: suggestions.length > 0 ? suggestions : undefined };
   }
 
   async getCardSets(game?: string): Promise<CardSet[]> {
     if (game) {
-      return await db.select().from(cardSets).where(
-        and(eq(cardSets.game, game), eq(cardSets.isDeleted, false))
-      );
+      return await db
+        .select()
+        .from(cardSets)
+        .where(and(eq(cardSets.game, game), eq(cardSets.isDeleted, false)));
     }
     return await db.select().from(cardSets).where(eq(cardSets.isDeleted, false));
   }
 
-  async writeAuditLog(entityType: string, entityId: string, action: string, adminUser: string | null, details: Record<string, unknown> = {}): Promise<void> {
+  async writeAuditLog(
+    entityType: string,
+    entityId: string,
+    action: string,
+    adminUser: string | null,
+    details: Record<string, unknown> = {}
+  ): Promise<void> {
     await db.insert(auditLog).values({
       entityType,
       entityId,
@@ -1130,11 +1389,14 @@ export class DatabaseStorage implements IStorage {
     const [card] = await db.select().from(cardMaster).where(eq(cardMaster.id, id));
     if (!card || card.isDeleted) return false;
 
-    await db.update(cardMaster).set({
-      isDeleted: true,
-      deletedAt: new Date(),
-      deletedBy: adminUser,
-    }).where(eq(cardMaster.id, id));
+    await db
+      .update(cardMaster)
+      .set({
+        isDeleted: true,
+        deletedAt: new Date(),
+        deletedBy: adminUser,
+      })
+      .where(eq(cardMaster.id, id));
 
     await this.writeAuditLog("card_master", String(id), "soft_delete", adminUser, {
       cardName: card.cardName,
@@ -1148,7 +1410,9 @@ export class DatabaseStorage implements IStorage {
 
   async getServiceTiers(serviceType?: string): Promise<ServiceTierRecord[]> {
     if (serviceType) {
-      return await db.select().from(serviceTiers)
+      return await db
+        .select()
+        .from(serviceTiers)
         .where(and(eq(serviceTiers.serviceType, serviceType), eq(serviceTiers.isActive, true)))
         .orderBy(serviceTiers.sortOrder);
     }
@@ -1156,8 +1420,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getServiceTier(serviceType: string, tierId: string): Promise<ServiceTierRecord | undefined> {
-    const [tier] = await db.select().from(serviceTiers)
-      .where(and(eq(serviceTiers.serviceType, serviceType), eq(serviceTiers.tierId, tierId), eq(serviceTiers.isActive, true)));
+    const [tier] = await db
+      .select()
+      .from(serviceTiers)
+      .where(
+        and(eq(serviceTiers.serviceType, serviceType), eq(serviceTiers.tierId, tierId), eq(serviceTiers.isActive, true))
+      );
     return tier;
   }
 
@@ -1185,10 +1453,17 @@ export class DatabaseStorage implements IStorage {
 
   async upsertLabelOverride(
     certId: string,
-    data: { cardNameOverride?: string | null; setOverride?: string | null; variantOverride?: string | null; languageOverride?: string | null; yearOverride?: string | null }
+    data: {
+      cardNameOverride?: string | null;
+      setOverride?: string | null;
+      variantOverride?: string | null;
+      languageOverride?: string | null;
+      yearOverride?: string | null;
+    }
   ): Promise<LabelOverride> {
     const now = new Date();
-    const [row] = await db.insert(labelOverrides)
+    const [row] = await db
+      .insert(labelOverrides)
       .values({ certId, ...data, editedAt: now })
       .onConflictDoUpdate({
         target: labelOverrides.certId,
@@ -1248,7 +1523,9 @@ export class DatabaseStorage implements IStorage {
   private _generateRandomCode(length = 12): string {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = crypto.randomBytes(length);
-    return Array.from(bytes).map(b => chars[b % chars.length]).join("");
+    return Array.from(bytes)
+      .map((b) => chars[b % chars.length])
+      .join("");
   }
 
   async generateClaimCode(certId: string): Promise<string> {
@@ -1302,7 +1579,12 @@ export class DatabaseStorage implements IStorage {
     return result.rows.length > 0;
   }
 
-  async createClaimVerification(certId: string, email: string, ownerName?: string, declaredNew?: boolean): Promise<string> {
+  async createClaimVerification(
+    certId: string,
+    email: string,
+    ownerName?: string,
+    declaredNew?: boolean
+  ): Promise<string> {
     const token = crypto.randomBytes(32).toString("hex");
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1319,29 +1601,38 @@ export class DatabaseStorage implements IStorage {
     return token;
   }
 
-  async completeClaimByToken(token: string): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }> {
+  async completeClaimByToken(
+    token: string
+  ): Promise<{ success: boolean; certId?: string; email?: string; ownerName?: string | null; error?: string }> {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(claimVerifications)
       .where(eq(claimVerifications.tokenHash, tokenHash));
 
     if (!verification) return { success: false, error: "Invalid verification link." };
     if (verification.usedAt) return { success: false, error: "This verification link has already been used." };
-    if (new Date() > verification.expiresAt) return { success: false, error: "This verification link has expired. Please submit a new claim." };
+    if (new Date() > verification.expiresAt)
+      return { success: false, error: "This verification link has expired. Please submit a new claim." };
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
     if ((cert as any).stolenStatus === "reported_stolen") {
       return {
         success: false,
-        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+        error:
+          "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
       };
     }
-    if (cert.ownershipStatus === "claimed") return { success: false, error: "This certificate has already been claimed." };
+    if (cert.ownershipStatus === "claimed")
+      return { success: false, error: "This certificate has already been claimed." };
     if (cert.claimCodeUsedAt) return { success: false, error: "This claim code has already been used." };
     if (cert.claimCodeCreatedAt && verification.createdAt < cert.claimCodeCreatedAt) {
-      return { success: false, error: "The claim code was regenerated after this verification was requested. Please submit a new claim." };
+      return {
+        success: false,
+        error: "The claim code was regenerated after this verification was requested. Please submit a new claim.",
+      };
     }
 
     let user = await this.getUserByEmail(verification.email);
@@ -1382,9 +1673,7 @@ export class DatabaseStorage implements IStorage {
         notes: "Claimed via email verification",
       });
 
-      await tx.update(claimVerifications)
-        .set({ usedAt: new Date() })
-        .where(eq(claimVerifications.id, verification.id));
+      await tx.update(claimVerifications).set({ usedAt: new Date() }).where(eq(claimVerifications.id, verification.id));
 
       // Clicking the unique-token verify link IS proof of email control;
       // flip the user's email_verified flag now if it isn't already.
@@ -1397,17 +1686,29 @@ export class DatabaseStorage implements IStorage {
       `);
     });
 
-    return { success: true, certId: verification.certId, email: verification.email, ownerName: verification.ownerName ?? undefined };
+    return {
+      success: true,
+      certId: verification.certId,
+      email: verification.email,
+      ownerName: verification.ownerName ?? undefined,
+    };
   }
 
   async getOwnershipHistory(certId: string): Promise<OwnershipHistoryRecord[]> {
-    return await db.select()
+    return await db
+      .select()
       .from(ownershipHistory)
       .where(eq(ownershipHistory.certId, certId))
       .orderBy(desc(ownershipHistory.createdAt));
   }
 
-  async assignOwnerManual(certId: string, email: string, adminUser: string, notes?: string, opts?: { overrideStolen?: boolean }): Promise<void> {
+  async assignOwnerManual(
+    certId: string,
+    email: string,
+    adminUser: string,
+    notes?: string,
+    opts?: { overrideStolen?: boolean }
+  ): Promise<void> {
     const normalEmail = email.toLowerCase().trim();
 
     const cert = await this.getCertificateByCertId(certId);
@@ -1453,7 +1754,8 @@ export class DatabaseStorage implements IStorage {
     });
 
     await this.writeAuditLog("certificate", certId, "OWNER_ASSIGNED", adminUser, {
-      email: normalEmail, userId: user.id,
+      email: normalEmail,
+      userId: user.id,
     });
   }
 
@@ -1476,7 +1778,12 @@ export class DatabaseStorage implements IStorage {
     return codes;
   }
 
-  async createTransferVerification(certId: string, fromEmail: string, toEmail: string, newOwnerName?: string): Promise<string> {
+  async createTransferVerification(
+    certId: string,
+    fromEmail: string,
+    toEmail: string,
+    newOwnerName?: string
+  ): Promise<string> {
     const ownerToken = crypto.randomBytes(32).toString("hex");
     const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
     const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1501,16 +1808,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Step 1: current owner clicks their confirmation link → generates new owner token
-  async confirmOwnerTransferStep(token: string): Promise<{ success: boolean; certId?: string; fromEmail?: string; toEmail?: string; newOwnerToken?: string; error?: string }> {
+  async confirmOwnerTransferStep(
+    token: string
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    newOwnerToken?: string;
+    error?: string;
+  }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
       .where(eq(transferVerifications.ownerTokenHash, ownerTokenHash));
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
-    if (verification.ownerConfirmedAt) return { success: false, error: "You have already confirmed this transfer. The new owner has been emailed." };
-    if (new Date() > verification.ownerExpiresAt) return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
+    if (verification.ownerConfirmedAt)
+      return { success: false, error: "You have already confirmed this transfer. The new owner has been emailed." };
+    if (new Date() > verification.ownerExpiresAt)
+      return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
 
     // Generate token for new owner
@@ -1518,7 +1837,8 @@ export class DatabaseStorage implements IStorage {
     const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
     const newOwnerExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h for new owner
 
-    await db.update(transferVerifications)
+    await db
+      .update(transferVerifications)
       .set({
         ownerConfirmedAt: new Date(),
         newOwnerTokenHash,
@@ -1526,7 +1846,13 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(transferVerifications.id, verification.id));
 
-    return { success: true, certId: verification.certId, fromEmail: verification.fromEmail, toEmail: verification.toEmail, newOwnerToken };
+    return {
+      success: true,
+      certId: verification.certId,
+      fromEmail: verification.fromEmail,
+      toEmail: verification.toEmail,
+      newOwnerToken,
+    };
   }
 
   private async _generateOwnershipToken(): Promise<string> {
@@ -1540,17 +1866,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Step 2: new owner clicks their confirmation link → transfer completes
-  async completeTransferByNewOwnerToken(token: string): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }> {
+  async completeTransferByNewOwnerToken(
+    token: string
+  ): Promise<{ success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string }> {
     const newOwnerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
       .where(eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash));
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
     if (!verification.newOwnerExpiresAt || new Date() > verification.newOwnerExpiresAt) {
-      return { success: false, error: "This confirmation link has expired. Please ask the original owner to initiate a new transfer." };
+      return {
+        success: false,
+        error: "This confirmation link has expired. Please ask the original owner to initiate a new transfer.",
+      };
     }
 
     const cert = await this.getCertificateByCertId(verification.certId);
@@ -1584,11 +1916,17 @@ export class DatabaseStorage implements IStorage {
       notes: `Transferred from ${verification.fromEmail} — both parties confirmed by email`,
     });
 
-    await db.update(transferVerifications)
+    await db
+      .update(transferVerifications)
       .set({ usedAt: new Date() })
       .where(eq(transferVerifications.id, verification.id));
 
-    return { success: true, certId: verification.certId, toEmail: verification.toEmail, ownerName: verification.newOwnerName ?? null };
+    return {
+      success: true,
+      certId: verification.certId,
+      toEmail: verification.toEmail,
+      ownerName: verification.newOwnerName ?? null,
+    };
   }
 
   // ── Customer dashboard queries ──────────────────────────────────────────────
@@ -1612,6 +1950,8 @@ export class DatabaseStorage implements IStorage {
       shippedAt: row.shipped_at,
       completedAt: row.completed_at,
       returnCarrier: row.return_carrier,
+      returnService: row.return_service,
+      returnTracking: row.return_tracking,
       returnTrackingNumber: row.return_tracking_number,
       customerFirstName: row.customer_first_name,
       customerEmail: row.customer_email,
@@ -1700,22 +2040,30 @@ export class DatabaseStorage implements IStorage {
     return rows;
   }
 
-  async getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<{
-    cardGame: string | null; setName: string | null; cardName: string | null;
-    total: number; gBL: number; g10: number; g9: number;
-    g8: number; g7: number; gLow: number;
-  }[]> {
-    const conditions: string[] = [
-      `status = 'active'`,
-      `deleted_at IS NULL`,
-      `grade_type = 'numeric'`,
-    ];
+  async getGlobalPopulation(filters: { game?: string; set?: string; card?: string }): Promise<
+    {
+      cardGame: string | null;
+      setName: string | null;
+      cardName: string | null;
+      total: number;
+      gBL: number;
+      g10: number;
+      g9: number;
+      g8: number;
+      g7: number;
+      gLow: number;
+    }[]
+  > {
+    const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
     if (filters.game) conditions.push(`LOWER(card_game) = LOWER('${filters.game.replace(/'/g, "''")}')`);
-    if (filters.set)  conditions.push(`LOWER(set_name)  LIKE LOWER('%${filters.set.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
-    if (filters.card) conditions.push(`LOWER(card_name) LIKE LOWER('%${filters.card.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
+    if (filters.set)
+      conditions.push(`LOWER(set_name)  LIKE LOWER('%${filters.set.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
+    if (filters.card)
+      conditions.push(`LOWER(card_name) LIKE LOWER('%${filters.card.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
 
     const where = conditions.join(" AND ");
-    const result = await db.execute(sql.raw(`
+    const result = await db.execute(
+      sql.raw(`
       SELECT
         card_game,
         set_name,
@@ -1742,26 +2090,31 @@ export class DatabaseStorage implements IStorage {
       GROUP BY card_game, set_name, card_name
       ORDER BY total DESC
       LIMIT 200
-    `));
+    `)
+    );
 
-    return (result.rows as any[]).map(r => ({
+    return (result.rows as any[]).map((r) => ({
       cardGame: r.card_game ?? null,
-      setName:  r.set_name  ?? null,
+      setName: r.set_name ?? null,
       cardName: r.card_name ?? null,
-      total:    Number(r.total),
-      gBL:      Number(r.gbl ?? r.gBL ?? 0),
-      g10:      Number(r.g10),
-      g9:       Number(r.g9),
-      g8:       Number(r.g8),
-      g7:       Number(r.g7),
-      gLow:     Number(r.glow ?? r.gLow ?? 0),
+      total: Number(r.total),
+      gBL: Number(r.gbl ?? r.gBL ?? 0),
+      g10: Number(r.g10),
+      g9: Number(r.g9),
+      g8: Number(r.g8),
+      g7: Number(r.g7),
+      gLow: Number(r.glow ?? r.gLow ?? 0),
     }));
   }
 
   // ── v2 Transfer Flow (DVLA-style) ─────────────────────────────────────────
   async createTransferV2(data: {
-    certId: string; fromEmail: string; toEmail: string; newOwnerName?: string;
-    outgoingKeeperUserId: string; referenceNumber: string;
+    certId: string;
+    fromEmail: string;
+    toEmail: string;
+    newOwnerName?: string;
+    outgoingKeeperUserId: string;
+    referenceNumber: string;
   }): Promise<string> {
     const ownerToken = crypto.randomBytes(32).toString("hex");
     const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
@@ -1793,21 +2146,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async confirmOutgoingKeeperV2(token: string): Promise<{
-    success: boolean; certId?: string; fromEmail?: string; toEmail?: string;
-    newOwnerToken?: string; error?: string; stolen?: boolean;
+    success: boolean;
+    certId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    newOwnerToken?: string;
+    error?: string;
+    stolen?: boolean;
   }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(
+        and(eq(transferVerifications.ownerTokenHash, ownerTokenHash), eq(transferVerifications.flowVersion, "v2"))
+      );
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.ownerConfirmedAt) return { success: false, error: "You have already confirmed this transfer." };
-    if (new Date() > verification.ownerExpiresAt) return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
+    if (new Date() > verification.ownerExpiresAt)
+      return { success: false, error: "This confirmation link has expired. Please initiate a new transfer." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
     if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
 
@@ -1818,7 +2177,8 @@ export class DatabaseStorage implements IStorage {
       return {
         success: false,
         stolen: true,
-        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+        error:
+          "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
       };
     }
 
@@ -1827,7 +2187,8 @@ export class DatabaseStorage implements IStorage {
     const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
     const incomingConfirmDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
 
-    await db.update(transferVerifications)
+    await db
+      .update(transferVerifications)
       .set({
         ownerConfirmedAt: new Date(),
         newOwnerTokenHash,
@@ -1846,17 +2207,25 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async confirmIncomingKeeperV2(token: string, referenceNumberProvided: string): Promise<{
-    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string; stolen?: boolean;
+  async confirmIncomingKeeperV2(
+    token: string,
+    referenceNumberProvided: string
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    toEmail?: string;
+    ownerName?: string | null;
+    error?: string;
+    stolen?: boolean;
   }> {
     const newOwnerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(
+        and(eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash), eq(transferVerifications.flowVersion, "v2"))
+      );
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
@@ -1873,13 +2242,17 @@ export class DatabaseStorage implements IStorage {
       return {
         success: false,
         stolen: true,
-        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+        error:
+          "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
       };
     }
 
     const certRefNumber = (cert as any).referenceNumber as string | null;
     if (!certRefNumber) {
-      return { success: false, error: "This certificate does not have a Document Reference Number. Please contact support." };
+      return {
+        success: false,
+        error: "This certificate does not have a Document Reference Number. Please contact support.",
+      };
     }
 
     // Normalise: strip dashes and compare uppercase
@@ -1888,7 +2261,8 @@ export class DatabaseStorage implements IStorage {
       // Record the failed attempt + audit log atomically — admin review must
       // never see one without the other.
       await db.transaction(async (tx) => {
-        await tx.update(transferVerifications)
+        await tx
+          .update(transferVerifications)
           .set({ referenceNumberProvided: referenceNumberProvided.trim() })
           .where(eq(transferVerifications.id, verification.id));
 
@@ -1902,7 +2276,10 @@ export class DatabaseStorage implements IStorage {
         });
       });
 
-      return { success: false, error: "The Document Reference Number you entered does not match. Please check your Logbook and try again." };
+      return {
+        success: false,
+        error: "The Document Reference Number you entered does not match. Please check your Logbook and try again.",
+      };
     }
 
     // Reference number correct — start dispute window (14 days from now)
@@ -1916,7 +2293,8 @@ export class DatabaseStorage implements IStorage {
       incomingUser = await this.createUser({ email: verification.toEmail });
     }
 
-    await db.update(transferVerifications)
+    await db
+      .update(transferVerifications)
       .set({
         referenceNumberProvided: referenceNumberProvided.trim(),
         incomingKeeperUserId: incomingUser.id,
@@ -1934,24 +2312,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTransferV2(id: number): Promise<TransferVerification | undefined> {
-    const [row] = await db.select()
+    const [row] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.id, id),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(and(eq(transferVerifications.id, id), eq(transferVerifications.flowVersion, "v2")));
     return row;
   }
 
   async getTransferV2ByCertId(certId: string): Promise<TransferVerification | undefined> {
-    const [row] = await db.select()
+    const [row] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.certId, certId),
-        eq(transferVerifications.flowVersion, "v2"),
-        isNull(transferVerifications.usedAt),
-        isNull(transferVerifications.cancelledAt),
-      ))
+      .where(
+        and(
+          eq(transferVerifications.certId, certId),
+          eq(transferVerifications.flowVersion, "v2"),
+          isNull(transferVerifications.usedAt),
+          isNull(transferVerifications.cancelledAt)
+        )
+      )
       .orderBy(desc(transferVerifications.createdAt))
       .limit(1);
     return row;
@@ -1962,28 +2341,33 @@ export class DatabaseStorage implements IStorage {
     if (filters?.status) conditions.push(eq(transferVerifications.status, filters.status));
     if (filters?.certId) conditions.push(eq(transferVerifications.certId, filters.certId));
 
-    return db.select()
+    return db
+      .select()
       .from(transferVerifications)
       .where(and(...conditions))
       .orderBy(desc(transferVerifications.createdAt));
   }
 
-  async disputeTransferV2(transferId: number, disputedBy: "outgoing" | "incoming", reason: string): Promise<{ success: boolean; error?: string }> {
-    const [transfer] = await db.select()
+  async disputeTransferV2(
+    transferId: number,
+    disputedBy: "outgoing" | "incoming",
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const [transfer] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.id, transferId),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(and(eq(transferVerifications.id, transferId), eq(transferVerifications.flowVersion, "v2")));
 
     if (!transfer) return { success: false, error: "Transfer not found." };
-    if (transfer.status !== "pending_dispute") return { success: false, error: "This transfer is not in the dispute window." };
+    if (transfer.status !== "pending_dispute")
+      return { success: false, error: "This transfer is not in the dispute window." };
     if (transfer.disputeDeadline && new Date() > transfer.disputeDeadline) {
       return { success: false, error: "The dispute window has closed." };
     }
 
     await db.transaction(async (tx) => {
-      await tx.update(transferVerifications)
+      await tx
+        .update(transferVerifications)
         .set({
           status: "disputed",
           disputedAt: new Date(),
@@ -2004,12 +2388,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cancelTransferV2(transferId: number, reason: string): Promise<{ success: boolean; error?: string }> {
-    const [transfer] = await db.select()
+    const [transfer] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.id, transferId),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(and(eq(transferVerifications.id, transferId), eq(transferVerifications.flowVersion, "v2")));
 
     if (!transfer) return { success: false, error: "Transfer not found." };
     // Can only cancel if not yet completed or already cancelled
@@ -2018,7 +2400,8 @@ export class DatabaseStorage implements IStorage {
     }
 
     await db.transaction(async (tx) => {
-      await tx.update(transferVerifications)
+      await tx
+        .update(transferVerifications)
         .set({
           status: "cancelled",
           cancelledAt: new Date(),
@@ -2037,15 +2420,20 @@ export class DatabaseStorage implements IStorage {
     return { success: true };
   }
 
-  async finaliseTransferV2(transferId: number, opts?: { skipStatusCheck?: boolean }): Promise<{
-    success: boolean; certId?: string; toEmail?: string; ownerName?: string | null; error?: string;
+  async finaliseTransferV2(
+    transferId: number,
+    opts?: { skipStatusCheck?: boolean }
+  ): Promise<{
+    success: boolean;
+    certId?: string;
+    toEmail?: string;
+    ownerName?: string | null;
+    error?: string;
   }> {
-    const [transfer] = await db.select()
+    const [transfer] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.id, transferId),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(and(eq(transferVerifications.id, transferId), eq(transferVerifications.flowVersion, "v2")));
 
     if (!transfer) return { success: false, error: "Transfer not found." };
     if (["completed", "cancelled", "expired"].includes(transfer.status)) {
@@ -2078,7 +2466,8 @@ export class DatabaseStorage implements IStorage {
     let newReferenceNumber: string | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       const candidate = generateReferenceNumber();
-      const existing = await db.select({ id: certificates.id })
+      const existing = await db
+        .select({ id: certificates.id })
         .from(certificates)
         .where(eq(certificates.referenceNumber, candidate))
         .limit(1);
@@ -2088,7 +2477,10 @@ export class DatabaseStorage implements IStorage {
       }
     }
     if (!newReferenceNumber) {
-      return { success: false, error: "Failed to generate unique reference number after 3 attempts — please try again." };
+      return {
+        success: false,
+        error: "Failed to generate unique reference number after 3 attempts — please try again.",
+      };
     }
 
     // Atomic finalise — cert UPDATE (DRN rotation + version bump), audit_log
@@ -2140,7 +2532,8 @@ export class DatabaseStorage implements IStorage {
       });
 
       // Mark transfer as completed
-      await tx.update(transferVerifications)
+      await tx
+        .update(transferVerifications)
         .set({
           status: "completed",
           finalisedAt: new Date(),
@@ -2159,24 +2552,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTransfersReadyToFinalise(): Promise<TransferVerification[]> {
-    return db.select()
+    return db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.flowVersion, "v2"),
-        eq(transferVerifications.status, "pending_dispute"),
-        isNotNull(transferVerifications.disputeDeadline),
-        sql`${transferVerifications.disputeDeadline} <= NOW()`,
-      ));
+      .where(
+        and(
+          eq(transferVerifications.flowVersion, "v2"),
+          eq(transferVerifications.status, "pending_dispute"),
+          isNotNull(transferVerifications.disputeDeadline),
+          sql`${transferVerifications.disputeDeadline} <= NOW()`
+        )
+      );
   }
 
-  async expireStaleTransfersV2(): Promise<Array<{
-    transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
-  }>> {
+  async expireStaleTransfersV2(): Promise<
+    Array<{
+      transferId: number;
+      certId: string;
+      fromEmail: string;
+      toEmail: string;
+      reason: string;
+    }>
+  > {
     // One sweep tick = one transaction. Three batched expiries + N cert
     // resets all succeed together or none, so a crash mid-sweep can't leave
     // a transfer marked expired with the cert still flagged transfer_pending.
     const collected: Array<{
-      transferId: number; certId: string; fromEmail: string; toEmail: string; reason: string;
+      transferId: number;
+      certId: string;
+      fromEmail: string;
+      toEmail: string;
+      reason: string;
     }> = [];
 
     await db.transaction(async (tx) => {
@@ -2225,8 +2631,14 @@ export class DatabaseStorage implements IStorage {
         }
       };
       map(expiredOwner.rows as any[], "Outgoing keeper did not confirm within 24 hours.");
-      map(expiredIncoming.rows as any[], "Incoming keeper did not verify the Document Reference Number within 14 days.");
-      map(expiredBuyerInit.rows as any[], "The current keeper did not respond to a buyer-initiated transfer within 14 days. Original ownership has been preserved.");
+      map(
+        expiredIncoming.rows as any[],
+        "Incoming keeper did not verify the Document Reference Number within 14 days."
+      );
+      map(
+        expiredBuyerInit.rows as any[],
+        "The current keeper did not respond to a buyer-initiated transfer within 14 days. Original ownership has been preserved."
+      );
 
       // Reset cert ownership status for any expired transfers
       for (const row of collected) {
@@ -2261,7 +2673,7 @@ export class DatabaseStorage implements IStorage {
    */
   async validateClaimCodeForTransfer(
     certId: string,
-    claimCode: string,
+    claimCode: string
   ): Promise<{ valid: boolean; currentOwnerEmail?: string; currentOwnerUserId?: string }> {
     const hash = this._hashClaimCode(claimCode);
     const result = await db.execute(sql`
@@ -2286,8 +2698,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTransferV2BuyerInit(data: {
-    certId: string; claimantEmail: string; claimantName?: string;
-    currentOwnerEmail: string; currentOwnerUserId: string;
+    certId: string;
+    claimantEmail: string;
+    claimantName?: string;
+    currentOwnerEmail: string;
+    currentOwnerUserId: string;
   }): Promise<{ ownerToken: string; transferId: number }> {
     const ownerToken = crypto.randomBytes(32).toString("hex");
     const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
@@ -2296,22 +2711,25 @@ export class DatabaseStorage implements IStorage {
 
     let transferId = 0;
     await db.transaction(async (tx) => {
-      const inserted = await tx.insert(transferVerifications).values({
-        certId: data.certId,
-        // For buyer-init, fromEmail = current owner (the keeper losing the cert),
-        // toEmail = new claimant (the buyer who used the claim code).
-        fromEmail: data.currentOwnerEmail.toLowerCase().trim(),
-        toEmail: data.claimantEmail.toLowerCase().trim(),
-        ownerTokenHash,
-        ownerExpiresAt,
-        newOwnerName: data.claimantName?.trim() || null,
-        flowVersion: "v2",
-        status: "pending_owner_invited_by_buyer",
-        outgoingKeeperUserId: data.currentOwnerUserId,
-        // Mark that the buyer (incoming keeper) initiated this with the claim
-        // code, so admin reviewers can see at a glance which path was used.
-        referenceNumberProvided: "BUYER_INIT_VIA_CLAIM_CODE",
-      }).returning({ id: transferVerifications.id });
+      const inserted = await tx
+        .insert(transferVerifications)
+        .values({
+          certId: data.certId,
+          // For buyer-init, fromEmail = current owner (the keeper losing the cert),
+          // toEmail = new claimant (the buyer who used the claim code).
+          fromEmail: data.currentOwnerEmail.toLowerCase().trim(),
+          toEmail: data.claimantEmail.toLowerCase().trim(),
+          ownerTokenHash,
+          ownerExpiresAt,
+          newOwnerName: data.claimantName?.trim() || null,
+          flowVersion: "v2",
+          status: "pending_owner_invited_by_buyer",
+          outgoingKeeperUserId: data.currentOwnerUserId,
+          // Mark that the buyer (incoming keeper) initiated this with the claim
+          // code, so admin reviewers can see at a glance which path was used.
+          referenceNumberProvided: "BUYER_INIT_VIA_CLAIM_CODE",
+        })
+        .returning({ id: transferVerifications.id });
       transferId = inserted[0].id;
 
       // Mark cert as transfer_pending — atomically guarded against any other
@@ -2335,19 +2753,29 @@ export class DatabaseStorage implements IStorage {
    * before the existing sweep auto-finalises.
    */
   async confirmBuyerInitTransfer(token: string): Promise<{
-    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; disputeDeadline?: Date; error?: string; stolen?: boolean;
+    success: boolean;
+    transferId?: number;
+    certId?: string;
+    claimantEmail?: string;
+    ownerEmail?: string;
+    disputeDeadline?: Date;
+    error?: string;
+    stolen?: boolean;
   }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(
+        and(eq(transferVerifications.ownerTokenHash, ownerTokenHash), eq(transferVerifications.flowVersion, "v2"))
+      );
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.status !== "pending_owner_invited_by_buyer") {
-      return { success: false, error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).` };
+      return {
+        success: false,
+        error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).`,
+      };
     }
     if (new Date() > verification.ownerExpiresAt) {
       return { success: false, error: "This confirmation link has expired (14-day deadline passed)." };
@@ -2363,7 +2791,8 @@ export class DatabaseStorage implements IStorage {
       return {
         success: false,
         stolen: true,
-        error: "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+        error:
+          "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
       };
     }
 
@@ -2377,7 +2806,8 @@ export class DatabaseStorage implements IStorage {
     // 14-day dispute window starts now.
     const disputeDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    await db.update(transferVerifications)
+    await db
+      .update(transferVerifications)
       .set({
         status: "pending_dispute",
         ownerConfirmedAt: new Date(),
@@ -2401,20 +2831,31 @@ export class DatabaseStorage implements IStorage {
    * transfer is rejected immediately and cert ownership returns to
    * 'claimed' (original keeper unchanged).
    */
-  async disputeBuyerInitTransfer(token: string, reason?: string): Promise<{
-    success: boolean; transferId?: number; certId?: string; claimantEmail?: string; ownerEmail?: string; error?: string;
+  async disputeBuyerInitTransfer(
+    token: string,
+    reason?: string
+  ): Promise<{
+    success: boolean;
+    transferId?: number;
+    certId?: string;
+    claimantEmail?: string;
+    ownerEmail?: string;
+    error?: string;
   }> {
     const ownerTokenHash = crypto.createHash("sha256").update(token).digest("hex");
-    const [verification] = await db.select()
+    const [verification] = await db
+      .select()
       .from(transferVerifications)
-      .where(and(
-        eq(transferVerifications.ownerTokenHash, ownerTokenHash),
-        eq(transferVerifications.flowVersion, "v2"),
-      ));
+      .where(
+        and(eq(transferVerifications.ownerTokenHash, ownerTokenHash), eq(transferVerifications.flowVersion, "v2"))
+      );
 
     if (!verification) return { success: false, error: "Invalid dispute link." };
     if (verification.status !== "pending_owner_invited_by_buyer") {
-      return { success: false, error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).` };
+      return {
+        success: false,
+        error: `This transfer is no longer in the owner-response stage (status: ${verification.status}).`,
+      };
     }
     if (new Date() > verification.ownerExpiresAt) {
       return { success: false, error: "This dispute link has expired (14-day deadline passed)." };
@@ -2423,12 +2864,15 @@ export class DatabaseStorage implements IStorage {
     if (verification.cancelledAt) return { success: false, error: "This transfer has been cancelled." };
 
     await db.transaction(async (tx) => {
-      await tx.update(transferVerifications)
+      await tx
+        .update(transferVerifications)
         .set({
           status: "disputed",
           disputedAt: new Date(),
           disputedBy: "outgoing",
-          disputeReason: (reason || "Disputed by current keeper via buyer-init notification email").trim().slice(0, 2000),
+          disputeReason: (reason || "Disputed by current keeper via buyer-init notification email")
+            .trim()
+            .slice(0, 2000),
         })
         .where(eq(transferVerifications.id, verification.id));
 
@@ -2461,8 +2905,8 @@ export async function deductAiCredits(
   userId: string,
   amount: number,
   reason: string
-): Promise<{ ok: true; remaining: number } | { ok: false; reason: 'insufficient' | 'no_user' }> {
-  if (amount <= 0) throw new Error('deductAiCredits: amount must be positive');
+): Promise<{ ok: true; remaining: number } | { ok: false; reason: "insufficient" | "no_user" }> {
+  if (amount <= 0) throw new Error("deductAiCredits: amount must be positive");
 
   const result = await db.execute(sql`
     UPDATE users
@@ -2478,15 +2922,15 @@ export async function deductAiCredits(
     const check = await db.execute(sql`
       SELECT ai_credits_user_balance FROM users WHERE id = ${userId} LIMIT 1
     `);
-    if (check.rows.length === 0) return { ok: false, reason: 'no_user' };
-    return { ok: false, reason: 'insufficient' };
+    if (check.rows.length === 0) return { ok: false, reason: "no_user" };
+    return { ok: false, reason: "insufficient" };
   }
 
   // Audit trail
   await db.insert(auditLog).values({
-    entityType: 'user',
+    entityType: "user",
     entityId: userId,
-    action: 'ai_credits.deducted',
+    action: "ai_credits.deducted",
     adminUser: null,
     details: { amount, reason },
   });

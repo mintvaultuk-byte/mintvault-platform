@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import crypto from "crypto";
 import { SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS } from "@shared/schema";
+import { isServiceValidForCarrier } from "@shared/carriers";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
 import { sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered } from "../email";
@@ -296,32 +297,52 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const { carrier, trackingNumber, postageCost } = req.body;
+      const { carrier, service, trackingNumber, postageCost } = req.body;
       const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
 
       const safeCarrier = carrier ? String(carrier) : null;
+      const safeService = service ? String(service) : null;
       const safeTracking = trackingNumber ? String(trackingNumber) : null;
       const safeCost = postageCost ? parseInt(postageCost, 10) : null;
 
-      await db.execute(sql`
-        UPDATE submissions SET
-          return_carrier = COALESCE(${safeCarrier}, return_carrier),
-          return_tracking = COALESCE(${safeTracking}, return_tracking),
-          return_postage_cost = COALESCE(${safeCost}, return_postage_cost),
-          updated_at = NOW()
-        WHERE id = ${numId}
-      `);
+      // Validate carrier+service combination against the shared catalogue.
+      // Only enforced when a carrier is supplied — legacy calls that pass
+      // neither must still succeed.
+      if (safeCarrier && !isServiceValidForCarrier(safeCarrier, safeService)) {
+        return res.status(400).json({
+          error: "Invalid carrier/service combination",
+          carrier: safeCarrier,
+          service: safeService,
+        });
+      }
 
-      await storage.writeAuditLog(
-        "submission",
-        submission.submissionId,
-        "return_label_created",
-        req.session.adminEmail || "admin",
-        {
-          carrier,
-          trackingNumber,
-          postageCost,
-        }
+      const adminEmail = req.session.adminEmail || "admin";
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE submissions SET
+            return_carrier = COALESCE(${safeCarrier}, return_carrier),
+            return_service = COALESCE(${safeService}, return_service),
+            return_tracking = COALESCE(${safeTracking}, return_tracking),
+            return_postage_cost = COALESCE(${safeCost}, return_postage_cost),
+            updated_at = NOW()
+          WHERE id = ${numId}
+        `);
+        await tx.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES (
+            'submission',
+            ${submission.submissionId},
+            'return_label_created',
+            ${adminEmail},
+            ${JSON.stringify({ carrier: safeCarrier, service: safeService, trackingNumber: safeTracking, postageCost: safeCost })}::jsonb
+          )
+        `);
+      });
+
+      // Diagnostic-safe log: submissionId + carrier + service only. No PII.
+      console.log(
+        `[dispatch] return_label_created submissionId=${submission.submissionId} carrier=${safeCarrier ?? "-"} service=${safeService ?? "-"}`
       );
 
       res.json({ success: true });

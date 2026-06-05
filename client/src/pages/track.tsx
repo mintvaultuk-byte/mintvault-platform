@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS } from "@shared/schema";
+import { carrierIdFromLegacyName, carrierLabel, serviceLabel, trackUrl } from "@shared/carriers";
 
 interface TrackingResult {
   submissionId: string;
@@ -19,6 +20,7 @@ interface TrackingResult {
   completedAt: string | null;
   returnTracking: string | null;
   returnCarrier: string | null;
+  returnService: string | null;
   turnaroundDays: number | null;
 }
 
@@ -72,11 +74,9 @@ export default function TrackPage() {
 
     setLoading(true);
     try {
-      const res = await apiRequest(
-        "POST",
-        `/api/submissions/${encodeURIComponent(trimmedId)}/track`,
-        { email: trimmedEmail }
-      );
+      const res = await apiRequest("POST", `/api/submissions/${encodeURIComponent(trimmedId)}/track`, {
+        email: trimmedEmail,
+      });
       const data = await res.json();
       setResult(data);
     } catch (err: any) {
@@ -159,10 +159,7 @@ export default function TrackPage() {
               <CardTitle className="text-[#D4AF37] text-lg font-mono" data-testid="text-track-result-id">
                 {result.submissionId}
               </CardTitle>
-              <Badge
-                data-testid="badge-track-status"
-                className="bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/30"
-              >
+              <Badge data-testid="badge-track-status" className="bg-[#D4AF37]/20 text-[#D4AF37] border-[#D4AF37]/30">
                 {SUBMISSION_STATUS_LABELS[result.status] || result.status}
               </Badge>
             </CardHeader>
@@ -178,18 +175,14 @@ export default function TrackPage() {
                           isCurrent
                             ? "bg-[#D4AF37] text-black"
                             : isActive
-                            ? "bg-[#D4AF37]/30 text-[#D4AF37]"
-                            : "bg-[#E8E4DC] text-[#999999]"
+                              ? "bg-[#D4AF37]/30 text-[#D4AF37]"
+                              : "bg-[#E8E4DC] text-[#999999]"
                         }`}
                         data-testid={`step-${step.key}`}
                       >
                         {idx + 1}
                       </div>
-                      <span
-                        className={`text-xs mt-1 ${
-                          isActive ? "text-[#D4AF37]" : "text-[#999999]"
-                        }`}
-                      >
+                      <span className={`text-xs mt-1 ${isActive ? "text-[#D4AF37]" : "text-[#999999]"}`}>
                         {step.label}
                       </span>
                     </div>
@@ -252,22 +245,57 @@ export default function TrackPage() {
                 )}
               </div>
 
-              {(result.status === "shipped" || result.status === "completed") && result.returnTracking && (
-                <div className="border-t border-[#E8E4DC] pt-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Truck size={16} className="text-[#D4AF37]" />
-                    <span className="text-[#444444] text-sm font-medium">Return Shipping</span>
-                  </div>
-                  {result.returnCarrier && (
-                    <p className="text-[#666666] text-sm" data-testid="text-track-carrier">
-                      Carrier: {result.returnCarrier}
-                    </p>
-                  )}
-                  <p className="text-[#D4AF37] font-mono text-sm" data-testid="text-track-tracking">
-                    {result.returnTracking}
-                  </p>
-                </div>
-              )}
+              {(result.status === "shipped" || result.status === "completed") &&
+                result.returnTracking &&
+                (() => {
+                  // Carrier may be a stable id ("royal_mail") or a legacy
+                  // free-text label ("Royal Mail") on historical rows — map
+                  // through the shared helper before deriving labels + URL.
+                  const cid = carrierIdFromLegacyName(result.returnCarrier);
+                  const carrierDisplay = cid ? carrierLabel(cid) : result.returnCarrier || "";
+                  const svcText = cid && result.returnService ? serviceLabel(cid, result.returnService) : null;
+                  const href = cid ? trackUrl(cid, result.returnTracking) : null;
+                  return (
+                    <div className="border-t border-[#E8E4DC] pt-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Truck size={16} className="text-[#D4AF37]" />
+                        <span className="text-[#444444] text-sm font-medium">Return Shipping</span>
+                      </div>
+                      {carrierDisplay && (
+                        <p className="text-[#666666] text-sm" data-testid="text-track-carrier">
+                          Carrier: {carrierDisplay}
+                        </p>
+                      )}
+                      {svcText && (
+                        <p className="text-[#666666] text-sm" data-testid="text-track-service">
+                          Service: {svcText}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard?.writeText(result.returnTracking ?? "")}
+                          className="text-[#D4AF37] font-mono text-sm underline-offset-2 hover:underline cursor-pointer"
+                          title="Click to copy tracking number"
+                          data-testid="text-track-tracking"
+                        >
+                          {result.returnTracking}
+                        </button>
+                        {href && (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-2.5 py-1 rounded hover:bg-[#D4AF37]/20 transition-colors"
+                            data-testid="link-track-carrier"
+                          >
+                            Track →
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
             </CardContent>
           </Card>
         </div>

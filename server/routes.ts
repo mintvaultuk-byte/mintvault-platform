@@ -32,6 +32,7 @@ import {
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
+import { isServiceValidForCarrier } from "@shared/carriers";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -4804,7 +4805,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const { status, returnTracking, returnCarrier, returnPostageCost } = req.body;
+      const { status, returnTracking, returnCarrier, returnService, returnPostageCost } = req.body;
       if (!status) {
         return res.status(400).json({ error: "Status is required" });
       }
@@ -4817,10 +4818,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
+      // For shipped transitions, validate the carrier/service pair against
+      // the shared catalogue when a carrier is supplied. Legacy clients that
+      // omit returnService still succeed when the carrier itself isn't
+      // present — only enforce when carrier is set.
+      if (status.toLowerCase() === "shipped" && returnCarrier) {
+        const svc = returnService ? String(returnService) : null;
+        if (!isServiceValidForCarrier(String(returnCarrier), svc)) {
+          return res.status(400).json({
+            error: "Invalid carrier/service combination",
+            carrier: returnCarrier,
+            service: returnService ?? null,
+          });
+        }
+      }
+
       const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
       const updated = await storage.updateSubmissionStatus(numId, status, {
         returnTracking,
         returnCarrier,
+        returnService,
         returnPostageCost: returnPostageCost ? parseInt(returnPostageCost, 10) : undefined,
       });
 
@@ -4834,8 +4851,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           toStatus: status,
           returnTracking,
           returnCarrier,
+          returnService: returnService ?? null,
         }
       );
+
+      if (status.toLowerCase() === "shipped") {
+        // Diagnostic-safe log: submissionId + carrier + service only. No PII.
+        console.log(
+          `[dispatch] status_shipped submissionId=${submission.submissionId} carrier=${returnCarrier ?? "-"} service=${returnService ?? "-"}`
+        );
+      }
 
       const emailData = {
         email: submission.email || "",
@@ -4854,6 +4879,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ...emailData,
           trackingNumber: returnTracking || submission.returnTracking || undefined,
           carrier: returnCarrier || submission.returnCarrier || undefined,
+          service: returnService || (submission as any).returnService || undefined,
         }).catch(() => {});
       } else if (newStatus === "delivered" && emailData.email) {
         sendSubmissionDelivered({
@@ -4958,32 +4984,54 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const { carrier, trackingNumber, postageCost } = req.body;
+      const { carrier, service, trackingNumber, postageCost } = req.body;
       const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
 
       const safeCarrier = carrier ? String(carrier) : null;
+      const safeService = service ? String(service) : null;
       const safeTracking = trackingNumber ? String(trackingNumber) : null;
       const safeCost = postageCost ? parseInt(postageCost, 10) : null;
 
-      await db.execute(sql`
-        UPDATE submissions SET
-          return_carrier = COALESCE(${safeCarrier}, return_carrier),
-          return_tracking = COALESCE(${safeTracking}, return_tracking),
-          return_postage_cost = COALESCE(${safeCost}, return_postage_cost),
-          updated_at = NOW()
-        WHERE id = ${numId}
-      `);
+      // Validate carrier+service combination against the shared catalogue —
+      // only when the caller actually supplied a carrier (legacy callers that
+      // omit both must still succeed). isServiceValidForCarrier permits a
+      // null service when carrier === "other"; otherwise the service is
+      // required and must be a known key for that carrier.
+      if (safeCarrier && !isServiceValidForCarrier(safeCarrier, safeService)) {
+        return res.status(400).json({
+          error: "Invalid carrier/service combination",
+          carrier: safeCarrier,
+          service: safeService,
+        });
+      }
 
-      await storage.writeAuditLog(
-        "submission",
-        submission.submissionId,
-        "return_label_created",
-        req.session.adminEmail || "admin",
-        {
-          carrier,
-          trackingNumber,
-          postageCost,
-        }
+      const adminEmail = req.session.adminEmail || "admin";
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE submissions SET
+            return_carrier = COALESCE(${safeCarrier}, return_carrier),
+            return_service = COALESCE(${safeService}, return_service),
+            return_tracking = COALESCE(${safeTracking}, return_tracking),
+            return_postage_cost = COALESCE(${safeCost}, return_postage_cost),
+            updated_at = NOW()
+          WHERE id = ${numId}
+        `);
+        await tx.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES (
+            'submission',
+            ${submission.submissionId},
+            'return_label_created',
+            ${adminEmail},
+            ${JSON.stringify({ carrier: safeCarrier, service: safeService, trackingNumber: safeTracking, postageCost: safeCost })}::jsonb
+          )
+        `);
+      });
+
+      // Diagnostic-safe log: submissionId + carrier + service only. No PII.
+      console.log(
+        `[dispatch] return_label_created submissionId=${submission.submissionId} carrier=${safeCarrier ?? "-"} service=${safeService ?? "-"}`
       );
 
       res.json({ success: true });
