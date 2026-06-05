@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { APP_BASE_URL } from "./app-url";
 import { COMPANY, formatPostalAddress } from "@shared/company";
+import { trackUrl, serviceLabel, carrierLabel, carrierIdFromLegacyName } from "@shared/carriers";
 
 // Pre-formatted postal address as HTML <br />-joined block. Sourced from
 // the canonical record on shared/company.ts so any address change updates
@@ -8,7 +9,9 @@ import { COMPANY, formatPostalAddress } from "@shared/company";
 const POSTAL_ADDRESS_HTML = formatPostalAddress(COMPANY.postalAddress, {
   multiline: true,
   includeDisplayName: true,
-}).split("\n").join("<br />");
+})
+  .split("\n")
+  .join("<br />");
 
 const FROM_EMAIL = "MintVault UK <noreply@mintvaultuk.com>";
 const FALLBACK_FROM = "MintVault UK <onboarding@resend.dev>";
@@ -39,15 +42,18 @@ function getFromEmail(): string {
  * on API failures (401, 422, etc.) instead of throwing. Throws on any failure
  * so callers know when an email was NOT sent.
  */
-async function sendViaResend(resend: Resend, payload: {
-  from: string;
-  to: string | string[];
-  replyTo?: string;
-  subject: string;
-  html: string;
-  bcc?: string | string[];
-  attachments?: Array<{ filename: string; content: Buffer | string }>;
-}): Promise<{ id: string }> {
+async function sendViaResend(
+  resend: Resend,
+  payload: {
+    from: string;
+    to: string | string[];
+    replyTo?: string;
+    subject: string;
+    html: string;
+    bcc?: string | string[];
+    attachments?: Array<{ filename: string; content: Buffer | string }>;
+  }
+): Promise<{ id: string }> {
   const result = await resend.emails.send(payload);
   if (result.error) {
     throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
@@ -103,13 +109,13 @@ function escapeHtmlForEmail(s: string): string {
 }
 
 const CONTACT_TOPIC_LABELS: Record<string, string> = {
-  "submission":         "Submission enquiry",
-  "grading":            "Grading question",
-  "cert-vault":         "Certificate / Vault",
-  "ownership":          "Ownership registry",
-  "returns-shipping":   "Returns & shipping",
-  "payment":            "Payment",
-  "other":              "Other",
+  submission: "Submission enquiry",
+  grading: "Grading question",
+  "cert-vault": "Certificate / Vault",
+  ownership: "Ownership registry",
+  "returns-shipping": "Returns & shipping",
+  payment: "Payment",
+  other: "Other",
 };
 
 /**
@@ -135,8 +141,8 @@ export async function sendContactInquiry(data: {
 
   const inbox = process.env.CONTACT_INBOX_EMAIL || "hello@mintvaultuk.com";
   const topicLabel = CONTACT_TOPIC_LABELS[data.topic] || data.topic;
-  const safeName    = escapeHtmlForEmail(data.name);
-  const safeEmail   = escapeHtmlForEmail(data.email);
+  const safeName = escapeHtmlForEmail(data.name);
+  const safeEmail = escapeHtmlForEmail(data.email);
   const safeMessage = escapeHtmlForEmail(data.message);
   const submittedAtFmt = data.submittedAt.toISOString();
 
@@ -186,13 +192,16 @@ export async function sendSubmissionConfirmation(data: {
   const resend = getResend();
   if (!resend) return;
 
-  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || (data.serviceType?.toUpperCase() || "");
-  const crossoverRows = data.serviceType === "crossover" && data.crossoverCompany ? `
+  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || data.serviceType?.toUpperCase() || "";
+  const crossoverRows =
+    data.serviceType === "crossover" && data.crossoverCompany
+      ? `
 <tr><td style="padding:8px 0;color:#999;width:140px;">Original Company</td><td style="padding:8px 0;color:#fff;">${data.crossoverCompany}</td></tr>
 ${data.crossoverOriginalGrade ? `<tr><td style="padding:8px 0;color:#999;">Original Grade</td><td style="padding:8px 0;color:#fff;">${data.crossoverOriginalGrade}</td></tr>` : ""}
 ${data.crossoverCertNumber ? `<tr><td style="padding:8px 0;color:#999;">Cert Number</td><td style="padding:8px 0;color:#fff;">${data.crossoverCertNumber}</td></tr>` : ""}
 <tr><td colspan="2" style="padding:8px 0;color:#999;font-size:12px;">⚠️ Crossover is subject to review. Cards not meeting crossover standards will be returned.</td></tr>
-` : "";
+`
+      : "";
 
   const body = `
 <p>Hi ${data.firstName},</p>
@@ -218,11 +227,15 @@ ${POSTAL_ADDRESS_HTML}
 <ol start="4" style="margin:0;padding-left:20px;color:#ccc;">
 <li style="margin-bottom:8px;">We will confirm receipt and begin grading.</li>
 </ol>
-${data.labelToken ? `
+${
+  data.labelToken
+    ? `
 <p style="margin-top:24px;">
 <a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
 <a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
-</p>` : ""}
+</p>`
+    : ""
+}
 <p style="margin-top:24px;">
 <a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
 </p>`;
@@ -244,14 +257,21 @@ ${data.labelToken ? `
 
 /** V2 order confirmation — includes legal page links, inspection window, and terms acceptance record. Used when LEGAL_PAGES_LIVE=true. */
 export async function sendSubmissionConfirmationV2(data: {
-  email: string; firstName: string; submissionId: string; cardCount: number;
-  tier: string; total: number; serviceType?: string; labelToken?: string;
-  termsVersion?: string; termsAcceptedAt?: string;
+  email: string;
+  firstName: string;
+  submissionId: string;
+  cardCount: number;
+  tier: string;
+  total: number;
+  serviceType?: string;
+  labelToken?: string;
+  termsVersion?: string;
+  termsAcceptedAt?: string;
 }) {
   const resend = getResend();
   if (!resend) return;
 
-  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || (data.serviceType?.toUpperCase() || "");
+  const serviceLabel = SERVICE_TYPE_LABELS[data.serviceType || ""] || data.serviceType?.toUpperCase() || "";
   const body = `
 <p>Hi ${data.firstName},</p>
 <p>Thank you for your submission. Your order has been confirmed and payment received.</p>
@@ -284,11 +304,15 @@ export async function sendSubmissionConfirmationV2(data: {
 ${POSTAL_ADDRESS_HTML}
 </div>
 <p style="color:#999;font-size:12px;margin:0 0 16px 24px;">Also printed on your packing slip — please include the slip inside the parcel.</p>
-${data.labelToken ? `
+${
+  data.labelToken
+    ? `
 <p style="margin-top:24px;">
 <a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/shipping-label?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;margin-right:12px;">DOWNLOAD SHIPPING LABEL</a>
 <a href="${APP_BASE_URL}/api/submissions/${data.submissionId}/packing-slip?token=${data.labelToken}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.05);border:1px solid rgba(212,175,55,0.4);color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">DOWNLOAD PACKING SLIP</a>
-</p>` : ""}
+</p>`
+    : ""
+}
 
 <div style="margin-top:24px;padding-top:16px;border-top:1px solid #333;">
 <p style="color:#666;font-size:11px;margin:0 0 4px 0;">Legal Documents:</p>
@@ -327,12 +351,13 @@ export async function sendCardsReceived(data: {
   const resend = getResend();
   if (!resend) return;
 
-  const photosHtml = data.photoUrls && data.photoUrls.length > 0
-    ? `<p style="margin-top:16px;color:#aaa;font-size:13px;">We photographed your cards when they arrived:</p>
+  const photosHtml =
+    data.photoUrls && data.photoUrls.length > 0
+      ? `<p style="margin-top:16px;color:#aaa;font-size:13px;">We photographed your cards when they arrived:</p>
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 16px;">
-${data.photoUrls.map(url => `<img src="${url}" alt="Receipt photo" style="width:120px;height:90px;object-fit:cover;border-radius:4px;border:1px solid #333;" />`).join("")}
+${data.photoUrls.map((url) => `<img src="${url}" alt="Receipt photo" style="width:120px;height:90px;object-fit:cover;border-radius:4px;border:1px solid #333;" />`).join("")}
 </div>`
-    : "";
+      : "";
 
   const body = `
 <p>Hi ${data.firstName},</p>
@@ -405,32 +430,46 @@ export async function sendShipped(data: {
   cardCount: number;
   trackingNumber?: string;
   carrier?: string;
+  service?: string;
 }) {
   const resend = getResend();
   if (!resend) return;
 
-  const carrierRow = data.carrier
-    ? `<tr><td style="padding:8px 0;color:#999;">Carrier</td><td style="padding:8px 0;color:#fff;">${data.carrier}</td></tr>`
+  // Carrier values may be either the stable id ("royal_mail") or a legacy
+  // free-text label ("Royal Mail") on historical rows. Normalise via the
+  // shared mapper, then look up the canonical label + track URL.
+  const carrierId = data.carrier ? carrierIdFromLegacyName(data.carrier) : null;
+  const carrierDisplay = carrierId ? carrierLabel(carrierId) : data.carrier || "";
+  const serviceText = carrierId && data.service ? serviceLabel(carrierId, data.service) : null;
+  const carrierLine = carrierDisplay ? `${carrierDisplay}${serviceText ? ` — ${serviceText}` : ""}` : "";
+  const trackHref = carrierId ? trackUrl(carrierId, data.trackingNumber ?? null) : null;
+
+  const carrierRow = carrierLine
+    ? `<tr><td style="padding:8px 0;color:#999;">Carrier</td><td style="padding:8px 0;color:#fff;">${carrierLine}</td></tr>`
     : "";
   const trackingRow = data.trackingNumber
     ? `<tr><td style="padding:8px 0;color:#999;">Tracking Number</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.trackingNumber}</td></tr>`
     : "";
-  const rmTrackingBtn = (data.trackingNumber && (!data.carrier || data.carrier === "Royal Mail"))
+  const trackingBtn = trackHref
     ? `<p style="margin-top:16px;">
-<a href="https://www.royalmail.com/track-your-item#/tracking-results/${data.trackingNumber}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK WITH ROYAL MAIL →</a>
+<a href="${trackHref}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK WITH ${carrierDisplay.toUpperCase()} →</a>
 </p>`
     : "";
 
+  const dispatchLine = carrierDisplay
+    ? `Your graded slab has been handed to ${carrierDisplay} and is on its way to you!`
+    : `Your graded slab is on its way to you!`;
+
   const body = `
 <p>Hi ${data.firstName},</p>
-<p>Your graded slab has been handed to Royal Mail and is on its way to you!</p>
+<p>${dispatchLine}</p>
 <table style="width:100%;border-collapse:collapse;margin:16px 0;">
 <tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
 <tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
 ${carrierRow}
 ${trackingRow}
 </table>
-${rmTrackingBtn}
+${trackingBtn}
 <p>Please ensure someone is available to sign for the delivery.</p>
 <p style="margin-top:24px;">
 <a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW IN DASHBOARD</a>
@@ -474,7 +513,9 @@ export async function sendSubmissionDelivered(data: {
 </p>`;
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `Your MintVault slab has arrived — ${data.submissionId}`,
       html: baseHtml("Slab Delivered", body),
     });
@@ -585,11 +626,7 @@ function ctaButton(href: string, label: string): string {
 </table>`;
 }
 
-export async function sendClaimVerification(data: {
-  email: string;
-  certId: string;
-  verifyUrl: string;
-}): Promise<void> {
+export async function sendClaimVerification(data: { email: string; certId: string; verifyUrl: string }): Promise<void> {
   const resend = getResend();
   if (!resend) {
     console.log(`[email] SKIPPED claim verification email to ${data.email} (no Resend client)`);
@@ -700,7 +737,10 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
 // ── v2 Transfer emails (DVLA-style with ref number + dispute window) ─────────
 
 export async function sendTransferV2OutgoingConfirmation(data: {
-  fromEmail: string; toEmail: string; certId: string; confirmUrl: string;
+  fromEmail: string;
+  toEmail: string;
+  certId: string;
+  confirmUrl: string;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -748,8 +788,8 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
 export async function sendTransferV2OwnerInvitedByBuyer(data: {
   ownerEmail: string;
   certId: string;
-  maskedClaimantEmail: string;       // e.g. "n***@example.com"
-  ownerExpiresAt: Date;              // 14-day deadline
+  maskedClaimantEmail: string; // e.g. "n***@example.com"
+  ownerExpiresAt: Date; // 14-day deadline
   disputeUrl: string;
   confirmUrl: string;
 }): Promise<void> {
@@ -815,7 +855,9 @@ ${certBlock(data.certId)}`;
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.claimantEmail,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.claimantEmail,
       subject: `MintVault — Transfer of ${data.certId} confirmed by previous keeper`,
       html: ownershipBaseHtml("Owner confirmed your transfer — dispute window started", body),
     });
@@ -846,7 +888,9 @@ ${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-heig
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.claimantEmail,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.claimantEmail,
       subject: `MintVault — Transfer of ${data.certId} disputed`,
       html: ownershipBaseHtml("Transfer disputed by current keeper", body),
     });
@@ -857,7 +901,11 @@ ${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-heig
 }
 
 export async function sendTransferV2IncomingConfirmation(data: {
-  toEmail: string; fromEmail: string; certId: string; confirmUrl: string; previousOwnersCount: number;
+  toEmail: string;
+  fromEmail: string;
+  certId: string;
+  confirmUrl: string;
+  previousOwnersCount: number;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -895,7 +943,10 @@ ${ctaButton(data.confirmUrl, "Accept &amp; Verify")}
 }
 
 export async function sendTransferV2DisputeWindowStarted(data: {
-  email: string; certId: string; role: "outgoing" | "incoming"; disputeDeadline: Date;
+  email: string;
+  certId: string;
+  role: "outgoing" | "incoming";
+  disputeDeadline: Date;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -903,8 +954,13 @@ export async function sendTransferV2DisputeWindowStarted(data: {
     return;
   }
 
-  const deadlineStr = data.disputeDeadline.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-  const roleLabel = data.role === "outgoing" ? "outgoing (current) Registered Keeper" : "incoming (new) Registered Keeper";
+  const deadlineStr = data.disputeDeadline.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const roleLabel =
+    data.role === "outgoing" ? "outgoing (current) Registered Keeper" : "incoming (new) Registered Keeper";
 
   const body = `
 <p style="color:rgba(255,255,255,0.70);font-size:14px;line-height:1.7;margin:0 0 6px;">Both parties have confirmed the keepership transfer for the certificate below. A 14-day dispute window is now active.</p>
@@ -929,7 +985,10 @@ ${certBlock(data.certId)}
 }
 
 export async function sendTransferV2Completed(data: {
-  email: string; certId: string; role: "outgoing" | "incoming"; newKeeperName?: string | null;
+  email: string;
+  certId: string;
+  role: "outgoing" | "incoming";
+  newKeeperName?: string | null;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
@@ -938,7 +997,9 @@ export async function sendTransferV2Completed(data: {
   }
 
   const isIncoming = data.role === "incoming";
-  const title = isIncoming ? "Keepership Transfer Complete — You Are the New Registered Keeper" : "Keepership Transfer Complete — Registry Updated";
+  const title = isIncoming
+    ? "Keepership Transfer Complete — You Are the New Registered Keeper"
+    : "Keepership Transfer Complete — Registry Updated";
   const mainText = isIncoming
     ? `The keepership transfer for the certificate below has been finalised. You are now the Registered Keeper in the MintVault registry.${data.newKeeperName ? ` Registered as: ${data.newKeeperName}.` : ""}`
     : "The keepership transfer for the certificate below has been finalised. The registry has been updated and you are no longer the Registered Keeper for this certificate.";
@@ -963,9 +1024,7 @@ ${certBlock(data.certId)}
   }
 }
 
-export async function sendTransferV2Cancelled(data: {
-  email: string; certId: string; reason: string;
-}): Promise<void> {
+export async function sendTransferV2Cancelled(data: { email: string; certId: string; reason: string }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
 
@@ -977,7 +1036,9 @@ ${certBlock(data.certId)}
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `MintVault — Transfer Cancelled for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Cancelled", body),
     });
@@ -988,7 +1049,9 @@ ${certBlock(data.certId)}
 }
 
 export async function sendTransferV2Disputed(data: {
-  email: string; certId: string; disputedBy: string;
+  email: string;
+  certId: string;
+  disputedBy: string;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
@@ -1001,7 +1064,9 @@ ${certBlock(data.certId)}
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `MintVault — Transfer Disputed for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Dispute Raised", body),
     });
@@ -1011,9 +1076,7 @@ ${certBlock(data.certId)}
   }
 }
 
-export async function sendTransferV2Expired(data: {
-  email: string; certId: string; reason: string;
-}): Promise<void> {
+export async function sendTransferV2Expired(data: { email: string; certId: string; reason: string }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
 
@@ -1025,7 +1088,9 @@ ${certBlock(data.certId)}
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `MintVault — Transfer Expired for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Expired", body),
     });
@@ -1036,7 +1101,10 @@ ${certBlock(data.certId)}
 }
 
 export async function sendTransferV2IncomingReminder(data: {
-  email: string; certId: string; daysRemaining: number; confirmUrl: string;
+  email: string;
+  certId: string;
+  daysRemaining: number;
+  confirmUrl: string;
 }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
@@ -1049,7 +1117,9 @@ ${ctaButton(data.confirmUrl, "Verify & Accept")}
 
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `MintVault — Reminder: Accept Keepership of ${data.certId} (${data.daysRemaining} days left)`,
       html: ownershipBaseHtml("Keepership Transfer — Reminder", body),
     });
@@ -1178,7 +1248,7 @@ export async function sendStolenVerificationEmail(
   name: string,
   certId: string,
   cardName: string,
-  verifyUrl: string,
+  verifyUrl: string
 ): Promise<void> {
   const resend = getResend();
   if (!resend) return;
@@ -1226,7 +1296,7 @@ export async function sendStolenVerificationEmail(
 export async function sendWelcomeVerificationEmail(
   email: string,
   displayName: string | null,
-  verifyUrl: string,
+  verifyUrl: string
 ): Promise<void> {
   const resend = getResend();
   if (!resend) return;
@@ -1242,14 +1312,19 @@ export async function sendWelcomeVerificationEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">This link expires in 24 hours. If you did not create a MintVault account, ignore this email.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Verify your MintVault account", html: baseHtml("Verify Your Email", body) });
-  } catch (err: any) { console.error(`[email] Welcome/verify failed for ${email}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: email,
+      subject: "Verify your MintVault account",
+      html: baseHtml("Verify Your Email", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Welcome/verify failed for ${email}:`, err.message);
+  }
 }
 
-export async function sendAccountMagicLinkEmail(
-  email: string,
-  loginUrl: string,
-): Promise<void> {
+export async function sendAccountMagicLinkEmail(email: string, loginUrl: string): Promise<void> {
   const resend = getResend();
   if (!resend) return;
   const body = `
@@ -1262,14 +1337,19 @@ export async function sendAccountMagicLinkEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request this, you can safely ignore it. Your account is secure.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault login link", html: baseHtml("Your Login Link", body) });
-  } catch (err: any) { console.error(`[email] Magic link failed for ${email}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: email,
+      subject: "Your MintVault login link",
+      html: baseHtml("Your Login Link", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Magic link failed for ${email}:`, err.message);
+  }
 }
 
-export async function sendPasswordResetEmail(
-  email: string,
-  resetUrl: string,
-): Promise<void> {
+export async function sendPasswordResetEmail(email: string, resetUrl: string): Promise<void> {
   const resend = getResend();
   if (!resend) return;
   const body = `
@@ -1282,8 +1362,16 @@ export async function sendPasswordResetEmail(
 </p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request a password reset, ignore this email. Your password has not been changed.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Reset your MintVault password", html: baseHtml("Password Reset", body) });
-  } catch (err: any) { console.error(`[email] Password reset failed for ${email}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: email,
+      subject: "Reset your MintVault password",
+      html: baseHtml("Password Reset", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Password reset failed for ${email}:`, err.message);
+  }
 }
 
 export async function sendPasswordChangedEmail(email: string): Promise<void> {
@@ -1294,14 +1382,19 @@ export async function sendPasswordChangedEmail(email: string): Promise<void> {
 <p style="margin:0 0 16px 0;">If you made this change, no action is needed.</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not change your password, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault password was changed", html: baseHtml("Password Changed", body) });
-  } catch (err: any) { console.error(`[email] Password changed notice failed for ${email}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: email,
+      subject: "Your MintVault password was changed",
+      html: baseHtml("Password Changed", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Password changed notice failed for ${email}:`, err.message);
+  }
 }
 
-export async function sendEmailChangedNotification(
-  oldEmail: string,
-  newEmail: string,
-): Promise<void> {
+export async function sendEmailChangedNotification(oldEmail: string, newEmail: string): Promise<void> {
   const resend = getResend();
   if (!resend) return;
   const body = `
@@ -1310,8 +1403,16 @@ export async function sendEmailChangedNotification(
 <p style="margin:0 0 24px 0;"><strong>New address:</strong> ${newEmail}</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not make this change, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: oldEmail, subject: "Your MintVault email address was changed", html: baseHtml("Email Address Changed", body) });
-  } catch (err: any) { console.error(`[email] Email changed notice failed for ${oldEmail}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: oldEmail,
+      subject: "Your MintVault email address was changed",
+      html: baseHtml("Email Address Changed", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Email changed notice failed for ${oldEmail}:`, err.message);
+  }
 }
 
 export async function sendAccountDeletedEmail(email: string): Promise<void> {
@@ -1322,8 +1423,16 @@ export async function sendAccountDeletedEmail(email: string): Promise<void> {
 <p style="margin:0 0 16px 0;">Your submission history and certificate ownership records have been anonymised and retained for our records, as required for the certificate chain-of-custody.</p>
 <p style="margin:0;color:#999;font-size:12px;">If you did not request account deletion, contact us immediately at mintvaultuk@gmail.com.</p>`;
   try {
-    await sendViaResend(resend, { from: getFromEmail(), replyTo: REPLY_TO, to: email, subject: "Your MintVault account has been deleted", html: baseHtml("Account Deleted", body) });
-  } catch (err: any) { console.error(`[email] Account deleted notice failed for ${email}:`, err.message); }
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: email,
+      subject: "Your MintVault account has been deleted",
+      html: baseHtml("Account Deleted", body),
+    });
+  } catch (err: any) {
+    console.error(`[email] Account deleted notice failed for ${email}:`, err.message);
+  }
 }
 
 // ── Vault Club emails ─────────────────────────────────────────────────────────
@@ -1351,17 +1460,18 @@ export async function sendVaultClubWelcomeEmail(data: {
 <p style="color:#888;font-size:12px;margin-top:16px;">Questions? Reply to this email or contact us at mintvaultuk@gmail.com.</p>`;
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: `Welcome to Vault Club ${tierLabel} — MintVault`,
       html: baseHtml(`Welcome to Vault Club ${tierLabel}`, body),
     });
-  } catch (err: any) { console.error(`[email] Vault Club welcome failed for ${data.email}:`, err.message); }
+  } catch (err: any) {
+    console.error(`[email] Vault Club welcome failed for ${data.email}:`, err.message);
+  }
 }
 
-export async function sendVaultClubCancelledEmail(data: {
-  email: string;
-  displayName: string | null;
-}): Promise<void> {
+export async function sendVaultClubCancelledEmail(data: { email: string; displayName: string | null }): Promise<void> {
   const resend = getResend();
   if (!resend) return;
   const name = data.displayName || "Collector";
@@ -1376,11 +1486,15 @@ export async function sendVaultClubCancelledEmail(data: {
 </p>`;
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: "Your Vault Club membership has been cancelled — MintVault",
       html: baseHtml("Vault Club Cancelled", body),
     });
-  } catch (err: any) { console.error(`[email] Vault Club cancelled notice failed for ${data.email}:`, err.message); }
+  } catch (err: any) {
+    console.error(`[email] Vault Club cancelled notice failed for ${data.email}:`, err.message);
+  }
 }
 
 export async function sendVaultClubPaymentFailedEmail(data: {
@@ -1401,11 +1515,15 @@ export async function sendVaultClubPaymentFailedEmail(data: {
 <p style="color:#888;font-size:12px;">Your membership will remain active for 7 days while we retry the payment. After that your Showroom will be deactivated until you update your details.</p>`;
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: "Action required — Vault Club payment failed",
       html: baseHtml("Payment Failed", body),
     });
-  } catch (err: any) { console.error(`[email] Vault Club payment failed notice for ${data.email}:`, err.message); }
+  } catch (err: any) {
+    console.error(`[email] Vault Club payment failed notice for ${data.email}:`, err.message);
+  }
 }
 
 export async function sendVaultClubGraceExpiredEmail(data: {
@@ -1425,9 +1543,13 @@ export async function sendVaultClubGraceExpiredEmail(data: {
 </p>`;
   try {
     await sendViaResend(resend, {
-      from: getFromEmail(), replyTo: REPLY_TO, to: data.email,
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
       subject: "We miss you — Vault Club membership ended",
       html: baseHtml("Membership Ended", body),
     });
-  } catch (err: any) { console.error(`[email] Vault Club grace expired notice for ${data.email}:`, err.message); }
+  } catch (err: any) {
+    console.error(`[email] Vault Club grace expired notice for ${data.email}:`, err.message);
+  }
 }

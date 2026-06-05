@@ -217,6 +217,13 @@ export const submissions = pgTable("submissions", {
   shippedAt: timestamp("shipped_at"),
   completedAt: timestamp("completed_at"),
   returnCarrier: text("return_carrier"),
+  // Carrier service-level key, paired with returnCarrier. Values live in
+  // shared/carriers.ts (e.g. "tracked_48", "tracked_24", "special_delivery",
+  // "dpd_classic", "dpd_next_day", "dpd_1200", "evri_standard",
+  // "evri_next_day"). NULL when carrier === "other" or when the submission
+  // pre-dates the dispatch-service-tracking change. The source of truth for
+  // the key set is shared/carriers.ts, not this column.
+  returnService: text("return_service"),
   returnTracking: text("return_tracking"),
   returnPostageCost: integer("return_postage_cost"),
   termsAccepted: boolean("terms_accepted").default(false),

@@ -116,11 +116,9 @@ export function registerSubmissionRoutes(app: Express): void {
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
       if (!type || !VALID_SERVICE_TYPES.includes(type)) {
-        return res
-          .status(400)
-          .json({
-            error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}`,
-          });
+        return res.status(400).json({
+          error: `Invalid or missing service type "${type || ""}". Must be one of: ${VALID_SERVICE_TYPES.join(", ")}`,
+        });
       }
 
       // Check tier capacity — block paused tiers
@@ -130,12 +128,10 @@ export function registerSubmissionRoutes(app: Express): void {
         );
         const cap = capRow.rows[0] as any;
         if (cap?.status === "paused") {
-          return res
-            .status(403)
-            .json({
-              error:
-                cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.`,
-            });
+          return res.status(403).json({
+            error:
+              cap.paused_message || `The ${tier} tier is currently closed for submissions. Please try another tier.`,
+          });
         }
       }
 
@@ -165,24 +161,20 @@ export function registerSubmissionRoutes(app: Express): void {
       const tierData = serviceTierToPricingTier(dbTier);
 
       if (!tierData.pricePerCard || tierData.pricePerCard <= 0) {
-        return res
-          .status(400)
-          .json({
-            error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.`,
-          });
+        return res.status(400).json({
+          error: `Tier "${tier}" for service "${serviceType}" has an invalid price configuration (£0). Checkout aborted.`,
+        });
       }
 
       // Capacity gating — only applied to grading submissions (reholder/crossover/auth have no tier capacity)
       if (serviceType === "grading") {
         const capacity = await getTierCapacity(tier).catch(() => null);
         if (capacity && capacity.full) {
-          return res
-            .status(409)
-            .json({
-              error: "tier_full",
-              tier,
-              message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.`,
-            });
+          return res.status(409).json({
+            error: "tier_full",
+            tier,
+            message: `The ${tier} tier is currently at full capacity. Please choose a different tier or check back later.`,
+          });
         }
       }
 
@@ -255,8 +247,7 @@ export function registerSubmissionRoutes(app: Express): void {
       if (quantity > 1 && (!Array.isArray(cardItems) || cardItems.length === 0)) {
         return res.status(400).json({ error: "Card details required for multi-card submissions" });
       }
-      const authoritativeQuantity =
-        Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
+      const authoritativeQuantity = Array.isArray(cardItems) && cardItems.length > 0 ? cardItems.length : quantity;
       if (authoritativeQuantity !== quantity) {
         return res.status(400).json({ error: "Quantity mismatch" });
       }
@@ -691,6 +682,7 @@ export function registerSubmissionRoutes(app: Express): void {
         completedAt: submission.completedAt || null,
         returnTracking: submission.returnTracking || null,
         returnCarrier: submission.returnCarrier || null,
+        returnService: (submission as any).returnService || null,
         turnaroundDays: submission.turnaroundDays || null,
       });
     } catch (error: any) {

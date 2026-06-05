@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
+import { CARRIERS, servicesForCarrier, suggestServiceForSubmission, carrierIdFromLegacyName } from "@shared/carriers";
 import {
   ArrowLeft,
   Package,
@@ -59,6 +60,7 @@ interface SubmissionRow {
   shippedAt: string;
   completedAt: string;
   returnCarrier: string;
+  returnService: string | null;
   returnTracking: string;
   returnPostageCost: number;
   highValueFlag: boolean;
@@ -308,7 +310,8 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   });
 
   const [trackingInput, setTrackingInput] = useState("");
-  const [carrierInput, setCarrierInput] = useState("Royal Mail");
+  const [carrierInput, setCarrierInput] = useState<string>("royal_mail");
+  const [serviceInput, setServiceInput] = useState<string>("");
   const [postageCostInput, setPostageCostInput] = useState("");
   const [showReturnForm, setShowReturnForm] = useState(false);
   const [adminNotesInput, setAdminNotesInput] = useState<string>("");
@@ -334,6 +337,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
     mutationFn: async () => {
       await apiRequest("POST", `/api/admin/submissions/${submissionId}/return-label`, {
         carrier: carrierInput,
+        service: carrierInput === "other" ? null : serviceInput || null,
         trackingNumber: trackingInput,
         postageCost: postageCostInput,
       });
@@ -398,6 +402,26 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       setAdminFlaggedInput(!!sub.adminFlagged);
     }
   }, [sub?.submissionId]);
+
+  // Pre-fill carrier from any existing value (legacy data may store free-text
+  // like "Royal Mail" — map back to the stable id).
+  useEffect(() => {
+    if (sub?.returnCarrier) {
+      const mapped = carrierIdFromLegacyName(sub.returnCarrier);
+      if (mapped) setCarrierInput(mapped);
+    }
+  }, [sub?.submissionId, sub?.returnCarrier]);
+
+  // totalDeclaredValue is stored in whole pounds; carriers.ts auto-suggest
+  // expects pence, so convert at the boundary. Grading submissions default
+  // to the carrier's express-band service regardless of declared value —
+  // see suggestServiceForSubmission for the rule.
+  const declaredValuePence = (sub?.totalDeclaredValue ?? 0) * 100;
+  const subServiceType = sub?.serviceType ?? null;
+  useEffect(() => {
+    const suggested = suggestServiceForSubmission(carrierInput, subServiceType, declaredValuePence);
+    setServiceInput(suggested ?? "");
+  }, [carrierInput, subServiceType, declaredValuePence]);
 
   if (isLoading || !sub) {
     return (
@@ -543,10 +567,11 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                 className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="select-carrier"
               >
-                <option value="Royal Mail">Royal Mail</option>
-                <option value="Evri">Evri</option>
-                <option value="DPD">DPD</option>
-                <option value="Other">Other</option>
+                {CARRIERS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -560,6 +585,36 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               />
             </div>
           </div>
+          {carrierInput !== "other" && servicesForCarrier(carrierInput).length > 0 && (
+            <div className="mb-3">
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Service</label>
+              <select
+                value={serviceInput}
+                onChange={(e) => setServiceInput(e.target.value)}
+                className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                data-testid="select-service"
+              >
+                {servicesForCarrier(carrierInput).map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1">
+                {subServiceType === "grading" || !subServiceType
+                  ? `Defaults to Express for graded slabs (declared £${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`
+                  : `Auto-selected from declared value (£${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`}
+              </p>
+            </div>
+          )}
+          {carrierInput === "dpd" && (sub.totalDeclaredValue ?? 0) > 500 && (
+            <div
+              className="mb-3 border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] text-xs rounded px-3 py-2"
+              data-testid="warning-dpd-cover"
+            >
+              ⚠️ DPD cover may be insufficient above £500 — Royal Mail Special Delivery recommended.
+            </div>
+          )}
           <div className="max-w-[200px] mb-3">
             <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Return Postage Cost (pence)</label>
             <input
@@ -577,7 +632,11 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                 if (!trackingInput) return;
                 statusMutation.mutate({
                   status: "shipped",
-                  extra: { returnTracking: trackingInput, returnCarrier: carrierInput },
+                  extra: {
+                    returnTracking: trackingInput,
+                    returnCarrier: carrierInput,
+                    returnService: carrierInput === "other" ? null : serviceInput || null,
+                  },
                 });
               }}
               disabled={!trackingInput || statusMutation.isPending}

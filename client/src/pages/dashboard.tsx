@@ -36,6 +36,7 @@ import VaultClubBadge from "@/components/vault-club-badge";
 import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
 import { isNonNumericGrade } from "@shared/schema";
+import { carrierIdFromLegacyName, carrierLabel, serviceLabel, trackUrl } from "@shared/carriers";
 import { useToast } from "@/hooks/use-toast";
 import SeoHead from "@/components/seo-head";
 
@@ -59,6 +60,7 @@ interface CustomerSubmission {
   deliveredAt: string | null;
   completedAt: string | null;
   returnCarrier: string | null;
+  returnService: string | null;
   returnTrackingNumber: string | null;
   returnTracking: string | null;
   royalMailOutboundTracking: string | null;
@@ -384,21 +386,52 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
         )}
 
         {/* Return tracking button (once shipped) */}
-        {retTracking && sub.shippedAt && (
-          <div className="mt-4">
-            <a
-              href={`https://www.royalmail.com/track-your-item#/tracking-results/${retTracking}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-xs font-semibold text-[#B8960C] border border-[#D4AF37]/30 bg-[#D4AF37]/5 rounded-lg px-3 py-2 hover:bg-[#D4AF37]/10 transition-colors"
-            >
-              <Truck size={12} />
-              Track Return Parcel
-              <ExternalLink size={10} />
-            </a>
-            <p className="text-[10px] text-[#AAAAAA] mt-1.5 font-mono">{retTracking}</p>
-          </div>
-        )}
+        {retTracking &&
+          sub.shippedAt &&
+          (() => {
+            // Carrier may be either the stable id ("royal_mail") or a legacy
+            // free-text label ("Royal Mail") on historical rows — normalise
+            // through carrierIdFromLegacyName before deriving labels + URL.
+            const cid = carrierIdFromLegacyName(sub.returnCarrier);
+            const carrierDisplay = cid ? carrierLabel(cid) : sub.returnCarrier || "";
+            const svcText = cid && sub.returnService ? serviceLabel(cid, sub.returnService) : null;
+            const href = cid ? trackUrl(cid, retTracking) : null;
+            return (
+              <div className="mt-4">
+                {(carrierDisplay || svcText) && (
+                  <p className="text-[10px] text-[#888888] mb-1.5">
+                    {carrierDisplay}
+                    {svcText ? ` — ${svcText}` : ""}
+                  </p>
+                )}
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-xs font-semibold text-[#B8960C] border border-[#D4AF37]/30 bg-[#D4AF37]/5 rounded-lg px-3 py-2 hover:bg-[#D4AF37]/10 transition-colors"
+                  >
+                    <Truck size={12} />
+                    Track Return Parcel
+                    <ExternalLink size={10} />
+                  </a>
+                ) : (
+                  <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#888888] border border-[#E8E4DC] bg-[#FAFAF8] rounded-lg px-3 py-2">
+                    <Truck size={12} />
+                    Tracking number (no carrier link)
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(retTracking)}
+                  className="block text-[10px] text-[#AAAAAA] hover:text-[#666666] mt-1.5 font-mono cursor-pointer underline-offset-2 hover:underline"
+                  title="Click to copy"
+                >
+                  {retTracking}
+                </button>
+              </div>
+            );
+          })()}
 
         {/* Timeline toggle */}
         <button

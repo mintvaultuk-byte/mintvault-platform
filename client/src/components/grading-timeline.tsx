@@ -1,25 +1,32 @@
 import { CheckCircle2, Circle, Clock, Truck } from "lucide-react";
+import { carrierIdFromLegacyName, trackUrl } from "@shared/carriers";
 
 const STAGES = [
-  { key: "submitted",       label: "Submitted",     desc: "Order placed and payment confirmed" },
-  { key: "received",        label: "Received",      desc: "Cards arrived at MintVault facility" },
-  { key: "in_queue",        label: "In Queue",      desc: "Waiting to be graded" },
-  { key: "grading",         label: "Being Graded",  desc: "Currently under examination" },
-  { key: "quality_check",   label: "Quality Check", desc: "Grade being verified" },
+  { key: "submitted", label: "Submitted", desc: "Order placed and payment confirmed" },
+  { key: "received", label: "Received", desc: "Cards arrived at MintVault facility" },
+  { key: "in_queue", label: "In Queue", desc: "Waiting to be graded" },
+  { key: "grading", label: "Being Graded", desc: "Currently under examination" },
+  { key: "quality_check", label: "Quality Check", desc: "Grade being verified" },
   { key: "slab_production", label: "Slab Production", desc: "Card being encapsulated" },
-  { key: "shipping",        label: "Shipping",      desc: "On its way back to you" },
-  { key: "delivered",       label: "Delivered",     desc: "Tracking shows delivered" },
+  { key: "shipping", label: "Shipping", desc: "On its way back to you" },
+  { key: "delivered", label: "Delivered", desc: "Tracking shows delivered" },
 ];
 
 interface Props {
   currentStatus: string;
   trackingNumber?: string | null;
+  carrier?: string | null;
   statusUpdatedAt?: string | null;
   compact?: boolean;
 }
 
-export default function GradingTimeline({ currentStatus, trackingNumber, statusUpdatedAt, compact }: Props) {
-  const currentIdx = STAGES.findIndex(s => s.key === currentStatus);
+export default function GradingTimeline({ currentStatus, trackingNumber, carrier, statusUpdatedAt, compact }: Props) {
+  // Carrier may be either a stable id ("royal_mail") or a legacy
+  // free-text label ("Royal Mail"). Normalise via the shared mapper so
+  // trackUrl() can build the right link — null means "show as text only".
+  const carrierId = carrierIdFromLegacyName(carrier);
+  const trackHref = carrierId ? trackUrl(carrierId, trackingNumber) : null;
+  const currentIdx = STAGES.findIndex((s) => s.key === currentStatus);
 
   if (compact) {
     const stage = STAGES[currentIdx] ?? STAGES[0];
@@ -43,17 +50,21 @@ export default function GradingTimeline({ currentStatus, trackingNumber, statusU
         <div className="space-y-3">
           {STAGES.map((stage, idx) => {
             const isComplete = idx < currentIdx;
-            const isCurrent  = idx === currentIdx;
-            const isFuture   = idx > currentIdx;
+            const isCurrent = idx === currentIdx;
+            const isFuture = idx > currentIdx;
 
             return (
               <div key={stage.key} className="flex items-start gap-4 relative">
                 {/* Dot */}
-                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center z-10 border-2 ${
-                  isComplete ? "bg-emerald-500 border-emerald-500" :
-                  isCurrent  ? "bg-[#D4AF37] border-[#D4AF37]" :
-                               "bg-white border-[#E8E4DC]"
-                }`}>
+                <div
+                  className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center z-10 border-2 ${
+                    isComplete
+                      ? "bg-emerald-500 border-emerald-500"
+                      : isCurrent
+                        ? "bg-[#D4AF37] border-[#D4AF37]"
+                        : "bg-white border-[#E8E4DC]"
+                  }`}
+                >
                   {isComplete ? (
                     <CheckCircle2 size={14} className="text-white" />
                   ) : isCurrent ? (
@@ -65,28 +76,34 @@ export default function GradingTimeline({ currentStatus, trackingNumber, statusU
 
                 {/* Content */}
                 <div className="pt-1 pb-3 min-w-0">
-                  <p className={`text-sm font-semibold ${
-                    isComplete ? "text-emerald-600" :
-                    isCurrent  ? "text-[#1A1A1A]" :
-                                 "text-[#AAAAAA]"
-                  }`}>
+                  <p
+                    className={`text-sm font-semibold ${
+                      isComplete ? "text-emerald-600" : isCurrent ? "text-[#1A1A1A]" : "text-[#AAAAAA]"
+                    }`}
+                  >
                     {stage.label}
-                    {isCurrent && <span className="ml-2 text-[9px] font-bold uppercase text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">Current</span>}
+                    {isCurrent && (
+                      <span className="ml-2 text-[9px] font-bold uppercase text-[#D4AF37] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
                   </p>
-                  {!isFuture && (
-                    <p className="text-xs text-[#888888] mt-0.5">{stage.desc}</p>
-                  )}
+                  {!isFuture && <p className="text-xs text-[#888888] mt-0.5">{stage.desc}</p>}
                   {isCurrent && stage.key === "shipping" && trackingNumber && (
                     <div className="flex items-center gap-1.5 mt-1">
                       <Truck size={12} className="text-[#D4AF37]" />
-                      <a
-                        href={`https://www.royalmail.com/track-your-item#/tracking-results/${trackingNumber}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#D4AF37] text-xs hover:underline font-mono"
-                      >
-                        {trackingNumber}
-                      </a>
+                      {trackHref ? (
+                        <a
+                          href={trackHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#D4AF37] text-xs hover:underline font-mono"
+                        >
+                          {trackingNumber}
+                        </a>
+                      ) : (
+                        <span className="text-[#D4AF37] text-xs font-mono">{trackingNumber}</span>
+                      )}
                     </div>
                   )}
                 </div>
