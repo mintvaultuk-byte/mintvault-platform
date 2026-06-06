@@ -985,10 +985,11 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                 className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
                 data-testid="select-return-carrier"
               >
-                <option value="Royal Mail">Royal Mail</option>
-                <option value="Evri">Evri</option>
-                <option value="DPD">DPD</option>
-                <option value="Other">Other</option>
+                {CARRIERS.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -1002,6 +1003,36 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               />
             </div>
           </div>
+          {carrierInput !== "other" && servicesForCarrier(carrierInput).length > 0 && (
+            <div className="mb-3">
+              <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Service</label>
+              <select
+                value={serviceInput}
+                onChange={(e) => setServiceInput(e.target.value)}
+                className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                data-testid="select-return-service"
+              >
+                {servicesForCarrier(carrierInput).map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1">
+                {subServiceType === "grading" || !subServiceType
+                  ? `Defaults to Express for graded slabs (declared £${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`
+                  : `Auto-selected from declared value (£${(sub.totalDeclaredValue ?? 0).toLocaleString()}). Override if needed.`}
+              </p>
+            </div>
+          )}
+          {carrierInput === "dpd" && (sub.totalDeclaredValue ?? 0) > 500 && (
+            <div
+              className="mb-3 border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] text-xs rounded px-3 py-2"
+              data-testid="warning-return-dpd-cover"
+            >
+              ⚠️ DPD cover may be insufficient above £500 — Royal Mail Special Delivery recommended.
+            </div>
+          )}
           <div className="max-w-[200px] mb-3">
             <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Postage Cost (pence, optional)</label>
             <input
