@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
-import { CARRIERS, servicesForCarrier, suggestServiceForSubmission, carrierIdFromLegacyName } from "@shared/carriers";
+import {
+  CARRIERS,
+  carrierIdFromLegacyName,
+  carrierLabel,
+  serviceLabel,
+  servicesForCarrier,
+  suggestServiceForSubmission,
+} from "@shared/carriers";
 import {
   ArrowLeft,
   Package,
@@ -317,6 +324,21 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const [showMarkReceived, setShowMarkReceived] = useState(false);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
 
+  // Edit-shipping panel. Separate state from the Create Return Label form
+  // so the auto-suggest doesn't overwrite the operator's current stored
+  // service when they open the editor to fix a typo.
+  const [isEditingShipping, setIsEditingShipping] = useState(false);
+  const [editCarrier, setEditCarrier] = useState<string>("royal_mail");
+  const [editService, setEditService] = useState<string>("");
+  const [editTracking, setEditTracking] = useState<string>("");
+  const [editPostage, setEditPostage] = useState<string>("");
+  const [editError, setEditError] = useState<string | null>(null);
+  // Post-edit notice + resend confirmation. Notice only appears when the
+  // edit happened AFTER shipped_at was set (i.e. the customer already
+  // got an email referencing the old details).
+  const [showResendNotice, setShowResendNotice] = useState(false);
+  const [resendDone, setResendDone] = useState(false);
+
   const statusMutation = useMutation({
     mutationFn: async ({ status, extra }: { status: string; extra?: any }) => {
       await apiRequest("POST", `/api/admin/submissions/${submissionId}/status`, {
@@ -342,6 +364,58 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
       setShowReturnForm(false);
+    },
+  });
+
+  const editShippingMutation = useMutation({
+    mutationFn: async () => {
+      const wasShipped = !!sub?.shippedAt;
+      const res = await fetch(`/api/admin/submissions/${submissionId}/return-label`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          carrier: editCarrier,
+          service: editCarrier === "other" ? null : editService || null,
+          trackingNumber: editTracking,
+          postageCost: editPostage,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to save");
+      }
+      return { wasShipped };
+    },
+    onSuccess: ({ wasShipped }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+      setIsEditingShipping(false);
+      setEditError(null);
+      // Notice only when the customer was already notified (shipped_at
+      // set). Edits before shipped don't need a resend.
+      if (wasShipped) {
+        setShowResendNotice(true);
+        setResendDone(false);
+      }
+    },
+    onError: (err: Error) => setEditError(err.message),
+  });
+
+  const resendShippingMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/submissions/${submissionId}/resend-shipping`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to resend shipping email");
+      }
+    },
+    onSuccess: () => {
+      setResendDone(true);
+      setShowResendNotice(false);
     },
   });
 
@@ -883,27 +957,205 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
         <SubmissionItemsSection submissionId={sub.submissionId} items={sub.items} />
       )}
 
-      {(sub.returnCarrier || sub.returnTracking) && (
-        <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]">
-          <div className="flex items-center gap-2 mb-3">
-            <Truck size={14} className="text-[var(--admin-gold)]" />
-            <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
-              Return Shipping
-            </h3>
-          </div>
-          <div className="text-sm space-y-1">
-            {sub.returnCarrier && <p className="text-[var(--admin-ink)]">Carrier: {sub.returnCarrier}</p>}
-            {sub.returnTracking && (
-              <p className="text-[var(--admin-ink)]" style={{ fontFamily: "var(--admin-mono)" }}>
-                Tracking: {sub.returnTracking}
-              </p>
-            )}
-            {sub.returnPostageCost && (
-              <p className="text-[var(--admin-ink-dim)]">Postage: £{(sub.returnPostageCost / 100).toFixed(2)}</p>
-            )}
-          </div>
-        </div>
-      )}
+      {(sub.returnCarrier || sub.returnTracking) &&
+        (() => {
+          // Normalise carrier (free-text legacy values resolve to a stable
+          // id) so display labels match the catalogue and the edit form
+          // can pre-fill the carrier dropdown correctly.
+          const carrierId = carrierIdFromLegacyName(sub.returnCarrier) ?? "";
+          const carrierDisplay = carrierId ? carrierLabel(carrierId) : sub.returnCarrier || "";
+          const svcText = carrierId && sub.returnService ? serviceLabel(carrierId, sub.returnService) : null;
+          return (
+            <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-gold)_5%,transparent)]">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <Truck size={14} className="text-[var(--admin-gold)]" />
+                  <h3 className="text-[var(--admin-gold-hi)] font-semibold text-xs uppercase tracking-wider">
+                    Return Shipping
+                  </h3>
+                </div>
+                {!isEditingShipping && (
+                  <button
+                    onClick={() => {
+                      // Pre-fill from current stored values (NOT auto-suggest).
+                      setEditCarrier(carrierId || "royal_mail");
+                      setEditService(sub.returnService ?? "");
+                      setEditTracking(sub.returnTracking ?? "");
+                      setEditPostage(sub.returnPostageCost ? String(sub.returnPostageCost) : "");
+                      setEditError(null);
+                      setIsEditingShipping(true);
+                    }}
+                    className="text-[10px] uppercase tracking-widest text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] border border-[var(--admin-line)] px-2 py-1 rounded"
+                    data-testid="button-edit-shipping"
+                  >
+                    <Edit2 size={11} className="inline mr-1" /> Edit shipping
+                  </button>
+                )}
+              </div>
+
+              {!isEditingShipping ? (
+                <div className="text-sm space-y-1">
+                  {carrierDisplay && (
+                    <p className="text-[var(--admin-ink)]" data-testid="text-return-carrier">
+                      Carrier: {carrierDisplay}
+                    </p>
+                  )}
+                  {svcText && (
+                    <p className="text-[var(--admin-ink)]" data-testid="text-return-service">
+                      Service: {svcText}
+                    </p>
+                  )}
+                  {sub.returnTracking && (
+                    <p
+                      className="text-[var(--admin-ink)]"
+                      style={{ fontFamily: "var(--admin-mono)" }}
+                      data-testid="text-return-tracking"
+                    >
+                      Tracking: {sub.returnTracking}
+                    </p>
+                  )}
+                  {sub.returnPostageCost && (
+                    <p className="text-[var(--admin-ink-dim)]">Postage: £{(sub.returnPostageCost / 100).toFixed(2)}</p>
+                  )}
+                </div>
+              ) : (
+                <div data-testid="form-edit-shipping">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Carrier</label>
+                      <select
+                        value={editCarrier}
+                        onChange={(e) => setEditCarrier(e.target.value)}
+                        className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                        data-testid="select-edit-carrier"
+                      >
+                        {CARRIERS.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Tracking Number</label>
+                      <input
+                        type="text"
+                        value={editTracking}
+                        onChange={(e) => setEditTracking(e.target.value)}
+                        className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                        data-testid="input-edit-tracking"
+                      />
+                    </div>
+                  </div>
+                  {editCarrier !== "other" && servicesForCarrier(editCarrier).length > 0 && (
+                    <div className="mb-3">
+                      <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">Service</label>
+                      <select
+                        value={editService}
+                        onChange={(e) => setEditService(e.target.value)}
+                        className="w-full bg-[var(--admin-bg2)] border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                        data-testid="select-edit-service"
+                      >
+                        <option value="">— select —</option>
+                        {servicesForCarrier(editCarrier).map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {editCarrier === "dpd" && (sub.totalDeclaredValue ?? 0) > 500 && (
+                    <div
+                      className="mb-3 border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] text-xs rounded px-3 py-2"
+                      data-testid="warning-edit-dpd-cover"
+                    >
+                      ⚠️ DPD cover may be insufficient above £500 — Royal Mail Special Delivery recommended.
+                    </div>
+                  )}
+                  <div className="max-w-[200px] mb-3">
+                    <label className="text-[var(--admin-ink-dim)] text-xs block mb-1">
+                      Postage Cost (pence, optional)
+                    </label>
+                    <input
+                      type="number"
+                      value={editPostage}
+                      onChange={(e) => setEditPostage(e.target.value)}
+                      className="w-full bg-transparent border border-[var(--admin-line)] rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)]"
+                      data-testid="input-edit-postage"
+                    />
+                  </div>
+                  {editError && (
+                    <p className="text-[var(--admin-red)] text-xs mb-2" data-testid="text-edit-error">
+                      {editError}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => editShippingMutation.mutate()}
+                      disabled={editShippingMutation.isPending}
+                      className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_20%,transparent)] disabled:opacity-50 flex items-center gap-2"
+                      data-testid="button-save-edit-shipping"
+                    >
+                      <Save size={13} /> {editShippingMutation.isPending ? "Saving..." : "Save changes"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsEditingShipping(false);
+                        setEditError(null);
+                      }}
+                      disabled={editShippingMutation.isPending}
+                      className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] text-sm px-4 py-2 rounded border border-[var(--admin-line-soft)] hover:border-[var(--admin-line)] transition-colors"
+                      data-testid="button-cancel-edit-shipping"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {showResendNotice && !isEditingShipping && (
+                <div
+                  className="mt-3 border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] text-[var(--admin-amber)] text-xs rounded px-3 py-2 flex items-center justify-between gap-3"
+                  data-testid="notice-resend-shipping"
+                >
+                  <span>Tracking updated after the customer was notified.</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => resendShippingMutation.mutate()}
+                      disabled={resendShippingMutation.isPending}
+                      className="text-[10px] uppercase tracking-widest border border-[var(--admin-amber)] text-[var(--admin-amber)] px-2 py-1 rounded hover:bg-[color-mix(in_srgb,var(--admin-amber)_20%,transparent)] transition-colors disabled:opacity-50"
+                      data-testid="button-resend-shipping"
+                    >
+                      {resendShippingMutation.isPending ? "Sending..." : "Resend shipping email"}
+                    </button>
+                    <button
+                      onClick={() => setShowResendNotice(false)}
+                      className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] text-xs"
+                      aria-label="Dismiss"
+                      data-testid="button-dismiss-resend-notice"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {resendDone && !isEditingShipping && (
+                <p
+                  className="mt-3 text-[var(--admin-green)] text-xs flex items-center gap-1"
+                  data-testid="text-resend-done"
+                >
+                  <CheckCircle size={12} /> Shipping email resent
+                </p>
+              )}
+              {resendShippingMutation.isError && (
+                <p className="mt-2 text-[var(--admin-red)] text-xs">
+                  {(resendShippingMutation.error as Error)?.message}
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
       <div
         className="border border-[color-mix(in_srgb,var(--admin-red)_30%,transparent)] rounded-lg p-4 mb-6 bg-[color-mix(in_srgb,var(--admin-red)_5%,transparent)]"
