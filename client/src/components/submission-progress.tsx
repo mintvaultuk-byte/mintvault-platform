@@ -195,7 +195,7 @@ export default function SubmissionProgress(props: SubmissionProgressProps) {
                 <div className={`flex-1 h-px ${isLast ? "invisible" : connectorCls}`} />
               </div>
               <div className={`mt-2 text-[11px] font-medium leading-tight ${labelCls}`}>{n.label}</div>
-              {n.timestamp ? (
+              {n.timestamp && (n.done || n.active) ? (
                 <div className={`text-[10px] mt-0.5 ${tokens.timestamp}`} data-testid={`progress-ts-${n.key}`}>
                   {fmtTime(n.timestamp)}
                 </div>
@@ -225,7 +225,7 @@ export default function SubmissionProgress(props: SubmissionProgressProps) {
               </div>
               <div className="pt-0.5">
                 <div className={`text-sm font-medium ${labelCls}`}>{n.label}</div>
-                {n.timestamp ? (
+                {n.timestamp && (n.done || n.active) ? (
                   <div className={`text-xs mt-0.5 ${tokens.timestamp}`}>{fmtTime(n.timestamp)}</div>
                 ) : null}
               </div>
