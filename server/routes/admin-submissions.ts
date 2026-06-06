@@ -510,7 +510,12 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           WHERE id = ${numId}
           RETURNING delivered_at
         `);
-        deliveredAt = (r.rows[0] as any)?.delivered_at?.toISOString?.() ?? null;
+        // Drizzle returns timestamps as strings on some pool paths and as
+        // Date instances on others. Normalise both shapes to an ISO-8601
+        // string so the response + audit detail are always populated.
+        const raw = (r.rows[0] as any)?.delivered_at;
+        deliveredAt =
+          raw instanceof Date ? raw.toISOString() : raw != null ? new Date(String(raw)).toISOString() : null;
         await tx.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
           VALUES (
