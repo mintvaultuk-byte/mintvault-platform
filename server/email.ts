@@ -387,6 +387,54 @@ ${photosHtml}
   }
 }
 
+// Transactional — fires on FORWARD transition into in_grading. Must NEVER
+// fire on the step-back path (backward → in_grading from ready_to_return);
+// the routes/admin-submissions.ts in_grading branch handles that gating,
+// and the dedicated /step-back endpoint never calls sendX functions.
+// Not gated on marketing_feature_consent — order-status updates are
+// transactional, same as the other sendX siblings.
+export async function sendGradingStarted(data: {
+  email: string;
+  firstName: string;
+  submissionId: string;
+  cardCount: number;
+  turnaroundDays: number | null;
+}) {
+  const resend = getResend();
+  if (!resend) return;
+
+  const turnaroundLine = data.turnaroundDays
+    ? `<tr><td style="padding:8px 0;color:#999;">Expected Turnaround</td><td style="padding:8px 0;color:#fff;">${data.turnaroundDays} working days</td></tr>`
+    : "";
+
+  const body = `
+<p>Hi ${data.firstName},</p>
+<p>We've started grading your cards.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr><td style="padding:8px 0;color:#999;width:140px;">Submission ID</td><td style="padding:8px 0;color:#D4AF37;font-weight:bold;">${data.submissionId}</td></tr>
+<tr><td style="padding:8px 0;color:#999;">Cards</td><td style="padding:8px 0;color:#fff;">${data.cardCount}</td></tr>
+${turnaroundLine}
+</table>
+<p>You'll get another update once grading is complete and your cards are being prepared for return shipping.</p>
+<p style="margin-top:24px;">
+<a href="${trackingUrl(data.submissionId)}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">TRACK YOUR SUBMISSION</a>
+</p>`;
+
+  try {
+    await sendViaResend(resend, {
+      from: getFromEmail(),
+      replyTo: REPLY_TO,
+      to: data.email,
+      subject: `MintVault — Grading Started (${data.submissionId})`,
+      html: baseHtml("Grading Started", body),
+    });
+    console.log(`[email] Grading started email sent to ${data.email}`);
+  } catch (err: any) {
+    console.error(`[email] Failed to send grading started to ${data.email}:`, err.message);
+    throw err;
+  }
+}
+
 export async function sendGradingComplete(data: {
   email: string;
   firstName: string;
