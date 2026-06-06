@@ -477,6 +477,27 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
     },
   });
 
+  // One-step-back status correction (mis-click recovery). NEVER triggers
+  // a customer email — that's the whole point of using a dedicated endpoint
+  // rather than POSTing a "previous status" through /status. Server gates
+  // floor (received) hard with a 400.
+  const stepBackMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/submissions/${submissionId}/step-back`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to step back");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+    },
+  });
+
   const markReceivedMutation = useMutation({
     mutationFn: async (files: File[]) => {
       const form = new FormData();
@@ -656,6 +677,41 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           </div>
         </div>
       )}
+
+      {/* Mis-click correction — understated link to walk back ONE step.
+          Hidden at received and pre-received (received is the floor).
+          Never triggers a customer email (the server uses a dedicated
+          endpoint that doesn't share the forward /status email path). */}
+      {(() => {
+        const STEP_BACK_PREV: Record<string, string> = {
+          in_grading: "received",
+          ready_to_return: "in_grading",
+          shipped: "ready_to_return",
+          completed: "shipped",
+        };
+        const prev = STEP_BACK_PREV[currentStatus];
+        if (!prev) return null;
+        const prevLabel = SUBMISSION_STATUS_LABELS[prev] ?? prev;
+        return (
+          <div className="mb-4 flex items-center gap-2" data-testid="step-back-row">
+            <button
+              onClick={() => {
+                if (window.confirm(`Step back to ${prevLabel}? This won't notify the customer.`)) {
+                  stepBackMutation.mutate();
+                }
+              }}
+              disabled={stepBackMutation.isPending}
+              className="text-[11px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] underline-offset-2 hover:underline disabled:opacity-50"
+              data-testid="link-step-back"
+            >
+              ↩ {stepBackMutation.isPending ? "Stepping back…" : `Step back to ${prevLabel}`}
+            </button>
+            {stepBackMutation.isError && (
+              <span className="text-[10px] text-[var(--admin-red)]">{(stepBackMutation.error as Error)?.message}</span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 5-node progress stepper. Mirrors the customer track surface so
           admin and customer see the same shape. Delivered lights up only

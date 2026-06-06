@@ -4,7 +4,13 @@ import { SUBMISSION_STATUS_TRANSITIONS, SUBMISSION_STATUS_LABELS } from "@shared
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
-import { sendCardsReceived, sendGradingComplete, sendShipped, sendSubmissionDelivered } from "../email";
+import {
+  sendCardsReceived,
+  sendGradingComplete,
+  sendGradingStarted,
+  sendShipped,
+  sendSubmissionDelivered,
+} from "../email";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -209,6 +215,15 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       const newStatus = status.toLowerCase();
       if (newStatus === "received" && emailData.email) {
         sendCardsReceived(emailData).catch(() => {});
+      } else if (newStatus === "in_grading" && emailData.email) {
+        // FORWARD transition only — this endpoint only ever fires on the
+        // standard ladder. Step-back into in_grading from ready_to_return
+        // goes through POST /step-back, which never calls sendX. So the
+        // gate is enforced by virtue of being on the forward endpoint at all.
+        sendGradingStarted({
+          ...emailData,
+          turnaroundDays: submission.turnaroundDays ?? null,
+        }).catch(() => {});
       } else if ((newStatus === "completed" || newStatus === "ready_to_return") && emailData.email) {
         sendGradingComplete(emailData).catch(() => {});
       } else if (newStatus === "shipped" && emailData.email) {
@@ -575,6 +590,112 @@ export function registerAdminSubmissionRoutes(app: Express): void {
     } catch (error: any) {
       console.error("Clear delivered error:", error.message);
       res.status(500).json({ error: "Failed to clear delivered" });
+    }
+  });
+
+  // One-step-back status correction. Mis-click recovery: an admin can
+  // walk a submission BACK exactly one step along the ladder. No arbitrary
+  // jumps; the trigger (status-transition-trigger.sql) gates the allowed
+  // pairs. NEVER fires a customer email — that's why this endpoint
+  // doesn't share the forward /status path. Going forward again later
+  // re-fires the relevant sendX as a real notification.
+  //
+  // Step → previous map (received is the floor):
+  //   completed       → shipped         (clears completed_at)
+  //   shipped         → ready_to_return (clears shipped_at, and delivered_at if set)
+  //   ready_to_return → in_grading      (status_history append, no column clear)
+  //   in_grading      → received        (status_history append, no column clear)
+  //
+  // status_history is append-only — we add an entry for the NEW (earlier)
+  // status with a {step_back:true} marker so the derived inGradingAt /
+  // readyToReturnAt stay truthful AND a future reader can distinguish a
+  // back-walk from a forward visit.
+  app.post("/api/admin/submissions/:id/step-back", requireAdmin, async (req, res) => {
+    try {
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      const current = String(submission.status || "").toLowerCase();
+
+      // Single source of truth for backward pairs — must match the trigger.
+      const PREV: Record<string, string> = {
+        completed: "shipped",
+        shipped: "ready_to_return",
+        ready_to_return: "in_grading",
+        in_grading: "received",
+      };
+      const prev = PREV[current];
+      if (!prev) {
+        return res.status(400).json({
+          error:
+            current === "received"
+              ? "Already at the earliest step (Received). Nothing to step back to."
+              : `Cannot step back from status "${current}".`,
+          currentStatus: current,
+        });
+      }
+
+      const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
+      const adminEmail = req.session.adminEmail || "admin";
+      const cleared: string[] = [];
+
+      // Build the per-pair UPDATE clause. status always changes; specific
+      // *_at columns get cleared based on the step we're LEAVING.
+      const setParts: ReturnType<typeof sql>[] = [sql`status = ${prev}`, sql`updated_at = NOW()`];
+      if (current === "shipped") {
+        setParts.push(sql`shipped_at = NULL`);
+        cleared.push("shipped_at");
+        // Carrier-confirmed delivery can't survive going un-shipped.
+        if ((submission as any).deliveredAt) {
+          setParts.push(sql`delivered_at = NULL`);
+          cleared.push("delivered_at");
+        }
+      } else if (current === "completed") {
+        setParts.push(sql`completed_at = NULL`);
+        cleared.push("completed_at");
+      }
+      // No column clear for in_grading or ready_to_return (no dedicated
+      // *_at column) — status_history append below is the truthful record.
+
+      // status_history append — preserves the chronological audit. The
+      // {step_back:true} marker lets future readers distinguish backward
+      // visits from forward ones; firstStatusHistoryTime in storage.ts
+      // returns the FIRST occurrence regardless, so the derived inGradingAt
+      // / readyToReturnAt continue to reflect the ORIGINAL forward time
+      // even after a back-walk (which is the intent: the customer was
+      // first told about that stage at the original time).
+      const historyEntry = JSON.stringify({
+        status: prev,
+        timestamp: new Date().toISOString(),
+        note: null,
+        step_back: true,
+      });
+      setParts.push(sql`status_history = COALESCE(status_history, '[]'::jsonb) || ${historyEntry}::jsonb`);
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE submissions SET ${sql.join(setParts, sql`, `)} WHERE id = ${numId}
+        `);
+        await tx.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES (
+            'submission',
+            ${submission.submissionId},
+            'status_stepped_back',
+            ${adminEmail},
+            ${JSON.stringify({ fromStatus: current, toStatus: prev, cleared })}::jsonb
+          )
+        `);
+      });
+
+      console.log(
+        `[dispatch] status_stepped_back submissionId=${submission.submissionId} ${current}->${prev} cleared=${cleared.join(",") || "(none)"}`
+      );
+      res.json({ success: true, fromStatus: current, toStatus: prev, cleared });
+    } catch (error: any) {
+      console.error("Step-back error:", error.message);
+      res.status(500).json({ error: "Failed to step back status", detail: error.message });
     }
   });
 
