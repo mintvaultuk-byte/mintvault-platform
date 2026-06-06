@@ -215,7 +215,10 @@ const sessionPool = new pg.Pool({
   connectionString: getDatabaseUrl(),
   ssl: { rejectUnauthorized: false },
   max: 8,
-  connectionTimeoutMillis: 10000,
+  // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
+  // same rationale). Session reads/writes happen on nearly every request,
+  // so this pool is the most likely to surface a cold-start otherwise.
+  connectionTimeoutMillis: 30000,
   idleTimeoutMillis: 30000,
   keepAlive: true,
 });
@@ -551,6 +554,25 @@ async function runTransferV2Sweep() {
           public_estimate: FF.AI_PUBLIC_ESTIMATE_ENABLED,
         })
       );
+
+      // Neon-compute keep-warm. Fly's health probe (/health) doesn't touch the
+      // DB, so a long quiet period lets Neon autosuspend the compute, which
+      // surfaces as a 1–5s cold-start on the next real request. A SELECT 1
+      // every ~4 minutes keeps the compute hot without coupling Fly liveness
+      // to DB availability (a Neon blip there would cycle machines).
+      //
+      // - Runs on the same Drizzle pool the app uses, so warmth applies to the
+      //   actual connection path.
+      // - .unref() so this timer never holds the event loop open during a
+      //   graceful shutdown (Fly SIGTERM should still drain cleanly).
+      // - Errors are logged and swallowed; this is a best-effort warm-up and
+      //   must NEVER take the process down.
+      const KEEP_WARM_INTERVAL_MS = 4 * 60 * 1000;
+      const keepWarmTimer = setInterval(() => {
+        pool.query("SELECT 1").catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
+      }, KEEP_WARM_INTERVAL_MS);
+      keepWarmTimer.unref();
+      console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
     }
   );
 })();

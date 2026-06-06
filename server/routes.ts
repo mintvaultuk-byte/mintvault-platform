@@ -5640,7 +5640,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           language: req.body.language || "English",
           year: req.body.year,
           notes: req.body.notes || null,
-          gradeOverall: isNonNumUpdate ? null : req.body.gradeOverall,
+          // Coerce empty/whitespace to null. The `grade` column is NUMERIC(4,1);
+          // Postgres rejects "" with 22P02 invalid input syntax for type numeric.
+          // Mirrors the `req.body.X || null` pattern used by every other nullable
+          // string field in this data object. Numeric-grade-only (non-numeric grade
+          // types stay null regardless).
+          gradeOverall: isNonNumUpdate
+            ? null
+            : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
+              ? req.body.gradeOverall
+              : null,
           gradeCentering: null,
           gradeCorners: null,
           gradeEdges: null,
