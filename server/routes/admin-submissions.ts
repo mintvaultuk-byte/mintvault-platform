@@ -326,7 +326,24 @@ export function registerAdminSubmissionRoutes(app: Express): void {
 
       const safeCarrier = carrier ? String(carrier) : null;
       const safeService = service ? String(service) : null;
-      const safeTracking = trackingNumber ? String(trackingNumber) : null;
+
+      // Tracking: distinguish "not provided" (preserve via COALESCE) from
+      // "explicitly blanked" (sent as empty/whitespace string). Blanking
+      // is rejected once the parcel is shipped — we should never lose the
+      // tracking number on a parcel the customer has already been told
+      // about. Empty-string on a not-yet-shipped row silently preserves
+      // the existing value, matching prior behaviour.
+      const trackingProvided = trackingNumber !== undefined && trackingNumber !== null;
+      const trimmedTracking = trackingProvided ? String(trackingNumber).trim() : null;
+      const submissionStatus = String(submission.status || "").toLowerCase();
+      const isShipped = submissionStatus === "shipped" || submissionStatus === "completed";
+      if (trackingProvided && trimmedTracking === "" && isShipped) {
+        return res.status(400).json({
+          error: "Tracking number cannot be blank once the submission has been shipped",
+        });
+      }
+      const safeTracking = trimmedTracking ? trimmedTracking : null;
+
       const safeCost = postageCost ? parseInt(postageCost, 10) : null;
 
       // Validate the (carrier, service) pair against the shared catalogue
@@ -343,6 +360,40 @@ export function registerAdminSubmissionRoutes(app: Express): void {
 
       const adminEmail = req.session.adminEmail || "admin";
 
+      // Edit-vs-create detection: if any return-label field was already
+      // set on the row before this write, treat as an edit. The first
+      // save stays "return_label_created"; every subsequent change is
+      // "return_label_edited" with a {field: {from, to}} delta in the
+      // audit details so corrections are traceable.
+      const prevCarrier = (submission as any).returnCarrier ?? null;
+      const prevService = (submission as any).returnService ?? null;
+      const prevTracking = (submission as any).returnTracking ?? null;
+      const prevCost = (submission as any).returnPostageCost ?? null;
+      const isEdit = !!(prevCarrier || prevTracking);
+
+      // Build a deltas object — only fields the caller actually changed.
+      // COALESCE means a null/omitted field preserves the prior value, so
+      // we only treat it as a change when (a) the new value is non-null
+      // and (b) it differs from the stored value.
+      const changes: Record<string, { from: any; to: any }> = {};
+      if (safeCarrier !== null && safeCarrier !== prevCarrier) {
+        changes.carrier = { from: prevCarrier, to: safeCarrier };
+      }
+      if (safeService !== null && safeService !== prevService) {
+        changes.service = { from: prevService, to: safeService };
+      }
+      if (safeTracking !== null && safeTracking !== prevTracking) {
+        changes.tracking = { from: prevTracking, to: safeTracking };
+      }
+      if (safeCost !== null && safeCost !== prevCost) {
+        changes.postageCost = { from: prevCost, to: safeCost };
+      }
+
+      const action = isEdit ? "return_label_edited" : "return_label_created";
+      const details = isEdit
+        ? { changes, admin_user: adminEmail, submissionId: submission.submissionId }
+        : { carrier: safeCarrier, service: safeService, trackingNumber: safeTracking, postageCost: safeCost };
+
       await db.transaction(async (tx) => {
         await tx.execute(sql`
           UPDATE submissions SET
@@ -358,22 +409,72 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           VALUES (
             'submission',
             ${submission.submissionId},
-            'return_label_created',
+            ${action},
             ${adminEmail},
-            ${JSON.stringify({ carrier: safeCarrier, service: safeService, trackingNumber: safeTracking, postageCost: safeCost })}::jsonb
+            ${JSON.stringify(details)}::jsonb
           )
         `);
       });
 
       // Diagnostic-safe log: submissionId + carrier + service only. No PII.
       console.log(
-        `[dispatch] return_label_created submissionId=${submission.submissionId} carrier=${safeCarrier ?? "-"} service=${safeService ?? "-"}`
+        `[dispatch] ${action} submissionId=${submission.submissionId} carrier=${safeCarrier ?? "-"} service=${safeService ?? "-"}`
+      );
+
+      res.json({ success: true, edited: isEdit });
+    } catch (error: any) {
+      console.error("Return label error:", error.message);
+      res.status(500).json({ error: "Failed to save return label" });
+    }
+  });
+
+  // Re-send the shipping notification email using the row's current
+  // return_carrier / return_service / return_tracking. Never auto-fires
+  // on edit — the admin clicks this explicitly when they've corrected
+  // tracking after the customer was already notified.
+  app.post("/api/admin/submissions/:id/resend-shipping", requireAdmin, async (req, res) => {
+    try {
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      if (!submission.email) {
+        return res.status(400).json({ error: "Submission has no customer email on file" });
+      }
+      if (!(submission as any).returnTracking) {
+        return res.status(400).json({ error: "No tracking number to send" });
+      }
+
+      const carrier = (submission as any).returnCarrier ?? undefined;
+      const service = (submission as any).returnService ?? undefined;
+      const trackingNumber = (submission as any).returnTracking ?? undefined;
+      const adminEmail = req.session.adminEmail || "admin";
+
+      await sendShipped({
+        email: submission.email,
+        firstName: submission.firstName || "Customer",
+        submissionId: submission.submissionId,
+        cardCount: submission.cardCount || 0,
+        carrier,
+        service,
+        trackingNumber,
+      });
+
+      await storage.writeAuditLog("submission", submission.submissionId, "shipping_email_resent", adminEmail, {
+        carrier: carrier ?? null,
+        service: service ?? null,
+        trackingNumber: trackingNumber ?? null,
+      });
+
+      // Diagnostic-safe log: submissionId + carrier + service only. No PII.
+      console.log(
+        `[dispatch] shipping_email_resent submissionId=${submission.submissionId} carrier=${carrier ?? "-"} service=${service ?? "-"}`
       );
 
       res.json({ success: true });
     } catch (error: any) {
-      console.error("Return label error:", error.message);
-      res.status(500).json({ error: "Failed to create return label" });
+      console.error("Resend shipping email error:", error.message);
+      res.status(500).json({ error: "Failed to resend shipping email" });
     }
   });
 
