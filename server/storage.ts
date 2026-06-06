@@ -50,6 +50,28 @@ export class StolenCertError extends Error {
   }
 }
 
+/**
+ * Extract the FIRST status_history timestamp for a given target status.
+ * status_history is the canonical record of every transition — appended to
+ * in updateSubmissionStatus on each status change. Used to surface
+ * inGradingAt and readyToReturnAt for the progress stepper, since those
+ * transitions do not have dedicated *_at columns on the submissions table
+ * (only received/shipped/completed/delivered do).
+ *
+ * Returns null when the history is missing, malformed, or the target
+ * status never occurred.
+ */
+function firstStatusHistoryTime(history: unknown, targetStatus: string): string | null {
+  if (!Array.isArray(history)) return null;
+  for (const entry of history) {
+    if (entry && typeof entry === "object" && (entry as any).status === targetStatus) {
+      const t = (entry as any).timestamp;
+      if (typeof t === "string" && t) return t;
+    }
+  }
+  return null;
+}
+
 export interface DashboardStats {
   totalCerts: number;
   thisWeek: number;
@@ -222,9 +244,7 @@ export interface IStorage {
     toEmail: string,
     newOwnerName?: string
   ): Promise<string>;
-  confirmOwnerTransferStep(
-    token: string
-  ): Promise<{
+  confirmOwnerTransferStep(token: string): Promise<{
     success: boolean;
     certId?: string;
     fromEmail?: string;
@@ -245,9 +265,7 @@ export interface IStorage {
     outgoingKeeperUserId: string;
     referenceNumber: string;
   }): Promise<string>;
-  confirmOutgoingKeeperV2(
-    token: string
-  ): Promise<{
+  confirmOutgoingKeeperV2(token: string): Promise<{
     success: boolean;
     certId?: string;
     fromEmail?: string;
@@ -297,9 +315,7 @@ export interface IStorage {
     currentOwnerEmail: string;
     currentOwnerUserId: string;
   }): Promise<{ ownerToken: string; transferId: number }>;
-  confirmBuyerInitTransfer(
-    token: string
-  ): Promise<{
+  confirmBuyerInitTransfer(token: string): Promise<{
     success: boolean;
     transferId?: number;
     certId?: string;
@@ -485,8 +501,15 @@ export class DatabaseStorage implements IStorage {
       gradingCost: row.grading_cost,
       notes: row.notes,
       receivedAt: row.received_at,
+      // Derived from status_history JSONB — no dedicated columns exist
+      // for these two transitions on the submissions table.
+      inGradingAt: firstStatusHistoryTime(row.status_history, "in_grading"),
+      readyToReturnAt: firstStatusHistoryTime(row.status_history, "ready_to_return"),
       shippedAt: row.shipped_at,
+      // Carrier-confirmed delivery — see migrations/add-delivered-at.sql.
+      deliveredAt: row.delivered_at,
       completedAt: row.completed_at,
+      statusHistory: row.status_history,
       returnCarrier: row.return_carrier,
       returnService: row.return_service,
       returnTracking: row.return_tracking,
@@ -639,8 +662,12 @@ export class DatabaseStorage implements IStorage {
       paymentIntentId: row.payment_intent_id,
       notes: row.notes,
       receivedAt: row.received_at,
+      inGradingAt: firstStatusHistoryTime(row.status_history, "in_grading"),
+      readyToReturnAt: firstStatusHistoryTime(row.status_history, "ready_to_return"),
       shippedAt: row.shipped_at,
+      deliveredAt: row.delivered_at,
       completedAt: row.completed_at,
+      statusHistory: row.status_history,
       returnCarrier: row.return_carrier,
       returnTracking: row.return_tracking,
       returnPostageCost: row.return_postage_cost,
@@ -1808,9 +1835,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Step 1: current owner clicks their confirmation link → generates new owner token
-  async confirmOwnerTransferStep(
-    token: string
-  ): Promise<{
+  async confirmOwnerTransferStep(token: string): Promise<{
     success: boolean;
     certId?: string;
     fromEmail?: string;
@@ -1947,8 +1972,12 @@ export class DatabaseStorage implements IStorage {
       totalAmount: row.total_amount,
       createdAt: row.created_at,
       receivedAt: row.received_at,
+      inGradingAt: firstStatusHistoryTime(row.status_history, "in_grading"),
+      readyToReturnAt: firstStatusHistoryTime(row.status_history, "ready_to_return"),
       shippedAt: row.shipped_at,
+      deliveredAt: row.delivered_at,
       completedAt: row.completed_at,
+      statusHistory: row.status_history,
       returnCarrier: row.return_carrier,
       returnService: row.return_service,
       returnTracking: row.return_tracking,

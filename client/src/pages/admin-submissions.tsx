@@ -10,6 +10,7 @@ import {
   servicesForCarrier,
   suggestServiceForSubmission,
 } from "@shared/carriers";
+import SubmissionProgress, { ADMIN_LABELS } from "@/components/submission-progress";
 import {
   ArrowLeft,
   Package,
@@ -61,7 +62,10 @@ interface SubmissionRow {
   paymentIntentId: string;
   notes: string;
   receivedAt: string;
+  inGradingAt: string | null;
+  readyToReturnAt: string | null;
   shippedAt: string;
+  deliveredAt: string | null;
   completedAt: string;
   returnCarrier: string;
   returnService: string | null;
@@ -419,6 +423,45 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
     },
   });
 
+  // Manual delivery confirmation — stopgap until the Royal Mail Tracking
+  // API is wired up. Idempotent server-side: re-clicking a row that's
+  // already delivered is a no-op (unchanged:true).
+  const markDeliveredMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to mark delivered");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+    },
+  });
+
+  // Clear (un-confirm) — mis-click recovery. Audited separately. The UI
+  // affordance is deliberately small (icon-only on the stepper area).
+  const clearDeliveredMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered/clear`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as any).error || "Failed to clear delivery");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions"] });
+    },
+  });
+
   const adminNotesMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("PATCH", `/api/admin/submissions/${submissionId}/notes`, {
@@ -613,6 +656,66 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
           </div>
         </div>
       )}
+
+      {/* 5-node progress stepper. Mirrors the customer track surface so
+          admin and customer see the same shape. Delivered lights up only
+          when delivered_at is set (manual today, RM API later). */}
+      <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">
+        <SubmissionProgress
+          variant="admin"
+          labels={ADMIN_LABELS}
+          status={sub.status}
+          receivedAt={sub.receivedAt}
+          inGradingAt={sub.inGradingAt}
+          readyToReturnAt={sub.readyToReturnAt}
+          shippedAt={sub.shippedAt}
+          deliveredAt={sub.deliveredAt}
+        />
+        {/* Mark Delivered — manual bridge until Royal Mail Tracking API is
+            wired. Only available once shipped_at is set AND delivered_at
+            is still NULL. Status "completed" alone does NOT enable this. */}
+        {sub.shippedAt && !sub.deliveredAt && (
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              onClick={() => markDeliveredMutation.mutate()}
+              disabled={markDeliveredMutation.isPending}
+              className="text-xs border border-[var(--admin-green)] bg-[color-mix(in_srgb,var(--admin-green)_15%,transparent)] text-[var(--admin-green)] px-3 py-1.5 rounded font-medium transition-colors hover:bg-[color-mix(in_srgb,var(--admin-green)_25%,transparent)] disabled:opacity-50 flex items-center gap-1.5"
+              data-testid="button-mark-delivered"
+            >
+              <CheckCircle size={12} />
+              {markDeliveredMutation.isPending ? "Marking..." : "Mark as Delivered"}
+            </button>
+            <span className="text-[10px] text-[var(--admin-ink-faint)]">
+              Manual bridge — Royal Mail Tracking API will replace this.
+            </span>
+          </div>
+        )}
+        {sub.deliveredAt && (
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-[11px] text-[var(--admin-green)] flex items-center gap-1">
+              <CheckCircle size={12} /> Delivered confirmed
+            </span>
+            <button
+              onClick={() => {
+                if (window.confirm("Clear the delivery confirmation? Used for mis-clicks.")) {
+                  clearDeliveredMutation.mutate();
+                }
+              }}
+              disabled={clearDeliveredMutation.isPending}
+              className="text-[10px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] underline-offset-2 hover:underline disabled:opacity-50"
+              data-testid="button-clear-delivered"
+              title="Clear delivery confirmation (mis-click recovery)"
+            >
+              clear
+            </button>
+          </div>
+        )}
+        {(markDeliveredMutation.isError || clearDeliveredMutation.isError) && (
+          <p className="mt-2 text-[var(--admin-red)] text-xs">
+            {(markDeliveredMutation.error as Error)?.message ?? (clearDeliveredMutation.error as Error)?.message}
+          </p>
+        )}
+      </div>
 
       {showReturnForm && (
         <div className="border border-[var(--admin-line)] rounded-lg p-4 mb-6">

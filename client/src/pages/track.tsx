@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Package, Search, Truck, CheckCircle, Clock, AlertCircle } from "lucide-react";
+import { Search, Truck, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { apiRequest } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS } from "@shared/schema";
 import { carrierIdFromLegacyName, carrierLabel, serviceLabel, trackUrl } from "@shared/carriers";
+import SubmissionProgress, { CUSTOMER_LABELS } from "@/components/submission-progress";
 
 interface TrackingResult {
   submissionId: string;
@@ -16,36 +17,15 @@ interface TrackingResult {
   cardCount: number;
   createdAt: string;
   receivedAt: string | null;
+  inGradingAt: string | null;
+  readyToReturnAt: string | null;
   shippedAt: string | null;
+  deliveredAt: string | null;
   completedAt: string | null;
   returnTracking: string | null;
   returnCarrier: string | null;
   returnService: string | null;
   turnaroundDays: number | null;
-}
-
-const STATUS_ICON: Record<string, typeof Package> = {
-  new: Package,
-  paid: Package,
-  received: CheckCircle,
-  in_grading: Clock,
-  ready_to_return: CheckCircle,
-  shipped: Truck,
-  completed: CheckCircle,
-};
-
-const STATUS_STEPS = [
-  { key: "new", label: "Submitted" },
-  { key: "received", label: "Received" },
-  { key: "in_grading", label: "Grading" },
-  { key: "ready_to_return", label: "Ready" },
-  { key: "shipped", label: "Shipped" },
-  { key: "completed", label: "Complete" },
-];
-
-function getStepIndex(status: string): number {
-  const idx = STATUS_STEPS.findIndex((s) => s.key === status);
-  return idx >= 0 ? idx : 0;
 }
 
 export default function TrackPage() {
@@ -92,8 +72,6 @@ export default function TrackPage() {
       setLoading(false);
     }
   };
-
-  const currentStep = result ? getStepIndex(result.status) : -1;
 
   return (
     <div className="px-4 py-12 max-w-2xl mx-auto">
@@ -164,31 +142,19 @@ export default function TrackPage() {
               </Badge>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-6 overflow-x-auto py-2">
-                {STATUS_STEPS.map((step, idx) => {
-                  const isActive = idx <= currentStep;
-                  const isCurrent = idx === currentStep;
-                  return (
-                    <div key={step.key} className="flex flex-col items-center min-w-[60px]">
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                          isCurrent
-                            ? "bg-[#D4AF37] text-black"
-                            : isActive
-                              ? "bg-[#D4AF37]/30 text-[#D4AF37]"
-                              : "bg-[#E8E4DC] text-[#999999]"
-                        }`}
-                        data-testid={`step-${step.key}`}
-                      >
-                        {idx + 1}
-                      </div>
-                      <span className={`text-xs mt-1 ${isActive ? "text-[#D4AF37]" : "text-[#999999]"}`}>
-                        {step.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              {/* 5-node progress stepper (shared with admin). Delivered
+                  lights up only when carrier confirms delivery — today
+                  manual via admin, later via Royal Mail Tracking API. */}
+              <SubmissionProgress
+                variant="customer"
+                labels={CUSTOMER_LABELS}
+                status={result.status}
+                receivedAt={result.receivedAt}
+                inGradingAt={result.inGradingAt}
+                readyToReturnAt={result.readyToReturnAt}
+                shippedAt={result.shippedAt}
+                deliveredAt={result.deliveredAt}
+              />
 
               <div className="grid grid-cols-2 gap-4 text-sm">
                 {result.serviceType && (

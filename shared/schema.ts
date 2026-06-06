@@ -215,6 +215,12 @@ export const submissions = pgTable("submissions", {
   notes: text("notes"),
   receivedAt: timestamp("received_at"),
   shippedAt: timestamp("shipped_at"),
+  // Carrier-confirmed delivery time, distinct from `completedAt` (which is
+  // an admin operational state, not a delivery confirmation). Today this is
+  // set manually by an admin via POST /api/admin/submissions/:id/mark-
+  // delivered as a stopgap; later it will be set automatically by the Royal
+  // Mail Tracking API polling. Nullable; null = not confirmed delivered.
+  deliveredAt: timestamp("delivered_at"),
   completedAt: timestamp("completed_at"),
   returnCarrier: text("return_carrier"),
   // Carrier service-level key, paired with returnCarrier. Values live in

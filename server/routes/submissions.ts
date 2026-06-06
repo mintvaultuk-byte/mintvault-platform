@@ -684,6 +684,12 @@ export function registerSubmissionRoutes(app: Express): void {
         returnCarrier: submission.returnCarrier || null,
         returnService: (submission as any).returnService || null,
         turnaroundDays: submission.turnaroundDays || null,
+        // Stepper inputs — see migrations/add-delivered-at.sql for the
+        // delivered_at column rationale. in_grading / ready_to_return
+        // timestamps are derived from status_history server-side.
+        inGradingAt: (submission as any).inGradingAt || null,
+        readyToReturnAt: (submission as any).readyToReturnAt || null,
+        deliveredAt: (submission as any).deliveredAt || null,
       });
     } catch (error: any) {
       console.error("Track submission error:", error.message);
