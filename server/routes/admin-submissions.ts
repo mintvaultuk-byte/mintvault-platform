@@ -478,6 +478,106 @@ export function registerAdminSubmissionRoutes(app: Express): void {
     }
   });
 
+  // MANUAL BRIDGE — sets submissions.delivered_at to NOW() so the customer-
+  // facing progress stepper can light up the "Delivered" node. This is a
+  // stopgap until the Royal Mail Tracking API polling is wired up; once
+  // that lands the same column will be written automatically with
+  // details.source='royalmail_api' instead of 'manual_admin'.
+  //
+  // Idempotent: a row that already has delivered_at set returns ok=true,
+  // unchanged=true, and writes no audit row (no double-confirmation).
+  // Pair endpoint below clears delivered_at (mis-click recovery).
+  app.post("/api/admin/submissions/:id/mark-delivered", requireAdmin, async (req, res) => {
+    try {
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
+      const adminEmail = req.session.adminEmail || "admin";
+
+      // Idempotent: don't overwrite an existing confirmation. Returning
+      // unchanged=true lets the UI mutation onSuccess silently no-op.
+      if ((submission as any).deliveredAt) {
+        return res.json({ success: true, unchanged: true, deliveredAt: (submission as any).deliveredAt });
+      }
+
+      let deliveredAt: string | null = null;
+      await db.transaction(async (tx) => {
+        const r = await tx.execute(sql`
+          UPDATE submissions
+          SET delivered_at = NOW(), updated_at = NOW()
+          WHERE id = ${numId}
+          RETURNING delivered_at
+        `);
+        // Drizzle returns timestamps as strings on some pool paths and as
+        // Date instances on others. Normalise both shapes to an ISO-8601
+        // string so the response + audit detail are always populated.
+        const raw = (r.rows[0] as any)?.delivered_at;
+        deliveredAt =
+          raw instanceof Date ? raw.toISOString() : raw != null ? new Date(String(raw)).toISOString() : null;
+        await tx.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES (
+            'submission',
+            ${submission.submissionId},
+            'delivery_confirmed_manual',
+            ${adminEmail},
+            ${JSON.stringify({ delivered_at: deliveredAt, source: "manual_admin" })}::jsonb
+          )
+        `);
+      });
+
+      // Diagnostic-safe log: submissionId only. No PII.
+      console.log(`[dispatch] delivery_confirmed_manual submissionId=${submission.submissionId}`);
+      res.json({ success: true, unchanged: false, deliveredAt });
+    } catch (error: any) {
+      console.error("Mark delivered error:", error.message);
+      res.status(500).json({ error: "Failed to mark delivered" });
+    }
+  });
+
+  // Clear delivered_at — mis-click recovery for the manual path. Audited
+  // separately so a confirmation that gets walked back is traceable.
+  app.post("/api/admin/submissions/:id/mark-delivered/clear", requireAdmin, async (req, res) => {
+    try {
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
+      if (!submission) {
+        return res.status(404).json({ error: "Submission not found" });
+      }
+      if (!(submission as any).deliveredAt) {
+        return res.json({ success: true, unchanged: true });
+      }
+      const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
+      const adminEmail = req.session.adminEmail || "admin";
+      const previous = (submission as any).deliveredAt;
+
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE submissions
+          SET delivered_at = NULL, updated_at = NOW()
+          WHERE id = ${numId}
+        `);
+        await tx.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES (
+            'submission',
+            ${submission.submissionId},
+            'delivery_confirmation_cleared',
+            ${adminEmail},
+            ${JSON.stringify({ previous_delivered_at: previous, reason: "admin_cleared" })}::jsonb
+          )
+        `);
+      });
+
+      console.log(`[dispatch] delivery_confirmation_cleared submissionId=${submission.submissionId}`);
+      res.json({ success: true, unchanged: false });
+    } catch (error: any) {
+      console.error("Clear delivered error:", error.message);
+      res.status(500).json({ error: "Failed to clear delivered" });
+    }
+  });
+
   app.get("/api/admin/submissions/:id/packing-slip", requireAdmin, async (req, res) => {
     try {
       const submission = await storage.getSubmissionBySubmissionId(String(req.params.id));
