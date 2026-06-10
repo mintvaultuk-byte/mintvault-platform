@@ -9,11 +9,26 @@ const grades = [
     label: "GEM MINT",
     desc: "Virtually perfect. Flawless corners, edges, and surface. Centering within 55/45 on front, 75/25 on back.",
   },
+  {
+    grade: "9.5",
+    label: "MINT+",
+    desc: "Between Mint and Gem Mint. One sub-grade short of perfect — typically a single corner or edge with the faintest whitening.",
+  },
   { grade: "9", label: "MINT", desc: "Outstanding condition. Minor imperfection visible only under close inspection." },
+  {
+    grade: "8.5",
+    label: "NM-MINT+",
+    desc: "Between Near Mint-Mint and Mint. Trace wear on at most one corner or edge, otherwise indistinguishable from a 9.",
+  },
   {
     grade: "8",
     label: "NEAR MINT-MINT",
     desc: "Minor wear on corners or edges. Slight surface marks or a small print defect.",
+  },
+  {
+    grade: "7.5",
+    label: "NM+",
+    desc: "Between Near Mint and Near Mint-Mint. Light wear on no more than two corners or edges; surface clean to the naked eye.",
   },
   {
     grade: "7",
@@ -21,9 +36,19 @@ const grades = [
     desc: "Visible minor wear. Light scratching or minor edge wear with small surface marks.",
   },
   {
+    grade: "6.5",
+    label: "EX-MINT+",
+    desc: "Between Excellent-Near Mint and Near Mint. Modest wear and light gloss loss noticeable on close inspection, no major defects.",
+  },
+  {
     grade: "6",
     label: "EXCELLENT-NEAR MINT",
     desc: "Noticeable wear but still presentable. Minor creasing possible. Light loss of gloss.",
+  },
+  {
+    grade: "5.5",
+    label: "EXCELLENT+",
+    desc: "Between Excellent and Excellent-Near Mint. Clear wear without disqualifying creases or stains; presents better than a 5.",
   },
   {
     grade: "5",
@@ -31,16 +56,36 @@ const grades = [
     desc: "Moderate wear including corner and edge wear, surface scratches, and possible print defects.",
   },
   {
+    grade: "4.5",
+    label: "VG-EX+",
+    desc: "Between Very Good-Excellent and Excellent. Heavier wear with visible surface marks; card remains structurally sound.",
+  },
+  {
     grade: "4",
     label: "VERY GOOD-EXCELLENT",
     desc: "Heavier wear. Visible creasing or surface damage. Card is still intact.",
+  },
+  {
+    grade: "3.5",
+    label: "VG+",
+    desc: "Between Very Good and Very Good-Excellent. Significant wear including creasing or staining, but better presented than a 3.",
   },
   {
     grade: "3",
     label: "VERY GOOD",
     desc: "Significant wear. Creasing, staining, or heavy edge wear visible without magnification.",
   },
+  {
+    grade: "2.5",
+    label: "GOOD+",
+    desc: "Between Good and Very Good. Heavy wear throughout; structural integrity intact but eye appeal limited.",
+  },
   { grade: "2", label: "GOOD", desc: "Heavy damage. Major creasing, tears, or significant staining throughout." },
+  {
+    grade: "1.5",
+    label: "FAIR",
+    desc: "Between Poor and Good. Severe damage with all major defects present; card still identifiable as the original printing.",
+  },
   {
     grade: "1",
     label: "POOR",
@@ -62,11 +107,17 @@ function gradeBarColor(g: string): string {
   const n = parseFloat(g);
   if (isNaN(n)) return "#888888";
   if (n >= 10) return "#D4AF37";
+  if (n >= 9.5) return "#C6A322"; // between 10 and 9
   if (n >= 9) return "#B8960C";
+  if (n >= 8.5) return "#6E7C7B"; // between 9 and 8
   if (n >= 8) return "#2563EB";
+  if (n >= 7.5) return "#1D839A"; // between 8 and 7
   if (n >= 7) return "#16A34A";
+  if (n >= 6.5) return "#709627"; // between 7 and 6
   if (n >= 6) return "#CA8A04";
+  if (n >= 5.5) return "#DA7108"; // between 6 and 5
   if (n >= 5) return "#EA580C";
+  if (n >= 4.5) return "#E33F19"; // between 5 and 4
   return "#DC2626";
 }
 
@@ -108,8 +159,9 @@ export default function GradingScalePage() {
         MintVault Grading Scale
       </h1>
       <p className="text-white text-base leading-relaxed mb-10">
-        Every card graded by MintVault is assessed on our professional 1&ndash;10 scale. Grades are whole numbers only
-        &mdash; no half-point grades. Grades reflect the overall condition of the card at the time of grading.
+        Every card graded by MintVault is assessed on our professional 1&ndash;10 scale. Grades use a precise 1&ndash;10
+        scale with half-point increments at higher condition ranges, giving you an accurate assessment of your
+        card&rsquo;s value.
       </p>
 
       {/* Grade table */}

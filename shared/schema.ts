@@ -1036,14 +1036,23 @@ export type OwnershipStatus = (typeof OWNERSHIP_STATUSES)[number];
 
 export const NUMERIC_GRADES = [
   { value: 10, label: "GEM MT", description: "Gem Mint" },
+  { value: 9.5, label: "MINT+", description: "Mint+" },
   { value: 9, label: "MINT", description: "Mint" },
+  { value: 8.5, label: "NM-MT+", description: "NM-Mint+" },
   { value: 8, label: "NM-MT", description: "Near Mint-Mint" },
+  { value: 7.5, label: "NM+", description: "NM+" },
   { value: 7, label: "NM", description: "Near Mint" },
+  { value: 6.5, label: "EX-MT+", description: "EX-Mint+" },
   { value: 6, label: "EX-MT", description: "Excellent-Mint" },
+  { value: 5.5, label: "EX+", description: "Excellent+" },
   { value: 5, label: "EX", description: "Excellent" },
+  { value: 4.5, label: "VG-EX+", description: "VG-EX+" },
   { value: 4, label: "VG-EX", description: "Very Good-Excellent" },
+  { value: 3.5, label: "VG+", description: "VG+" },
   { value: 3, label: "VG", description: "Very Good" },
+  { value: 2.5, label: "GOOD+", description: "Good+" },
   { value: 2, label: "GOOD", description: "Good" },
+  { value: 1.5, label: "FAIR", description: "Fair" },
   { value: 1, label: "PR", description: "Poor" },
 ] as const;
 
@@ -1058,22 +1067,23 @@ export function isNonNumericGrade(gradeType: string): boolean {
 
 export function gradeLabel(grade: number): string {
   if (grade >= 10) return "GEM MT";
-  if (grade >= 9.5) return "GEM MT";
+  if (grade >= 9.5) return "MINT+";
   if (grade >= 9) return "MINT";
-  if (grade >= 8.5) return "NM-MT";
+  if (grade >= 8.5) return "NM-MT+";
   if (grade >= 8) return "NM-MT";
-  if (grade >= 7.5) return "NM";
+  if (grade >= 7.5) return "NM+";
   if (grade >= 7) return "NM";
-  if (grade >= 6.5) return "EX-MT";
+  if (grade >= 6.5) return "EX-MT+";
   if (grade >= 6) return "EX-MT";
-  if (grade >= 5.5) return "EX";
+  if (grade >= 5.5) return "EX+";
   if (grade >= 5) return "EX";
-  if (grade >= 4.5) return "VG-EX";
+  if (grade >= 4.5) return "VG-EX+";
   if (grade >= 4) return "VG-EX";
-  if (grade >= 3.5) return "VG";
+  if (grade >= 3.5) return "VG+";
   if (grade >= 3) return "VG";
-  if (grade >= 2.5) return "GOOD";
+  if (grade >= 2.5) return "GOOD+";
   if (grade >= 2) return "GOOD";
+  if (grade >= 1.5) return "FAIR";
   if (grade >= 1) return "PR";
   return "";
 }

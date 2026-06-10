@@ -334,57 +334,57 @@ function remainingToGrade(remaining: number): number {
  * grade N, the cappedScore drops to GRADE_BRACKET_TOP[N] so the displayed
  * label matches finalGrade exactly.
  *
- * v2 (MVGS-v2-spec.md §2) — TAG-aligned bands, full half-grade ladder down
- * to 1. The v1 table was shifted ~5 points lenient AND skipped half-grades
- * below 7.5; both are corrected here to match TAG's published rubric ÷10.
- * 9.5 is removed (TAG does not use it). Boundaries are inclusive on the
- * lower side, exclusive on the upper (score 95 = Gem Mint; 94 = Mint).
+ * Aligned to the /standard publication band table — full half-grade ladder
+ * top to bottom, including 9.5 (Mint+) at 86-90. Boundaries are inclusive
+ * on the lower side, exclusive on the upper (score 91 = Gem Mint; 90 = Mint+).
  */
 const GRADE_BRACKET_TOP: Record<number, number> = {
-  10: 100, // Pristine 10P (99-100) + Gem Mint (95-98.9), integer top = 100
-  9: 94, // Mint 9 (90-94.9)
-  8.5: 89, // NM-Mint+ 8.5 (85-89.9)
-  8: 84, // NM-Mint 8 (80-84.9)
-  7.5: 79, // NM+ 7.5 (75-79.9)
-  7: 74, // Near Mint 7 (70-74.9)
-  6.5: 69, // EX-Mint+ 6.5 (65-69.9)
-  6: 64, // EX-Mint 6 (60-64.9)
-  5.5: 59, // Excellent+ 5.5 (55-59.9)
-  5: 54, // Excellent 5 (50-54.9)
-  4.5: 49, // VG-EX+ 4.5 (45-49.9)
-  4: 44, // VG-EX 4 (40-44.9)
-  3.5: 39, // VG+ 3.5 (35-39.9)
-  3: 34, // Very Good 3 (30-34.9)
-  2.5: 29, // Good+ 2.5 (25-29.9)
-  2: 24, // Good 2 (20-24.9)
-  1.5: 19, // Fair 1.5 (15-19.9)
-  1: 14, // Poor 1 (10-14.9; score < 10 still labels Poor)
+  10: 100, // Pristine 10P (96-100) + Gem Mint (91-95), integer top = 100
+  9.5: 90, // Mint+ 9.5 (86-90)
+  9: 85, // Mint 9 (81-85)
+  8.5: 80, // NM-Mint+ 8.5 (76-80)
+  8: 75, // NM-Mint 8 (71-75)
+  7.5: 70, // NM+ 7.5 (66-70)
+  7: 65, // Near Mint 7 (61-65)
+  6.5: 60, // EX-Mint+ 6.5 (56-60)
+  6: 55, // EX-Mint 6 (51-55)
+  5.5: 50, // Excellent+ 5.5 (46-50)
+  5: 45, // Excellent 5 (41-45)
+  4.5: 40, // VG-EX+ 4.5 (36-40)
+  4: 35, // VG-EX 4 (31-35)
+  3.5: 30, // VG+ 3.5 (26-30)
+  3: 25, // Very Good 3 (21-25)
+  2.5: 20, // Good+ 2.5 (16-20)
+  2: 15, // Good 2 (11-15)
+  1.5: 10, // Fair 1.5 (6-10)
+  1: 5, // Poor 1 (1-5)
 };
 function bracketTopFor(grade: number): number {
   if (GRADE_BRACKET_TOP[grade] !== undefined) return GRADE_BRACKET_TOP[grade];
   return GRADE_BRACKET_TOP[Math.floor(grade)] ?? 100;
 }
 
-/** Score → label per spec §2 band table. */
+/** Score → label per the /standard publication band table. */
 function gradeLabelForScore(score: number): string {
-  if (score >= 99) return "Pristine 10P";
-  if (score >= 95) return "Gem Mint";
-  if (score >= 90) return "Mint";
-  if (score >= 85) return "NM-Mint+";
-  if (score >= 80) return "NM-Mint";
-  if (score >= 75) return "NM+";
-  if (score >= 70) return "Near Mint";
-  if (score >= 65) return "EX-Mint+";
-  if (score >= 60) return "EX-Mint";
-  if (score >= 55) return "Excellent+";
-  if (score >= 50) return "Excellent";
-  if (score >= 45) return "VG-EX+";
-  if (score >= 40) return "VG-EX";
-  if (score >= 35) return "VG+";
-  if (score >= 30) return "Very Good";
-  if (score >= 25) return "Good+";
-  if (score >= 20) return "Good";
-  if (score >= 15) return "Fair";
+  if (score >= 96) return "Pristine 10P";
+  if (score >= 91) return "Gem Mint";
+  if (score >= 86) return "Mint+";
+  if (score >= 81) return "Mint";
+  if (score >= 76) return "NM-Mint+";
+  if (score >= 71) return "NM-Mint";
+  if (score >= 66) return "NM+";
+  if (score >= 61) return "Near Mint";
+  if (score >= 56) return "EX-Mint+";
+  if (score >= 51) return "EX-Mint";
+  if (score >= 46) return "Excellent+";
+  if (score >= 41) return "Excellent";
+  if (score >= 36) return "VG-EX+";
+  if (score >= 31) return "VG-EX";
+  if (score >= 26) return "VG+";
+  if (score >= 21) return "Very Good";
+  if (score >= 16) return "Good+";
+  if (score >= 11) return "Good";
+  if (score >= 6) return "Fair";
   return "Poor";
 }
 
@@ -696,25 +696,26 @@ export { gradeLabelForScore as mvgsGradeLabel };
  * grade with the MVGS-derived grade when defects have been MVGS-classified.
  */
 export function gradeFromMvgsScore(score: number): number {
-  // v2 band table per spec §2 — full TAG half-grade ladder.
-  if (score >= 99) return 10; // Pristine 10P → grade 10 ("P" is label-only)
-  if (score >= 95) return 10; // Gem Mint
-  if (score >= 90) return 9; // Mint
-  if (score >= 85) return 8.5; // NM-Mint+
-  if (score >= 80) return 8; // NM-Mint
-  if (score >= 75) return 7.5; // NM+
-  if (score >= 70) return 7; // Near Mint
-  if (score >= 65) return 6.5; // EX-Mint+
-  if (score >= 60) return 6; // EX-Mint
-  if (score >= 55) return 5.5; // Excellent+
-  if (score >= 50) return 5; // Excellent
-  if (score >= 45) return 4.5; // VG-EX+
-  if (score >= 40) return 4; // VG-EX
-  if (score >= 35) return 3.5; // VG+
-  if (score >= 30) return 3; // Very Good
-  if (score >= 25) return 2.5; // Good+
-  if (score >= 20) return 2; // Good
-  if (score >= 15) return 1.5; // Fair
+  // Band table aligned to the /standard publication — full half-grade ladder.
+  if (score >= 96) return 10; // Pristine 10P → grade 10 ("P" is label-only)
+  if (score >= 91) return 10; // Gem Mint
+  if (score >= 86) return 9.5; // Mint+
+  if (score >= 81) return 9; // Mint
+  if (score >= 76) return 8.5; // NM-Mint+
+  if (score >= 71) return 8; // NM-Mint
+  if (score >= 66) return 7.5; // NM+
+  if (score >= 61) return 7; // Near Mint
+  if (score >= 56) return 6.5; // EX-Mint+
+  if (score >= 51) return 6; // EX-Mint
+  if (score >= 46) return 5.5; // Excellent+
+  if (score >= 41) return 5; // Excellent
+  if (score >= 36) return 4.5; // VG-EX+
+  if (score >= 31) return 4; // VG-EX
+  if (score >= 26) return 3.5; // VG+
+  if (score >= 21) return 3; // Very Good
+  if (score >= 16) return 2.5; // Good+
+  if (score >= 11) return 2; // Good
+  if (score >= 6) return 1.5; // Fair
   return 1; // Poor
 }
 
@@ -728,6 +729,7 @@ export function gradeFromMvgsScore(score: number): number {
  */
 export function mvgsTierName(grade: number): string {
   if (grade >= 10) return "Gem Mint";
+  if (grade >= 9.5) return "Mint+";
   if (grade >= 9) return "Mint";
   if (grade >= 8.5) return "NM-Mint+";
   if (grade >= 8) return "NM-Mint";
