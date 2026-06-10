@@ -1815,7 +1815,7 @@ export default function GradingPanel({
                       <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">
                         MVGS
                       </span>
-                      <span className="text-[#1A1400] text-sm font-bold" data-testid="text-mvgs-score">
+                      <span className="text-[var(--admin-ink)] text-sm font-bold" data-testid="text-mvgs-score">
                         {mvgs.score}/100 · {mvgs.grade}
                       </span>
                     </div>
