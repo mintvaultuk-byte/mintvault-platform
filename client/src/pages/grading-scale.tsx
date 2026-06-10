@@ -5,7 +5,7 @@ import GradientButton from "@/components/ui/gradient-button";
 
 const grades = [
   {
-    grade: "10★",
+    grade: "10P",
     label: "BLACK LABEL — PRISTINE 10P",
     desc: "Flawless in every measurable dimension. A perfect score across centering, corners, edges, and surface with zero defects. The rarest designation MintVault awards.",
   },
