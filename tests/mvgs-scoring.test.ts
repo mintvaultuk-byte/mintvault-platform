@@ -193,74 +193,97 @@ describe("computeMvgsScore", () => {
   });
 });
 
-describe("gradeFromMvgsScore — v2 band table (spec §2)", () => {
-  // Each pair = a score that sits at the boundary of two brackets, mapped to
-  // its v2 (TAG-aligned, full half-grade ladder) grade. v1 had skipped half-
-  // grades below 7.5 and was shifted ~5 points lenient; both corrected here.
+describe("gradeFromMvgsScore — /standard band table", () => {
+  // Each pair = the top and bottom of a band, mapped to its grade. The band
+  // table is aligned to the /standard publication — full half-grade ladder
+  // top to bottom, including 9.5 (Mint+) at 86-90.
   it.each([
-    [100, 10],
-    [99, 10], // Pristine 10P (label-only distinction)
-    [95, 10], // Gem Mint
-    [94, 9],
-    [90, 9], // Mint
-    [89, 8.5],
-    [85, 8.5], // NM-Mint+
-    [84, 8],
-    [80, 8], // NM-Mint
-    [79, 7.5],
-    [75, 7.5], // NM+
-    [74, 7],
-    [70, 7], // Near Mint
-    [69, 6.5],
-    [65, 6.5], // EX-Mint+
-    [64, 6],
-    [60, 6], // EX-Mint
-    [59, 5.5],
-    [55, 5.5], // Excellent+
-    [54, 5],
-    [50, 5], // Excellent
-    [49, 4.5],
-    [45, 4.5], // VG-EX+
-    [44, 4],
-    [40, 4], // VG-EX
-    [39, 3.5],
-    [35, 3.5], // VG+
-    [34, 3],
-    [30, 3], // Very Good
-    [29, 2.5],
-    [25, 2.5], // Good+
-    [24, 2],
-    [20, 2], // Good
-    [19, 1.5],
-    [15, 1.5], // Fair
-    [14, 1],
-    [1, 1], // Poor
+    [100, 10], // Pristine 10P top
+    [96, 10], // Pristine 10P bottom
+    [95, 10], // Gem Mint top
+    [91, 10], // Gem Mint bottom
+    [90, 9.5], // Mint+ top
+    [86, 9.5], // Mint+ bottom
+    [85, 9], // Mint top
+    [81, 9], // Mint bottom
+    [80, 8.5], // NM-Mint+ top
+    [76, 8.5], // NM-Mint+ bottom
+    [75, 8], // NM-Mint top
+    [71, 8], // NM-Mint bottom
+    [70, 7.5], // NM+ top
+    [66, 7.5], // NM+ bottom
+    [65, 7], // Near Mint top
+    [61, 7], // Near Mint bottom
+    [60, 6.5], // EX-Mint+ top
+    [56, 6.5], // EX-Mint+ bottom
+    [55, 6], // EX-Mint top
+    [51, 6], // EX-Mint bottom
+    [50, 5.5], // Excellent+ top
+    [46, 5.5], // Excellent+ bottom
+    [45, 5], // Excellent top
+    [41, 5], // Excellent bottom
+    [40, 4.5], // VG-EX+ top
+    [36, 4.5], // VG-EX+ bottom
+    [35, 4], // VG-EX top
+    [31, 4], // VG-EX bottom
+    [30, 3.5], // VG+ top
+    [26, 3.5], // VG+ bottom
+    [25, 3], // Very Good top
+    [21, 3], // Very Good bottom
+    [20, 2.5], // Good+ top
+    [16, 2.5], // Good+ bottom
+    [15, 2], // Good top
+    [11, 2], // Good bottom
+    [10, 1.5], // Fair top
+    [6, 1.5], // Fair bottom
+    [5, 1], // Poor top
+    [1, 1], // Poor bottom
   ])("score %i → grade %s", (score, expected) => {
     expect(gradeFromMvgsScore(score)).toBe(expected);
   });
 });
 
-describe("mvgsGradeLabel — v2 band table", () => {
+describe("mvgsGradeLabel — /standard band table", () => {
   it.each([
     [100, "Pristine 10P"],
-    [99, "Pristine 10P"],
+    [96, "Pristine 10P"],
     [95, "Gem Mint"],
-    [90, "Mint"],
-    [85, "NM-Mint+"],
-    [80, "NM-Mint"],
-    [75, "NM+"],
-    [70, "Near Mint"],
-    [65, "EX-Mint+"],
-    [60, "EX-Mint"],
-    [55, "Excellent+"],
-    [50, "Excellent"],
-    [45, "VG-EX+"],
-    [40, "VG-EX"],
-    [35, "VG+"],
-    [30, "Very Good"],
-    [25, "Good+"],
-    [20, "Good"],
-    [15, "Fair"],
+    [91, "Gem Mint"],
+    [90, "Mint+"],
+    [86, "Mint+"],
+    [85, "Mint"],
+    [81, "Mint"],
+    [80, "NM-Mint+"],
+    [76, "NM-Mint+"],
+    [75, "NM-Mint"],
+    [71, "NM-Mint"],
+    [70, "NM+"],
+    [66, "NM+"],
+    [65, "Near Mint"],
+    [61, "Near Mint"],
+    [60, "EX-Mint+"],
+    [56, "EX-Mint+"],
+    [55, "EX-Mint"],
+    [51, "EX-Mint"],
+    [50, "Excellent+"],
+    [46, "Excellent+"],
+    [45, "Excellent"],
+    [41, "Excellent"],
+    [40, "VG-EX+"],
+    [36, "VG-EX+"],
+    [35, "VG-EX"],
+    [31, "VG-EX"],
+    [30, "VG+"],
+    [26, "VG+"],
+    [25, "Very Good"],
+    [21, "Very Good"],
+    [20, "Good+"],
+    [16, "Good+"],
+    [15, "Good"],
+    [11, "Good"],
+    [10, "Fair"],
+    [6, "Fair"],
+    [5, "Poor"],
     [1, "Poor"],
   ])("score %i → %s", (score, expected) => {
     expect(mvgsGradeLabel(score)).toBe(expected);
@@ -287,26 +310,26 @@ describe("MVGS v2 — crease ceiling (spec §4)", () => {
     const r = computeMvgsScore(baseInput({ creaseSpanPct: 10 }));
     expect(r.ceiling?.source).toBe("crease");
     expect(r.ceiling?.grade).toBe(4.5);
-    // Floor rule caps score at top of 4.5 bracket = 49.
-    expect(r.score).toBeLessThanOrEqual(49);
+    // Floor rule caps score at top of 4.5 bracket = 40.
+    expect(r.score).toBeLessThanOrEqual(40);
   });
 
   it("~half-across crease (25-50%) caps at 4", () => {
     const r = computeMvgsScore(baseInput({ creaseSpanPct: 40 }));
     expect(r.ceiling?.grade).toBe(4);
-    expect(r.score).toBeLessThanOrEqual(44);
+    expect(r.score).toBeLessThanOrEqual(35);
   });
 
   it("~three-quarters crease (50-75%) caps at 3.5", () => {
     const r = computeMvgsScore(baseInput({ creaseSpanPct: 60 }));
     expect(r.ceiling?.grade).toBe(3.5);
-    expect(r.score).toBeLessThanOrEqual(39);
+    expect(r.score).toBeLessThanOrEqual(30);
   });
 
   it("full-length crease >75% caps at 3", () => {
     const r = computeMvgsScore(baseInput({ creaseSpanPct: 90 }));
     expect(r.ceiling?.grade).toBe(3);
-    expect(r.score).toBeLessThanOrEqual(34);
+    expect(r.score).toBeLessThanOrEqual(25);
   });
 
   it("zero / null crease span = no ceiling", () => {

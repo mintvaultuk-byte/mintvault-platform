@@ -104,15 +104,23 @@ function gradeLabel(grade: string | null): string {
   const n = Number(grade);
   if (Number.isNaN(n)) return "";
   if (n === 10) return "GEM MINT";
+  if (n >= 9.5) return "MINT+";
   if (n >= 9) return "MINT";
+  if (n >= 8.5) return "NM-MT+";
   if (n >= 8) return "NM-MT";
+  if (n >= 7.5) return "NM+";
   if (n >= 7) return "NM";
+  if (n >= 6.5) return "EX-MT+";
   if (n >= 6) return "EX-MT";
+  if (n >= 5.5) return "EX+";
   if (n >= 5) return "EX";
+  if (n >= 4.5) return "VG-EX+";
   if (n >= 4) return "VG-EX";
+  if (n >= 3.5) return "VG+";
   if (n >= 3) return "VG";
+  if (n >= 2.5) return "GOOD+";
   if (n >= 2) return "GOOD";
-  if (n >= 1) return "FAIR";
+  if (n >= 1.5) return "FAIR";
   return "POOR";
 }
 
