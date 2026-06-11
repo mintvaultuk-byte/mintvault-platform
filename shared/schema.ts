@@ -520,6 +520,12 @@ export const certificates = pgTable("certificates", {
   gradingBackHighcontrast: text("grading_back_highcontrast"),
   gradingBackEdgeenhanced: text("grading_back_edgeenhanced"),
   gradingBackInverted: text("grading_back_inverted"),
+  // 1600px q80 display derivatives for the grading-panel viewer — the full-res
+  // cropped scans (multi-MB) stay as the zoom/manual-tool source; the viewer
+  // loads these instead. Null on certs predating the derivative pipeline; the
+  // images endpoint falls back to the cropped key.
+  gradingFrontDisplay: text("grading_front_display"),
+  gradingBackDisplay: text("grading_back_display"),
   // Grading commentary + scoring metadata. All exist in the live DB but were
   // missing from the schema — same gap-class as the grading_* columns above.
   // Without these, raw-SQL writes succeed but Drizzle reads return undefined,
