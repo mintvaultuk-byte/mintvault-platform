@@ -3,9 +3,9 @@
  *
  * Pure CSS 3D + a single requestAnimationFrame loop: no Three.js, no WebGL.
  * Each card is the REAL scan (via the same-origin /api/public/slab-image
- * proxy) floating in an arc with depth-of-field blur, mouse parallax,
- * hover tilt, and a cursor-tracking specular shine. Clicking a card opens
- * a cert overlay with the MVGS score and a View Certificate CTA.
+ * proxy) floating in an arc with depth-of-field blur, mouse parallax, and
+ * hover tilt. Clicking a card opens a cert overlay with the MVGS score and
+ * a View Certificate CTA. No shine/glass overlay — the scan renders crisp.
  *
  * The white mat border on the scans (V850 scanner output) is INTENTIONAL —
  * against the dark vault background it reads as a physical card mount.
@@ -242,17 +242,6 @@ export default function SlabShowcase({ items, className }: Props) {
         if (!items[i]) return;
         targetParallax.current[i] = { x: nx * 55 * pos.depth, y: ny * 28 * pos.depth };
       });
-
-      cardRefs.current.forEach((el) => {
-        if (!el) return;
-        const shine = el.querySelector(".card-shine") as HTMLElement | null;
-        if (!shine) return;
-        const cardRect = el.getBoundingClientRect();
-        const sx = (((e.clientX - cardRect.left) / cardRect.width) * 100).toFixed(1) + "%";
-        const sy = (((e.clientY - cardRect.top) / cardRect.height) * 100).toFixed(1) + "%";
-        shine.style.setProperty("--sx", sx);
-        shine.style.setProperty("--sy", sy);
-      });
     };
 
     container.addEventListener("mousemove", onMouseMove, { passive: true });
@@ -406,7 +395,7 @@ export default function SlabShowcase({ items, className }: Props) {
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: "cover",
+                    objectFit: "contain",
                     borderRadius: "7px",
                     display: "block",
                     userSelect: "none",
@@ -423,22 +412,6 @@ export default function SlabShowcase({ items, className }: Props) {
                       console.warn("[SlabShowcase] image load failed:", item.certNumber);
                       setLoadedCount((c) => c + 1);
                     }
-                  }}
-                />
-
-                {/* Specular shine — follows the cursor via --sx/--sy */}
-                <div
-                  className="card-shine"
-                  data-card-index={index}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    borderRadius: "7px",
-                    background:
-                      "radial-gradient(circle at var(--sx,50%) var(--sy,50%), rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 35%, transparent 65%)",
-                    pointerEvents: "none",
-                    zIndex: 6,
-                    mixBlendMode: "screen" as const,
                   }}
                 />
 
