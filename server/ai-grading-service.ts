@@ -46,8 +46,14 @@ export interface EnrichedCardData extends CardIdentification {
   dbSource: string | null;
 }
 
-export interface CornerDetail { grade: number; notes: string; }
-export interface EdgeDetail   { grade: number; notes: string; }
+export interface CornerDetail {
+  grade: number;
+  notes: string;
+}
+export interface EdgeDetail {
+  grade: number;
+  notes: string;
+}
 
 export interface AiDefect {
   id: number;
@@ -157,7 +163,7 @@ async function rateLimit(): Promise<void> {
   const now = Date.now();
   const elapsed = now - lastAiCallTs;
   if (elapsed < MIN_CALL_INTERVAL_MS) {
-    await new Promise(r => setTimeout(r, MIN_CALL_INTERVAL_MS - elapsed));
+    await new Promise((r) => setTimeout(r, MIN_CALL_INTERVAL_MS - elapsed));
   }
   lastAiCallTs = Date.now();
 }
@@ -195,12 +201,25 @@ export interface ImageVariants {
  * Kept the old `autoCropCard` export in place for any non-variant callers
  * (e.g. /api/admin/grade-with-ai in routes.ts).
  */
-export async function generateImageVariants(buffer: Buffer, certId?: string | number): Promise<ImageVariants & { cropGeometry?: { pre_padding_px: { top: number; bottom: number; left: number; right: number }; post_asymmetry_px: { horizontal: number; vertical: number }; extended: boolean }; matRgb?: { r: number; g: number; b: number } }> {
+export async function generateImageVariants(
+  buffer: Buffer,
+  certId?: string | number
+): Promise<
+  ImageVariants & {
+    cropGeometry?: {
+      pre_padding_px: { top: number; bottom: number; left: number; right: number };
+      post_asymmetry_px: { horizontal: number; vertical: number };
+      extended: boolean;
+    };
+    matRgb?: { r: number; g: number; b: number };
+  }
+> {
   const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap, padWithMat } = await import("./image-processing");
 
   // Step 1: deskew small rotations before cropping
   const { buffer: deskewed, angle } = await deskewCard(buffer);
-  if (Math.abs(angle) > 0.05) console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°${certId != null ? ` cert=${certId}` : ""}`);
+  if (Math.abs(angle) > 0.05)
+    console.log(`[ai/variants] deskewed ${angle.toFixed(2)}°${certId != null ? ` cert=${certId}` : ""}`);
 
   // Step 2: tight card-boundary crop (mat-agnostic); fall back to sharp.trim-based autoCrop
   const yellowResult = await cropToYellowBorder(deskewed, certId);
@@ -221,7 +240,12 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
   // the cropped buffer's outer strip — which is the card's yellow border, not
   // mat — and extend padding gets filled with yellow ⇒ bogus "wraparound"
   // strip below the card.
-  const { buffer: centred, pre_padding_px, post_asymmetry_px, extended } = await reCentreBitmap(rectCropped, { certId, matRgb });
+  const {
+    buffer: centred,
+    pre_padding_px,
+    post_asymmetry_px,
+    extended,
+  } = await reCentreBitmap(rectCropped, { certId, matRgb });
 
   // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
   // `centredUnpadded` so the caller can mask rounded corners on the actual
@@ -250,7 +274,9 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
     sharp(cropped).negate().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
   ]);
 
-  console.log(`[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB (re-centre asym=${post_asymmetry_px.horizontal}/${post_asymmetry_px.vertical}px, extended=${extended})`);
+  console.log(
+    `[ai/variants] generated 5 views: cropped=${(cropped.length / 1024).toFixed(0)}KB grey=${(greyscale.length / 1024).toFixed(0)}KB hi=${(highcontrast.length / 1024).toFixed(0)}KB edge=${(edgeenhanced.length / 1024).toFixed(0)}KB inv=${(inverted.length / 1024).toFixed(0)}KB (re-centre asym=${post_asymmetry_px.horizontal}/${post_asymmetry_px.vertical}px, extended=${extended})`
+  );
 
   return {
     original: buffer,
@@ -270,18 +296,40 @@ export async function generateImageVariants(buffer: Buffer, certId?: string | nu
 /** Map printed card set codes to the TCG API's internal set IDs */
 const CARD_CODE_TO_TCG_ID: Record<string, string> = {
   // Scarlet & Violet era
-  SVI: "sv1", PAL: "sv2", OBF: "sv3", MEW: "sv3pt5",
-  PAR: "sv4", KSS: "sv4pt5", TEF: "sv5", TWM: "sv6",
-  SFA: "sv6pt5", SCR: "sv7", SSP: "sv8", PRE: "sv8pt5",
-  JTG: "sv9", DRI: "sv10", BLT: "sv11", WHT: "sv12", MEG: "sv13",
+  SVI: "sv1",
+  PAL: "sv2",
+  OBF: "sv3",
+  MEW: "sv3pt5",
+  PAR: "sv4",
+  KSS: "sv4pt5",
+  TEF: "sv5",
+  TWM: "sv6",
+  SFA: "sv6pt5",
+  SCR: "sv7",
+  SSP: "sv8",
+  PRE: "sv8pt5",
+  JTG: "sv9",
+  DRI: "sv10",
+  BLT: "sv11",
+  WHT: "sv12",
+  MEG: "sv13",
   SVP: "svp",
   // Sword & Shield era (common)
-  SWH: "swsh1", RCL: "swsh2", DAA: "swsh3", VIV: "swsh4",
-  BST: "swsh5", CRE: "swsh6", EVS: "swsh7", FST: "swsh8",
-  BRS: "swsh9", ASR: "swsh10", LOR: "swsh11", SIT: "swsh12",
+  SWH: "swsh1",
+  RCL: "swsh2",
+  DAA: "swsh3",
+  VIV: "swsh4",
+  BST: "swsh5",
+  CRE: "swsh6",
+  EVS: "swsh7",
+  FST: "swsh8",
+  BRS: "swsh9",
+  ASR: "swsh10",
+  LOR: "swsh11",
+  SIT: "swsh12",
   CRZ: "swsh12pt5",
   // Promos / specials
-  "M24EN": "mcd19",
+  M24EN: "mcd19",
 };
 
 /** Resolve a printed card code to TCG API set ID(s) to try */
@@ -360,7 +408,9 @@ export async function verifyPokemonCardWithTcgApi(
     if (results.length === 0) {
       console.log(`[identify-debug] TCG query strategy 2: name:"${detectedName}" number:${queryNumber}`);
       const nameQuery = encodeURIComponent(`name:"${detectedName}" number:${queryNumber}`);
-      const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, { headers: { "X-Api-Key": apiKey } });
+      const nameRes = await fetch(`https://api.pokemontcg.io/v2/cards?q=${nameQuery}&pageSize=10`, {
+        headers: { "X-Api-Key": apiKey },
+      });
       if (nameRes.ok) {
         const nameData = await nameRes.json();
         const rawResults = nameData.data || [];
@@ -373,8 +423,14 @@ export async function verifyPokemonCardWithTcgApi(
             return false;
           }
           // Number guard: TCG card number must match AI-detected number (strip leading zeros)
-          if (detectedNumber && card.number && String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")) {
-            console.log(`[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — number mismatch (AI: ${detectedNumber}, TCG: ${card.number})`);
+          if (
+            detectedNumber &&
+            card.number &&
+            String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")
+          ) {
+            console.log(
+              `[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — number mismatch (AI: ${detectedNumber}, TCG: ${card.number})`
+            );
             return false;
           }
           // Year guard: set release year must be within 1 year of copyright_year
@@ -382,7 +438,9 @@ export async function verifyPokemonCardWithTcgApi(
             const cardYear = parseInt(copyrightYear, 10);
             const setYear = parseInt(card.set.releaseDate?.split("-")[0] || "0", 10);
             if (setYear > 0 && Math.abs(setYear - cardYear) > 1) {
-              console.log(`[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — year mismatch (AI: ${copyrightYear}, TCG: ${setYear})`);
+              console.log(
+                `[tcg-verify] strategy 2: rejected ${card.set.name} #${card.number} — year mismatch (AI: ${copyrightYear}, TCG: ${setYear})`
+              );
               return false;
             }
           }
@@ -398,7 +456,9 @@ export async function verifyPokemonCardWithTcgApi(
     if (results.length === 0) {
       // If Claude has high confidence + set_code, trust its identification even without TCG match
       // (many promos, Japanese sets, and new releases aren't in the TCG database)
-      console.log(`[pokemon-tcg] no match for "${detectedName}" #${detectedNumber} (code=${setCode}, promo=${isPromoPattern})`);
+      console.log(
+        `[pokemon-tcg] no match for "${detectedName}" #${detectedNumber} (code=${setCode}, promo=${isPromoPattern})`
+      );
       return {
         verified: false,
         trustAi: true, // signal to caller: use Claude's raw data for name/number/year, but leave set_name for manual entry
@@ -420,7 +480,9 @@ export async function verifyPokemonCardWithTcgApi(
         });
         if (yearFiltered.length === 1) {
           const card = yearFiltered[0];
-          console.log(`[pokemon-tcg] year-disambiguated: ${card.id} from ${card.set.name} (©${copyrightYear} matches ${card.set.releaseDate})`);
+          console.log(
+            `[pokemon-tcg] year-disambiguated: ${card.id} from ${card.set.name} (©${copyrightYear} matches ${card.set.releaseDate})`
+          );
           return buildResult(card);
         }
         if (yearFiltered.length > 1) {
@@ -437,17 +499,22 @@ export async function verifyPokemonCardWithTcgApi(
       }
 
       // Can't disambiguate — reject
-      const setNames = [...uniqueSets].map(sid => results.find((c: any) => c.set.id === sid)?.set.name).join(", ");
-      console.warn(`[pokemon-tcg] ambiguous: "${detectedName}" #${detectedNumber} found in ${uniqueSets.size} sets: ${setNames}`);
-      return { verified: false, rejectReason: `Multiple sets contain ${detectedName} ${detectedNumber} — please specify set` };
+      const setNames = [...uniqueSets].map((sid) => results.find((c: any) => c.set.id === sid)?.set.name).join(", ");
+      console.warn(
+        `[pokemon-tcg] ambiguous: "${detectedName}" #${detectedNumber} found in ${uniqueSets.size} sets: ${setNames}`
+      );
+      return {
+        verified: false,
+        rejectReason: `Multiple sets contain ${detectedName} ${detectedNumber} — please specify set`,
+      };
     }
 
     // Single set match — pick best variant by rarity if multiple
     let card = results[0];
     if (results.length > 1 && detectedRarity) {
       const rarityLower = detectedRarity.toLowerCase();
-      const rarityMatch = results.find((c: any) =>
-        c.rarity?.toLowerCase().includes(rarityLower) || rarityLower.includes(c.rarity?.toLowerCase() || "")
+      const rarityMatch = results.find(
+        (c: any) => c.rarity?.toLowerCase().includes(rarityLower) || rarityLower.includes(c.rarity?.toLowerCase() || "")
       );
       if (rarityMatch) card = rarityMatch;
     }
@@ -457,24 +524,46 @@ export async function verifyPokemonCardWithTcgApi(
       const yearNum = parseInt(copyrightYear, 10);
       const setYear = parseInt(card.set.releaseDate?.split("-")[0] || "0", 10);
       if (setYear > 0 && Math.abs(setYear - yearNum) > 1) {
-        console.warn(`[pokemon-tcg] year mismatch: card ©${copyrightYear} vs set ${card.set.name} (${setYear}) — rejecting`);
-        return { verified: false, rejectReason: `Year mismatch: card shows ©${copyrightYear} but TCG match is from ${setYear}` };
+        console.warn(
+          `[pokemon-tcg] year mismatch: card ©${copyrightYear} vs set ${card.set.name} (${setYear}) — rejecting`
+        );
+        return {
+          verified: false,
+          rejectReason: `Year mismatch: card shows ©${copyrightYear} but TCG match is from ${setYear}`,
+        };
       }
     }
 
     // Number sanity check: TCG card number must match what the AI detected (strip leading zeros)
-    if (detectedNumber && card.number && String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")) {
-      console.warn(`[pokemon-tcg] number mismatch: AI detected #${detectedNumber} but TCG match is #${card.number} — rejecting`);
-      return { verified: false, rejectReason: `Card number mismatch: detected #${detectedNumber} but TCG match is #${card.number}` };
+    if (
+      detectedNumber &&
+      card.number &&
+      String(card.number).replace(/^0+/, "") !== String(detectedNumber).replace(/^0+/, "")
+    ) {
+      console.warn(
+        `[pokemon-tcg] number mismatch: AI detected #${detectedNumber} but TCG match is #${card.number} — rejecting`
+      );
+      return {
+        verified: false,
+        rejectReason: `Card number mismatch: detected #${detectedNumber} but TCG match is #${card.number}`,
+      };
     }
 
     // Name sanity check: TCG card name must match AI-detected name
     if (normaliseCardName(card.name) !== normaliseCardName(detectedName)) {
-      console.warn(`[pokemon-tcg] name mismatch: AI="${detectedName}" TCG="${card.name}" — rejecting (set_code may be wrong)`);
-      return { verified: false, trustAi: true, rejectReason: `Name mismatch: AI detected "${detectedName}" but TCG match is "${card.name}" — likely wrong set code` };
+      console.warn(
+        `[pokemon-tcg] name mismatch: AI="${detectedName}" TCG="${card.name}" — rejecting (set_code may be wrong)`
+      );
+      return {
+        verified: false,
+        trustAi: true,
+        rejectReason: `Name mismatch: AI detected "${detectedName}" but TCG match is "${card.name}" — likely wrong set code`,
+      };
     }
 
-    console.log(`[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (${card.rarity})`);
+    console.log(
+      `[pokemon-tcg] verified: ${card.id} ${card.name} #${card.number} from ${card.set.name} (${card.rarity})`
+    );
     return buildResult(card);
   } catch (err: any) {
     console.error("[pokemon-tcg] verification failed:", err.message);
@@ -510,9 +599,9 @@ function clampAllGrades(result: GradingAnalysis): GradingAnalysis {
     result.overall_grade = clampGrade(result.overall_grade);
   }
   if (result.centering) result.centering.subgrade = clampGrade(result.centering.subgrade);
-  if (result.corners)   result.corners.subgrade   = clampGrade(result.corners.subgrade);
-  if (result.edges)     result.edges.subgrade     = clampGrade(result.edges.subgrade);
-  if (result.surface)   result.surface.subgrade   = clampGrade(result.surface.subgrade);
+  if (result.corners) result.corners.subgrade = clampGrade(result.corners.subgrade);
+  if (result.edges) result.edges.subgrade = clampGrade(result.edges.subgrade);
+  if (result.surface) result.surface.subgrade = clampGrade(result.surface.subgrade);
   return result;
 }
 
@@ -520,20 +609,24 @@ function clampAllGrades(result: GradingAnalysis): GradingAnalysis {
 
 /**
  * Resize an image buffer to fit Anthropic Claude Vision API constraints.
- * Resizes to max 2576x2576 (Opus 4.7 supports up to 3.75MP / 2576px long edge).
- * JPEG quality 95 preserves fine detail for grading (scratches, whitening, print dots).
+ * Resizes to max 1568x1568 — the API downscales anything larger to 1568px on
+ * the long edge server-side, so sending more is pure upload latency with zero
+ * accuracy gain (previously 2576px q85, ~2.5x the payload for the same pixels
+ * the model actually sees).
  */
 export async function resizeForClaude(buffer: Buffer): Promise<{ buffer: Buffer; mediaType: "image/jpeg" }> {
   const inputSize = buffer.length;
   const resized = await sharp(buffer)
     .rotate() // auto-orient based on EXIF
-    .resize(2576, 2576, {
+    .resize(1568, 1568, {
       fit: "inside",
       withoutEnlargement: true,
     })
-    .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+    .jpeg({ quality: 80, progressive: true, mozjpeg: true })
     .toBuffer();
-  console.log(`[ai/resize] ${(inputSize / 1024 / 1024).toFixed(2)}MB -> ${(resized.length / 1024 / 1024).toFixed(2)}MB`);
+  console.log(
+    `[ai/resize] ${(inputSize / 1024 / 1024).toFixed(2)}MB -> ${(resized.length / 1024 / 1024).toFixed(2)}MB`
+  );
   return { buffer: resized, mediaType: "image/jpeg" };
 }
 
@@ -550,10 +643,7 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
 
   let trimmed: Buffer;
   try {
-    trimmed = await sharp(buffer)
-      .rotate()
-      .trim({ background: "white", threshold: 25 })
-      .toBuffer();
+    trimmed = await sharp(buffer).rotate().trim({ background: "white", threshold: 25 }).toBuffer();
   } catch (err) {
     console.warn("[ai/auto-crop] trim failed, falling back to original:", err);
     trimmed = buffer;
@@ -563,7 +653,10 @@ export async function autoCropCard(buffer: Buffer, borderPx = 40): Promise<Buffe
 
   const final = await sharp(trimmed)
     .extend({
-      top: borderPx, bottom: borderPx, left: borderPx, right: borderPx,
+      top: borderPx,
+      bottom: borderPx,
+      left: borderPx,
+      right: borderPx,
       background: { r: 255, g: 255, b: 255, alpha: 1 },
     })
     .resize(2576, 2576, { fit: "inside", withoutEnlargement: true })
@@ -586,15 +679,21 @@ export async function analyzeCardFromBuffers(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
   cardGame?: string,
-  certId?: string | number,
+  certId?: string | number
 ): Promise<GradingAnalysis> {
   if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
     throw new Error("AI_FULL_GRADE_ENABLED=false");
   }
   await rateLimit();
 
-  const frontB64 = frontBuffer.toString("base64");
-  const backB64 = backBuffer ? backBuffer.toString("base64") : null;
+  // Incoming buffers are 2576px q85 from the variant pipeline — resize to the
+  // 1568px the API actually uses before paying the base64 upload cost.
+  const [frontResized, backResized] = await Promise.all([
+    resizeForClaude(frontBuffer),
+    backBuffer ? resizeForClaude(backBuffer) : Promise.resolve(null),
+  ]);
+  const frontB64 = frontResized.buffer.toString("base64");
+  const backB64 = backResized ? backResized.buffer.toString("base64") : null;
 
   const content: object[] = [imageBlock(frontB64)];
   if (backB64) content.push(imageBlock(backB64));
@@ -624,9 +723,17 @@ export async function analyzeCardFromBuffers(
   try {
     return clampAllGrades(parseJson<GradingAnalysis>(text));
   } catch {
+    // One fix retry max — logged so a doubled call is visible in latency triage
+    console.warn(
+      `[grade-card] retry cert=${certId ?? "unknown"}: grade response was invalid JSON, running single json-fix call`
+    );
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-haiku-4-5-20251001", { label: "json-fix", certId, callType: "json_fix" });
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-haiku-4-5-20251001", {
+        label: "json-fix",
+        certId,
+        callType: "json_fix",
+      });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -686,11 +793,16 @@ const CLAUDE_MAX_ATTEMPTS = 3;
 // Per-million-token USD pricing. cacheWrite default is input × 1.25 per
 // Anthropic's pricing structure; cacheRead is input × 0.10. Used by the cost
 // logger so Haiku/Sonnet calls don't get logged at Opus rates.
-interface ModelPricing { input: number; output: number; cacheWrite: number; cacheRead: number; }
+interface ModelPricing {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+}
 const MODEL_PRICING: Record<string, ModelPricing> = {
-  "claude-opus-4-7":          { input: 5,  output: 25, cacheWrite: 6.25,  cacheRead: 0.5  },
-  "claude-sonnet-4-6":        { input: 3,  output: 15, cacheWrite: 3.75,  cacheRead: 0.3  },
-  "claude-haiku-4-5-20251001":{ input: 1,  output: 5,  cacheWrite: 1.25,  cacheRead: 0.1  },
+  "claude-opus-4-7": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-sonnet-4-6": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
 };
 const DEFAULT_PRICING: ModelPricing = MODEL_PRICING["claude-opus-4-7"];
 function pricingFor(model: string): ModelPricing {
@@ -698,9 +810,9 @@ function pricingFor(model: string): ModelPricing {
   if (exact) return exact;
   // Loose fallback by family substring so a future date-suffixed model still
   // logs sensible numbers until the map is updated.
-  if (model.includes("haiku"))  return MODEL_PRICING["claude-haiku-4-5-20251001"];
+  if (model.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
   if (model.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
-  if (model.includes("opus"))   return MODEL_PRICING["claude-opus-4-7"];
+  if (model.includes("opus")) return MODEL_PRICING["claude-opus-4-7"];
   return DEFAULT_PRICING;
 }
 
@@ -748,7 +860,7 @@ async function callClaude(
     label?: string;
     certId?: string | number;
     callType?: AiCallType;
-  },
+  }
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY environment variable not set");
@@ -764,16 +876,22 @@ async function callClaude(
     body.thinking = { type: "adaptive" };
   }
 
-  // System prompt with prompt caching
+  // System prompt with prompt caching. 1h TTL (vs the 5-min default) so the
+  // ~30KB rubric stays cached across a whole grading session — cards are
+  // typically graded more than 5 minutes apart, which made the default TTL
+  // miss on nearly every call. Requires the extended-cache-ttl beta header
+  // (sent unconditionally in anthropicFetch).
   if (options?.systemPrompt) {
-    body.system = [{
-      type: "text",
-      text: options.systemPrompt,
-      cache_control: { type: "ephemeral" },
-    }];
+    body.system = [
+      {
+        type: "text",
+        text: options.systemPrompt,
+        cache_control: { type: "ephemeral", ttl: "1h" },
+      },
+    ];
   }
 
-  const certTag = options?.certId != null ? `cert=${options.certId}` : (options?.label || "unknown");
+  const certTag = options?.certId != null ? `cert=${options.certId}` : options?.label || "unknown";
   const callStartedAt = Date.now();
   let response: Response | null = null;
   let lastErr: any = null;
@@ -781,9 +899,11 @@ async function callClaude(
   for (let attempt = 1; attempt <= CLAUDE_MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) {
       const delay = CLAUDE_RETRY_BACKOFF_MS[attempt - 1];
-      await new Promise(r => setTimeout(r, delay));
+      await new Promise((r) => setTimeout(r, delay));
       const decision = isRetryableClaudeError(lastErr, response);
-      console.log(`[ai/retry] ${attempt - 1}/${CLAUDE_MAX_ATTEMPTS - 1} for ${certTag} after ${decision.reason} (${delay}ms delay)`);
+      console.log(
+        `[ai/retry] ${attempt - 1}/${CLAUDE_MAX_ATTEMPTS - 1} for ${certTag} after ${decision.reason} (${delay}ms delay)`
+      );
     }
 
     response = null;
@@ -794,7 +914,9 @@ async function callClaude(
       lastErr = err;
       const decision = isRetryableClaudeError(err, null);
       if (decision.retry && attempt < CLAUDE_MAX_ATTEMPTS) continue;
-      throw new Error(`Claude API ${err?.name || "error"} after ${attempt} attempt${attempt > 1 ? "s" : ""} (${CLAUDE_TIMEOUT_MS}ms per attempt) for ${certTag}: ${err?.message || err}`);
+      throw new Error(
+        `Claude API ${err?.name || "error"} after ${attempt} attempt${attempt > 1 ? "s" : ""} (${CLAUDE_TIMEOUT_MS}ms per attempt) for ${certTag}: ${err?.message || err}`
+      );
     }
 
     if (!response.ok) {
@@ -811,7 +933,7 @@ async function callClaude(
     throw new Error(`Claude API exhausted retries for ${certTag}: ${lastErr?.message || "unknown"}`);
   }
 
-  const data = await response.json() as Record<string, unknown>;
+  const data = (await response.json()) as Record<string, unknown>;
   const usage = data.usage as any;
 
   // ── Cost logging ──────────────────────────────────────────────────────────
@@ -827,16 +949,18 @@ async function callClaude(
     (outputTokens / 1_000_000) * pricing.output;
   const costGbp = costUsd * 0.79; // approximate USD→GBP
   const label = options?.label || "unknown";
-  console.log(`[ai-cost] ${label} (${model}): input=${inputTokens} cached=${cacheRead} cache-write=${cacheCreation} output=${outputTokens} → £${costGbp.toFixed(4)} ($${costUsd.toFixed(4)})`);
+  console.log(
+    `[ai-cost] ${label} (${model}): input=${inputTokens} cached=${cacheRead} cache-write=${cacheCreation} output=${outputTokens} → £${costGbp.toFixed(4)} ($${costUsd.toFixed(4)})`
+  );
   // ── End cost logging ──────────────────────────────────────────────────────
 
   const contentArr = data.content as { type: string; text?: string; thinking?: string }[] | undefined;
   if (!contentArr?.length) throw new Error("Claude returned empty content array");
 
   // With adaptive thinking, content[0] may be a thinking block — find the text block
-  const textBlock = contentArr.find(b => b.type === "text");
+  const textBlock = contentArr.find((b) => b.type === "text");
   if (!textBlock?.text) {
-    throw new Error(`Claude returned no text block. Content types: [${contentArr.map(b => b.type).join(", ")}]`);
+    throw new Error(`Claude returned no text block. Content types: [${contentArr.map((b) => b.type).join(", ")}]`);
   }
 
   // ── Persist to ai_predictions for the AI Learning dashboard ───────────────
@@ -854,19 +978,21 @@ async function callClaude(
     } catch {
       prediction = { raw: textBlock.text };
     }
-    db.insert(aiPredictions).values({
-      certId:        String(options.certId),
-      model,
-      promptVersion: promptHash,
-      callType:      options.callType,
-      prediction:    prediction as object,
-      latencyMs,
-      inputTokens,
-      outputTokens,
-      costGbp:       costGbp.toFixed(5),
-    }).then(undefined, (err) => {
-      console.warn(`[ai-predictions] insert failed for ${certTag}: ${err?.message || err}`);
-    });
+    db.insert(aiPredictions)
+      .values({
+        certId: String(options.certId),
+        model,
+        promptVersion: promptHash,
+        callType: options.callType,
+        prediction: prediction as object,
+        latencyMs,
+        inputTokens,
+        outputTokens,
+        costGbp: costGbp.toFixed(5),
+      })
+      .then(undefined, (err) => {
+        console.warn(`[ai-predictions] insert failed for ${certTag}: ${err?.message || err}`);
+      });
   }
 
   return textBlock.text;
@@ -899,18 +1025,22 @@ async function identifyWithGpt(base64: string): Promise<CardIdentification | nul
     const response = await client.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1024,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } },
-          { type: "text", text: CARD_IDENTIFICATION_PROMPT },
-        ],
-      }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } },
+            { type: "text", text: CARD_IDENTIFICATION_PROMPT },
+          ],
+        },
+      ],
     });
 
     const text = response.choices[0]?.message?.content || "";
     const parsed = normalizeCardNumber(parseJson<CardIdentification>(text));
-    console.log(`[identify-debug] GPT response: name="${parsed.detected_name}" set="${parsed.detected_set}" number="${parsed.detected_number}" set_code="${parsed.set_code}" copyright_year="${parsed.copyright_year}" confidence="${parsed.confidence}"`);
+    console.log(
+      `[identify-debug] GPT response: name="${parsed.detected_name}" set="${parsed.detected_set}" number="${parsed.detected_number}" set_code="${parsed.set_code}" copyright_year="${parsed.copyright_year}" confidence="${parsed.confidence}"`
+    );
     return parsed;
   } catch (err: any) {
     console.warn(`[identify-debug] GPT call failed: ${err.message}`);
@@ -920,7 +1050,9 @@ async function identifyWithGpt(base64: string): Promise<CardIdentification | nul
 
 /** Normalise set code: strip whitespace, uppercase. "M24 EN" and "M24EN" become "M24EN" */
 function normaliseSetCode(code: string | null | undefined): string {
-  return String(code || "").replace(/\s+/g, "").toUpperCase();
+  return String(code || "")
+    .replace(/\s+/g, "")
+    .toUpperCase();
 }
 
 /** Normalise card name for comparison: lowercase, strip TCG suffixes */
@@ -948,7 +1080,9 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
   const yearAgree = claude.copyright_year === gpt.copyright_year;
   console.log(`[normalise-debug] agreement after normalise: code=${codeAgree} number=${numberAgree} year=${yearAgree}`);
 
-  console.log(`[identify-debug] claude=${claude.detected_name}/${claude.set_code}/${claude.detected_number}/${claude.copyright_year} gpt=${gpt.detected_name}/${gpt.set_code}/${gpt.detected_number}/${gpt.copyright_year} agreement: code=${codeAgree} number=${numberAgree} year=${yearAgree}`);
+  console.log(
+    `[identify-debug] claude=${claude.detected_name}/${claude.set_code}/${claude.detected_number}/${claude.copyright_year} gpt=${gpt.detected_name}/${gpt.set_code}/${gpt.detected_number}/${gpt.copyright_year} agreement: code=${codeAgree} number=${numberAgree} year=${yearAgree}`
+  );
 
   // Both agree on key fields → high confidence, use Claude
   if (codeAgree && numberAgree) {
@@ -970,7 +1104,11 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
   }
 
   // Both disagree → medium confidence, use Claude, flag for review
-  return { ...claude, confidence: "medium" as const, reasoning: `${claude.reasoning || ""} [GPT disagrees: set_code=${gpt.set_code}, year=${gpt.copyright_year}]` };
+  return {
+    ...claude,
+    confidence: "medium" as const,
+    reasoning: `${claude.reasoning || ""} [GPT disagrees: set_code=${gpt.set_code}, year=${gpt.copyright_year}]`,
+  };
 }
 
 // ── Card identification from raw buffer (for direct image uploads) ─────────
@@ -978,7 +1116,7 @@ function reconcileIdentifications(claude: CardIdentification, gpt: CardIdentific
 export async function identifyCardFromBuffer(
   buffer: Buffer,
   _mimeType: string,
-  certId?: string | number,
+  certId?: string | number
 ): Promise<CardIdentification> {
   if (!(await getFeatureFlag("AI_IDENTIFY_ENABLED"))) {
     throw new Error("AI_IDENTIFY_ENABLED=false");
@@ -1001,7 +1139,9 @@ export async function identifyCardFromBuffer(
   let claudeResult: CardIdentification;
   try {
     claudeResult = normalizeCardNumber(parseJson<CardIdentification>(claudeText));
-    console.log(`[identify-debug] raw Claude response: name="${claudeResult.detected_name}" set="${claudeResult.detected_set}" number="${claudeResult.detected_number}" year="${claudeResult.detected_year}" set_code="${claudeResult.set_code}" copyright_year="${claudeResult.copyright_year}" game="${claudeResult.detected_game}" confidence="${claudeResult.confidence}"`);
+    console.log(
+      `[identify-debug] raw Claude response: name="${claudeResult.detected_name}" set="${claudeResult.detected_set}" number="${claudeResult.detected_number}" year="${claudeResult.detected_year}" set_code="${claudeResult.set_code}" copyright_year="${claudeResult.copyright_year}" game="${claudeResult.detected_game}" confidence="${claudeResult.confidence}"`
+    );
   } catch {
     throw new Error(`Card identification returned invalid JSON: ${claudeText.slice(0, 200)}`);
   }
@@ -1016,7 +1156,7 @@ export async function identifyCardFromBuffer(
 }
 
 const KNOWN_GAME_SLUGS = ["pokemon", "yugioh", "mtg", "onepiece", "sports", "digimon", "lorcana", "other"] as const;
-type KnownGameSlug = typeof KNOWN_GAME_SLUGS[number];
+type KnownGameSlug = (typeof KNOWN_GAME_SLUGS)[number];
 
 /**
  * Map any Claude/GPT-supplied game string to a canonical slug. Returns
@@ -1025,7 +1165,11 @@ type KnownGameSlug = typeof KNOWN_GAME_SLUGS[number];
  */
 export function normaliseGameSlug(raw: unknown): KnownGameSlug {
   if (typeof raw !== "string" || !raw.trim()) return "other";
-  const s = raw.trim().toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[éè]/g, "e")
+    .replace(/[^a-z0-9]/g, "");
   if ((KNOWN_GAME_SLUGS as readonly string[]).includes(s)) return s as KnownGameSlug;
   // Common label variants
   if (s === "magic" || s === "magicthegathering" || s === "mtgcards") return "mtg";
@@ -1088,7 +1232,7 @@ export interface DefectCandidate {
 export async function suggestDefectsFromBuffer(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
-  certId?: string | number,
+  certId?: string | number
 ): Promise<DefectCandidate[]> {
   if (!(await getFeatureFlag("AI_DEFECT_SUGGEST_ENABLED"))) return [];
   await rateLimit();
@@ -1102,7 +1246,11 @@ export async function suggestDefectsFromBuffer(
 
   let text: string;
   try {
-    text = await callClaude(content, 2048, "claude-haiku-4-5-20251001", { label: "suggest-defects-haiku", certId, callType: "defect_suggest" });
+    text = await callClaude(content, 2048, "claude-haiku-4-5-20251001", {
+      label: "suggest-defects-haiku",
+      certId,
+      callType: "defect_suggest",
+    });
   } catch (err: any) {
     console.warn(`[suggest-defects] call failed for cert=${certId}: ${err.message}`);
     return [];
@@ -1133,13 +1281,13 @@ export async function suggestDefectsFromBuffer(
     if (!Number.isFinite(x) || x < 0 || x > 100) continue;
     if (!Number.isFinite(y) || y < 0 || y > 100) continue;
     cleaned.push({
-      type:        typeof r.type === "string" && r.type.trim() ? r.type.trim() : "Other",
-      severity:    severity as DefectCandidate["severity"],
+      type: typeof r.type === "string" && r.type.trim() ? r.type.trim() : "Other",
+      severity: severity as DefectCandidate["severity"],
       description: typeof r.description === "string" ? r.description.trim() : "",
       location,
-      image_side:  typeof r.image_side === "string" ? r.image_side.toLowerCase() : location,
-      x_percent:   Math.round(x),
-      y_percent:   Math.round(y),
+      image_side: typeof r.image_side === "string" ? r.image_side.toLowerCase() : location,
+      x_percent: Math.round(x),
+      y_percent: Math.round(y),
     });
   }
   console.log(`[suggest-defects] cert=${certId}: ${cleaned.length} candidate(s) accepted (raw: ${raw.length})`);
@@ -1161,52 +1309,52 @@ export interface AiGrading {
   centering: {
     front_left_right: string | null;
     front_top_bottom: string | null;
-    back_left_right:  string | null;
-    back_top_bottom:  string | null;
+    back_left_right: string | null;
+    back_top_bottom: string | null;
     front_grade: number;
-    back_grade:  number;
-    subgrade:    number;
+    back_grade: number;
+    subgrade: number;
   };
   corners: {
-    front_top_left:     number;
-    front_top_right:    number;
-    front_bottom_left:  number;
+    front_top_left: number;
+    front_top_right: number;
+    front_bottom_left: number;
     front_bottom_right: number;
-    back_top_left:      number;
-    back_top_right:     number;
-    back_bottom_left:   number;
-    back_bottom_right:  number;
-    subgrade:           number;
+    back_top_left: number;
+    back_top_right: number;
+    back_bottom_left: number;
+    back_bottom_right: number;
+    subgrade: number;
   };
   edges: {
-    front_top:    number;
-    front_right:  number;
+    front_top: number;
+    front_right: number;
     front_bottom: number;
-    front_left:   number;
-    back_top:     number;
-    back_right:   number;
-    back_bottom:  number;
-    back_left:    number;
-    subgrade:     number;
+    front_left: number;
+    back_top: number;
+    back_right: number;
+    back_bottom: number;
+    back_left: number;
+    subgrade: number;
   };
   surface: {
     front_grade: number;
-    back_grade:  number;
-    subgrade:    number;
-    has_print_lines?:       boolean;
-    has_holo_scratches?:    boolean;
+    back_grade: number;
+    subgrade: number;
+    has_print_lines?: boolean;
+    has_holo_scratches?: boolean;
     has_surface_scratches?: boolean;
-    has_staining?:          boolean;
-    has_crease?:            boolean;
-    has_tear?:              boolean;
+    has_staining?: boolean;
+    has_crease?: boolean;
+    has_tear?: boolean;
   };
   overall_grade: number;
   confidence: {
     centering: "high" | "medium" | "low";
-    corners:   "high" | "medium" | "low";
-    edges:     "high" | "medium" | "low";
-    surface:   "high" | "medium" | "low";
-    overall:   "high" | "medium" | "low";
+    corners: "high" | "medium" | "low";
+    edges: "high" | "medium" | "low";
+    surface: "high" | "medium" | "low";
+    overall: "high" | "medium" | "low";
   };
 }
 
@@ -1232,7 +1380,7 @@ function coerceConfidence(v: unknown): "high" | "medium" | "low" {
 export async function gradeCardFromBuffer(
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
-  certId?: string | number,
+  certId?: string | number
 ): Promise<AiGrading | null> {
   if (!(await getFeatureFlag("AI_HAIKU_QUICK_GRADE_ENABLED"))) return null;
   await rateLimit();
@@ -1242,7 +1390,10 @@ export async function gradeCardFromBuffer(
     const { buffer: backResized, mediaType: backMime } = await resizeForClaude(backBuffer);
     content.push(imageBlock(backResized.toString("base64"), backMime));
   }
-  content.push({ type: "text", text: "Grade this card. Return ONLY valid JSON matching the schema in the system prompt." });
+  content.push({
+    type: "text",
+    text: "Grade this card. Return ONLY valid JSON matching the schema in the system prompt.",
+  });
 
   let text: string;
   try {
@@ -1275,17 +1426,26 @@ export async function gradeCardFromBuffer(
     const cf = parsed.confidence || {};
 
     // Centering: ratios are strings like "52/48"; tolerate missing.
-    const txt = (v: unknown): string | null => (typeof v === "string" && /^\d+\/\d+$/.test(v.trim())) ? v.trim() : null;
+    const txt = (v: unknown): string | null => (typeof v === "string" && /^\d+\/\d+$/.test(v.trim()) ? v.trim() : null);
 
     const cFrontGrade = clampGradeOrNull(c.front_grade);
-    const cBackGrade  = clampGradeOrNull(c.back_grade);
-    const cSub        = clampGradeOrNull(c.subgrade);
+    const cBackGrade = clampGradeOrNull(c.back_grade);
+    const cSub = clampGradeOrNull(c.subgrade);
     if (cFrontGrade == null || cBackGrade == null || cSub == null) {
       console.warn(`[grade-haiku] cert=${certId}: missing/invalid centering grades; bailing`);
       return null;
     }
 
-    const cornerKeys = ["front_top_left","front_top_right","front_bottom_left","front_bottom_right","back_top_left","back_top_right","back_bottom_left","back_bottom_right"] as const;
+    const cornerKeys = [
+      "front_top_left",
+      "front_top_right",
+      "front_bottom_left",
+      "front_bottom_right",
+      "back_top_left",
+      "back_top_right",
+      "back_bottom_left",
+      "back_bottom_right",
+    ] as const;
     const corners: any = { subgrade: clampGradeOrNull(co.subgrade) };
     if (corners.subgrade == null) {
       console.warn(`[grade-haiku] cert=${certId}: missing corners subgrade; bailing`);
@@ -1300,7 +1460,16 @@ export async function gradeCardFromBuffer(
       corners[k] = g;
     }
 
-    const edgeKeys = ["front_top","front_right","front_bottom","front_left","back_top","back_right","back_bottom","back_left"] as const;
+    const edgeKeys = [
+      "front_top",
+      "front_right",
+      "front_bottom",
+      "front_left",
+      "back_top",
+      "back_right",
+      "back_bottom",
+      "back_left",
+    ] as const;
     const edges: any = { subgrade: clampGradeOrNull(ed.subgrade) };
     if (edges.subgrade == null) {
       console.warn(`[grade-haiku] cert=${certId}: missing edges subgrade; bailing`);
@@ -1316,8 +1485,8 @@ export async function gradeCardFromBuffer(
     }
 
     const sFrontGrade = clampGradeOrNull(su.front_grade);
-    const sBackGrade  = clampGradeOrNull(su.back_grade);
-    const sSub        = clampGradeOrNull(su.subgrade);
+    const sBackGrade = clampGradeOrNull(su.back_grade);
+    const sSub = clampGradeOrNull(su.subgrade);
     if (sFrontGrade == null || sBackGrade == null || sSub == null) {
       console.warn(`[grade-haiku] cert=${certId}: missing surface grades; bailing`);
       return null;
@@ -1333,36 +1502,38 @@ export async function gradeCardFromBuffer(
       centering: {
         front_left_right: txt(c.front_left_right),
         front_top_bottom: txt(c.front_top_bottom),
-        back_left_right:  txt(c.back_left_right),
-        back_top_bottom:  txt(c.back_top_bottom),
+        back_left_right: txt(c.back_left_right),
+        back_top_bottom: txt(c.back_top_bottom),
         front_grade: cFrontGrade,
-        back_grade:  cBackGrade,
-        subgrade:    cSub,
+        back_grade: cBackGrade,
+        subgrade: cSub,
       },
       corners: corners as AiGrading["corners"],
-      edges:   edges   as AiGrading["edges"],
+      edges: edges as AiGrading["edges"],
       surface: {
         front_grade: sFrontGrade,
-        back_grade:  sBackGrade,
-        subgrade:    sSub,
-        has_print_lines:       Boolean(su.has_print_lines),
-        has_holo_scratches:    Boolean(su.has_holo_scratches),
+        back_grade: sBackGrade,
+        subgrade: sSub,
+        has_print_lines: Boolean(su.has_print_lines),
+        has_holo_scratches: Boolean(su.has_holo_scratches),
         has_surface_scratches: Boolean(su.has_surface_scratches),
-        has_staining:          Boolean(su.has_staining),
-        has_crease:            Boolean(su.has_crease),
-        has_tear:              Boolean(su.has_tear),
+        has_staining: Boolean(su.has_staining),
+        has_crease: Boolean(su.has_crease),
+        has_tear: Boolean(su.has_tear),
       },
       overall_grade: overall,
       confidence: {
         centering: coerceConfidence(cf.centering),
-        corners:   coerceConfidence(cf.corners),
-        edges:     coerceConfidence(cf.edges),
-        surface:   coerceConfidence(cf.surface),
-        overall:   coerceConfidence(cf.overall),
+        corners: coerceConfidence(cf.corners),
+        edges: coerceConfidence(cf.edges),
+        surface: coerceConfidence(cf.surface),
+        overall: coerceConfidence(cf.overall),
       },
     };
 
-    console.log(`[grade-haiku] cert=${certId}: overall=${overall} centering=${cSub} corners=${corners.subgrade} edges=${edges.subgrade} surface=${sSub} overall_conf=${result.confidence.overall}`);
+    console.log(
+      `[grade-haiku] cert=${certId}: overall=${overall} centering=${cSub} corners=${corners.subgrade} edges=${edges.subgrade} surface=${sSub} overall_conf=${result.confidence.overall}`
+    );
     return result;
   } catch (err: any) {
     console.warn(`[grade-haiku] cert=${certId}: validation error — ${err.message}`);
@@ -1406,17 +1577,15 @@ export async function verifyAndEnrichCardData(id: CardIdentification): Promise<E
   const unverified: EnrichedCardData = {
     ...id,
     verified: false,
-    officialName:   id.detected_name,
-    officialSet:    id.detected_set,
+    officialName: id.detected_name,
+    officialSet: id.detected_set,
     officialNumber: id.detected_number,
     referenceImageUrl: null,
     dbSource: null,
   };
 
   try {
-    const query = id.detected_number
-      ? `${id.detected_name} ${id.detected_number}`
-      : id.detected_name;
+    const query = id.detected_number ? `${id.detected_name} ${id.detected_number}` : id.detected_name;
     const results = await lookupCard(id.detected_game, query);
 
     // Find a match that passes all three guards: name, number, year
@@ -1425,8 +1594,8 @@ export async function verifyAndEnrichCardData(id: CardIdentification): Promise<E
       return {
         ...id,
         verified: true,
-        officialName:   match.name,
-        officialSet:    match.setName,
+        officialName: match.name,
+        officialSet: match.setName,
         officialNumber: match.number,
         referenceImageUrl: match.imageUrl,
         dbSource: match.source,
@@ -1441,8 +1610,8 @@ export async function verifyAndEnrichCardData(id: CardIdentification): Promise<E
         return {
           ...id,
           verified: true,
-          officialName:   fallbackMatch.name,
-          officialSet:    fallbackMatch.setName,
+          officialName: fallbackMatch.name,
+          officialSet: fallbackMatch.setName,
           officialNumber: fallbackMatch.number,
           referenceImageUrl: fallbackMatch.imageUrl,
           dbSource: fallbackMatch.source,
@@ -1458,9 +1627,16 @@ export async function verifyAndEnrichCardData(id: CardIdentification): Promise<E
 
 /** Find first result where name matches AND card number matches AND year is within ±1 */
 function findGuardedMatch(
-  results: { name: string; number: string | null; year: string | null; setName: string; imageUrl: string | null; source: string }[],
-  id: CardIdentification,
-): typeof results[number] | null {
+  results: {
+    name: string;
+    number: string | null;
+    year: string | null;
+    setName: string;
+    imageUrl: string | null;
+    source: string;
+  }[],
+  id: CardIdentification
+): (typeof results)[number] | null {
   for (const r of results) {
     // Name guard: base name must match (ignore suffixes like -EX, -V, VSTAR etc.)
     const aiName = id.detected_name.replace(/[-\s]?(EX|GX|V|VMAX|VSTAR|ex)$/i, "").toLowerCase();
@@ -1497,57 +1673,47 @@ function findGuardedMatch(
 // ── Full grading analysis ──────────────────────────────────────────────────
 
 export interface ImageKeys {
-  frontOriginal:     string | null;
-  backOriginal:      string | null;
-  frontGreyscale:    string | null;
+  frontOriginal: string | null;
+  backOriginal: string | null;
+  frontGreyscale: string | null;
   frontHighcontrast: string | null;
-  backGreyscale:     string | null;
-  backHighcontrast:  string | null;
-  angledOriginal?:   string | null;
-  closeupOriginal?:  string | null;
+  backGreyscale: string | null;
+  backHighcontrast: string | null;
+  angledOriginal?: string | null;
+  closeupOriginal?: string | null;
 }
 
-export async function analyzeCard(
-  keys: ImageKeys,
-  cardGame?: string
-): Promise<GradingAnalysis> {
+export async function analyzeCard(keys: ImageKeys, cardGame?: string): Promise<GradingAnalysis> {
   if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
     throw new Error("AI_FULL_GRADE_ENABLED=false");
   }
   await rateLimit();
 
   // Fetch images in parallel
-  const [
-    frontB64, backB64,
-    frontGreyB64, frontHiB64,
-    backGreyB64, backHiB64,
-    angledB64, closeupB64,
-  ] = await Promise.all([
-    r2KeyToBase64(keys.frontOriginal),
-    r2KeyToBase64(keys.backOriginal),
-    r2KeyToBase64(keys.frontGreyscale),
-    r2KeyToBase64(keys.frontHighcontrast),
-    r2KeyToBase64(keys.backGreyscale),
-    r2KeyToBase64(keys.backHighcontrast),
-    r2KeyToBase64(keys.angledOriginal ?? null),
-    r2KeyToBase64(keys.closeupOriginal ?? null),
-  ]);
+  const [frontB64, backB64, frontGreyB64, frontHiB64, backGreyB64, backHiB64, angledB64, closeupB64] =
+    await Promise.all([
+      r2KeyToBase64(keys.frontOriginal),
+      r2KeyToBase64(keys.backOriginal),
+      r2KeyToBase64(keys.frontGreyscale),
+      r2KeyToBase64(keys.frontHighcontrast),
+      r2KeyToBase64(keys.backGreyscale),
+      r2KeyToBase64(keys.backHighcontrast),
+      r2KeyToBase64(keys.angledOriginal ?? null),
+      r2KeyToBase64(keys.closeupOriginal ?? null),
+    ]);
 
   if (!frontB64) throw new Error("Front image is required for AI analysis but could not be fetched");
-  if (!backB64)  throw new Error("Back image is required for AI analysis but could not be fetched");
+  if (!backB64) throw new Error("Back image is required for AI analysis but could not be fetched");
 
-  const content: object[] = [
-    imageBlock(frontB64),
-    imageBlock(backB64),
-  ];
+  const content: object[] = [imageBlock(frontB64), imageBlock(backB64)];
 
   // Add enhancement variants if available
   if (frontGreyB64) content.push(imageBlock(frontGreyB64));
-  if (frontHiB64)   content.push(imageBlock(frontHiB64));
-  if (backGreyB64)  content.push(imageBlock(backGreyB64));
-  if (backHiB64)    content.push(imageBlock(backHiB64));
-  if (angledB64)    content.push(imageBlock(angledB64));
-  if (closeupB64)   content.push(imageBlock(closeupB64));
+  if (frontHiB64) content.push(imageBlock(frontHiB64));
+  if (backGreyB64) content.push(imageBlock(backGreyB64));
+  if (backHiB64) content.push(imageBlock(backHiB64));
+  if (angledB64) content.push(imageBlock(angledB64));
+  if (closeupB64) content.push(imageBlock(closeupB64));
 
   let systemPrompt = GRADING_SYSTEM_PROMPT;
   if (cardGame && CARD_GAME_MODULES[cardGame]) {
@@ -1570,14 +1736,15 @@ export async function analyzeCard(
   try {
     return clampAllGrades(parseJson<GradingAnalysis>(text));
   } catch {
+    // One fix retry max — logged so a doubled call is visible in latency triage
+    console.warn(
+      `[grade-card] retry key=${keys.frontOriginal ?? "unknown"}: grade response was invalid JSON, running single json-fix call`
+    );
     const fixPrompt = `The following text was supposed to be valid JSON but failed to parse. Return ONLY the corrected valid JSON, nothing else:\n\n${text.slice(0, 8000)}`;
     try {
-      const fixedText = await callClaude(
-        [{ type: "text", text: fixPrompt }],
-        4096,
-        "claude-haiku-4-5-20251001",
-        { label: "json-fix-r2" }
-      );
+      const fixedText = await callClaude([{ type: "text", text: fixPrompt }], 4096, "claude-haiku-4-5-20251001", {
+        label: "json-fix-r2",
+      });
       return clampAllGrades(parseJson<GradingAnalysis>(fixedText));
     } catch {
       throw new Error("AI returned invalid JSON and could not be corrected automatically");
@@ -1592,24 +1759,36 @@ export interface IdentifyAndAnalyzeResult {
   analysis: GradingAnalysis;
 }
 
-export async function identifyAndAnalyze(
-  keys: ImageKeys,
-  cardGame?: string
-): Promise<IdentifyAndAnalyzeResult> {
+export async function identifyAndAnalyze(keys: ImageKeys, cardGame?: string): Promise<IdentifyAndAnalyzeResult> {
   // Run identification first (quick, uses front image only)
-  const rawId = keys.frontOriginal
-    ? await identifyCard(keys.frontOriginal)
-    : null;
+  const rawId = keys.frontOriginal ? await identifyCard(keys.frontOriginal) : null;
 
   const identification = rawId
     ? await verifyAndEnrichCardData(rawId)
     : {
-        detected_name: "Unknown", detected_set: "Unknown", detected_number: null,
-        detected_year: null, detected_game: cardGame || "other", detected_language: "English",
-        detected_rarity: null, is_holo: false, is_foil: false, is_reverse_holo: false,
-        is_full_art: false, is_textured: false, card_type: null, set_code: null, copyright_year: null, confidence: "low" as const, reasoning: null,
-        verified: false, officialName: "Unknown", officialSet: "Unknown",
-        officialNumber: null, referenceImageUrl: null, dbSource: null,
+        detected_name: "Unknown",
+        detected_set: "Unknown",
+        detected_number: null,
+        detected_year: null,
+        detected_game: cardGame || "other",
+        detected_language: "English",
+        detected_rarity: null,
+        is_holo: false,
+        is_foil: false,
+        is_reverse_holo: false,
+        is_full_art: false,
+        is_textured: false,
+        card_type: null,
+        set_code: null,
+        copyright_year: null,
+        confidence: "low" as const,
+        reasoning: null,
+        verified: false,
+        officialName: "Unknown",
+        officialSet: "Unknown",
+        officialNumber: null,
+        referenceImageUrl: null,
+        dbSource: null,
       };
 
   // Full grading analysis (uses all images)

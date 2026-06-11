@@ -1005,29 +1005,52 @@ export default function GradingPanel({
   // measurement-wins-over-checkbox precedence. Client uses
   // DEFAULT_MVGS_CALIBRATION for the live preview; server's authoritative
   // compute on approve loads the persisted calibration row.
-  const mvgsForOverall = scoreMvgsV2(
-    {
-      centeringFrontLr: frontLR || null,
-      centeringFrontTb: frontTB || null,
-      centeringBackLr: backLR || null,
-      centeringBackTb: backTB || null,
-      defects: (defects || [])
-        .filter((d) => d.mvgsCode && d.tier && d.zone)
-        .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+  // Memoised: scoreMvgsV2 loops over every defect multiple times, and this
+  // component re-renders on every keystroke (notes, centering inputs, etc.).
+  // Deps are exactly the inputs the engine reads — recompute only when one of
+  // them actually changes, not on every render.
+  const mvgsForOverall = useMemo(
+    () =>
+      scoreMvgsV2(
+        {
+          centeringFrontLr: frontLR || null,
+          centeringFrontTb: frontTB || null,
+          centeringBackLr: backLR || null,
+          centeringBackTb: backTB || null,
+          defects: (defects || [])
+            .filter((d) => d.mvgsCode && d.tier && d.zone)
+            .map((d) => ({ mvgsCode: d.mvgsCode!, tier: d.tier!, zone: d.zone! })),
+          darkBorderFront,
+          darkBorderBack,
+          eyeAppealModifier,
+          whiteningLines,
+          // v2.1 — multi-crease list. Engine derives max(spanPct) at the builder
+          // boundary. creaseSpanPct legacy field omitted; the builder prefers
+          // creaseLines when both are present anyway.
+          creaseLines,
+          wrinkleSeverity,
+          tearSeverity,
+          hasCrease: !!surface.hasCrease,
+          hasTear: !!surface.hasTear,
+        },
+        DEFAULT_MVGS_CALIBRATION
+      ),
+    [
+      frontLR,
+      frontTB,
+      backLR,
+      backTB,
+      defects,
       darkBorderFront,
       darkBorderBack,
       eyeAppealModifier,
       whiteningLines,
-      // v2.1 — multi-crease list. Engine derives max(spanPct) at the builder
-      // boundary. creaseSpanPct legacy field omitted; the builder prefers
-      // creaseLines when both are present anyway.
       creaseLines,
       wrinkleSeverity,
       tearSeverity,
-      hasCrease: !!surface.hasCrease,
-      hasTear: !!surface.hasTear,
-    },
-    DEFAULT_MVGS_CALIBRATION
+      surface.hasCrease,
+      surface.hasTear,
+    ]
   );
   const hasMvgsPins = (defects || []).some((d) => d.mvgsCode);
 

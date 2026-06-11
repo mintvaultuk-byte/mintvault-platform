@@ -8918,6 +8918,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             await uploadToR2(displayKey, croppedBuf, "image/jpeg");
           }
 
+          // 5a. 1600px display derivative for the grading-panel viewer —
+          // full-res cropped stays as the zoom/manual-tool source.
+          if (angle === "front" || angle === "back") {
+            const { makeDisplayDerivative } = await import("./image-processing");
+            const displayDerivative = await makeDisplayDerivative(croppedBuf);
+            const derivKey = `grading/${certId}/${angle}_display.jpg`;
+            await uploadToR2(derivKey, displayDerivative, "image/jpeg");
+            updates[`grading_${angle}_display`] = derivKey;
+          }
+
           // 6. Variants — fire-and-forget (don't block the response)
           setImmediate(async () => {
             try {
@@ -9006,6 +9016,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (updates.grading_back_cropped)
           await db.execute(
             sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_front_display)
+          await db.execute(
+            sql`UPDATE certificates SET grading_front_display  = ${updates.grading_front_display},  updated_at = NOW() WHERE id = ${id}`
+          );
+        if (updates.grading_back_display)
+          await db.execute(
+            sql`UPDATE certificates SET grading_back_display   = ${updates.grading_back_display},   updated_at = NOW() WHERE id = ${id}`
           );
         if (updates.grading_angled_original)
           await db.execute(
@@ -9211,18 +9229,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
         await uploadToR2(cropKey, cropped, "image/jpeg");
 
+        // 1600px display derivative for the grading-panel viewer
+        const { makeDisplayDerivative: mdd } = await import("./image-processing");
+        const derivBuf = await mdd(cropped);
+        const derivKey = `grading/${certIdStr}/${side}_display.jpg`;
+        await uploadToR2(derivKey, derivBuf, "image/jpeg");
+
         // Update display path
         if (side === "front") {
           const displayKey = r2KeyForImage(certIdStr, "front", "jpg");
           await uploadToR2(displayKey, cropped, "image/jpeg");
           await db.execute(
-            sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+            sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, grading_front_display = ${derivKey}, updated_at = NOW() WHERE id = ${id}`
           );
         } else {
           const displayKey = r2KeyForImage(certIdStr, "back", "jpg");
           await uploadToR2(displayKey, cropped, "image/jpeg");
           await db.execute(
-            sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+            sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, grading_back_display = ${derivKey}, updated_at = NOW() WHERE id = ${id}`
           );
         }
 
@@ -9347,13 +9371,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const displayKey = r2KeyForImage(certIdStr, side, "jpg");
       await uploadToR2(displayKey, cropped, "image/jpeg");
 
+      // Refresh the 1600px viewer derivative so the recrop is visible in the
+      // grading panel (which prefers grading_{side}_display over cropped).
+      const { makeDisplayDerivative: makeDeriv } = await import("./image-processing");
+      const recropDerivBuf = await makeDeriv(cropped);
+      const recropDerivKey = `grading/${certIdStr}/${side}_display.jpg`;
+      await uploadToR2(recropDerivKey, recropDerivBuf, "image/jpeg");
+
       if (side === "front") {
         await db.execute(
-          sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+          sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, grading_front_display = ${recropDerivKey}, updated_at = NOW() WHERE id = ${id}`
         );
       } else {
         await db.execute(
-          sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, updated_at = NOW() WHERE id = ${id}`
+          sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, grading_back_display = ${recropDerivKey}, updated_at = NOW() WHERE id = ${id}`
         );
       }
 
@@ -9713,8 +9744,11 @@ Defects (admin-confirmed): ${defectLines}`;
         angled_cropped: c.gradingAngledCropped || null,
         closeup_original: c.gradingCloseupOriginal || null,
         closeup_cropped: c.gradingCloseupCropped || null,
-        front_display: c.frontImagePath || null,
-        back_display: c.backImagePath || null,
+        // Viewer derivatives (1600px q80). Fallback chain keeps certs that
+        // predate the derivative pipeline working: full-res cropped → legacy
+        // display path.
+        front_display: c.gradingFrontDisplay || c.gradingFrontCropped || c.frontImagePath || null,
+        back_display: c.gradingBackDisplay || c.gradingBackCropped || c.backImagePath || null,
       };
 
       const urls: Record<string, string | null> = {};
@@ -11487,33 +11521,68 @@ Defects (admin-confirmed): ${defectLines}`;
           uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
         }
       }
-      await Promise.all(uploads);
-      console.log(`[ai/identify-and-analyze] uploaded ${uploads.length} image variants to R2`);
-
-      // Step 4: Save image keys to certificate
-      await db.execute(sql`
-        UPDATE certificates SET
-          grading_front_original = ${uploadKeys.front_original || null},
-          grading_front_cropped = ${uploadKeys.front_cropped || null},
-          grading_front_greyscale = ${uploadKeys.front_greyscale || null},
-          grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
-          grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
-          grading_front_inverted = ${uploadKeys.front_inverted || null},
-          grading_back_original = ${uploadKeys.back_original || null},
-          grading_back_cropped = ${uploadKeys.back_cropped || null},
-          grading_back_greyscale = ${uploadKeys.back_greyscale || null},
-          grading_back_highcontrast = ${uploadKeys.back_highcontrast || null},
-          grading_back_edgeenhanced = ${uploadKeys.back_edgeenhanced || null},
-          grading_back_inverted = ${uploadKeys.back_inverted || null},
-          updated_at = NOW()
-        WHERE id = ${id}
-      `);
+      // Steps 3+4 (upload variants, save keys) run in parallel with Step 5
+      // (identify) — identify only needs the in-memory cropped buffer, and was
+      // previously blocked behind 12 R2 uploads it never used.
+      const uploadAndSaveKeys = (async () => {
+        // Refresh the 1600px viewer derivatives alongside the regenerated
+        // crops, otherwise the grading panel keeps showing the stale derivative.
+        const { makeDisplayDerivative } = await import("./image-processing");
+        if (Buffer.isBuffer(frontVariants.cropped)) {
+          const k = `${prefix}/front_display.jpg`;
+          uploadKeys["front_display"] = k;
+          uploads.push(
+            makeDisplayDerivative(frontVariants.cropped)
+              .then((b) => uploadToR2(k, b, "image/jpeg"))
+              .then(() => {})
+          );
+        }
+        if (backVariants && Buffer.isBuffer(backVariants.cropped)) {
+          const k = `${prefix}/back_display.jpg`;
+          uploadKeys["back_display"] = k;
+          uploads.push(
+            makeDisplayDerivative(backVariants.cropped)
+              .then((b) => uploadToR2(k, b, "image/jpeg"))
+              .then(() => {})
+          );
+        }
+        await Promise.all(uploads);
+        console.log(`[ai/identify-and-analyze] uploaded ${uploads.length} image variants to R2`);
+        await db.execute(sql`
+          UPDATE certificates SET
+            grading_front_original = ${uploadKeys.front_original || null},
+            grading_front_cropped = ${uploadKeys.front_cropped || null},
+            grading_front_greyscale = ${uploadKeys.front_greyscale || null},
+            grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
+            grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
+            grading_front_inverted = ${uploadKeys.front_inverted || null},
+            grading_back_original = ${uploadKeys.back_original || null},
+            grading_back_cropped = ${uploadKeys.back_cropped || null},
+            grading_back_greyscale = ${uploadKeys.back_greyscale || null},
+            grading_back_highcontrast = ${uploadKeys.back_highcontrast || null},
+            grading_back_edgeenhanced = ${uploadKeys.back_edgeenhanced || null},
+            grading_back_inverted = ${uploadKeys.back_inverted || null},
+            grading_front_display = ${uploadKeys.front_display || null},
+            grading_back_display = ${uploadKeys.back_display || null},
+            updated_at = NOW()
+          WHERE id = ${id}
+        `);
+      })();
 
       // Step 5: Identify the card (uses cropped front)
-      const identification = await identifyCardFromBuffer(frontVariants.cropped, "image/jpeg");
+      const [identification] = await Promise.all([
+        identifyCardFromBuffer(frontVariants.cropped, "image/jpeg"),
+        uploadAndSaveKeys,
+      ]);
+
+      // Step 7 kicked off early: the grade call only needs detected_game (for
+      // the game-specific prompt module), not the TCG enrichment below — so it
+      // runs in parallel with Step 6 instead of waiting behind it.
+      const game = identification.detected_game?.toLowerCase();
+      const analysisPromise = analyzeCardFromBuffers(frontVariants.cropped, backVariants?.cropped || null, game, id);
+      analysisPromise.catch(() => {}); // pre-subscribe: avoids unhandled rejection if Step 6 throws first; error still surfaces at the await below
 
       // Step 6: Pokémon TCG API verification
-      const game = identification.detected_game?.toLowerCase();
       let enrichedId = await verifyAndEnrichCardData(identification);
       let tcgTrustAiFlag = false;
       if (game === "pokemon") {
@@ -11556,8 +11625,8 @@ Defects (admin-confirmed): ${defectLines}`;
         if (tcgResult.trustAi) tcgTrustAiFlag = true;
       }
 
-      // Step 7: Full grading analysis (uses cropped front + back + greyscale + hicontrast)
-      const analysis = await analyzeCardFromBuffers(frontVariants.cropped, backVariants?.cropped || null, game);
+      // Step 7: Full grading analysis (started above, in parallel with Step 6)
+      const analysis = await analysisPromise;
 
       // Step 8: Extract and log grade strength score
       const strengthScore =

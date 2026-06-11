@@ -9,7 +9,15 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2 } from "./r2";
-import { generateImageVariants, identifyCardFromBuffer, verifyAndEnrichCardData, verifyPokemonCardWithTcgApi, gradeCardFromBuffer, type EnrichedCardData, type AiGrading } from "./ai-grading-service";
+import {
+  generateImageVariants,
+  identifyCardFromBuffer,
+  verifyAndEnrichCardData,
+  verifyPokemonCardWithTcgApi,
+  gradeCardFromBuffer,
+  type EnrichedCardData,
+  type AiGrading,
+} from "./ai-grading-service";
 
 /**
  * Create a new certificate for an admin scan.
@@ -47,16 +55,14 @@ export async function createCertForScan(): Promise<{ id: number; certId: string;
 export async function uploadRawScansToR2(
   certId: number,
   front: { buffer: Buffer; mimeType: string; ext: string },
-  back: { buffer: Buffer; mimeType: string; ext: string } | null,
+  back: { buffer: Buffer; mimeType: string; ext: string } | null
 ): Promise<{ frontKey: string; backKey: string | null }> {
   const safeExt = (ext: string) => (ext.replace(/[^a-z0-9]/gi, "") || "bin").toLowerCase();
   const frontKey = `images/grading/${certId}/raw_front.${safeExt(front.ext)}`;
-  const backKey  = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
+  const backKey = back ? `images/grading/${certId}/raw_back.${safeExt(back.ext)}` : null;
   await Promise.all([
     uploadToR2(frontKey, front.buffer, front.mimeType || "application/octet-stream"),
-    back && backKey
-      ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream")
-      : Promise.resolve(),
+    back && backKey ? uploadToR2(backKey, back.buffer, back.mimeType || "application/octet-stream") : Promise.resolve(),
   ]);
   return { frontKey, backKey };
 }
@@ -65,10 +71,7 @@ export async function uploadRawScansToR2(
  * Write the cert's scan_status column. null = ready (no special state).
  * Defensive: missing column (pre-migration) → no-op, swallowed.
  */
-export async function setScanStatus(
-  certId: number,
-  status: "processing" | "failed" | null,
-): Promise<void> {
+export async function setScanStatus(certId: number, status: "processing" | "failed" | null): Promise<void> {
   try {
     await db.execute(sql`UPDATE certificates SET scan_status = ${status}, updated_at = NOW() WHERE id = ${certId}`);
   } catch (err: any) {
@@ -90,7 +93,7 @@ export async function processScanInBackground(
   certInfo: { id: number; certId: string },
   frontBuf: Buffer,
   backBuf: Buffer | null,
-  opts: { skipAi?: boolean } = {},
+  opts: { skipAi?: boolean } = {}
 ): Promise<void> {
   try {
     console.log(`[process-scan] start cert=${certInfo.certId} (id=${certInfo.id})`);
@@ -105,7 +108,7 @@ export async function processScanInBackground(
         // AI failure doesn't fail the whole job — images are processed,
         // admin can manually trigger AI from the grading panel.
         console.error(
-          `[process-scan] AI failed cert=${certInfo.certId}: ${aiErr?.message ?? aiErr}\n${aiErr?.stack ?? "(no stack)"}`,
+          `[process-scan] AI failed cert=${certInfo.certId}: ${aiErr?.message ?? aiErr}\n${aiErr?.stack ?? "(no stack)"}`
         );
       }
     }
@@ -114,7 +117,7 @@ export async function processScanInBackground(
     console.log(`[process-scan] ready cert=${certInfo.certId}`);
   } catch (err: any) {
     console.error(
-      `[process-scan] failed cert=${certInfo.certId}: ${err?.message ?? err}\n${err?.stack ?? "(no stack)"}`,
+      `[process-scan] failed cert=${certInfo.certId}: ${err?.message ?? err}\n${err?.stack ?? "(no stack)"}`
     );
     await setScanStatus(certInfo.id, "failed");
     try {
@@ -129,7 +132,9 @@ export async function processScanInBackground(
           NOW()
         )
       `);
-    } catch { /* audit write best-effort */ }
+    } catch {
+      /* audit write best-effort */
+    }
   }
 }
 
@@ -151,7 +156,7 @@ export async function processScanInBackground(
 export async function uploadImagesToCert(
   certId: number,
   frontBuffer: Buffer,
-  backBuffer: Buffer | null,
+  backBuffer: Buffer | null
 ): Promise<{ frontVariants: any; backVariants: any | null }> {
   const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
@@ -159,7 +164,8 @@ export async function uploadImagesToCert(
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
   // certificate_number is already normalised ("MV145", not "MV-0000000145");
   // fall back to synthesising from db id if somehow missing.
-  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`))
+    .rows[0] as any;
   const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
 
   // Resize raw scans (scanner output can be very large). Front + back run in
@@ -171,7 +177,11 @@ export async function uploadImagesToCert(
   // generateImageVariants, so the mozjpeg encode work was wasted. Baseline
   // saves ~30-40% per encode at no visual cost (the bytes are never served).
   const resizeBuf = async (buf: Buffer) =>
-    sharp(buf).rotate().resize(3000, 3000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+    sharp(buf)
+      .rotate()
+      .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
 
   const [frontResized, backResized] = await Promise.all([
     resizeBuf(frontBuffer),
@@ -287,13 +297,33 @@ export async function uploadImagesToCert(
     uploads.push(uploadToR2(backDisplayKey, backDisplayPng, "image/png").then(() => {}));
   }
 
+  // 1600px q80 viewer derivatives — the grading panel loads these instead of
+  // the full-res cropped JPEGs (which stay as the zoom/manual-tool source).
+  const { makeDisplayDerivative } = await import("./image-processing");
+  const frontViewerKey = `${prefix}/front_display.jpg`;
+  uploadKeys["front_viewer_display"] = frontViewerKey;
+  uploads.push(
+    makeDisplayDerivative(frontDisplayJpeg)
+      .then((buf) => uploadToR2(frontViewerKey, buf, "image/jpeg"))
+      .then(() => {})
+  );
+  if (backDisplayJpeg) {
+    const backViewerKey = `${prefix}/back_display.jpg`;
+    uploadKeys["back_viewer_display"] = backViewerKey;
+    uploads.push(
+      makeDisplayDerivative(backDisplayJpeg)
+        .then((buf) => uploadToR2(backViewerKey, buf, "image/jpeg"))
+        .then(() => {})
+    );
+  }
+
   await Promise.all(uploads);
   console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
 
   // Persist R2 keys + crop_geometry forensics
   const cropGeometry = {
     front: (frontVariants as any).cropGeometry ?? null,
-    back: backVariants ? (backVariants as any).cropGeometry ?? null : null,
+    back: backVariants ? ((backVariants as any).cropGeometry ?? null) : null,
     pipeline_version: "converged_v1",
     recorded_at: new Date().toISOString(),
   };
@@ -312,6 +342,8 @@ export async function uploadImagesToCert(
       grading_back_highcontrast  = ${uploadKeys.back_highcontrast || null},
       grading_back_edgeenhanced  = ${uploadKeys.back_edgeenhanced || null},
       grading_back_inverted     = ${uploadKeys.back_inverted || null},
+      grading_front_display     = ${uploadKeys.front_viewer_display || null},
+      grading_back_display      = ${uploadKeys.back_viewer_display || null},
       front_image_path          = ${uploadKeys.front_display || uploadKeys.front_cropped_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || uploadKeys.front_original || null},
       back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
       crop_geometry             = ${JSON.stringify(cropGeometry)}::jsonb,
@@ -339,7 +371,7 @@ export async function uploadImagesToCert(
 export async function runAiOnCert(
   certId: number,
   frontCropped: Buffer,
-  backCropped: Buffer | null,
+  backCropped: Buffer | null
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
   // Master kill-switch (admin-facing) — DB-backed pipeline setting that
   // admins flip from /admin/weekly-reel. Defaults to true so default
@@ -359,7 +391,9 @@ export async function runAiOnCert(
     const r = await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`);
     const row = r.rows[0] as any;
     if (row?.certificate_number) certTag = row.certificate_number;
-  } catch { /* best-effort — fall back to numeric id */ }
+  } catch {
+    /* best-effort — fall back to numeric id */
+  }
 
   // Two parallel Haiku calls — identify + the grade call (used here only
   // to extract centering; full grade is deferred to the admin's manual
@@ -380,7 +414,7 @@ export async function runAiOnCert(
       identification.detected_number,
       identification.detected_rarity,
       identification.set_code,
-      identification.copyright_year,
+      identification.copyright_year
     );
     if (tcgResult.verified) {
       enrichedId = {
@@ -409,13 +443,16 @@ export async function runAiOnCert(
   // TCG" gates unblock — even when set/number weren't confident.
   const aiConfidence = identification.confidence || "low";
   const shouldWriteDetails = tcgVerified || aiConfidence === "high";
-  const cardName = shouldWriteDetails ? (enrichedId.officialName || enrichedId.detected_name || null) : null;
-  const setName = tcgVerified ? (enrichedId.officialSet || enrichedId.detected_set || null) : null;
-  const cardNumber = shouldWriteDetails ? (enrichedId.detected_number || null) : null;
-  const cardGame = enrichedId.detected_game && enrichedId.detected_game !== "other"
-    ? enrichedId.detected_game
-    : (shouldWriteDetails ? (enrichedId.detected_game || null) : null);
-  const rarity = shouldWriteDetails ? (enrichedId.detected_rarity || null) : null;
+  const cardName = shouldWriteDetails ? enrichedId.officialName || enrichedId.detected_name || null : null;
+  const setName = tcgVerified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
+  const cardNumber = shouldWriteDetails ? enrichedId.detected_number || null : null;
+  const cardGame =
+    enrichedId.detected_game && enrichedId.detected_game !== "other"
+      ? enrichedId.detected_game
+      : shouldWriteDetails
+        ? enrichedId.detected_game || null
+        : null;
+  const rarity = shouldWriteDetails ? enrichedId.detected_rarity || null : null;
 
   // Year derivation — kept consistent with routes.ts identify-and-analyze.
   // Prefer Claude's copyright_year, fall back to TCG-verified detected_year.
@@ -516,7 +553,9 @@ export async function runAiOnCert(
   `);
 
   const centeringSubgrade = aiGrading?.centering?.subgrade ?? null;
-  console.log(`[scan-ingest] cert=${certId}: Option-A fast-path complete (identify + centering only) — card="${cardName}" game=${cardGame} centering=${centeringSubgrade} persisted=${centeringWritten}`);
+  console.log(
+    `[scan-ingest] cert=${certId}: Option-A fast-path complete (identify + centering only) — card="${cardName}" game=${cardGame} centering=${centeringSubgrade} persisted=${centeringWritten}`
+  );
   return { cardName, grade: null, strengthScore: null };
 }
 
@@ -540,7 +579,7 @@ const inFlightAutoAi = new Map<number, Promise<unknown>>();
 export function runAiOnCertIfIdle(
   certId: number,
   frontCropped: Buffer,
-  backCropped: Buffer | null,
+  backCropped: Buffer | null
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> | null {
   if (inFlightAutoAi.has(certId)) {
     console.log(`[ai] skip auto-trigger: already in-flight for cert ${certId}`);

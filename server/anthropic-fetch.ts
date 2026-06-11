@@ -5,10 +5,7 @@
  * Throws a standard DOMException with name="AbortError" if the timeout fires.
  * Callers are expected to inspect err.name and translate to HTTP 504.
  */
-export async function anthropicFetch(
-  body: unknown,
-  opts: { apiKey: string; timeoutMs?: number },
-): Promise<Response> {
+export async function anthropicFetch(body: unknown, opts: { apiKey: string; timeoutMs?: number }): Promise<Response> {
   const timeoutMs = opts.timeoutMs ?? 30_000;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -19,6 +16,9 @@ export async function anthropicFetch(
         "Content-Type": "application/json",
         "x-api-key": opts.apiKey,
         "anthropic-version": "2023-06-01",
+        // Enables cache_control ttl:"1h" on system prompts (grading rubric).
+        // Harmless no-op for requests that don't use extended TTL.
+        "anthropic-beta": "extended-cache-ttl-2025-04-11",
       },
       body: JSON.stringify(body),
       signal: ctrl.signal,

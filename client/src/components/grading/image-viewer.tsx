@@ -27,6 +27,11 @@ type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inv
 interface ImageUrls {
   front_original?: string | null;
   front_cropped?: string | null;
+  /** 1600px q80 viewer derivatives — preferred main-viewer source. The
+   *  server falls back to the full-res cropped key on certs that predate
+   *  the derivative pipeline. */
+  front_display?: string | null;
+  back_display?: string | null;
   front_greyscale?: string | null;
   front_highcontrast?: string | null;
   front_edgeenhanced?: string | null;
@@ -149,7 +154,15 @@ const VARIANTS: { key: Variant; label: string }[] = [
 ];
 
 function getUrl(urls: ImageUrls, side: Side, variant: Variant): string | null {
-  if (variant === "original") return urls[`${side}_cropped`] || urls[`${side}_original`] || null;
+  // Main colour view prefers the 1600px display derivative (front/back only —
+  // angled/closeup have no derivative and fall through to cropped/original).
+  if (variant === "original")
+    return (
+      (urls as Record<string, string | null | undefined>)[`${side}_display`] ||
+      urls[`${side}_cropped`] ||
+      urls[`${side}_original`] ||
+      null
+    );
   const key = `${side}_${variant}` as keyof ImageUrls;
   return (urls[key] as string | null) || urls[`${side}_cropped`] || urls[`${side}_original`] || null;
 }
@@ -1516,7 +1529,7 @@ export default function ImageViewer({
             <div className="rounded-lg overflow-hidden" style={{ aspectRatio: "5/7" }}>
               {urls.front_cropped || urls.front_original ? (
                 <img
-                  src={urls.front_cropped || urls.front_original || ""}
+                  src={urls.front_display || urls.front_cropped || urls.front_original || ""}
                   alt="scan front"
                   className="w-full h-full object-contain"
                 />
