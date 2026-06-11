@@ -295,10 +295,13 @@ export default function SlabShowcase({ items, className }: Props) {
                 transform: `translate(-50%, -50%) rotateY(${pos.rotY}deg) rotateX(${pos.rotX}deg)`,
                 transformStyle: "preserve-3d",
                 zIndex: pos.zIndex,
-                filter: pos.blur > 0 ? `blur(${pos.blur}px)` : "none",
+                // undefined removes the property entirely — even blur(0)/"none"
+                // can promote the card to a compositing layer and soften it
+                filter: pos.blur > 0 ? `blur(${pos.blur}px)` : undefined,
                 cursor: "pointer",
                 transition: "filter 0.4s ease",
-                willChange: "transform",
+                // no will-change: the RAF loop drives transforms directly, and
+                // forced layer promotion can render the card at lower resolution
               }}
               onClick={() => setSelected(item)}
               onMouseMove={(e) => {

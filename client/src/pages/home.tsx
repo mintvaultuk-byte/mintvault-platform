@@ -280,8 +280,16 @@ export default function HomeV2() {
           <div className="absolute inset-0 bg-gradient-to-br from-[#0c0c0a] via-[#0d0f0a] to-[#0a0c10]" />
         )}
 
-        {/* Dark gradient overlay — keeps the copy readable over the 3D scene */}
-        <div className="absolute inset-0 bg-gradient-to-r from-[#0c0c0a]/90 via-[#0c0c0a]/50 to-transparent pointer-events-none" />
+        {/* Dark gradient overlay — keeps the copy readable over the 3D scene.
+            Explicit stops: fully transparent by 52% so the card zone (centre
+            card sits at x:57%) has no overlay dimming it. */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "linear-gradient(to right, rgba(10,10,8,0.95) 0%, rgba(10,10,8,0.6) 28%, rgba(10,10,8,0.1) 42%, transparent 52%)",
+          }}
+        />
 
         {/* Hero copy — unchanged text, repositioned left above the scene */}
         <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-16 max-w-xl pointer-events-none [&_a]:pointer-events-auto">
