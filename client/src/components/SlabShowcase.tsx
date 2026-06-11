@@ -64,14 +64,18 @@ function canWebGL(): boolean {
   }
 }
 
-/** Load an image cross-origin for canvas composition. Resolves null on failure. */
+/** Load an image for canvas composition. Resolves null on failure. */
 function loadImageEl(url: string | null): Promise<HTMLImageElement | null> {
   if (!url) return Promise.resolve(null);
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    // No crossOrigin needed — images come from the same-origin
+    // /api/public/slab-image proxy, so the canvas stays untainted.
     img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
+    img.onerror = () => {
+      console.warn("[SlabShowcase] image load failed:", url);
+      resolve(null);
+    };
     img.src = url;
   });
 }

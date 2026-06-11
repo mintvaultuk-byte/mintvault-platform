@@ -2094,6 +2094,55 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Slab showcase image proxy ──────────────────────────────────────────────
+  // The browser canvas can't consume R2 signed URLs cross-origin (no CORS
+  // headers on the bucket), so the showcase loads images through this
+  // same-origin proxy. R2 access happens server-side with the app's creds.
+  app.get("/api/public/slab-image/:certNumber/:kind", lookupRateLimit, async (req, res) => {
+    try {
+      const certNumber = normalizeCertId(String(req.params.certNumber));
+      const kind = String(req.params.kind);
+      if (!/^MV\d+$/.test(certNumber)) return res.status(404).end();
+
+      const cert = (await storage.getCertificateByCertId(certNumber)) as any;
+      if (!cert || cert.status !== "active" || cert.gradeOverall == null) return res.status(404).end();
+
+      let key: string | null = null;
+      if (kind === "front-label") {
+        key = `public/slab-showcase/${certNumber}/front_label.png`;
+      } else if (kind === "back-label") {
+        key = `public/slab-showcase/${certNumber}/back_label.png`;
+      } else if (kind === "scan") {
+        key = cert.gradingFrontDisplay || cert.gradingFrontCropped || cert.frontImagePath || null;
+      } else {
+        return res.status(404).end();
+      }
+      if (!key) return res.status(404).end();
+
+      try {
+        const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+        const { getR2Client } = await import("./r2");
+        const s3 = getR2Client();
+        const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
+        if (!result.Body) return res.status(502).end();
+        const ext = key.split(".").pop()?.toLowerCase() || "jpg";
+        res.setHeader("Content-Type", ext === "png" ? "image/png" : "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        if (result.ContentLength != null) res.setHeader("Content-Length", String(result.ContentLength));
+        (result.Body as NodeJS.ReadableStream).pipe(res);
+      } catch (r2Err: any) {
+        // Missing object (e.g. label not generated yet) → 404; anything else → 502
+        const code = r2Err?.name === "NoSuchKey" || r2Err?.$metadata?.httpStatusCode === 404 ? 404 : 502;
+        console.error(`[slab-image] R2 fetch failed for ${certNumber}/${kind} (${key}): ${r2Err?.message || r2Err}`);
+        res.status(code).end();
+      }
+    } catch (err: any) {
+      console.error("[slab-image] error:", err?.message || err);
+      res.status(502).end();
+    }
+  });
+
   app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
       const certId = String(req.params.id);

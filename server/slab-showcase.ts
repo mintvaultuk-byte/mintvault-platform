@@ -15,7 +15,7 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2, getR2SignedUrl, headR2 } from "./r2";
+import { uploadToR2, headR2 } from "./r2";
 import { generateLabelPNG } from "./labels";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 
@@ -34,7 +34,6 @@ export interface SlabShowcaseItem {
   frontScanUrl: string | null;
 }
 
-const SIGNED_URL_TTL_S = 3600;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 let cache: { items: SlabShowcaseItem[]; at: number } | null = null;
@@ -50,27 +49,28 @@ function normaliseCertNumber(raw: string): string {
 }
 
 /**
- * Render-or-reuse a label PNG in R2. Returns a signed URL, or null when the
- * label pipeline fails for this cert (caller skips the cert on front failure,
- * falls back to the branded back face on back failure).
+ * Render-or-reuse a label PNG in R2. Returns true when the label exists (or
+ * was just generated) — the browser then loads it via the same-origin
+ * /api/public/slab-image proxy, NOT a signed URL (R2 signed URLs are
+ * cross-origin and taint the canvas the showcase composes textures on).
  */
-async function ensureLabelInR2(dbId: number, certNumber: string, side: "front" | "back"): Promise<string | null> {
+async function ensureLabelInR2(dbId: number, certNumber: string, side: "front" | "back"): Promise<boolean> {
   const key = `public/slab-showcase/${certNumber}/${side}_label.png`;
   try {
     const exists = await headR2(key);
     if (!exists) {
       const cert = await storage.getCertificate(dbId);
-      if (!cert) return null;
+      if (!cert) return false;
       const png = await generateLabelPNG({ ...cert, certId: normaliseCertNumber(cert.certId) }, side);
       await uploadToR2(key, png, "image/png");
       console.log(
         `[slab-showcase] generated ${side} label for ${certNumber} (${(png.length / 1024).toFixed(0)}KB → ${key})`
       );
     }
-    return await getR2SignedUrl(key, SIGNED_URL_TTL_S);
+    return true;
   } catch (err: any) {
     console.error(`[slab-showcase] ${side} label failed for ${certNumber}: ${err?.message || err}`);
-    return null;
+    return false;
   }
 }
 
@@ -99,22 +99,20 @@ export async function getSlabShowcaseItems(limit = 8): Promise<SlabShowcaseItem[
         const grade = parseFloat(String(row.grade));
         if (!Number.isFinite(grade)) return null;
 
-        const [frontLabelUrl, backLabelUrl, frontScanUrl] = await Promise.all([
+        const [hasFrontLabel, hasBackLabel] = await Promise.all([
           ensureLabelInR2(Number(row.id), certNumber, "front"),
           ensureLabelInR2(Number(row.id), certNumber, "back"),
-          (async () => {
-            const scanKey = row.grading_front_display || row.grading_front_cropped || row.front_image_path || null;
-            if (!scanKey) return null;
-            try {
-              return await getR2SignedUrl(String(scanKey), SIGNED_URL_TTL_S);
-            } catch {
-              return null;
-            }
-          })(),
         ]);
 
         // Front label is the slab's face — without it the slab is unusable.
-        if (!frontLabelUrl) return null;
+        if (!hasFrontLabel) return null;
+
+        // Same-origin proxy URLs (see /api/public/slab-image in routes.ts) —
+        // the browser canvas can't use cross-origin R2 signed URLs.
+        const scanKey = row.grading_front_display || row.grading_front_cropped || row.front_image_path || null;
+        const frontLabelUrl = `/api/public/slab-image/${certNumber}/front-label`;
+        const backLabelUrl = hasBackLabel ? `/api/public/slab-image/${certNumber}/back-label` : null;
+        const frontScanUrl = scanKey ? `/api/public/slab-image/${certNumber}/scan` : null;
 
         return {
           certNumber,
