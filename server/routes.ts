@@ -2113,7 +2113,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       } else if (kind === "back-label") {
         key = `public/slab-showcase/${certNumber}/back_label.png`;
       } else if (kind === "scan") {
-        key = cert.gradingFrontDisplay || cert.gradingFrontCropped || cert.frontImagePath || null;
+        // Raw SQL: grading_front_display predates this branch's schema.ts
+        // (added on perf/grading-speed) but exists in the staging DB — a
+        // drizzle select() won't return it until the branches merge.
+        const scanRow = (
+          await db.execute(
+            sql`SELECT grading_front_display, grading_front_cropped, front_image_path FROM certificates WHERE id = ${cert.id}`
+          )
+        ).rows[0] as any;
+        key = scanRow?.grading_front_display || scanRow?.grading_front_cropped || scanRow?.front_image_path || null;
       } else {
         return res.status(404).end();
       }
