@@ -539,9 +539,10 @@ export default function SlabShowcase({ items, className }: Props) {
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "center",
+          // No backdropFilter — the dark background dims the cards enough,
+          // and the blur made the panel text unreadable.
           background: selected ? "rgba(0,0,0,0.6)" : "transparent",
-          backdropFilter: selected ? "blur(4px)" : "none",
-          transition: "background 0.35s ease, backdrop-filter 0.35s ease",
+          transition: "background 0.35s ease",
           pointerEvents: selected ? "all" : "none",
         }}
       >
@@ -556,7 +557,7 @@ export default function SlabShowcase({ items, className }: Props) {
             padding: "28px 32px 32px",
             transform: selected ? "translateY(0)" : "translateY(100%)",
             transition: "transform 0.4s cubic-bezier(0.32,0.72,0,1)",
-            boxShadow: "0 -20px 60px rgba(0,0,0,0.5)",
+            boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
             position: "relative",
           }}
         >
