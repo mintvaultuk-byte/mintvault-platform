@@ -265,7 +265,12 @@ export default function SlabShowcase({ items, className }: Props) {
         overflow: "hidden",
       }}
     >
-      <style>{`@keyframes mv-showcase-spin { to { transform: rotate(360deg) } }`}</style>
+      <style>{`
+        @keyframes mv-showcase-spin { to { transform: rotate(360deg) } }
+        /* image-rendering: high-quality is valid CSS (Images L4) but missing
+           from TS's csstype — applied via class instead of inline style. */
+        .mv-card-img { image-rendering: high-quality; }
+      `}</style>
 
       {/* Stage */}
       <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d" }}>
@@ -391,6 +396,7 @@ export default function SlabShowcase({ items, className }: Props) {
 
                 {/* Real card scan — white mat border is intentional (card mount) */}
                 <img
+                  className="mv-card-img"
                   src={item.frontScanUrl || item.frontLabelUrl}
                   alt={item.cardName}
                   draggable={false}
@@ -401,7 +407,6 @@ export default function SlabShowcase({ items, className }: Props) {
                     borderRadius: "7px",
                     display: "block",
                     userSelect: "none",
-                    imageRendering: "high-quality" as const,
                     WebkitBackfaceVisibility: "hidden" as const,
                   }}
                   onLoad={() => setLoadedCount((c) => c + 1)}
