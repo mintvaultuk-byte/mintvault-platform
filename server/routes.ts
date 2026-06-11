@@ -2071,6 +2071,86 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Slab showcase — homepage 3D hero data ─────────────────────────────────
+  // Public, no auth. Top graded certs with real label PNGs (generated +
+  // cached in R2 by server/slab-showcase.ts). Never 500s a page load.
+  const showcaseRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests. Limit: 30 per minute per IP." },
+  });
+  app.get("/api/public/slab-showcase", showcaseRateLimit, async (_req, res) => {
+    try {
+      const { getSlabShowcaseItems } = await import("./slab-showcase");
+      const items = await getSlabShowcaseItems(8);
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.json({ items, generatedAt: new Date().toISOString() });
+    } catch (err: any) {
+      console.error("[slab-showcase] endpoint error:", err?.message || err);
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({ items: [], generatedAt: new Date().toISOString() });
+    }
+  });
+
+  // ── Slab showcase image proxy ──────────────────────────────────────────────
+  // The browser canvas can't consume R2 signed URLs cross-origin (no CORS
+  // headers on the bucket), so the showcase loads images through this
+  // same-origin proxy. R2 access happens server-side with the app's creds.
+  app.get("/api/public/slab-image/:certNumber/:kind", lookupRateLimit, async (req, res) => {
+    try {
+      const certNumber = normalizeCertId(String(req.params.certNumber));
+      const kind = String(req.params.kind);
+      if (!/^MV\d+$/.test(certNumber)) return res.status(404).end();
+
+      const cert = (await storage.getCertificateByCertId(certNumber)) as any;
+      if (!cert || cert.status !== "active" || cert.gradeOverall == null) return res.status(404).end();
+
+      let key: string | null = null;
+      if (kind === "front-label") {
+        key = `public/slab-showcase/${certNumber}/front_label.png`;
+      } else if (kind === "back-label") {
+        key = `public/slab-showcase/${certNumber}/back_label.png`;
+      } else if (kind === "scan") {
+        // Raw SQL: grading_front_display predates this branch's schema.ts
+        // (added on perf/grading-speed) but exists in the staging DB — a
+        // drizzle select() won't return it until the branches merge.
+        const scanRow = (
+          await db.execute(
+            sql`SELECT grading_front_display, grading_front_cropped, front_image_path FROM certificates WHERE id = ${cert.id}`
+          )
+        ).rows[0] as any;
+        key = scanRow?.grading_front_display || scanRow?.grading_front_cropped || scanRow?.front_image_path || null;
+      } else {
+        return res.status(404).end();
+      }
+      if (!key) return res.status(404).end();
+
+      try {
+        const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+        const { getR2Client } = await import("./r2");
+        const s3 = getR2Client();
+        const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
+        if (!result.Body) return res.status(502).end();
+        const ext = key.split(".").pop()?.toLowerCase() || "jpg";
+        res.setHeader("Content-Type", ext === "png" ? "image/png" : "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        if (result.ContentLength != null) res.setHeader("Content-Length", String(result.ContentLength));
+        (result.Body as NodeJS.ReadableStream).pipe(res);
+      } catch (r2Err: any) {
+        // Missing object (e.g. label not generated yet) → 404; anything else → 502
+        const code = r2Err?.name === "NoSuchKey" || r2Err?.$metadata?.httpStatusCode === 404 ? 404 : 502;
+        console.error(`[slab-image] R2 fetch failed for ${certNumber}/${kind} (${key}): ${r2Err?.message || r2Err}`);
+        res.status(code).end();
+      }
+    } catch (err: any) {
+      console.error("[slab-image] error:", err?.message || err);
+      res.status(502).end();
+    }
+  });
+
   app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
       const certId = String(req.params.id);
@@ -10320,6 +10400,15 @@ Defects (admin-confirmed): ${defectLines}`;
         } catch (logErr) {
           console.warn("[approve] ai_grade_corrections insert failed:", logErr);
         }
+      }
+
+      // Newly published cert should appear in the homepage showcase without
+      // waiting out the 5-min memory cache.
+      try {
+        const { clearSlabShowcaseCache } = await import("./slab-showcase");
+        clearSlabShowcaseCache();
+      } catch {
+        /* non-fatal */
       }
 
       const updated = await storage.getCertificate(id);
